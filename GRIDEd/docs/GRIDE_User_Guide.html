@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GRIDE User Guide</title>
+<style>
+  body { font-family: "Segoe UI", sans-serif; margin: 0; background: #F6F6F4; color: #1E1F22; line-height: 1.5; }
+  header { background: #1F2226; color: #F2F2F2; padding: 28px 40px; }
+  header h1 { margin: 0; font-size: 30px; } header p { margin: 4px 0 0; color: #C9CED6; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 40px 60px; }
+  h2 { border-bottom: 2px solid #E0A23B; padding-bottom: 4px; margin-top: 36px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: #fff; }
+  th, td { border: 1px solid #D5D8DD; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #ECEDEF; }
+  code, kbd { font-family: Consolas, monospace; background: #ECEDEF; padding: 1px 5px; border-radius: 3px; }
+  .note { background: #FFF6E3; border-left: 4px solid #E0A23B; padding: 8px 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GRIDE User Guide</h1>
+  <p>C90 &middot; C++11 &middot; Shalimar &mdash; Windows &middot; Linux &middot; macOS &middot; TMS320C6747</p>
+</header>
+<main>
+
+<h2>1. Getting started</h2>
+<ol>
+  <li><b>File &gt; New &gt; Project</b> (<kbd>Ctrl+Shift+N</kbd>): choose a language, a template, a name, a location and the targets.</li>
+  <li>GRIDE creates <code>Name\Name.pro</code> with <code>src\</code>, <code>inc\</code> and <code>lib\</code> folders, plus a workspace <code>Name.grws</code>.</li>
+  <li>Choose <b>Config</b> and <b>Target</b> on the toolbar, then press <kbd>F7</kbd> to build.</li>
+</ol>
+<p class="note">Before the first build, set the tool paths in <b>Tools &gt; Options &gt; Toolchains</b>. <b>Tools &gt; Toolchain Check</b> shows what is installed.</p>
+
+<h2>2. The window</h2>
+<table>
+  <tr><th>Area</th><th>Panes</th></tr>
+  <tr><td>Left</td><td>Project Explorer, Class View, Files</td></tr>
+  <tr><td>Centre</td><td>Tabbed editors (right-click a tab for Save, Close, Pin and Copy Path)</td></tr>
+  <tr><td>Right</td><td>Properties, Breakpoints</td></tr>
+  <tr><td>Bottom</td><td>Output, Error List, Find Results, Watch, Registers, Memory, Terminal (plus Locals, Call Stack and Disassembly from <b>Debug &gt; Windows</b>)</td></tr>
+</table>
+<p>To float a pane, use the button on its title bar or double-click its tab. Close the floating window to dock the pane back. <b>Window &gt; Reset Window Layout</b> restores the default layout.</p>
+
+<h2>3. Projects and workspaces</h2>
+<table>
+  <tr><th>File</th><th>Contents</th></tr>
+  <tr><td><code>.pro</code></td><td>One project. Paths are relative to the <code>.pro</code> file, e.g. <code>"src/kalman.c"</code>.</td></tr>
+  <tr><td><code>.grws</code></td><td>Workspace: its projects, the startup project, the active Config and Target, and breakpoints.</td></tr>
+  <tr><td><code>gride.settings.json</code></td><td>IDE settings, in <code>%APPDATA%\GRIDE</code> or next to <code>GRIDE.exe</code> (portable).</td></tr>
+</table>
+<p><b>Code Composer Studio 7.4 projects</b> can be opened with <b>File &gt; Open &gt; CCS 7.4 Project</b>, or added to a workspace. GRIDE reads <code>.project</code>, <code>.cproject</code> and <code>.ccsproject</code> and never writes to them. Their builds go into the project's <code>.gride\</code> folder.</p>
+
+<h2>4. Building</h2>
+<p>Each step is a command template with macros such as <code>$(Compiler)</code>, <code>$(Source)</code>, <code>$(AsmFile)</code>, <code>$(ObjFile)</code>, <code>$(Objects)</code> and <code>$(Output)</code>:</p>
+<p><code>source &rarr; compile &rarr; .asm &rarr; assemble &rarr; .obj &rarr; link &rarr; program (.exe / .out)</code></p>
+<ul>
+  <li>Errors in MSVC, TI or GNU format appear in the <b>Error List</b>. Double-click one to jump to the line.</li>
+  <li><b>Build &gt; Batch Build</b> builds several Project &middot; Config &middot; Target combinations in one run.</li>
+  <li><b>Project &gt; Properties</b> (<kbd>Alt+F7</kbd>) edits defines, include dirs, optimisation, libraries and the linker .cmd file for each Config and Target.</li>
+</ul>
+
+<h2>5. Debugging</h2>
+<p><kbd>F9</kbd> toggles a breakpoint (or click the gutter). <kbd>F5</kbd> builds and starts. Then:</p>
+<ul>
+  <li><kbd>F10</kbd> steps over, <kbd>F11</kbd> steps into, <kbd>Shift+F11</kbd> steps out.</li>
+  <li><kbd>Ctrl+F10</kbd> runs to the cursor; <kbd>Shift+F5</kbd> stops.</li>
+</ul>
+<p class="note">Version 1.0 uses a <b>placeholder debugger</b> that simulates execution, so the whole debug UI works now. It will be replaced by the VM6747 / native debugger.</p>
+
+<h2>6. C &harr; Shalimar conversion</h2>
+<p>Use <b>Tools &gt; Convert</b> (<kbd>Ctrl+Alt+S</kbd> for C &rarr; Shalimar, <kbd>Ctrl+Alt+H</kbd> for Shalimar &rarr; C). Set the converter paths in <b>Tools &gt; Options &gt; Converters</b>. GRIDE can add the result to the project and open it.</p>
+
+<h2>7. Main keyboard shortcuts</h2>
+<table>
+  <tr><th>Keys</th><th>Command</th><th>Keys</th><th>Command</th></tr>
+  <tr><td><kbd>Ctrl+Shift+N</kbd></td><td>New project</td><td><kbd>F7</kbd></td><td>Build workspace</td></tr>
+  <tr><td><kbd>Ctrl+Shift+O</kbd></td><td>Open project / workspace</td><td><kbd>Ctrl+B</kbd></td><td>Build project</td></tr>
+  <tr><td><kbd>Ctrl+S</kbd> / <kbd>Ctrl+Shift+S</kbd></td><td>Save / Save all</td><td><kbd>Ctrl+F7</kbd></td><td>Compile file</td></tr>
+  <tr><td><kbd>Ctrl+F</kbd> / <kbd>Ctrl+H</kbd></td><td>Find / Replace</td><td><kbd>F5</kbd> / <kbd>Ctrl+F5</kbd></td><td>Debug / Run</td></tr>
+  <tr><td><kbd>Ctrl+Shift+F</kbd></td><td>Find in files</td><td><kbd>F9</kbd></td><td>Toggle breakpoint</td></tr>
+  <tr><td><kbd>Ctrl+G</kbd></td><td>Go to line</td><td><kbd>Ctrl+K, C</kbd> / <kbd>Ctrl+K, U</kbd></td><td>Comment / Uncomment</td></tr>
+  <tr><td><kbd>Ctrl+F2</kbd> / <kbd>F2</kbd></td><td>Bookmark / next bookmark</td><td><kbd>Ctrl+K, D</kbd></td><td>Format document</td></tr>
+</table>
+<p><b>Help &gt; Keyboard Shortcuts</b> lists every shortcut. You can change them in <b>Tools &gt; Customize Keyboard</b>.</p>
+
+<h2>8. Reference documents</h2>
+<p>The <b>Help &gt; Language Reference</b> and <b>Help &gt; Toolchain Reference</b> items open files from the help folder (<b>Tools &gt; Options &gt; Projects</b>):</p>
+<p><code>C90_Reference</code>, <code>Cpp11_Reference</code>, <code>Shalimar_Reference</code>, <code>MASM_LINK_Reference</code>, <code>ASM6x_LNK6x_Reference</code>, <code>RTS6747_Reference</code>, <code>VM6747_Reference</code></p>
+<p>Each can be a <code>.pdf</code>, <code>.chm</code>, <code>.html</code>, <code>.md</code> or <code>.txt</code> file.</p>
+</main>
+</body>
+</html>

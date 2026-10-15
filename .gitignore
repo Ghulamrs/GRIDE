@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.aps
+*.VC.db
+*.VC.opendb
+
+# Build output
+bin/
+obj/
+x64/
+x86/
+Debug/
+Release/

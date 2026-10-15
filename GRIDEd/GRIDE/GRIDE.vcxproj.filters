@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source">
+      <UniqueIdentifier>{e25fdf9a-e54e-5571-a8f0-d1ecf6236d1e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Core">
+      <UniqueIdentifier>{73a25774-4378-5584-acee-7de4ae2daa51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Model">
+      <UniqueIdentifier>{a63b1f63-fa7c-5efd-aaac-888b477dc894}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Services">
+      <UniqueIdentifier>{c1ef783d-4899-590c-8d83-3b0c2ce25e27}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Settings">
+      <UniqueIdentifier>{2cee7e4b-1faa-5fe9-b3bf-cc9cf41f3e9f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\UI">
+      <UniqueIdentifier>{041fb265-57a2-5ec0-b136-25b380a66ebc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\UI\Controls">
+      <UniqueIdentifier>{bf0dc1bc-14e9-5603-83d8-b06151f3e1da}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\UI\Dialogs">
+      <UniqueIdentifier>{7bef9784-3a1d-5f42-a152-306d8a635f27}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\UI\Docking">
+      <UniqueIdentifier>{e991bcda-755e-5196-9335-cf7e584f9b80}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\UI\Editor">
+      <UniqueIdentifier>{aea6c59f-6509-53e9-b652-211159fe2ebe}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\UI\Panes">
+      <UniqueIdentifier>{5c669631-e3a6-570c-832c-3447cb509cd5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\Core\NativeMethods.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Main.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UI\MainForm.Build.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UI\MainForm.Commands.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UI\MainForm.Edit.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UI\MainForm.File.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UI\MainForm.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\Core\Json.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Core\LanguageTarget.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Core\NativeMethods.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Core\PathUtil.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Model\BuildConfiguration.h">
+      <Filter>Source\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Model\CcsProjectReader.h">
+      <Filter>Source\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Model\GrideProject.h">
+      <Filter>Source\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Model\Workspace.h">
+      <Filter>Source\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\BuildEngine.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\BuildMessage.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\CodeConverter.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\Debugger.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\MacroExpander.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\ProjectTemplates.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\ToolRunner.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Settings\GrideSettings.h">
+      <Filter>Source\Settings</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Settings\ToolchainSettings.h">
+      <Filter>Source\Settings</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Commands.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Controls\StartPage.h">
+      <Filter>Source\UI\Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Controls\TabStrip.h">
+      <Filter>Source\UI\Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Dialogs\DialogBase.h">
+      <Filter>Source\UI\Dialogs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Dialogs\EditDialogs.h">
+      <Filter>Source\UI\Dialogs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Dialogs\OptionsDialog.h">
+      <Filter>Source\UI\Dialogs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Dialogs\ProjectDialogs.h">
+      <Filter>Source\UI\Dialogs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Dialogs\ToolDialogs.h">
+      <Filter>Source\UI\Dialogs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Docking\DockArea.h">
+      <Filter>Source\UI\Docking</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Editor\CodeEditor.h">
+      <Filter>Source\UI\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Editor\CodeTextBox.h">
+      <Filter>Source\UI\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Editor\DocumentManager.h">
+      <Filter>Source\UI\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Editor\EditorDocument.h">
+      <Filter>Source\UI\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Editor\SyntaxHighlighter.h">
+      <Filter>Source\UI\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Editor\UndoManager.h">
+      <Filter>Source\UI\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\IconFactory.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\MainForm.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Panes\DebugPanes.h">
+      <Filter>Source\UI\Panes</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Panes\ExplorerPanes.h">
+      <Filter>Source\UI\Panes</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Panes\OutputPanes.h">
+      <Filter>Source\UI\Panes</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\PropertyObjects.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Theme.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="src\pch.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
