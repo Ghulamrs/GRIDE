@@ -6,8 +6,8 @@
     python washout.py PARENT --zip      and pack it as PARENT\\GRIDEd.zip, GRIDEd\\ its one top folder
 
 **Everything the projects are, and nothing they make** (2026-10-15, moved here from RIDE-4.7):
-this repository - both IDEs, GRIDE 2.0\\ and GRIDEd\\, with their docs, lib\\ccs, toolchain.json
-and samples - and each repository beside it that GRIDE's toolchain is built from:
+this repository - GRIDEd\\ with its docs, lib\\ccs, toolchain.json and samples - and each
+repository beside it that GRIDE's toolchain is built from:
 
     Compilers\\  Compiler-Ci (c90), C++Optimize (cpp11), Compiler-Si (shalimar), Converter-C2S (c2s)
     TI\\         ASM6x, LNK6x, RTS6x, SIM6747, VM6747
@@ -17,6 +17,7 @@ A repository goes whole: every file git tracks in it, as it is on disk (a change
 committed included), and a tracked file missing from the disk as git has it. No file is left
 out for its kind - tests, scripts, docs, binaries git tracks all go. What git does not track
 does not: x64\\, obj\\, logs and test output are what building and testing made. .git does not.
+GRIDE 2.0\\ does not either (2026-10-15): the compact IDE is not part of the solution.
 
 The copy has one layout, the Windows box's: Compilers\\, TI\\ and Windows\\ inside GRIDEd\\, side
 by side, because their projects and scripts name each other by relative path (shc.sln reaches
@@ -32,6 +33,7 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 NAME = "GRIDEd"                  # the copy's folder, whatever this checkout is called (GRIDE on the Mac)
+LEFT_OUT = ["GRIDE 2.0"]         # in this repository, not part of the solution
 
 # The repositories beside this one that GRIDE's toolchain is built from, as this tree lays them out.
 SIBLINGS = [
@@ -74,11 +76,13 @@ def tracked(repo):
     return out
 
 
-def wash(repo, dest):
+def wash(repo, dest, left_out=()):
     """Copy every tracked file of repo into dest; return (copied, restored, submodules) -
     restored are the tracked files missing from the disk, written as git has them."""
     copied, restored, submodules = 0, [], []
     for mode, blob, path in tracked(repo):
+        if any(path.startswith(d + "/") for d in left_out):
+            continue
         if mode == "160000":
             submodules.append(path)      # a submodule is a repository of its own, not a file
             continue
@@ -141,7 +145,7 @@ def main(argv):
     total, all_restored, all_submodules = 0, [], []
     # this repository first; where the siblings are inside it, .git\info\exclude keeps them from its list
     for name, repo, rel in repos:
-        copied, restored, submodules = wash(repo, os.path.join(dest, rel))
+        copied, restored, submodules = wash(repo, os.path.join(dest, rel), LEFT_OUT if repo == ROOT else ())
         print("  %-26s %5d files%s" % (name, copied,
                                        ", %d restored from git" % len(restored) if restored else ""))
         total += copied
