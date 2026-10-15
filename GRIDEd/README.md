@@ -18,11 +18,11 @@ It also has C ⇄ Shalimar conversion and read-only reading of Code Composer Stu
 | C++/CLI support | Installer > Individual components > **C++/CLI support for v143 build tools** |
 | .NET Framework 4.8 targeting pack | Installer > Individual components |
 
-1. Open `GRIDE.sln`.
-2. Choose `Debug | x64` (or x86).
+1. Open `GRIDE.sln`. The repositories under `Compilers\`, `TI\` and `Windows\` must sit beside this folder (`..\Compilers`, `..\TI`, `..\Windows`), as `washout.py` lays them out.
+2. Choose `Release | x64`.
 3. Build (F7) and run (F5).
 
-The output is `bin\<platform>\<config>\GRIDE.exe`, with `toolchain.json` and `lib\ccs\*.tsv` beside it. **Help > View Help** opens the User Guide: GRIDE looks in the help directory named under Tools > Options > Projects, then beside the exe, in `docs` and `help` under it, then in `..\help` and `..\docs` - the installed layout is `<install>\bin\GRIDE.exe` (+ `toolchain.json`), `<install>\help\GRIDE_User_Guide.html`, `<install>\docs\`, `<install>\examples\cppparse` and `<install>\settings.json`. Both configurations build with 0 errors and 0 warnings on the v143 toolset; the post-build event (which copies `docs`) needs `cmd.exe`, so where that is blocked by policy build with `/p:PostBuildEventUseInBuild=false`.
+The output is `<platform>\<config>\GRIDE.exe` (`x64\Release\GRIDE.exe`), with `toolchain.json` and `lib\ccs\*.tsv` beside it, and in an x64 build the whole tool chain too - see *The tool chain in the solution* below. **Help > View Help** opens the User Guide: GRIDE looks in the help directory named under Tools > Options > Projects, then beside the exe, in `docs` and `help` under it, then in `..\help` and `..\docs` - the installed layout is `<install>\bin\GRIDE.exe` (+ `toolchain.json`), `<install>\help\GRIDE_User_Guide.html`, `<install>\docs\`, `<install>\examples\cppparse` and `<install>\settings.json`. Both configurations build with 0 errors and 0 warnings on the v143 toolset; the post-build event (which copies `docs`) needs `cmd.exe`, so where that is blocked by policy build with `/p:PostBuildEventUseInBuild=false`.
 
 `GRIDE.sln` holds every project GRIDE is built and shown with; Build Solution builds what the configuration selects:
 
@@ -30,6 +30,53 @@ The output is `bin\<platform>\<config>\GRIDE.exe`, with `toolchain.json` and `li
 |---|---|---|---|---|
 | `GRIDE` | - | `GRIDE\GRIDE.vcxproj` | every configuration | the IDE |
 | `cppparse` | samples | `samples\cppparse\cppparse\cppparse.vcxproj` | `Debug \| x64`, `Release \| x64` | the example of section 2, the same project file `samples\cppparse\cppparse.sln` opens; Visual Studio's build of it goes to `sandbox\vs\<config>` beside `GRIDE.sln` (the project's own `$(SolutionDir)sandbox\vs`), never into `samples` - GRIDE's own build of it goes to the project's `.gride` |
+| `cc1` (c90), `cxx1` (cpp11), `shc` (shalimar), `c2s` | Compilers | `..\Compilers\...` | `Debug \| x64`, `Release \| x64` | the C90, C++11 and Shalimar compilers and the C ⇄ Shalimar converter |
+| `asm6x`, `lnk6x`, `rts6x`, `sim6747`, `vm6747` | TI | `..\TI\...` | `Debug \| x64`, `Release \| x64` | the TMS320C6747 assembler, linker, run-time libraries, simulator and emulator |
+| `masm`, `link` | Windows | `..\Windows\...` | `Debug \| x64`, `Release \| x64` | the Windows assembler and linker |
+
+### The tool chain in the solution
+
+![GRIDE.sln: GRIDE depends on the eleven tools; shc on cxx1; rts6x on cxx1, asm6x and shc; all build into x64\<config>](docs/solution-dependencies.svg)
+
+GRIDE depends on every tool, so building GRIDE (or F5 on it) builds the whole tool chain first. Two of the tools depend on others, because they run what those build (the names are Solution Explorer's, each project file's own: `cc1` builds `c90.exe`, `cxx1` `cpp11.exe`, `shc` `shalimar.exe`, the rest the exe of their name):
+
+```
+GRIDE  (the startup project; depends on all eleven tools)
+├── cc1        ..\Compilers\Compiler-Ci\ide\cc1.vcxproj
+├── cxx1       ..\Compilers\C++Optimize\ide\cxx1.vcxproj
+├── shc        ..\Compilers\Compiler-Si\ide\shc.vcxproj
+│   └── cxx1           its post-build compiles the Shalimar run-time with cpp11.exe
+├── c2s        ..\Compilers\Converter-C2S\c2s.vcxproj
+├── asm6x      ..\TI\ASM6x\asm6x.vcxproj
+├── lnk6x      ..\TI\LNK6x\lnk6x.vcxproj
+├── rts6x      ..\TI\RTS6x\rts6x.vcxproj  (a makefile project around build.cmd)
+│   ├── cxx1           compiles the C6000 run-time library
+│   ├── asm6x          assembles it, and Shalimar's TMS6747 run-time
+│   └── shc            writes lib\shmrt-tms6747\*.s, which rts6x assembles
+├── sim6747    ..\TI\SIM6747\sim6747.vcxproj
+├── vm6747     ..\TI\VM6747\vm6747.vcxproj
+├── masm       ..\Windows\MASM\masm.vcxproj
+└── link       ..\Windows\LINK\link.vcxproj
+
+cppparse  (samples\; no dependency either way)
+```
+
+Every project builds into the one folder `x64\<config>\` beside `GRIDE.sln`, so a build leaves GRIDE ready to run, each tool where `toolchain.json`'s lookup finds it - beside `GRIDE.exe`:
+
+```
+x64\Release\
+├── GRIDE.exe, toolchain.json, docs\
+├── c90.exe, cpp11.exe, shalimar.exe, c2s.exe
+├── asm6x.exe, lnk6x.exe, sim6747.exe, vm6747.exe
+├── masm.exe, link.exe
+└── lib\
+    ├── ccs\                       CCS 7.4 / 5.5 option tables (GRIDE)
+    ├── shmrt-x86_64-windows*.lib  the Shalimar run-time (shalimar's post-build)
+    ├── shmrt-tms6747*\            its TMS6747 assembly (shalimar's post-build)
+    └── rts6x-tms6747\             rts6x, rts6xd, printf6x, printf6xd, shmrt6x, shmrt6xd (rts6x)
+```
+
+The tools build for x64 only; the x86 configurations build GRIDE alone. Each tool's own solution under its repository still builds it by itself, into that repository. In `Debug | x64`, `link` stops at C2220 (`image.cpp`, C4701 under its `/WX`) and `cpp11` warns C4702 (`A64Peep.cpp`) - known, and left as they are.
 
 ## 2. Try it
 

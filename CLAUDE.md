@@ -21,22 +21,25 @@ Two Visual Studio-style IDE front-ends for the C90 / C++11 / Shalimar toolchain 
 
 ## Build GRIDEd
 
+`GRIDEd\GRIDE.sln` holds GRIDE and all eleven tool projects (solution folders Compilers, TI, Windows), so Visual Studio 2022 builds the whole tool chain. Open it and build `Release | x64`, or from the command line:
+
 ```
-"C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\amd64\MSBuild.exe" GRIDEd\GRIDE\GRIDE.vcxproj -p:Configuration=Release -p:Platform=x64 -p:SolutionDir=C:\Users\GRA\work\GRIDEd\GRIDEd\ -m
+"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\devenv.com" GRIDEd\GRIDE.sln /Build "Release|x64"
 ```
 
-Output: `GRIDEd\bin\x64\Release\GRIDE.exe`, with `toolchain.json`, `docs` and `lib\ccs` beside it. Close GRIDE before rebuilding. It must build with 0 warnings.
+Everything builds into `GRIDEd\x64\Release`: GRIDE.exe, the ten tool exes, `toolchain.json`, `docs`, and `lib\` (Shalimar runtimes, `rts6x-tms6747`, `ccs`). GRIDE is ready to run there, with no staging. Close GRIDE before rebuilding. It must build with 0 warnings: Release|x64 does, 0 errors and 0 warnings in the IDE (2026-10-15).
 
-## Development tools (no installer yet)
+**The dependency tree is in `GRIDEd\README.md`** (section 1, *The tool chain in the solution*, text tree plus `docs\solution-dependencies.svg`). Keep it, and this file, in step with `GRIDE.sln`. In short: GRIDE depends on all 11 tools; shc (shalimar) on cxx1 (cpp11); rts6x on cxx1, asm6x and shc. Solution Explorer shows each project file's own name: cc1 is c90, cxx1 is cpp11, shc is shalimar.
 
-GRIDE finds each tool by `toolchain.json`'s lookup: environment variable, tool folder, **beside GRIDE.exe**, RIDE install, PATH. During development the tools sit beside `GRIDE.exe`. Staging is manual for now:
+`Debug | x64` stops at link's C2220 (`Windows\LINK\src\image.cpp`, C4701 under its `/WX`), and cxx1 warns C4702 (`A64Peep.cpp`). These are known and left as they are; do not fix them.
 
-1. Build each tool project Release|x64; output is its own `x64\Release` (`Compiler-Si` lives in `ide\x64\Release`, `Compiler-Ci` and `C++Optimize` likewise under `ide\`).
-2. Build `Compilers\Compiler-Si\ide\shc.sln`, not `shc.vcxproj`: its post-build needs `cpp11.exe` beside `shalimar.exe` to build the Shalimar runtime.
-3. Build RTS6x with `TI\RTS6x\build.cmd`, with `CPP11` and `ASM6X` set to the built `cpp11.exe` and `asm6x.exe`. It writes `TI\RTS6x\build\*.lib`.
-4. Copy the ten exes (c90, cpp11, shalimar, c2s, masm, link, asm6x, lnk6x, sim6747, vm6747) into `GRIDEd\bin\x64\Release`; RTS6x's four libs into `lib\rts6x-tms6747\` there; `Compilers\Compiler-Si\ide\x64\Release\lib\*` into `lib\` there.
+## Development tools
 
-Rebuilding a tool does not refresh the staged copy. The compilers find their own headers in their source trees.
+GRIDE finds each tool by `toolchain.json`'s lookup: environment variable, tool folder, **beside GRIDE.exe**, RIDE install, PATH. The solution build puts every tool beside GRIDE.exe. The old manual staging into `GRIDEd\bin\x64\Release` is retired; that folder is stale.
+
+Each tool repository's own solution or project (`shc.sln`, `asm6x.vcxproj`, ...) still builds that tool alone, into its own folder. RTS6x's `build.cmd` still builds its libraries alone, with `CPP11` and `ASM6X` set. The compilers find their own headers in their source trees.
+
+`washout.py` (at the repository root) extracts GRIDEd and the eleven tool repositories, whole, into a folder (and with `--zip`, a zip) that builds the same way.
 
 **No RIDE path:** `%APPDATA%\GRIDE\toolchain.json` sets `installation.defaultRoots` to `[]` on this machine only, so GRIDE never looks in `C:\Program Files\RIDE`. The installer will set real paths later; do not hard-code RIDE paths in GRIDEd.
 
