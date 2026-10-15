@@ -16,10 +16,12 @@ namespace Gride { namespace UI {
     using namespace Gride::Settings;
 
     public delegate void NavigateHandler(String^ file, int line);
+    public delegate void NavigateColumnHandler(String^ file, int line, int column);
     public delegate void FileActivatedHandler(String^ file, GrideProject^ project);
     public delegate void RenameHandler(GrideProject^ project, String^ oldPath, String^ newName);
 
-    public enum class NodeKind { Workspace, Project, Folder, File };
+    // SolutionFolder / SolutionItem: a Visual Studio solution's folders and the files they hold, which belong to no project
+    public enum class NodeKind { Workspace, Project, Folder, File, SolutionFolder, SolutionItem };
 
     public ref class NodeInfo
     {
@@ -96,6 +98,7 @@ namespace Gride { namespace UI {
         event FileActivatedHandler^ FileActivated;
         event EventHandler^ SelectionChanged;
         event RenameHandler^ RenameRequested;
+        event EventHandler^ RemoveRequested;    // Del pressed on a file while the pane floats
 
         // context menus are created by MainForm from its command registry
         property System::Windows::Forms::ContextMenuStrip^ WorkspaceMenu;
@@ -116,6 +119,8 @@ namespace Gride { namespace UI {
             String^ get() { NodeInfo^ n = Selected; if (n != nullptr && n->Kind == NodeKind::File) return n->FilePath; return nullptr; }
         }
         property bool HasFocus { bool get() { return tree->Focused; } }
+        // a file name is being edited in place (the edit box is a child of the tree)
+        property bool IsEditingLabel { bool get() { return tree->ContainsFocus && !tree->Focused; } }
 
         void SetWorkspace(Workspace^ w) { workspace = w; RefreshTree(); }
 
@@ -137,17 +142,44 @@ namespace Gride { namespace UI {
                     workspace->Projects->Count, plural),
                     "workspace", gcnew NodeInfo(NodeKind::Workspace, nullptr, workspace->FilePath, nullptr));
                 tree->Nodes->Add(root);
+                // a Visual Studio solution's folders, nested as the .sln nests them, with their items
+                Dictionary<String^, TreeNode^>^ solutionFolders = gcnew Dictionary<String^, TreeNode^>(StringComparer::OrdinalIgnoreCase);
+                for each (String^ path in workspace->SolutionFolders) SolutionFolderNode(root, path, solutionFolders);
+                for each (KeyValuePair<String^, List<String^>^> kv in workspace->SolutionItems)
+                {
+                    TreeNode^ fn = SolutionFolderNode(root, kv.Key, solutionFolders);
+                    for each (String^ abs in kv.Value)
+                    {
+                        String^ text = Path::GetFileName(abs);
+                        if (!File::Exists(abs)) text = text + "  (missing)";
+                        fn->Nodes->Add(MakeNode(text, FileIcons::ForFile(abs), gcnew NodeInfo(NodeKind::SolutionItem, nullptr, abs, kv.Key)));
+                    }
+                }
                 for each (GrideProject^ p in workspace->Projects)
                 {
                     String^ label = p->Name + "   [" + LanguageInfo::Name(p->Lang) + "]";
                     if (p->IsCcs) label = p->Name + "   [CCS 7.4, read-only]";
+                    else if (p->IsVs) label = p->Name + "   [" + (p->Vs != nullptr && p->Vs->Version->Length > 0 ? p->Vs->Version->Split(L',')[0] : "Visual Studio") +
+                                              (p->Vs != nullptr && p->Vs->Toolset->Length > 0 ? " " + p->Vs->Toolset : String::Empty) + ", read-only]";
                     TreeNode^ pn = MakeNode(label, FileIcons::ForProject(p), gcnew NodeInfo(NodeKind::Project, p, p->FilePath, nullptr));
                     if (String::Compare(p->Name, workspace->StartupName, true) == 0)
-                        pn->NodeFont = gcnew SD::Font(tree->Font, FontStyle::Bold);
-                    root->Nodes->Add(pn);
+                    {
+                        // one bold font for the life of the pane, not a new GDI font per refresh
+                        if (boldFont == nullptr || !boldFont->FontFamily->Equals(tree->Font->FontFamily) || boldFont->Size != tree->Font->Size)
+                            boldFont = gcnew SD::Font(tree->Font, FontStyle::Bold);
+                        pn->NodeFont = boldFont;
+                    }
+                    TreeNode^ under = root;
+                    if (p->IsVs && p->Vs != nullptr && p->Vs->SolutionFolder->Length > 0) under = SolutionFolderNode(root, p->Vs->SolutionFolder, solutionFolders);
+                    under->Nodes->Add(pn);
                     for each (ProjectFolder^ f in p->Folders)
                     {
-                        TreeNode^ fn = MakeNode(f->Name, "folder", gcnew NodeInfo(NodeKind::Folder, p, nullptr, f->Name));
+                        // a folder that names its compiler says so, as RIDE's pane names a group's toolchain
+                        String^ folderText = f->Name;
+                        String^ own;
+                        if (p->FolderToolchains->TryGetValue(f->Name, own) && !String::IsNullOrWhiteSpace(own))
+                            folderText = f->Name + "  (" + Gride::Services::RideToolchain::Name(Gride::Services::RideToolchain::FromWord(own)) + ")";
+                        TreeNode^ fn = MakeNode(folderText, "folder", gcnew NodeInfo(NodeKind::Folder, p, nullptr, f->Name));
                         pn->Nodes->Add(fn);
                         List<String^>^ files = gcnew List<String^>(f->Files);
                         files->Sort(StringComparer::OrdinalIgnoreCase);
@@ -163,9 +195,24 @@ namespace Gride { namespace UI {
                 }
                 root->Expand();
                 if (first) for each (TreeNode^ pn in root->Nodes) pn->Expand();
+                if (first) for each (KeyValuePair<String^, TreeNode^> kv in solutionFolders) kv.Value->Expand();
                 RestoreExpanded(tree->Nodes, expanded, selectedKey);
             }
             tree->EndUpdate();
+        }
+
+        // the node of a solution folder path ("Libs/Inner"), made with its parents when missing
+        TreeNode^ SolutionFolderNode(TreeNode^ root, String^ path, Dictionary<String^, TreeNode^>^ made)
+        {
+            TreeNode^ found;
+            if (made->TryGetValue(path, found)) return found;
+            int slash = path->LastIndexOf(L'/');
+            TreeNode^ parent = slash > 0 ? SolutionFolderNode(root, path->Substring(0, slash), made) : root;
+            String^ leaf = slash > 0 ? path->Substring(slash + 1) : path;
+            TreeNode^ n = MakeNode(leaf + "   [solution folder]", "folder", gcnew NodeInfo(NodeKind::SolutionFolder, nullptr, nullptr, path));
+            parent->Nodes->Add(n);
+            made[path] = n;
+            return n;
         }
 
         // selects the node of a file (used by "Track active item")
@@ -183,6 +230,7 @@ namespace Gride { namespace UI {
     private:
         TreeView^ tree;
         Workspace^ workspace;
+        SD::Font^ boldFont;
 
         TreeNode^ MakeNode(String^ text, String^ icon, NodeInfo^ info)
         {
@@ -229,7 +277,7 @@ namespace Gride { namespace UI {
         void OnDoubleClick(Object^ sender, TreeNodeMouseClickEventArgs^ e)
         {
             NodeInfo^ i = dynamic_cast<NodeInfo^>(e->Node->Tag);
-            if (i != nullptr && i->Kind == NodeKind::File) FileActivated(i->FilePath, i->Project);
+            if (i != nullptr && (i->Kind == NodeKind::File || i->Kind == NodeKind::SolutionItem)) FileActivated(i->FilePath, i->Project);
         }
 
         void OnNodeClick(Object^ sender, TreeNodeMouseClickEventArgs^ e)
@@ -244,6 +292,8 @@ namespace Gride { namespace UI {
             case NodeKind::Workspace: m = WorkspaceMenu; break;
             case NodeKind::Project:   m = ProjectMenu; break;
             case NodeKind::Folder:    m = FolderMenu; break;
+            case NodeKind::SolutionFolder:
+            case NodeKind::SolutionItem: m = WorkspaceMenu; break;
             default:                  m = FileMenu; break;
             }
             if (m != nullptr) m->Show(tree, e->Location);
@@ -253,14 +303,17 @@ namespace Gride { namespace UI {
 
         void OnKeyDown(Object^ sender, KeyEventArgs^ e)
         {
+            NodeInfo^ sel = Selected;
+            if (e->KeyCode == Keys::Enter && sel != nullptr && sel->Kind == NodeKind::SolutionItem) { FileActivated(sel->FilePath, nullptr); e->Handled = true; return; }
             if (e->KeyCode == Keys::Enter && SelectedFile != nullptr) { FileActivated(SelectedFile, SelectedProject); e->Handled = true; }
             if (e->KeyCode == Keys::F2) { BeginRename(); e->Handled = true; }
+            if (e->KeyData == Keys::Delete && SelectedFile != nullptr) { RemoveRequested(this, EventArgs::Empty); e->Handled = true; }
         }
 
         void OnBeforeLabelEdit(Object^ sender, NodeLabelEditEventArgs^ e)
         {
             NodeInfo^ i = dynamic_cast<NodeInfo^>(e->Node->Tag);
-            if (i == nullptr || i->Kind != NodeKind::File || i->Project->IsReadOnly) { e->CancelEdit = true; return; }
+            if (i == nullptr || i->Kind != NodeKind::File || i->Project == nullptr || i->Project->IsReadOnly) { e->CancelEdit = true; return; }
             e->Node->Text = Path::GetFileName(i->FilePath);
         }
 

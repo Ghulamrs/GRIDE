@@ -139,6 +139,8 @@ namespace Gride { namespace UI {
 
     void MainForm::CancelBuild()
     {
+        // RIDE's Build > Stop ends a running program the same way, and everything it started
+        if (runner->IsRunning) { StopProgram(); return; }
         engine->Cancel();
         afterBuild = AfterBuild::Nothing;
         SetStatus("Cancelling build...");
@@ -165,6 +167,18 @@ namespace Gride { namespace UI {
         catch (InvalidOperationException^) { }
     }
 
+    // the native-tools question, asked from the build thread and answered on the window's
+    bool MainForm::OnEngineQuestion(String^ question)
+    {
+        if (IsDisposed || !IsHandleCreated) return false;
+        try { return safe_cast<bool>(Invoke(gcnew Func<String^, bool>(this, &MainForm::AskYesNo), question)); }
+        catch (Exception^) { return false; }
+    }
+    bool MainForm::AskYesNo(String^ question)
+    {
+        return MessageBox::Show(this, question, "GRIDE", MessageBoxButtons::YesNo, MessageBoxIcon::Question) == WF::DialogResult::Yes;
+    }
+
     void MainForm::AppendBuildOutput(String^ line) { output->Append("Build", line); }
     void MainForm::AddBuildMessage(BuildMessage^ m) { errorList->Add(m); }
 
@@ -175,6 +189,12 @@ namespace Gride { namespace UI {
         else SetStatus(String::Format("Build failed  ({0} error(s), {1} warning(s))", s->Errors, s->Warnings));
         if (s->Errors > 0) bottomArea->ShowPane(errorList);
         for each (EditorDocument^ d in docs->Documents) d->ChangedOnDisk();   // swallow timestamp changes made by tools
+        // RIDE puts the caret on the first error, opening the file when nothing has
+        if (!s->Ok && !s->Cancelled && settings->Env->JumpToFirstError)
+        {
+            BuildMessage^ first = s->FirstError != nullptr ? s->FirstError : errorList->FirstError();
+            if (first != nullptr && File::Exists(first->File)) OnNavigateTo(first->File, first->Line, first->Column);
+        }
 
         AfterBuild next = afterBuild;
         afterBuild = AfterBuild::Nothing;
@@ -185,7 +205,7 @@ namespace Gride { namespace UI {
             GrideProject^ p = workspace->StartupProject;
             LaunchDebugger(BuildEngine::ProgramPath(p, p->GetConfiguration(CurrentConfig(), CurrentTarget())));
         }
-        else if (next == AfterBuild::Run) RunProgram();
+        else if (next == AfterBuild::Run || next == AfterBuild::Emulate || next == AfterBuild::Verify) RunChosen(next);
     }
 
     // =========================================================================
@@ -203,9 +223,73 @@ namespace Gride { namespace UI {
     void MainForm::DebugStartNoDebug()
     {
         if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        // a Run of a cross target is turned away before anything is built (RIDE's buildAndRun)
+        if (!RideToolchain::RunsHere(RideTool::C90, CurrentTarget()))
+        {
+            output->Clear("Build"); output->ShowSource("Build"); bottomArea->ShowPane(output);
+            output->Append("Build", RideToolchain::WhyNotRun(RideTool::C90, CurrentTarget()));
+            SetStatus(RideToolchain::WhyNotRun(RideTool::C90, CurrentTarget()));
+            return;
+        }
         afterBuild = AfterBuild::Run;
         if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(workspace->StartupProject), nullptr))
             afterBuild = AfterBuild::Nothing;
+    }
+
+    // RIDE's Build > Emulate on vm6747 and Build > Verify: the same build a Run makes, with what runs the program changed
+    void MainForm::DebugEmulate()
+    {
+        if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        if (!RideToolchain::IsEmulated(CurrentTarget())) { SetStatus("Emulate on vm6747 is for tms6747 - choose it under Target"); return; }
+        afterBuild = AfterBuild::Emulate;
+        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(workspace->StartupProject), nullptr))
+            afterBuild = AfterBuild::Nothing;
+    }
+
+    void MainForm::DebugVerify()
+    {
+        if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        if (!RideToolchain::IsEmulated(CurrentTarget())) { SetStatus("Verify is for tms6747 - choose it under Target"); return; }
+        afterBuild = AfterBuild::Verify;
+        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(workspace->StartupProject), nullptr))
+            afterBuild = AfterBuild::Nothing;
+    }
+
+    void MainForm::StopProgram()
+    {
+        if (!runner->IsRunning) return;
+        SetStatus("Stopping the program...");
+        runner->Stop();
+    }
+
+    // the running program's lines, and its end, land in the Output pane on the window's thread
+    void MainForm::OnRunOutput(String^ line)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke(gcnew Action<String^>(this, &MainForm::AppendBuildOutput), line); }
+        catch (InvalidOperationException^) { }
+    }
+
+    void MainForm::OnRunExited(int status, bool stopped)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke(gcnew Action<Object^, Object^>(this, &MainForm::RunExitedUI), status, stopped); }
+        catch (InvalidOperationException^) { }
+    }
+
+    void MainForm::RunExitedUI(Object^ status, Object^ stopped)
+    {
+        int code = safe_cast<int>(status);
+        bool wasStopped = safe_cast<bool>(stopped);
+        output->InputEnabled = false;
+        output->Append("Build", String::Empty);
+        output->Append("Build", wasStopped ? "[stopped]" : String::Format("[program returned {0}]", code));
+        SetStatus(wasStopped ? "The program was stopped" : String::Format("The program returned {0}", code));
+    }
+
+    void MainForm::OnOutputInput(String^ line)
+    {
+        if (!runner->Write(line)) SetStatus("No program is running to read that");
     }
 
     void MainForm::DebugStop()        { debugger->Stop(); }
@@ -234,6 +318,61 @@ namespace Gride { namespace UI {
         if (ed != nullptr) ed->ToggleBreakpoint(0);
     }
 
+    // RIDE's Ctrl-Up / Ctrl-Down: the frame looked at - its variables in Locals, the editor on its line,
+    // "the variables are main's, at f.c:11" in the status bar; the top frame is the stop again
+    void MainForm::DebugUpStack() { LookAtFrame(debugger->CurrentFrame + 1); }
+    void MainForm::DebugDownStack() { LookAtFrame(debugger->CurrentFrame - 1); }
+    void MainForm::OnFrameChosen(int index) { LookAtFrame(index); }
+
+    void MainForm::LookAtFrame(int index)
+    {
+        if (!IsInBreak()) return;
+        if (index < 0) { SetStatus("at the stop"); return; }
+        List<DebugFrame^>^ frames = debugger->CallStack();
+        if (index >= frames->Count) { SetStatus(frames->Count <= 1 ? "nothing called this" : "the stack ends here"); return; }
+        if (index == debugger->CurrentFrame && index == 0) { SetStatus("at the stop"); return; }
+        if (!debugger->SelectFrame(index))
+        {
+            String^ why = debugger->WhyNoStackWalk();
+            SetStatus(why->Length > 0 ? why : debugger->Name + " cannot look at another frame");
+            return;
+        }
+        DebugFrame^ f = frames[index];
+        if (!String::IsNullOrEmpty(f->File) && f->Line > 0)
+        {
+            EditorDocument^ d = OpenDocument(f->File, 0);
+            if (d != nullptr) d->Editor->GoToLine(f->Line);
+        }
+        RefreshDebugPanes();
+        SetStatus(index == 0 ? "back at the stop" : DebugTranscript::LookingAt(f));
+    }
+
+    // RIDE's Watch expression... and the setting of a variable: the panes' own input lines
+    void MainForm::DebugAddWatch()
+    {
+        bottomArea->ShowPane(watch);
+        watch->FocusAdd();
+    }
+
+    void MainForm::DebugSetVariable()
+    {
+        bottomArea->ShowPane(locals);
+        locals->FocusSet();
+    }
+
+    void MainForm::OnVariableSet(String^ name, String^ value)
+    {
+        if (!IsInBreak()) return;
+        String^ said;
+        if (!debugger->SetVariable(name, value, said))
+        {
+            output->Append("Debug", "cannot set " + name + ": " + said);
+            SetStatus("cannot set " + name + " - " + said);
+        }
+        else SetStatus(name + " = " + value);
+        RefreshDebugPanes();
+    }
+
     void MainForm::DebugDeleteAllBreakpoints()
     {
         for each (SortedSet<int>^ s in BreakpointMap()->Values) s->Clear();
@@ -245,15 +384,16 @@ namespace Gride { namespace UI {
     void MainForm::DebugConnect()
     {
         ToolchainSettings^ tc = settings->Toolchain(Target::C6747);
-        String^ vm = tc->Resolve(tc->Simulator);
+        String^ vm = tc->Resolve(tc->Emulator);
+        String^ sim = tc->Resolve(tc->Simulator);
         StringBuilder^ sb = gcnew StringBuilder();
         sb->AppendLine("VM6747 connection");
         sb->AppendLine("=================");
         sb->AppendLine();
-        sb->AppendLine("Simulator : " + vm);
-        if (File::Exists(vm)) sb->AppendLine("Status    : found");
-        else sb->AppendLine("Status    : not installed yet");
+        sb->AppendLine("Emulator  : " + vm + (File::Exists(vm) ? "  (found)" : "  (not installed yet)"));
+        sb->AppendLine("Simulator : " + sim + (File::Exists(sim) ? "  (found)" : "  (not installed yet)"));
         sb->AppendLine("Run cmd   : " + tc->RunCmd);
+        sb->AppendLine("Emulate   : " + tc->EmulateCmd);
         sb->AppendLine("Debug cmd : " + tc->DebugCmd);
         sb->AppendLine();
         sb->AppendLine("Active debugger: " + debugger->Name);
@@ -290,6 +430,40 @@ namespace Gride { namespace UI {
         return false;
     }
 
+    // the engine the window talks to: the events of the one before are let go
+    void MainForm::AttachDebugger(DebugEngine^ engine)
+    {
+        if (debugger != nullptr)
+        {
+            debugger->StateChanged -= gcnew DebugStateHandler(this, &MainForm::OnDebugState);
+            debugger->Stopped -= gcnew DebugStopHandler(this, &MainForm::OnDebugStopped);
+            debugger->Output -= gcnew TextLineHandler(this, &MainForm::OnDebugOutput);
+            debugger->ProgramOutput -= gcnew TextLineHandler(this, &MainForm::OnDebugProgramOutput);
+        }
+        debugger = engine;
+        debugger->StateChanged += gcnew DebugStateHandler(this, &MainForm::OnDebugState);
+        debugger->Stopped += gcnew DebugStopHandler(this, &MainForm::OnDebugStopped);
+        debugger->Output += gcnew TextLineHandler(this, &MainForm::OnDebugOutput);
+        debugger->ProgramOutput += gcnew TextLineHandler(this, &MainForm::OnDebugProgramOutput);
+    }
+
+    // what the emulator debugs: the one assembly file of a one-file program, else the object folder of them
+    String^ MainForm::AssemblyProgramFor(GrideProject^ p, BuildConfiguration^ cfg, ToolchainSettings^ tc)
+    {
+        String^ objDir = p->ToAbsolute(cfg->ObjDir);
+        try
+        {
+            if (Directory::Exists(objDir))
+            {
+                array<String^>^ asms = Directory::GetFiles(objDir, "*" + tc->AsmExt);
+                if (asms->Length == 1) return asms[0];
+            }
+        }
+        catch (Exception^) { }
+        return objDir;
+    }
+
+    // RIDE's F8: the engine for the build (dbg_planFor), the placeholder with the reason when there is none
     void MainForm::LaunchDebugger(String^ program)
     {
         String^ file = nullptr;
@@ -304,6 +478,22 @@ namespace Gride { namespace UI {
         output->Clear("Debug");
         output->ShowSource("Debug");
         bottomArea->ShowPane(output);
+        DebugEngine^ engine = gcnew PlaceholderDebugger();
+        if (p != nullptr)
+        {
+            Target t = CurrentTarget();
+            BuildConfiguration^ cfg = p->GetConfiguration(CurrentConfig(), t);
+            ToolchainSettings^ tc = settings->Toolchain(t);
+            bool shalimar = false;
+            for each (String^ f in p->AllFiles()) if (settings->DetectLanguage(f, p->Lang) == Language::Shalimar) shalimar = true;
+            String^ shmrt = shalimar ? RideToolchain::FindShalimarRuntimeDir(tc->ToolDir, ToolchainSettings::RideRoot, cfg->IsDebug) : nullptr;
+            DebugLaunch^ launch = DebuggerChoice::For(p, cfg, tc, settings, program, AssemblyProgramFor(p, cfg, tc), shalimar, shmrt);
+            if (!launch->Possible) output->Append("Debug", launch->WhyNot + " - the placeholder stands in");
+            else if (launch->Kind == DebuggerKind::Shalimar) engine = gcnew ShalimarSession(launch);
+            else engine = gcnew ProcessDebugger(launch);
+        }
+        AttachDebugger(engine);
+        if (p != nullptr) engine->SetSourceFiles(p->AllFiles());
         debugger->SetBreakpoints(BreakpointMap());
         bottomArea->ShowPane(watch);
         bottomArea->ShowPane(callStack);
@@ -311,24 +501,127 @@ namespace Gride { namespace UI {
         debugger->Start(program, CurrentTarget(), file, line);
     }
 
-    // Ctrl+F5: run the startup program outside the IDE
-    void MainForm::RunProgram()
+    // the program's own lines, as heard through the debugger (RIDE's console)
+    void MainForm::OnDebugProgramOutput(String^ line)
     {
+        if (InvokeRequired) { BeginInvoke(gcnew Action<String^>(this, &MainForm::OnDebugProgramOutput), line); return; }
+        output->Append("Debug", line);
+    }
+
+    // Ctrl+F5: run the startup program
+    void MainForm::RunProgram() { RunChosen(AfterBuild::Run); }
+
+    // the run's worker for Verify: both programs captured on a thread, the lines posted to the Output pane
+    ref class VerifyJob
+    {
+    public:
+        VerifyJob(MainForm^ form, String^ emulate, String^ simulate, String^ workDir, String^ outName, String^ missing, bool hasArgs)
+        {
+            this->form = form; this->emulate = emulate; this->simulate = simulate; this->workDir = workDir;
+            this->outName = outName; this->missing = missing; this->hasArgs = hasArgs;
+        }
+        void Run()
+        {
+            int status = ProgramRunner::Verify(emulate, simulate, workDir, 65001, outName, missing, hasArgs, gcnew Action<String^>(this, &VerifyJob::Say));
+            form->OnRunExited(status, false);
+        }
+    private:
+        MainForm^ form;
+        String^ emulate; String^ simulate; String^ workDir; String^ outName; String^ missing; bool hasArgs;
+        void Say(String^ line) { form->OnRunOutput(line); }
+    };
+
+    // the program of the startup project, run as RIDE runs one: inside the Output pane with an input
+    // line, "[program returned N]" at the end; on tms6747 the simulator on the .out (the emulator on
+    // the assembly when the project says emulateOnly), Emulate always the emulator, Verify both
+    void MainForm::RunChosen(AfterBuild how)
+    {
+        if (workspace == nullptr || workspace->StartupProject == nullptr || runner->IsRunning) return;
         GrideProject^ p = workspace->StartupProject;
         Target t = CurrentTarget();
         BuildConfiguration^ cfg = p->GetConfiguration(CurrentConfig(), t);
         String^ program = BuildEngine::ProgramPath(p, cfg);
         ToolchainSettings^ tc = settings->Toolchain(t);
+        bool emulated = RideToolchain::IsEmulated(t);
+        if (!settings->Env->RunInIde && how == AfterBuild::Run && !emulated) { RunExternal(p, tc, program); return; }
+
+        output->ShowSource("Build");
+        bottomArea->ShowPane(output);
+        List<String^>^ args = p->ProgramArgs;
+        bool shalimar = false;
+        for each (String^ f in p->AllFiles()) if (settings->DetectLanguage(f, p->Lang) == Language::Shalimar) shalimar = true;
+        String^ cmd; String^ shown;
+        int codePage = tc->OutputCodePage;
+        if (emulated)
+        {
+            if (how == AfterBuild::Run && p->EmulateOnly) how = AfterBuild::Emulate;
+            String^ sim = tc->ResolveFor("simulator", tc->Simulator);
+            String^ vm = tc->ResolveFor("emulator", tc->Emulator);
+            String^ out = RideToolchain::TiProgramOf(program);
+            String^ asmDir = p->ToAbsolute(cfg->ObjDir);     // the assembly the build wrote, which vm6747 runs
+            String^ shmrt = shalimar ? RideToolchain::FindShalimarRuntimeDir(tc->ToolDir, ToolchainSettings::RideRoot, cfg->IsDebug) : nullptr;
+            String^ missing = RideToolchain::SimulationMissing(sim, out);
+            if (codePage == 0) codePage = 65001;             // RIDE's runners write UTF-8
+            if (how == AfterBuild::Verify)
+            {
+                VerifyJob^ job = gcnew VerifyJob(this, RideToolchain::EmulateCommand(vm, asmDir, shalimar, nullptr, shmrt),
+                                                 RideToolchain::SimulateCommand(sim, out), p->ProjectDir, Path::GetFileName(out), missing, args->Count > 0);
+                SetStatus("Verifying " + Path::GetFileName(out) + " on vm6747 and sim6747...");
+                System::Threading::Thread^ th = gcnew System::Threading::Thread(gcnew System::Threading::ThreadStart(job, &VerifyJob::Run));
+                th->IsBackground = true;
+                th->Start();
+                return;
+            }
+            if (how == AfterBuild::Emulate)
+            {
+                if (!File::Exists(vm))
+                {
+                    output->Append("Build", "no " + tc->Emulator + " - the emulator runs the assembly (looked in " + tc->LookedIn(tc->Emulator) + ")");
+                    SetStatus("no emulator"); return;
+                }
+                cmd = RideToolchain::EmulateCommand(vm, asmDir, shalimar, args, shmrt);
+                shown = "$ " + Path::GetFileNameWithoutExtension(vm) + " " + PathUtil::MakeRelative(p->ProjectDir, asmDir);
+            }
+            else
+            {
+                if (missing->Length > 0) { output->Append("Build", missing); SetStatus(missing); return; }
+                if (args->Count > 0) output->Append("Build", "[run] the simulator takes no command line - Emulate on vm6747 hands them over");
+                cmd = RideToolchain::SimulateCommand(sim, out);
+                shown = RideToolchain::RunnerLine(true, program);
+            }
+        }
+        else
+        {
+            if (String::IsNullOrEmpty(tc->RunCmd))
+            {
+                String^ why = RideToolchain::WhyNotRun(RideTool::C90, t);
+                if (why->Length == 0) why = TargetInfo::Name(t) + " programs cannot run on this Windows PC - copy " + program + " to the target";
+                output->Append("Build", why); SetStatus(why); return;
+            }
+            if (!File::Exists(program)) { output->Append("Build", "no " + program + " - build it first"); SetStatus("nothing to run"); return; }
+            cmd = RideToolchain::LaunchCommand(program, false, args, String::Empty, nullptr);
+            shown = "$ " + PathUtil::MakeRelative(p->ProjectDir, program) + (args->Count > 0 ? " " + String::Join(" ", args) : String::Empty);
+        }
+        output->Append("Build", shown);
+        List<String^>^ env = tc->EnvironmentVars == nullptr ? gcnew List<String^>() : gcnew List<String^>(tc->EnvironmentVars);
+        if (!runner->Start(cmd, p->ProjectDir, env, codePage)) { SetStatus("The program could not be started"); return; }
+        output->InputEnabled = true;
+        SetStatus("Running " + Path::GetFileName(program) + " - type its input below the output, Stop Program ends it");
+    }
+
+    // the way before the port, kept as an option: the program in a console window of its own
+    void MainForm::RunExternal(GrideProject^ p, ToolchainSettings^ tc, String^ program)
+    {
         if (String::IsNullOrEmpty(tc->RunCmd))
         {
-            MessageBox::Show(this, TargetInfo::Name(t) + " programs cannot run on this Windows PC.\n" +
+            MessageBox::Show(this, TargetInfo::Name(tc->TargetKind) + " programs cannot run on this Windows PC.\n" +
                              "Copy " + program + " to the target, or set a Run command in\nTools > Options > Toolchains > " + tc->Name + ".",
                              "Start Without Debugging", MessageBoxButtons::OK, MessageBoxIcon::Information);
             return;
         }
         MacroExpander^ mx = gcnew MacroExpander();
         mx->Set("Program", program);
-        mx->Set("Simulator", tc->Resolve(tc->Simulator));
+        mx->Set("Simulator", tc->ResolveFor("simulator", tc->Simulator));
         mx->Set("ToolDir", tc->ToolDir);
         mx->Set("ProjectDir", p->ProjectDir);
         String^ cmd = mx->Expand(tc->RunCmd);
@@ -381,8 +674,11 @@ namespace Gride { namespace UI {
         ClearExecutionMarkers();
         EditorDocument^ d = OpenDocument(info->File, 0);
         if (d != nullptr) d->Editor->SetExecutionLine(info->Line);
+        // a new stop: what the panes saw at the last one is what a value is compared with (RIDE's NewStop)
+        watch->NewStop();
+        locals->NewStop();
         RefreshDebugPanes();
-        SetStatus(String::Format("Paused at {0}, line {1} ({2})", Path::GetFileName(info->File), info->Line, info->Reason));
+        SetStatus(Path::GetFileName(info->File) + ":" + info->Line + (info->Function->Length > 0 ? " in " + info->Function : String::Empty));
         Activate();
     }
 
@@ -397,9 +693,7 @@ namespace Gride { namespace UI {
             if (p != nullptr)
             {
                 BuildConfiguration^ cfg = p->GetConfiguration(CurrentConfig(), CurrentTarget());
-                String^ asmPath = Path::Combine(p->ToAbsolute(cfg->ObjDir),
-                                                Path::GetFileNameWithoutExtension(loc->File) + settings->Toolchain(CurrentTarget())->AsmExt);
-                disasm->ShowFile(loc->File, asmPath);
+                disasm->ShowFile(loc->File, engine->AsmFileFor(p, cfg, loc->File));
             }
         }
     }
@@ -419,6 +713,7 @@ namespace Gride { namespace UI {
         }
         if (workspace != nullptr) workspace->IsDirty = true;
         RefreshBreakpointsPane();
+        if (debugger->IsActive) debugger->BreakpointsChanged();     // toggling while stopped resends them (RIDE)
     }
 
     void MainForm::OnBreakpointRemove(String^ file, int line)
@@ -428,6 +723,7 @@ namespace Gride { namespace UI {
         EditorDocument^ d = docs->Find(file);
         if (d != nullptr) d->Editor->RefreshGutter();
         RefreshBreakpointsPane();
+        if (debugger->IsActive) debugger->BreakpointsChanged();
     }
 
     void MainForm::RefreshBreakpointsPane() { bpPane->Fill(BreakpointMap()); }

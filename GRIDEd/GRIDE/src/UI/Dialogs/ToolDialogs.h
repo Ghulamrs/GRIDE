@@ -117,22 +117,37 @@ namespace Gride { namespace UI {
             list->Dock = DockStyle::Fill;
             list->View = WF::View::Details;
             list->FullRowSelect = true;
-            list->Columns->Add("Tool", 170);
-            list->Columns->Add("Resolved path", 470);
-            list->Columns->Add("Status", 120);
+            list->Columns->Add("Tool", 150);
+            list->Columns->Add("Resolved path", 300);
+            list->Columns->Add("Status", 90);
+            list->Columns->Add("Looked in", 260);
             list->SmallImageList = IconFactory::CreateImageList(gcnew array<String^>{ "info", "warning" });
             int found = 0, missing = 0;
+            ToolchainDefinitions^ defs = ToolchainDefinitions::Current;
+            ListViewGroup^ dg = gcnew ListViewGroup("toolchain.json");
+            list->Groups->Add(dg);
+            AddLine(list, dg, "Shipped file", defs->ShippedFound ? defs->ShippedFile : "not found: " + defs->ShippedFile, defs->ShippedFound ? "info" : "warning", defs->ShippedFound ? "Found" : "Missing", String::Empty);
+            AddLine(list, dg, "Your overrides", defs->UserJson != nullptr ? defs->UserFile : "(none) " + defs->UserFile, "info", defs->UserJson != nullptr ? "In use" : "None", String::Empty);
+            for each (String^ p in defs->Problems) AddLine(list, dg, "Problem", p, "warning", "Check", String::Empty);
             for each (ToolchainSettings^ tc in s->Toolchains)
             {
                 ListViewGroup^ g = gcnew ListViewGroup(TargetInfo::DisplayName(tc->TargetKind));
                 list->Groups->Add(g);
-                AddTool(list, g, tc, "C90 compiler", tc->CompilerC90, found, missing);
-                AddTool(list, g, tc, "C++11 compiler", tc->CompilerCpp11, found, missing);
+                AddTool(list, g, tc, "C90 compiler (c90)", tc->CompilerC90, found, missing);
+                AddTool(list, g, tc, "C++11 compiler (cpp11)", tc->CompilerCpp11, found, missing);
                 AddTool(list, g, tc, "Shalimar compiler", tc->CompilerShalimar, found, missing);
-                AddTool(list, g, tc, "Assembler", tc->Assembler, found, missing);
-                AddTool(list, g, tc, "Linker", tc->Linker, found, missing);
+                if (!String::IsNullOrEmpty(tc->Assembler)) AddTool(list, g, tc, "Assembler", tc->Assembler, found, missing);
+                if (!String::IsNullOrEmpty(tc->Linker)) AddTool(list, g, tc, "Linker", tc->Linker, found, missing);
+                if (!String::IsNullOrEmpty(tc->DebugAssembler)) AddTool(list, g, tc, "Debug assembler (clang)", tc->DebugAssembler, found, missing);
                 if (!String::IsNullOrEmpty(tc->Runtime)) AddTool(list, g, tc, "Runtime", tc->Runtime, found, missing);
-                if (!String::IsNullOrEmpty(tc->Simulator)) AddTool(list, g, tc, "Simulator", tc->Simulator, found, missing);
+                if (!String::IsNullOrEmpty(tc->RuntimeDir))
+                {
+                    String^ dir = tc->ResolveRuntimeDir();
+                    AddPlain(list, g, "Runtime directory (RTS6x)", String::IsNullOrEmpty(dir) ? tc->RuntimeDir : Path::Combine(dir, "rts6x.lib"), found, missing);
+                }
+                if (!String::IsNullOrEmpty(tc->Simulator)) AddTool(list, g, tc, "Simulator (sim6747)", tc->Simulator, found, missing);
+                if (!String::IsNullOrEmpty(tc->Emulator)) AddTool(list, g, tc, "Emulator (vm6747)", tc->Emulator, found, missing);
+                if (!String::IsNullOrEmpty(tc->Debugger)) AddTool(list, g, tc, "Debugger", tc->Debugger, found, missing);
             }
             ListViewGroup^ cg = gcnew ListViewGroup("Converters");
             list->Groups->Add(cg);
@@ -156,24 +171,28 @@ namespace Gride { namespace UI {
         }
 
     private:
+        // a tool that is not there says where it was looked for
         static void AddTool(ListView^ list, ListViewGroup^ g, ToolchainSettings^ tc, String^ name, String^ tool, int% found, int% missing)
         {
-            AddPlain(list, g, name, tc->Resolve(tool), found, missing);
+            String^ path = tc->Resolve(tool);
+            bool ok = !String::IsNullOrEmpty(path) && File::Exists(path);
+            AddLine(list, g, name, String::IsNullOrEmpty(path) ? "(not set)" : path, ok ? "info" : "warning", ok ? "Found" : "Not installed", ok ? String::Empty : tc->LookedIn(tool));
+            if (ok) found++; else missing++;
         }
         static void AddPlain(ListView^ list, ListViewGroup^ g, String^ name, String^ path, int% found, int% missing)
         {
             bool ok = !String::IsNullOrEmpty(path) && File::Exists(path);
-            String^ icon = "warning";
-            String^ shown = path;
-            String^ state = "Not installed";
-            if (ok) { icon = "info"; state = "Found"; }
-            if (String::IsNullOrEmpty(path)) shown = "(not set)";
+            AddLine(list, g, name, String::IsNullOrEmpty(path) ? "(not set)" : path, ok ? "info" : "warning", ok ? "Found" : "Not installed", String::Empty);
+            if (ok) found++; else missing++;
+        }
+        static void AddLine(ListView^ list, ListViewGroup^ g, String^ name, String^ shown, String^ icon, String^ state, String^ lookedIn)
+        {
             ListViewItem^ it = gcnew ListViewItem(name, icon);
             it->SubItems->Add(shown);
             it->SubItems->Add(state);
+            it->SubItems->Add(lookedIn);
             it->Group = g;
             list->Items->Add(it);
-            if (ok) found++; else missing++;
         }
     };
 

@@ -1,70 +1,87 @@
 // =============================================================================
-//  UndoManager.h - snapshot based undo / redo for the code editor
+//  UndoManager.h - delta based undo / redo for the code editor
 //
 //  RichTextBox's own undo also records colour changes made by the syntax
-//  highlighter, so Ctrl+Z would "undo colouring". GRIDE therefore keeps its
-//  own history of text snapshots (taken after a short typing pause and before
-//  every programmatic change).
+//  highlighter, so Ctrl+Z would "undo colouring"; its buffer is switched off
+//  (EM_SETUNDOLIMIT 0) and GRIDE keeps its own history instead. Each step
+//  stores only what changed (EditDelta), never a copy of the whole text.
+//  CodeEditor groups typing into bursts and records one delta per burst.
 // =============================================================================
 #pragma once
 #include "../../pch.h"
 
 namespace Gride { namespace UI {
 
-    public ref class UndoState
+    // one undo step: at Start, Removed was replaced by Inserted
+    public ref class EditDelta
     {
     public:
-        UndoState(String^ text, int caret) { Text = text; Caret = caret; }
-        property String^ Text;
-        property int Caret;
+        int Start;
+        String^ Removed;
+        String^ Inserted;
+        int SelStartBefore;     // selection before the edit (restored by Undo)
+        int SelLengthBefore;
+        int CaretAfter;         // caret after the edit (restored by Redo)
+        int FirstLineBefore;    // first visible line before the edit
     };
 
     public ref class UndoManager
     {
     public:
-        UndoManager() { states = gcnew List<UndoState^>(); index = -1; MaxStates = 300; }
+        UndoManager() { undo = gcnew List<EditDelta^>(); redo = gcnew List<EditDelta^>(); MaxSteps = 1000; savePoint = 0; }
 
-        property int MaxStates;
-        property bool CanUndo { bool get() { return index > 0; } }
-        property bool CanRedo { bool get() { return index >= 0 && index < states->Count - 1; } }
+        property int MaxSteps;
+        property bool CanUndo { bool get() { return undo->Count > 0; } }
+        property bool CanRedo { bool get() { return redo->Count > 0; } }
+        // true when the steps undone / redone lead back to the text last saved
+        property bool AtSavePoint { bool get() { return savePoint == undo->Count; } }
 
-        void Reset(String^ text, int caret)
+        void Reset() { undo->Clear(); redo->Clear(); savePoint = 0; }
+
+        void MarkSaved() { savePoint = undo->Count; }
+
+        // a new edit after undo: the redo branch (and a save point in it) is gone
+        void DiscardRedo()
         {
-            states->Clear();
-            states->Add(gcnew UndoState(text, caret));
-            index = 0;
+            if (savePoint > undo->Count) savePoint = -1;
+            redo->Clear();
         }
 
-        // records a new state (ignored when the text did not change)
-        void Push(String^ text, int caret)
+        void Push(EditDelta^ d)
         {
-            if (index >= 0 && String::CompareOrdinal(states[index]->Text, text) == 0) return;
-            if (index < states->Count - 1) states->RemoveRange(index + 1, states->Count - index - 1);
-            states->Add(gcnew UndoState(text, caret));
-            // large files keep fewer snapshots
-            int max = text->Length > 1000000 ? 20 : MaxStates;
-            while (states->Count > max) states->RemoveAt(0);
-            index = states->Count - 1;
+            DiscardRedo();
+            undo->Add(d);
+            if (undo->Count > MaxSteps)
+            {
+                int drop = undo->Count - MaxSteps;
+                undo->RemoveRange(0, drop);
+                savePoint = savePoint >= drop ? savePoint - drop : -1;
+            }
         }
 
-        // returns the state to restore, or null
-        UndoState^ Undo(String^ currentText, int caret)
+        // the step to revert (moved to the redo list), or null
+        EditDelta^ TakeUndo()
         {
-            Push(currentText, caret);         // keep un-snapshotted typing
-            if (index <= 0) return nullptr;
-            index--;
-            return states[index];
+            if (undo->Count == 0) return nullptr;
+            EditDelta^ d = undo[undo->Count - 1];
+            undo->RemoveAt(undo->Count - 1);
+            redo->Add(d);
+            return d;
         }
 
-        UndoState^ Redo()
+        // the step to apply again (moved back to the undo list), or null
+        EditDelta^ TakeRedo()
         {
-            if (!CanRedo) return nullptr;
-            index++;
-            return states[index];
+            if (redo->Count == 0) return nullptr;
+            EditDelta^ d = redo[redo->Count - 1];
+            redo->RemoveAt(redo->Count - 1);
+            undo->Add(d);
+            return d;
         }
 
     private:
-        List<UndoState^>^ states;
-        int index;
+        List<EditDelta^>^ undo;
+        List<EditDelta^>^ redo;
+        int savePoint;          // undo depth of the saved text, -1 = no longer reachable
     };
 }}

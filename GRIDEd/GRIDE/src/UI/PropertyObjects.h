@@ -93,8 +93,17 @@ namespace Gride { namespace UI {
             }
         }
 
-        GR_CAT("Project") GR_RO GR_NAME("Read-only (CCS)")
+        GR_CAT("Project") GR_RO GR_NAME("Read-only (CCS / Visual Studio)")
         property bool ReadOnlyCcs { bool get() { return project->IsReadOnly; } }
+
+        GR_CAT("Visual Studio") GR_RO GR_NAME("Version")
+        property String^ VsVersion { String^ get() { return project->Vs != nullptr ? project->Vs->Version : String::Empty; } }
+
+        GR_CAT("Visual Studio") GR_RO GR_NAME("Solution")
+        property String^ VsSolution { String^ get() { return project->Vs != nullptr ? project->Vs->SolutionPath : String::Empty; } }
+
+        GR_CAT("Visual Studio") GR_RO GR_NAME("Configurations")
+        property String^ VsConfigurations { String^ get() { return project->Vs != nullptr ? String::Join(", ", project->Vs->Configurations) : String::Empty; } }
 
         GR_CAT("Project") GR_RO GR_NAME("Files")
         property int FileCount { int get() { return project->AllFiles()->Count; } }

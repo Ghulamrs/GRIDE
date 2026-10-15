@@ -2,15 +2,20 @@
 //  Workspace.h - a group of projects (.grws JSON), like a Visual Studio .sln
 //
 //  {
-//    "gride": "1.0", "type": "workspace", "name": "INS_Suite",
-//    "projects": [ { "path": "NavFilter/NavFilter.pro" },
-//                  { "path": "ImuDriver", "kind": "ccs7", "readOnly": true } ],
-//    "startup": "NavFilter", "activeConfig": "Debug", "activeTarget": "TMS320C6747"
+//    "gride": "1.0", "type": "workspace", "name": "cppparse",
+//    "projects": [ { "path": "cppparse/cppparse.vcxproj", "kind": "vs", "readOnly": true, "solution": "cppparse.sln",
+//                    "toolchain": "cl", "programArgs": ["--health", "."] } ],
+//    "solution": "cppparse.sln",
+//    "startup": "cppparse", "activeConfig": "Release", "activeTarget": "Windows"
 //  }
+//  A project read from Visual Studio's or CCS's files ("vs", "ccs7") is never written; what
+//  GRIDE keeps for it - the compiler word, the folders' own, the program's arguments,
+//  emulateOnly - is kept in its entry here.
 // =============================================================================
 #pragma once
 #include "GrideProject.h"
 #include "CcsProjectReader.h"
+#include "VsProjectReader.h"
 
 namespace Gride { namespace Model {
 
@@ -30,6 +35,63 @@ namespace Gride { namespace Model {
             IsTemporary = false;
             IsDirty = false;
             Breakpoints = gcnew Dictionary<String^, SortedSet<int>^>(StringComparer::OrdinalIgnoreCase);
+            SolutionPath = String::Empty;
+            SolutionFolders = gcnew List<String^>();
+            SolutionItems = gcnew Dictionary<String^, List<String^>^>();
+        }
+
+        // a Visual Studio solution opened as a workspace: the .sln, its solution folders ("Libs/Inner",
+        // outer ones first) and the files they hold (absolute), which the explorer shows under them
+        property String^ SolutionPath;
+        property List<String^>^ SolutionFolders;
+        property Dictionary<String^, List<String^>^>^ SolutionItems;
+
+        // the solution's C++ projects read-only, their dependencies by GUID, the solution folders and
+        // items; a project that cannot be read, and every non-C++ project, is a line in LoadErrors
+        static Workspace^ ForSolution(VsSolution^ s)
+        {
+            Workspace^ w = gcnew Workspace();
+            w->Name = s->Name;
+            w->FilePath = Path::Combine(s->Dir, s->Name + ".grws");
+            w->IsTemporary = true;
+            w->SolutionPath = s->Path;
+            w->ActiveTarget = Target::Windows;
+            for each (String^ f in s->FolderPaths()) w->SolutionFolders->Add(f);
+            for each (VsSolutionEntry^ e in s->Entries)
+            {
+                if (!e->IsFolder || e->Items->Count == 0) continue;
+                String^ chain = s->FolderPathOf(e);
+                String^ own = chain->Length > 0 ? chain + "/" + e->Name : e->Name;
+                if (!w->SolutionItems->ContainsKey(own)) w->SolutionItems[own] = gcnew List<String^>();
+                w->SolutionItems[own]->AddRange(e->Items);
+            }
+            Dictionary<String^, GrideProject^>^ byGuid = gcnew Dictionary<String^, GrideProject^>();
+            for each (VsSolutionEntry^ e in s->CppProjects())
+            {
+                try
+                {
+                    GrideProject^ p = VsProjectReader::Read(e->Path, s->Path);
+                    if (p->Name->Length == 0 || String::Compare(p->Name, Path::GetFileNameWithoutExtension(e->Path), true) == 0) p->Name = e->Name;
+                    p->Vs->SolutionFolder = s->FolderPathOf(e);
+                    w->Projects->Add(p);
+                    byGuid[e->Guid] = p;
+                }
+                catch (Exception^ ex) { w->LoadErrors->Add(e->RelativePath + ": " + ex->Message); }
+            }
+            for each (VsSolutionEntry^ e in s->CppProjects())
+            {
+                GrideProject^ p;
+                if (!byGuid->TryGetValue(e->Guid, p)) continue;
+                for each (String^ dep in e->Dependencies)
+                {
+                    GrideProject^ d;
+                    if (byGuid->TryGetValue(dep, d) && d != p && !p->DependsOn->Contains(d->Name)) p->DependsOn->Add(d->Name);
+                }
+            }
+            for each (String^ n in s->Notes) w->LoadErrors->Add(n);
+            w->StartupName = w->Projects->Count > 0 ? w->Projects[0]->Name : String::Empty;
+            w->IsDirty = false;
+            return w;
         }
 
         property String^ FilePath;
@@ -121,6 +183,17 @@ namespace Gride { namespace Model {
             w->StartupName = j->GetString("startup", String::Empty);
             w->ActiveConfig = j->GetString("activeConfig", "Debug");
             w->ActiveTarget = TargetInfo::Parse(j->GetString("activeTarget", "Windows"));
+            String^ sln = j->GetString("solution", String::Empty);
+            if (sln->Length > 0) w->SolutionPath = PathUtil::MakeAbsolute(w->Directory, sln);
+            if (j->Has("solutionFolders")) w->SolutionFolders = j->GetStringList("solutionFolders");
+            JsonValue^ items = j->GetObject("solutionItems");
+            if (items != nullptr)
+                for each (String^ folder in items->KeyNames)
+                {
+                    List<String^>^ abs = gcnew List<String^>();
+                    for each (String^ rel in items->GetStringList(folder)) abs->Add(PathUtil::MakeAbsolute(w->Directory, rel));
+                    w->SolutionItems[folder] = abs;
+                }
 
             JsonValue^ list = j->Get("projects");
             if (list != nullptr && list->IsArray)
@@ -134,7 +207,14 @@ namespace Gride { namespace Model {
                     {
                         GrideProject^ p;
                         if (kind == "ccs7") p = CcsProjectReader::Read(abs, cgToolRoot);
+                        else if (kind == "vs")
+                        {
+                            String^ own = e->GetString("solution", String::Empty);
+                            p = VsProjectReader::Read(abs, own->Length > 0 ? PathUtil::MakeAbsolute(w->Directory, own) : w->SolutionPath);
+                            p->Vs->SolutionFolder = e->GetString("solutionFolder", String::Empty);
+                        }
                         else p = GrideProject::Load(abs);
+                        if (p->IsImported) ReadImportedState(e, p);
                         w->Projects->Add(p);
                     }
                     catch (Exception^ ex)
@@ -153,6 +233,7 @@ namespace Gride { namespace Model {
                     if (lines->Count > 0) w->Breakpoints[PathUtil::MakeAbsolute(w->Directory, rel)] = lines;
                 }
             w->IsDirty = false;
+            w->savedText = JsonWriter::Write(w->ToJson());
             return w;
         }
 
@@ -169,7 +250,24 @@ namespace Gride { namespace Model {
             return w;
         }
 
+        // true when saving would write something different from the file as loaded / last saved
+        // (breakpoints and the active configuration are edited without setting IsDirty)
+        bool HasChanges()
+        {
+            if (IsDirty || IsTemporary || savedText == nullptr) return true;
+            return !String::Equals(JsonWriter::Write(ToJson()), savedText);
+        }
+
         void Save()
+        {
+            JsonValue^ j = ToJson();
+            JsonWriter::WriteFile(FilePath, j);
+            savedText = JsonWriter::Write(j);
+            IsTemporary = false;
+            IsDirty = false;
+        }
+
+        JsonValue^ ToJson()
         {
             JsonValue^ j = JsonValue::MakeObject();
             j->SetString("gride", "1.0");
@@ -185,10 +283,32 @@ namespace Gride { namespace Model {
                     e->SetString("kind", "ccs7");
                     e->SetBool("readOnly", true);
                 }
+                else if (p->IsVs)
+                {
+                    e->SetString("path", PathUtil::MakeRelative(Directory, p->FilePath));
+                    e->SetString("kind", "vs");
+                    e->SetBool("readOnly", true);
+                    if (p->Vs != nullptr && p->Vs->SolutionPath->Length > 0) e->SetString("solution", PathUtil::MakeRelative(Directory, p->Vs->SolutionPath));
+                    if (p->Vs != nullptr && p->Vs->SolutionFolder->Length > 0) e->SetString("solutionFolder", p->Vs->SolutionFolder);
+                }
                 else e->SetString("path", PathUtil::MakeRelative(Directory, p->FilePath));
+                if (p->IsImported) WriteImportedState(e, p);
                 list->Add(e);
             }
             j->SetValue("projects", list);
+            if (SolutionPath->Length > 0) j->SetString("solution", PathUtil::MakeRelative(Directory, SolutionPath));
+            if (SolutionFolders->Count > 0) j->SetList("solutionFolders", SolutionFolders);
+            if (SolutionItems->Count > 0)
+            {
+                JsonValue^ items = JsonValue::MakeObject();
+                for each (KeyValuePair<String^, List<String^>^> kv in SolutionItems)
+                {
+                    List<String^>^ rel = gcnew List<String^>();
+                    for each (String^ abs in kv.Value) rel->Add(PathUtil::MakeRelative(Directory, abs));
+                    items->SetList(kv.Key, rel);
+                }
+                j->SetValue("solutionItems", items);
+            }
             j->SetString("startup", StartupName);
             j->SetString("activeConfig", ActiveConfig);
             j->SetString("activeTarget", TargetInfo::Name(ActiveTarget));
@@ -201,9 +321,7 @@ namespace Gride { namespace Model {
                 bps->SetValue(PathUtil::MakeRelative(Directory, kv.Key), arr);
             }
             j->SetValue("breakpoints", bps);
-            JsonWriter::WriteFile(FilePath, j);
-            IsTemporary = false;
-            IsDirty = false;
+            return j;
         }
 
         // saves every writable project that changed
@@ -213,7 +331,39 @@ namespace Gride { namespace Model {
                 if (p->IsDirty && !p->IsReadOnly) p->Save();
         }
 
+        // what GRIDE keeps for an imported project, whose own files are never written, in its entry:
+        // each field only when it says something, so an entry without them is as before
+        static void WriteImportedState(JsonValue^ e, GrideProject^ p)
+        {
+            if (!String::IsNullOrWhiteSpace(p->Toolchain) && String::Compare(p->Toolchain->Trim(), "auto", true) != 0) e->SetString("toolchain", p->Toolchain->Trim());
+            if (p->FolderToolchains->Count > 0)
+            {
+                JsonValue^ ft = JsonValue::MakeObject();
+                for each (KeyValuePair<String^, String^> kv in p->FolderToolchains) ft->SetString(kv.Key, kv.Value);
+                e->SetValue("folderToolchains", ft);
+            }
+            if (p->ProgramArgs->Count > 0) e->SetList("programArgs", p->ProgramArgs);
+            if (p->EmulateOnly) e->SetBool("emulateOnly", true);
+        }
+
+        static void ReadImportedState(JsonValue^ e, GrideProject^ p)
+        {
+            p->Toolchain = e->GetString("toolchain", "auto");
+            JsonValue^ ft = e->GetObject("folderToolchains");
+            if (ft != nullptr)
+                for each (String^ name in ft->KeyNames)
+                {
+                    String^ w = ft->GetString(name, String::Empty);
+                    if (!String::IsNullOrWhiteSpace(w) && String::Compare(w->Trim(), "auto", true) != 0) p->FolderToolchains[name] = w->Trim();
+                }
+            if (e->Has("programArgs")) p->ProgramArgs = e->GetStringList("programArgs");
+            p->EmulateOnly = e->GetBool("emulateOnly", false);
+            p->IsDirty = false;
+        }
+
     private:
+        String^ savedText;      // JSON of the file as loaded / last saved
+
         void Visit(GrideProject^ p, List<GrideProject^>^ result, HashSet<GrideProject^>^ visiting)
         {
             if (p == nullptr || result->Contains(p) || visiting->Contains(p)) return;

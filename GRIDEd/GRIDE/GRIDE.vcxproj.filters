@@ -71,13 +71,25 @@
     <ClInclude Include="src\Core\PathUtil.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
+    <ClInclude Include="src\Core\TextFile.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
     <ClInclude Include="src\Model\BuildConfiguration.h">
+      <Filter>Source\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Model\CcsReading.h">
       <Filter>Source\Model</Filter>
     </ClInclude>
     <ClInclude Include="src\Model\CcsProjectReader.h">
       <Filter>Source\Model</Filter>
     </ClInclude>
     <ClInclude Include="src\Model\GrideProject.h">
+      <Filter>Source\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Model\VsSolution.h">
+      <Filter>Source\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Model\VsProjectReader.h">
       <Filter>Source\Model</Filter>
     </ClInclude>
     <ClInclude Include="src\Model\Workspace.h">
@@ -95,16 +107,40 @@
     <ClInclude Include="src\Services\Debugger.h">
       <Filter>Source\Services</Filter>
     </ClInclude>
+    <ClInclude Include="src\Services\DebugProcess.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\GdbDebugger.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\ShalimarSession.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
     <ClInclude Include="src\Services\MacroExpander.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\ProgramRunner.h">
       <Filter>Source\Services</Filter>
     </ClInclude>
     <ClInclude Include="src\Services\ProjectTemplates.h">
       <Filter>Source\Services</Filter>
     </ClInclude>
+    <ClInclude Include="src\Services\RideToolchain.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Services\VisualStudio.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
     <ClInclude Include="src\Services\ToolRunner.h">
       <Filter>Source\Services</Filter>
     </ClInclude>
+    <ClInclude Include="src\Settings\CompilerOptions.h">
+      <Filter>Source\Settings</Filter>
+    </ClInclude>
     <ClInclude Include="src\Settings\GrideSettings.h">
+      <Filter>Source\Settings</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Settings\ToolchainDefinitions.h">
       <Filter>Source\Settings</Filter>
     </ClInclude>
     <ClInclude Include="src\Settings\ToolchainSettings.h">
@@ -118,6 +154,9 @@
     </ClInclude>
     <ClInclude Include="src\UI\Controls\TabStrip.h">
       <Filter>Source\UI\Controls</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI\Dialogs\CompilerOptionsEditor.h">
+      <Filter>Source\UI\Dialogs</Filter>
     </ClInclude>
     <ClInclude Include="src\UI\Dialogs\DialogBase.h">
       <Filter>Source\UI\Dialogs</Filter>
@@ -179,5 +218,10 @@
     <ClInclude Include="src\pch.h">
       <Filter>Source</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="toolchain.json" />
+    <None Include="lib\ccs\options-ccs74-C6000_8.2.tsv" />
+    <None Include="lib\ccs\options-ccs55-C6000_7.4.tsv" />
   </ItemGroup>
 </Project>

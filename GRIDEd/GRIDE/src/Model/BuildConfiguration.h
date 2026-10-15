@@ -55,8 +55,10 @@ namespace Gride { namespace Model {
             Libs->Clear();
             if (TargetKind == Target::C6747)
             {
+                // RTS6x's library; rts6x.lib, rts6xd.lib, rts6747.lib and libc.a are all read as the
+                // configuration's one (rts6xd.lib for Debug) when the program is linked
                 LinkerCmd = "c6747.cmd";
-                Libs->Add("rts6747.lib");
+                Libs->Add("rts6x.lib");
             }
             else LinkerCmd = String::Empty;
             ExtraCompileFlags = String::Empty;

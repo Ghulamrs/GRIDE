@@ -178,22 +178,35 @@ exit /b 0</Command>
     <ClInclude Include="src\Core\LanguageTarget.h" />
     <ClInclude Include="src\Core\NativeMethods.h" />
     <ClInclude Include="src\Core\PathUtil.h" />
+    <ClInclude Include="src\Core\TextFile.h" />
     <ClInclude Include="src\Model\BuildConfiguration.h" />
     <ClInclude Include="src\Model\CcsProjectReader.h" />
+    <ClInclude Include="src\Model\CcsReading.h" />
     <ClInclude Include="src\Model\GrideProject.h" />
+    <ClInclude Include="src\Model\VsProjectReader.h" />
+    <ClInclude Include="src\Model\VsSolution.h" />
     <ClInclude Include="src\Model\Workspace.h" />
     <ClInclude Include="src\Services\BuildEngine.h" />
     <ClInclude Include="src\Services\BuildMessage.h" />
     <ClInclude Include="src\Services\CodeConverter.h" />
     <ClInclude Include="src\Services\Debugger.h" />
+    <ClInclude Include="src\Services\DebugProcess.h" />
+    <ClInclude Include="src\Services\GdbDebugger.h" />
+    <ClInclude Include="src\Services\ShalimarSession.h" />
     <ClInclude Include="src\Services\MacroExpander.h" />
+    <ClInclude Include="src\Services\ProgramRunner.h" />
     <ClInclude Include="src\Services\ProjectTemplates.h" />
+    <ClInclude Include="src\Services\RideToolchain.h" />
     <ClInclude Include="src\Services\ToolRunner.h" />
+    <ClInclude Include="src\Services\VisualStudio.h" />
+    <ClInclude Include="src\Settings\CompilerOptions.h" />
     <ClInclude Include="src\Settings\GrideSettings.h" />
+    <ClInclude Include="src\Settings\ToolchainDefinitions.h" />
     <ClInclude Include="src\Settings\ToolchainSettings.h" />
     <ClInclude Include="src\UI\Commands.h" />
     <ClInclude Include="src\UI\Controls\StartPage.h" />
     <ClInclude Include="src\UI\Controls\TabStrip.h" />
+    <ClInclude Include="src\UI\Dialogs\CompilerOptionsEditor.h" />
     <ClInclude Include="src\UI\Dialogs\DialogBase.h" />
     <ClInclude Include="src\UI\Dialogs\EditDialogs.h" />
     <ClInclude Include="src\UI\Dialogs\OptionsDialog.h" />
@@ -215,7 +228,16 @@ exit /b 0</Command>
     <ClInclude Include="src\UI\Theme.h" />
     <ClInclude Include="src\pch.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="toolchain.json" />
+    <None Include="lib\ccs\options-ccs74-C6000_8.2.tsv" />
+    <None Include="lib\ccs\options-ccs55-C6000_7.4.tsv" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <Target Name="CopyToolchainFile" AfterTargets="Build">
+    <Copy SourceFiles="$(ProjectDir)toolchain.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ProjectDir)lib\ccs\options-ccs74-C6000_8.2.tsv;$(ProjectDir)lib\ccs\options-ccs55-C6000_7.4.tsv" DestinationFolder="$(OutDir)lib\ccs" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

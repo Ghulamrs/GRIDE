@@ -71,13 +71,33 @@ namespace Gride { namespace UI {
             box->Font = PaneUtil::MonoFont();
             box->DetectUrls = false;
             box->MouseDoubleClick += gcnew MouseEventHandler(this, &OutputPane::OnDoubleClick);
+            // the input line of a program running inside the IDE (RIDE's window has one): shown while one runs
+            input = gcnew TextBox();
+            input->Dock = DockStyle::Bottom;
+            input->Font = PaneUtil::MonoFont();
+            input->Visible = false;
+            input->KeyDown += gcnew KeyEventHandler(this, &OutputPane::OnInputKey);
             Controls->Add(box);
+            Controls->Add(input);
             Controls->Add(bar);
         }
 
         event NavigateHandler^ Navigate;
+        event NavigateColumnHandler^ NavigateTo;     // with the column, when the line names one
+        event TextLineHandler^ InputEntered;         // a line typed for the running program
 
         property String^ CurrentSource { String^ get() { return safe_cast<String^>(source->SelectedItem); } }
+
+        // the input line is there while a program runs; it takes the focus when shown
+        property bool InputEnabled
+        {
+            bool get() { return input->Visible; }
+            void set(bool on)
+            {
+                input->Visible = on;
+                if (on) { input->Clear(); input->Focus(); }
+            }
+        }
 
         void Clear(String^ src)
         {
@@ -111,6 +131,18 @@ namespace Gride { namespace UI {
         Dictionary<String^, List<String^>^>^ lines;
         ToolStripComboBox^ source;
         RichTextBox^ box;
+        TextBox^ input;
+
+        // Enter hands the line to the program and shows it, as a console echoes what is typed
+        void OnInputKey(Object^ sender, KeyEventArgs^ e)
+        {
+            if (e->KeyCode != Keys::Enter) return;
+            e->SuppressKeyPress = true;
+            String^ text = input->Text;
+            input->Clear();
+            Append(CurrentSource, text);
+            InputEntered(text);
+        }
 
         List<String^>^ Get(String^ src)
         {
@@ -149,12 +181,16 @@ namespace Gride { namespace UI {
         void OnSourceChanged(Object^ sender, EventArgs^ e) { Redraw(); }
         void OnClear(Object^ sender, EventArgs^ e) { Clear(CurrentSource); }
 
+        // a double-click goes to the place the line names: a diagnostic, or any "file:line:col:" /
+        // "file(line,col):" line, as Enter on RIDE's Console does
         void OnDoubleClick(Object^ sender, MouseEventArgs^ e)
         {
             int line = box->GetLineFromCharIndex(box->GetCharIndexFromPosition(e->Location));
             if (line < 0 || line >= box->Lines->Length) return;
             BuildMessage^ m = BuildMessageParser::TryParse(box->Lines[line], nullptr);
-            if (m != nullptr && File::Exists(m->File)) Navigate(m->File, m->Line);
+            if (m == nullptr || m->Line <= 0) m = BuildMessageParser::TryParseLocation(box->Lines[line], nullptr);
+            if (m == nullptr || m->Line <= 0) return;
+            NavigateTo(m->File, m->Line, m->Column);
         }
     };
 
@@ -180,19 +216,32 @@ namespace Gride { namespace UI {
             list->DoubleClick += gcnew EventHandler(this, &ErrorListPane::OnDoubleClick);
             Controls->Add(list);
             Controls->Add(bar);
+            errors = warnings = infos = 0;
             UpdateCounts();
         }
 
         event NavigateHandler^ Navigate;
+        event NavigateColumnHandler^ NavigateTo;
 
-        property int ErrorCount { int get() { return Count(Severity::Error); } }
-        property int WarningCount { int get() { return Count(Severity::Warning); } }
+        property int ErrorCount { int get() { return errors; } }
+        property int WarningCount { int get() { return warnings; } }
 
-        void Clear() { all->Clear(); list->Items->Clear(); UpdateCounts(); }
+        // the first error listed, where a failed build takes the caret
+        BuildMessage^ FirstError()
+        {
+            for each (BuildMessage^ m in all)
+                if (m->Sev == Severity::Error && m->Line > 0 && !String::IsNullOrEmpty(m->File)) return m;
+            return nullptr;
+        }
+
+        void Clear() { all->Clear(); list->Items->Clear(); errors = warnings = infos = 0; UpdateCounts(); }
 
         void Add(BuildMessage^ m)
         {
             all->Add(m);
+            if (m->Sev == Severity::Error) errors++;
+            else if (m->Sev == Severity::Warning) warnings++;
+            else infos++;
             if (IsShown(m)) list->Items->Add(MakeItem(m));
             UpdateCounts();
         }
@@ -203,6 +252,7 @@ namespace Gride { namespace UI {
         ToolStripButton^ btnErrors;
         ToolStripButton^ btnWarnings;
         ToolStripButton^ btnInfos;
+        int errors, warnings, infos;     // kept while adding, not recounted per message
 
         ToolStripButton^ MakeToggle(ToolStrip^ bar, String^ icon)
         {
@@ -215,18 +265,11 @@ namespace Gride { namespace UI {
             return b;
         }
 
-        int Count(Severity s)
-        {
-            int n = 0;
-            for each (BuildMessage^ m in all) if (m->Sev == s) n++;
-            return n;
-        }
-
         void UpdateCounts()
         {
-            btnErrors->Text = String::Format("{0} Errors", Count(Severity::Error));
-            btnWarnings->Text = String::Format("{0} Warnings", Count(Severity::Warning));
-            btnInfos->Text = String::Format("{0} Messages", Count(Severity::Info));
+            btnErrors->Text = String::Format("{0} Errors", errors);
+            btnWarnings->Text = String::Format("{0} Warnings", warnings);
+            btnInfos->Text = String::Format("{0} Messages", infos);
         }
 
         bool IsShown(BuildMessage^ m)
@@ -265,7 +308,7 @@ namespace Gride { namespace UI {
         {
             if (list->SelectedItems->Count == 0) return;
             BuildMessage^ m = safe_cast<BuildMessage^>(list->SelectedItems[0]->Tag);
-            if (!String::IsNullOrEmpty(m->File) && File::Exists(m->File)) Navigate(m->File, m->Line);
+            if (!String::IsNullOrEmpty(m->File)) NavigateTo(m->File, m->Line, m->Column);
         }
     };
 
@@ -352,11 +395,15 @@ namespace Gride { namespace UI {
             Controls->Add(input);
             Controls->Add(bar);
             VisibleChanged += gcnew EventHandler(this, &TerminalPane::OnVisibleChanged);
+            Write("GRIDE terminal - type a command below and press Enter. cmd.exe is started on first use, "
+                  "with the toolchain folders on PATH.\n");
         }
 
         property String^ ExtraPath;          // toolchain folders added to PATH
         property String^ WorkingDirectory;
 
+        // started on the first command, not when the pane is shown: cmd.exe may be
+        // blocked by policy, and most sessions never use the terminal
         void StartShell()
         {
             StopShell();
@@ -369,27 +416,40 @@ namespace Gride { namespace UI {
             if (Directory::Exists(WorkingDirectory)) si->WorkingDirectory = WorkingDirectory;
             if (!String::IsNullOrEmpty(ExtraPath))
                 si->EnvironmentVariables["PATH"] = ExtraPath + ";" + si->EnvironmentVariables["PATH"];
-            proc = gcnew Process();
-            proc->StartInfo = si;
-            proc->OutputDataReceived += gcnew DataReceivedEventHandler(this, &TerminalPane::OnData);
-            proc->ErrorDataReceived += gcnew DataReceivedEventHandler(this, &TerminalPane::OnData);
+            Process^ p = gcnew Process();
+            p->StartInfo = si;
+            p->EnableRaisingEvents = true;
+            p->OutputDataReceived += gcnew DataReceivedEventHandler(this, &TerminalPane::OnData);
+            p->ErrorDataReceived += gcnew DataReceivedEventHandler(this, &TerminalPane::OnData);
+            p->Exited += gcnew EventHandler(this, &TerminalPane::OnExited);
             try
             {
-                proc->Start();
-                proc->BeginOutputReadLine();
-                proc->BeginErrorReadLine();
-                Write("GRIDE terminal - toolchain folders are on PATH. Type commands below.\n");
+                p->Start();
+                p->BeginOutputReadLine();
+                p->BeginErrorReadLine();
+                proc = p;
+                started = DateTime::Now;
             }
-            catch (Exception^ ex) { Write("Cannot start cmd.exe: " + ex->Message + "\n"); proc = nullptr; }
+            catch (Exception^ ex)
+            {
+                Write("Cannot start cmd.exe: " + ex->Message + "\nThe terminal is not available on this computer; "
+                      "build and run commands of GRIDE do not need it.\n");
+                proc = nullptr;
+            }
         }
 
         void StopShell()
         {
-            if (proc != nullptr)
+            Process^ p = proc;
+            proc = nullptr;
+            if (p == nullptr) return;
+            try
             {
-                try { if (!proc->HasExited) proc->Kill(); } catch (Exception^) { }
-                proc = nullptr;
+                p->EnableRaisingEvents = false;
+                if (!p->HasExited) p->Kill();
+                p->Close();
             }
+            catch (Exception^) { }
         }
 
     protected:
@@ -397,6 +457,7 @@ namespace Gride { namespace UI {
 
     private:
         Process^ proc;
+        DateTime started;
         RichTextBox^ output;
         TextBox^ input;
 
@@ -406,11 +467,27 @@ namespace Gride { namespace UI {
             output->ScrollToCaret();
         }
 
+        void Post(String^ s)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke(gcnew Action<String^>(this, &TerminalPane::Write), s); }
+            catch (Exception^) { }
+        }
+
         void OnData(Object^ sender, DataReceivedEventArgs^ e)
         {
-            if (e->Data == nullptr || IsDisposed) return;
-            try { BeginInvoke(gcnew Action<String^>(this, &TerminalPane::Write), e->Data + "\n"); }
-            catch (Exception^) { }
+            if (e->Data != nullptr) Post(e->Data + "\n");
+        }
+
+        void OnExited(Object^ sender, EventArgs^ e)
+        {
+            Process^ p = safe_cast<Process^>(sender);
+            int code = 0;
+            try { code = p->ExitCode; } catch (Exception^) { }
+            String^ s = String::Format("[cmd.exe ended, exit code {0}]\n", code);
+            if ((DateTime::Now - started).TotalSeconds < 3)
+                s = s + "cmd.exe stopped right after starting - it may be disabled by a policy on this computer.\n";
+            Post(s);
         }
 
         void OnInputKey(Object^ sender, KeyEventArgs^ e)
@@ -425,11 +502,10 @@ namespace Gride { namespace UI {
             input->Clear();
         }
 
-        void OnRestart(Object^ sender, EventArgs^ e) { output->Clear(); StartShell(); }
+        void OnRestart(Object^ sender, EventArgs^ e) { output->Clear(); StopShell(); StartShell(); }
         void OnClear(Object^ sender, EventArgs^ e) { output->Clear(); }
         void OnVisibleChanged(Object^ sender, EventArgs^ e)
         {
-            if (Visible && proc == nullptr) StartShell();
             if (Visible) input->Focus();
         }
     };

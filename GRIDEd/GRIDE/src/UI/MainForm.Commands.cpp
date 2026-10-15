@@ -31,8 +31,8 @@ namespace Gride { namespace UI {
         Cmd("File.NewFile", "&File...", "Ctrl+N", "file", DO(FileNewFile));
         Cmd("File.OpenWorkspace", "&Project / Workspace...", "Ctrl+Shift+O", "open", DO(FileOpenWorkspace));
         Cmd("File.OpenFile", "&File...", "Ctrl+O", "open", DO(FileOpenFile));
-        Cmd("File.OpenCcs", "&CCS 7.4 Project...", nullptr, "projectccs", DO(FileOpenCcs));
-        Cmd("File.ImportCcs", "&CCS 7.4 Project...", nullptr, "projectccs", DO(FileOpenCcs));
+        c = Cmd("File.OpenCcs", "&CCS 7.4 Project...", nullptr, "projectccs", DO(FileOpenCcs)); c->CanExecute = WHEN(CcsEnabled);
+        c = Cmd("File.ImportCcs", "&CCS 7.4 Project...", nullptr, "projectccs", DO(FileOpenCcs)); c->CanExecute = WHEN(CcsEnabled);
         Cmd("File.ImportFolder", "&Existing Folder...", nullptr, "folder", DO(FileImportFolder));
         c = Cmd("File.Close", "&Close", "Ctrl+F4", "close", DO(FileClose)); c->CanExecute = WHEN(HasDocument);
         c = Cmd("File.CloseWorkspace", "Close &Workspace", nullptr, nullptr, DO(FileCloseWorkspace)); c->CanExecute = WHEN(HasWorkspace);
@@ -102,7 +102,8 @@ namespace Gride { namespace UI {
         c = Cmd("Project.AddNewItem", "Add &New Item...", "Ctrl+Shift+A", "new", DO(ProjectAddNewItem)); c->CanExecute = WHEN(HasWritableProject);
         c = Cmd("Project.AddExisting", "Add E&xisting Item...", "Shift+Alt+A", "open", DO(ProjectAddExisting)); c->CanExecute = WHEN(HasWritableProject);
         c = Cmd("Project.NewFolder", "New &Folder...", nullptr, "folder", DO(ProjectNewFolder)); c->CanExecute = WHEN(HasWritableProject);
-        c = Cmd("Project.Remove", "&Remove from Project", nullptr, "close", DO(ProjectRemoveItem)); c->CanExecute = WHEN(HasSelectedFile);
+        // F2 / Del act on the explorer only while it has the focus (MainForm::ProcessCmdKey)
+        c = Cmd("Project.Remove", "&Remove from Project", "Del", "close", DO(ProjectRemoveItem)); c->CanExecute = WHEN(HasSelectedFile); c->SetDisplayOnly();
         c = Cmd("Project.Rename", "Re&name", "F2", nullptr, DO(ProjectRename)); c->CanExecute = WHEN(HasSelectedFile); c->SetDisplayOnly();
         c = Cmd("Project.Exclude", "E&xclude From Build", nullptr, nullptr, DO(ProjectExclude));
         c->CanExecute = WHEN(HasSelectedFile); c->IsChecked = WHEN(IsSelectedExcluded);
@@ -111,7 +112,9 @@ namespace Gride { namespace UI {
         c = Cmd("Project.SetStartup", "Set as &Startup Project", nullptr, nullptr, DO(ProjectSetStartup)); c->CanExecute = WHEN(HasProject);
         c = Cmd("Project.Dependencies", "Project &Dependencies...", nullptr, nullptr, DO(ProjectDependencies)); c->CanExecute = WHEN(HasWorkspace);
         c = Cmd("Project.BuildOrder", "Build &Order...", nullptr, nullptr, DO(ProjectBuildOrder)); c->CanExecute = WHEN(HasWorkspace);
-        c = Cmd("Project.RefreshCcs", "Refresh CCS Project", nullptr, "refresh", DO(ProjectRefreshCcs)); c->CanExecute = WHEN(HasProject);
+        c = Cmd("Project.RefreshCcs", "Refresh Imported Project", nullptr, "refresh", DO(ProjectRefreshCcs)); c->CanExecute = WHEN(HasProject);
+        c = Cmd("Project.CcsMapping", "CCS / VS &Mapping...", nullptr, "info", DO(ProjectCcsMapping)); c->CanExecute = WHEN(HasImportedProject);
+        c = Cmd("Project.CompilerOptions", "Compiler &Options...", nullptr, "settings", DO(ProjectCompilerOptions)); c->CanExecute = WHEN(HasProject);
         c = Cmd("Project.OpenFolder", "Open Containing Folder", nullptr, "folderopen", DO(ProjectOpenFolder)); c->CanExecute = WHEN(HasWorkspace);
         c = Cmd("Project.Properties", "&Properties...", "Alt+F7", "properties", DO(ProjectShowProperties)); c->CanExecute = WHEN(HasProject);
 
@@ -134,6 +137,10 @@ namespace Gride { namespace UI {
         commands->BeginCategory("Debug");
         c = Cmd("Debug.Start", "&Start Debugging", "F5", "debug", DO(DebugStart)); c->CanExecute = WHEN(CanStartDebug);
         c = Cmd("Debug.StartNoDebug", "Start &Without Debugging", "Ctrl+F5", "run", DO(DebugStartNoDebug)); c->CanExecute = WHEN(CanBuild);
+        // RIDE's Build > Emulate on vm6747 and Build > Verify (tms6747), and the stop of a program running in the Output pane
+        c = Cmd("Debug.Emulate", "&Emulate on VM6747", nullptr, "run", DO(DebugEmulate)); c->CanExecute = WHEN(CanBuild);
+        c = Cmd("Debug.Verify", "&Verify (vm6747 against sim6747)", nullptr, nullptr, DO(DebugVerify)); c->CanExecute = WHEN(CanBuild);
+        c = Cmd("Debug.StopProgram", "Stop &Program", nullptr, "stop", DO(StopProgram)); c->CanExecute = WHEN(IsRunning);
         c = Cmd("Debug.Stop", "S&top Debugging", "Shift+F5", "stop", DO(DebugStop)); c->CanExecute = WHEN(IsDebugging);
         c = Cmd("Debug.Restart", "&Restart", "Ctrl+Shift+F5", "restart", DO(DebugRestart)); c->CanExecute = WHEN(IsDebugging);
         c = Cmd("Debug.BreakAll", "Break &All", "Ctrl+Alt+Break", "pause", DO(DebugBreakAll)); c->CanExecute = WHEN(IsDebugging);
@@ -141,6 +148,11 @@ namespace Gride { namespace UI {
         c = Cmd("Debug.StepOver", "Step &Over", "F10", "stepover", DO(DebugStepOver)); c->CanExecute = WHEN(IsInBreak);
         c = Cmd("Debug.StepOut", "Step O&ut", "Shift+F11", "stepout", DO(DebugStepOut)); c->CanExecute = WHEN(IsInBreak);
         c = Cmd("Debug.RunToCursor", "Run to &Cursor", "Ctrl+F10", nullptr, DO(DebugRunToCursor)); c->CanExecute = WHEN(IsInBreak);
+        // RIDE's Debug menu: up and down the stack (its Ctrl-Up / Ctrl-Down), a watch, a variable set
+        c = Cmd("Debug.UpStack", "&Up the Stack", nullptr, nullptr, DO(DebugUpStack)); c->CanExecute = WHEN(IsInBreak);
+        c = Cmd("Debug.DownStack", "Do&wn the Stack", nullptr, nullptr, DO(DebugDownStack)); c->CanExecute = WHEN(IsInBreak);
+        c = Cmd("Debug.AddWatch", "&Watch Expression...", nullptr, "find", DO(DebugAddWatch)); c->CanExecute = WHEN(IsDebugging);
+        c = Cmd("Debug.SetVariable", "Set &Variable...", nullptr, "variable", DO(DebugSetVariable)); c->CanExecute = WHEN(IsInBreak);
         c = Cmd("Debug.ToggleBreakpoint", "Toggle &Breakpoint", "F9", "breakpoint", DO(DebugToggleBreakpoint)); c->CanExecute = WHEN(HasDocument);
         Cmd("Debug.DeleteAllBreakpoints", "&Delete All Breakpoints", "Ctrl+Shift+F9", nullptr, DO(DebugDeleteAllBreakpoints));
         array<ToolPane^>^ dbgPanes = gcnew array<ToolPane^>{ watch, locals, callStack, registers, memory, disasm, bpPane };
@@ -187,7 +199,7 @@ namespace Gride { namespace UI {
         array<String^>^ refIds = gcnew array<String^>{ "Help.RefC90", "Help.RefCpp11", "Help.RefShalimar",
                                                         "Help.RefMasm", "Help.RefAsm6x", "Help.RefRts", "Help.RefVm" };
         array<String^>^ refText = gcnew array<String^>{ "C90", "C++11", "Shalimar",
-                                                         "MASM / LINK (Windows)", "ASM6x / LNK6x", "RTS6747 Runtime", "VM6747 Simulator" };
+                                                         "MASM / LINK (Windows)", "ASM6x / LNK6x", "RTS6747 Runtime", "VM6747 / SIM6747" };
         array<String^>^ refFile = gcnew array<String^>{ "C90_Reference", "Cpp11_Reference", "Shalimar_Reference",
                                                          "MASM_LINK_Reference", "ASM6x_LNK6x_Reference", "RTS6747_Reference", "VM6747_Reference" };
         for (int i = 0; i < refIds->Length; i++)
@@ -268,7 +280,7 @@ namespace Gride { namespace UI {
         AddItems(project, gcnew array<String^>{ "Project.AddNewItem", "Project.AddExisting", "Project.NewFolder", "Project.Remove",
                                                 "Project.Rename", "Project.Exclude", "-", "Project.AddProject", "Project.RemoveProject",
                                                 "Project.SetStartup", "-", "Project.Dependencies", "Project.BuildOrder", "-",
-                                                "Project.RefreshCcs", "Project.OpenFolder", "-", "Project.Properties" });
+                                                "Project.RefreshCcs", "Project.CcsMapping", "Project.OpenFolder", "-", "Project.CompilerOptions", "Project.Properties" });
 
         // ---- Build
         miBuild = TopMenu("&Build");
@@ -280,8 +292,10 @@ namespace Gride { namespace UI {
 
         // ---- Debug
         ToolStripMenuItem^ debug = TopMenu("&Debug");
-        AddItems(debug, gcnew array<String^>{ "Debug.Start", "Debug.StartNoDebug", "Debug.Stop", "Debug.Restart", "Debug.BreakAll", "-",
+        AddItems(debug, gcnew array<String^>{ "Debug.Start", "Debug.StartNoDebug", "Debug.Emulate", "Debug.Verify", "Debug.StopProgram", "-",
+                                              "Debug.Stop", "Debug.Restart", "Debug.BreakAll", "-",
                                               "Debug.StepInto", "Debug.StepOver", "Debug.StepOut", "Debug.RunToCursor", "-",
+                                              "Debug.UpStack", "Debug.DownStack", "Debug.AddWatch", "Debug.SetVariable", "-",
                                               "Debug.ToggleBreakpoint", "Debug.DeleteAllBreakpoints", "-" });
         AddItems(SubMenu(debug, "&Windows"), gcnew array<String^>{ "Debug.WinWatch", "Debug.WinLocals", "Debug.WinCallStack",
                                                                    "Debug.WinRegisters", "Debug.WinMemory", "Debug.WinDisassembly",
@@ -428,10 +442,17 @@ namespace Gride { namespace UI {
             "Project.Dependencies", "Project.BuildOrder", "-", "Project.OpenFolder" });
         explorer->ProjectMenu = MakeContextMenu(gcnew array<String^>{ "Build.BuildProject", "Build.RebuildProject", "Build.CleanProject",
             "-", "Project.SetStartup", "-", "Project.AddNewItem", "Project.AddExisting", "Project.NewFolder", "-",
-            "Project.RefreshCcs", "Project.Dependencies", "Project.RemoveProject", "-", "Project.OpenFolder", "Project.Properties" });
+            "Project.RefreshCcs", "Project.CcsMapping", "Project.Dependencies", "Project.RemoveProject", "-", "Project.OpenFolder", "Project.CompilerOptions", "Project.Properties" });
         explorer->FolderMenu = MakeContextMenu(gcnew array<String^>{ "Project.AddNewItem", "Project.AddExisting", "-", "Project.OpenFolder" });
         explorer->FileMenu = MakeContextMenu(gcnew array<String^>{ "File.OpenSelected", "Build.Compile", "-", "Project.Exclude",
             "Project.Rename", "Project.Remove", "-", "Tools.CToShalimar", "Tools.ShalimarToC", "-", "Project.OpenFolder", "View.Properties" });
+    }
+
+    // one per editor (DocumentManager asks for it); the editor disposes it
+    System::Windows::Forms::ContextMenuStrip^ MainForm::MakeEditorMenu()
+    {
+        return MakeContextMenu(gcnew array<String^>{ "Edit.Undo", "Edit.Redo", "-", "Edit.Cut", "Edit.Copy", "Edit.Paste", "-",
+            "Edit.SelectAll", "-", "Debug.ToggleBreakpoint", "Edit.ToggleBookmark", "-", "Debug.RunToCursor" });
     }
 
     // =========================================================================
@@ -613,8 +634,9 @@ namespace Gride { namespace UI {
     bool MainForm::HasProject() { return ContextProject() != nullptr; }
     bool MainForm::HasWritableProject() { GrideProject^ p = ContextProject(); return p != nullptr && !p->IsReadOnly; }
     bool MainForm::HasSelectedFile() { return explorer->SelectedFile != nullptr; }
-    bool MainForm::CanBuild() { return workspace != nullptr && workspace->Projects->Count > 0 && !engine->IsBuilding && !debugger->IsActive; }
-    bool MainForm::IsBuilding() { return engine->IsBuilding; }
+    bool MainForm::CanBuild() { return workspace != nullptr && workspace->Projects->Count > 0 && !engine->IsBuilding && !debugger->IsActive && !runner->IsRunning; }
+    bool MainForm::IsBuilding() { return engine->IsBuilding || runner->IsRunning; }
+    bool MainForm::IsRunning() { return runner->IsRunning; }
     bool MainForm::IsDebugging() { return debugger->IsActive; }
     bool MainForm::IsInBreak() { return debugger->State == DebugState::Break; }
     bool MainForm::CanStartDebug() { return IsInBreak() || CanBuild(); }

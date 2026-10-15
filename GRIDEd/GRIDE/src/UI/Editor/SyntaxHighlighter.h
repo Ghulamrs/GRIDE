@@ -3,8 +3,7 @@
 //
 //  Driven entirely by LanguageSettings (keywords, types, comment markers) so
 //  C90, C++11, Shalimar, assembly and linker files all use the same code.
-//  BuildRtf() colours a whole file in one go (fast load); Tokenize() is used
-//  for the visible region after edits.
+//  The editor only ever colours the visible region with Tokenize().
 // =============================================================================
 #pragma once
 #include "../Theme.h"
@@ -45,13 +44,15 @@ namespace Gride { namespace UI {
 
         property bool IsPlain { bool get() { return lang == nullptr; } }
 
-        // true when position pos lies inside a /* block comment */
-        bool InBlockComment(String^ text, int pos)
+        // true when position pos lies inside a /* block comment */, scanning from
+        // 'from' (which must not itself be inside a comment, e.g. a line start
+        // far enough back) so the cost does not grow with the position in the file
+        bool InBlockComment(String^ text, int from, int pos)
         {
             if (lang == nullptr || String::IsNullOrEmpty(lang->BlockCommentStart)) return false;
             String^ bs = lang->BlockCommentStart; String^ be = lang->BlockCommentEnd;
             bool inBlock = false;
-            int i = 0;
+            int i = Math::Max(0, from);
             int n = Math::Min(pos, text->Length);
             while (i < n)
             {
@@ -197,61 +198,10 @@ namespace Gride { namespace UI {
             }
         }
 
-        // whole text -> RTF with colours (index 1 = plain text, 2.. = token kinds)
-        String^ BuildRtf(String^ text, Theme^ t, String^ fontName, float fontSize)
-        {
-            StringBuilder^ sb = gcnew StringBuilder(text->Length * 2 + 512);
-            sb->Append("{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fmodern ");
-            sb->Append(fontName);
-            sb->Append(";}}{\\colortbl ;");
-            for (int k = 0; k <= (int)TokenKind::Function; k++)
-            {
-                Color c = ColorOf((TokenKind)k, t);
-                sb->AppendFormat("\\red{0}\\green{1}\\blue{2};", c.R, c.G, c.B);
-            }
-            sb->Append("}\\viewkind4\\uc1\\pard\\f0");
-            sb->AppendFormat("\\fs{0}\\cf1 ", (int)Math::Round(fontSize * 2));
-
-            List<Token>^ tokens = Tokenize(text, 0, text->Length, false);
-            int pos = 0;
-            for each (Token tk in tokens)
-            {
-                if (tk.Start > pos) AppendEscaped(sb, text, pos, tk.Start - pos);
-                sb->AppendFormat("\\cf{0} ", (int)tk.Kind + 1);
-                AppendEscaped(sb, text, tk.Start, tk.Length);
-                sb->Append("\\cf1 ");
-                pos = tk.Start + tk.Length;
-            }
-            if (pos < text->Length) AppendEscaped(sb, text, pos, text->Length - pos);
-            sb->Append("}");
-            return sb->ToString();
-        }
-
     private:
         LanguageSettings^ lang;
         HashSet<String^>^ keywords;
         HashSet<String^>^ types;
         bool dotIdents;
-
-        static void AppendEscaped(StringBuilder^ sb, String^ text, int start, int len)
-        {
-            int end = start + len;
-            for (int i = start; i < end; i++)
-            {
-                wchar_t c = text[i];
-                switch (c)
-                {
-                case L'\\': sb->Append("\\\\"); break;
-                case L'{':  sb->Append("\\{"); break;
-                case L'}':  sb->Append("\\}"); break;
-                case L'\t': sb->Append("\\tab "); break;
-                case L'\r': break;
-                case L'\n': sb->Append("\\par\r\n"); break;
-                default:
-                    if (c > 127) sb->AppendFormat("\\u{0}?", (int)(short)c);
-                    else sb->Append(c);
-                }
-            }
-        }
     };
 }}

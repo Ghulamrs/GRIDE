@@ -35,7 +35,10 @@
 #include "Dialogs/EditDialogs.h"
 #include "Dialogs/ToolDialogs.h"
 #include "../Services/BuildEngine.h"
+#include "../Services/ProgramRunner.h"
 #include "../Services/Debugger.h"
+#include "../Services/GdbDebugger.h"
+#include "../Services/ShalimarSession.h"
 #include "../Services/CodeConverter.h"
 #include "../Services/ProjectTemplates.h"
 
@@ -86,7 +89,8 @@ namespace Gride { namespace UI {
         Func<String^>^ getter;
     };
 
-    public enum class AfterBuild { Nothing, Run, Debug };
+    // what a build was started for: nothing more, a run, the debugger, RIDE's Emulate on vm6747, RIDE's Verify
+    public enum class AfterBuild { Nothing, Run, Debug, Emulate, Verify };
 
     // =========================================================================
     public ref class MainForm : public Form
@@ -100,6 +104,11 @@ namespace Gride { namespace UI {
         virtual void OnActivated(EventArgs^ e) override;
         virtual bool ProcessCmdKey(WF::Message% msg, Keys keyData) override;
 
+    public:
+        // a running program's lines and its end (worker threads; also the Verify job's way in)
+        void OnRunOutput(String^ line);
+        void OnRunExited(int status, bool stopped);
+
     private:
         // ---------------------------------------------------------------- state
         array<String^>^ startArgs;
@@ -107,6 +116,7 @@ namespace Gride { namespace UI {
         Workspace^ workspace;
         Dictionary<String^, SortedSet<int>^>^ looseBreakpoints;   // used when no workspace is open
         BuildEngine^ engine;
+        ProgramRunner^ runner;          // the program of Start Without Debugging / Emulate, running in the Output pane
         DebugEngine^ debugger;
         CommandRegistry^ commands;
         AfterBuild afterBuild;
@@ -181,6 +191,7 @@ namespace Gride { namespace UI {
         // ======================================================= MainForm.cpp
         void CreateLayout();
         void CreatePanes();
+        void RestoreWindowBounds();
         void ApplyLayoutSizes();
         void ResetLayout();
         void StoreLayout();
@@ -198,12 +209,14 @@ namespace Gride { namespace UI {
         void OnDragDrop(Object^ sender, DragEventArgs^ e);
         void CheckFilesChangedOnDisk();
         Dictionary<String^, SortedSet<int>^>^ BreakpointMap();
+        Command^ FocusCommand(Keys keyData, array<String^>^ ids);
 
         // ============================================== MainForm.Commands.cpp
         void RegisterCommands();
         void BuildMenus();
         void BuildToolbars();
         void BuildContextMenus();
+        System::Windows::Forms::ContextMenuStrip^ MakeEditorMenu();
         ToolStripMenuItem^ TopMenu(String^ text);
         ToolStripMenuItem^ SubMenu(ToolStripMenuItem^ parent, String^ text);
         void AddItems(ToolStripMenuItem^ parent, array<String^>^ ids);
@@ -254,7 +267,9 @@ namespace Gride { namespace UI {
         void OnExplorerFileActivated(String^ file, GrideProject^ project);
         void OnExplorerSelection(Object^ sender, EventArgs^ e);
         void OnRenameRequested(GrideProject^ project, String^ oldPath, String^ newName);
+        void OnExplorerRemove(Object^ sender, EventArgs^ e);
         void OnNavigate(String^ file, int line);
+        void OnNavigateTo(String^ file, int line, int column);
         void OnStartPageCommand(String^ id);
         void OnStartPageRecent(String^ path);
         void OnDocumentActivated(Object^ sender, EventArgs^ e);
@@ -292,8 +307,18 @@ namespace Gride { namespace UI {
         void ProjectDependencies();
         void ProjectBuildOrder();
         void ProjectRefreshCcs();
+        void ProjectCcsMapping();
+        void ReportCcsProjects();
+        bool HasCcsProject();
+        bool HasImportedProject();
+        void ApplyCcsStates();
+        void RememberCcsState(GrideProject^ p);
+        void KeepImportedState(GrideProject^ p);
+        bool CcsEnabled();
         void ProjectOpenFolder();
         void ProjectShowProperties();
+        void ProjectCompilerOptions();
+        void ShowProjectProperties(String^ tab);
 
         // ================================================== MainForm.Edit.cpp
         TextBoxBase^ FocusedTextBox();
@@ -347,6 +372,8 @@ namespace Gride { namespace UI {
         void HelpView();
         void HelpUserGuide();
         void OpenHelpFile(String^ baseName);
+        List<String^>^ HelpFolders();
+        String^ FindHelpFile(String^ baseName, array<String^>^ extensions);
         void HelpShortcuts();
         void HelpReleaseNotes();
         void HelpAbout();
@@ -371,6 +398,8 @@ namespace Gride { namespace UI {
         void AppendBuildOutput(String^ line);
         void AddBuildMessage(BuildMessage^ m);
         void BuildFinishedUI(BuildSummary^ s);
+        bool OnEngineQuestion(String^ question);
+        bool AskYesNo(String^ question);
         String^ CurrentConfig();
         Target CurrentTarget();
         // Debug
@@ -383,12 +412,32 @@ namespace Gride { namespace UI {
         void DebugStepOver();
         void DebugStepOut();
         void DebugRunToCursor();
+        void DebugUpStack();
+        void DebugDownStack();
+        void DebugAddWatch();
+        void DebugSetVariable();
+        void LookAtFrame(int index);
+        void OnFrameChosen(int index);
+        void OnVariableSet(String^ name, String^ value);
+        void ApplyKeySet();
+        String^ KeysLine();
         void DebugToggleBreakpoint();
         void DebugDeleteAllBreakpoints();
         void DebugConnect();
         void DebugLoadProgram();
         void LaunchDebugger(String^ program);
+        void AttachDebugger(DebugEngine^ engine);
+        String^ AssemblyProgramFor(GrideProject^ p, BuildConfiguration^ cfg, ToolchainSettings^ tc);
+        void OnDebugProgramOutput(String^ line);
         void RunProgram();
+        void RunChosen(AfterBuild how);
+        void RunExternal(GrideProject^ p, ToolchainSettings^ tc, String^ program);
+        void DebugEmulate();
+        void DebugVerify();
+        void StopProgram();
+        bool IsRunning();
+        void RunExitedUI(Object^ status, Object^ stopped);
+        void OnOutputInput(String^ line);
         bool FindEntryPoint(GrideProject^ p, String^% file, int% line);
         void OnDebugState(DebugState s);
         void OnDebugStopped(StopInfo^ info);

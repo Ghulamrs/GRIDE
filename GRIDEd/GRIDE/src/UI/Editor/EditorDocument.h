@@ -6,6 +6,7 @@
 #include "CodeEditor.h"
 #include "../Controls/TabStrip.h"
 #include "../../Model/GrideProject.h"
+#include "../../Core/TextFile.h"
 
 namespace Gride { namespace UI {
 
@@ -46,18 +47,7 @@ namespace Gride { namespace UI {
                 return Path::GetFileName(FilePath);
             }
         }
-        property String^ EncodingName
-        {
-            String^ get()
-            {
-                if (dynamic_cast<UTF8Encoding^>(FileEncoding) != nullptr)
-                {
-                    if (FileEncoding->GetPreamble()->Length > 0) return "UTF-8 BOM";
-                    return "UTF-8";
-                }
-                return FileEncoding->WebName->ToUpperInvariant();
-            }
-        }
+        property String^ EncodingName { String^ get() { return TextFile::EncodingLabel(FileEncoding); } }
 
         String^ DefaultExtension()
         {
@@ -72,8 +62,9 @@ namespace Gride { namespace UI {
 
         void Load(String^ path)
         {
-            array<Byte>^ bytes = File::ReadAllBytes(path);
-            String^ text = Decode(bytes);
+            Encoding^ enc = nullptr;
+            String^ text = TextFile::Read(path, enc);
+            FileEncoding = enc;
             if (text->Contains("\r\n") || !text->Contains("\n")) LineEnding = "CRLF";
             else LineEnding = "LF";
             FilePath = Path::GetFullPath(path);
@@ -96,7 +87,7 @@ namespace Gride { namespace UI {
             if (LineEnding == "CRLF") text = text->Replace("\n", "\r\n");
             String^ dir = Path::GetDirectoryName(FilePath);
             if (!Directory::Exists(dir)) Directory::CreateDirectory(dir);
-            File::WriteAllText(FilePath, text, FileEncoding);
+            TextFile::Write(FilePath, text, FileEncoding);
             Editor->MarkSaved();
             lastWrite = File::GetLastWriteTime(FilePath);
         }
@@ -124,33 +115,5 @@ namespace Gride { namespace UI {
         String^ untitledName;
         DateTime lastWrite;
         static int untitledCounter = 0;
-
-        String^ Decode(array<Byte>^ bytes)
-        {
-            // BOM?
-            if (bytes->Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            {
-                FileEncoding = gcnew UTF8Encoding(true);
-                return Encoding::UTF8->GetString(bytes, 3, bytes->Length - 3);
-            }
-            if (bytes->Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
-            {
-                FileEncoding = Encoding::Unicode;
-                return Encoding::Unicode->GetString(bytes, 2, bytes->Length - 2);
-            }
-            // valid UTF-8 without BOM, else the system ANSI code page
-            try
-            {
-                UTF8Encoding^ strict = gcnew UTF8Encoding(false, true);
-                String^ s = strict->GetString(bytes);
-                FileEncoding = gcnew UTF8Encoding(false);
-                return s;
-            }
-            catch (DecoderFallbackException^)
-            {
-                FileEncoding = Encoding::Default;
-                return Encoding::Default->GetString(bytes);
-            }
-        }
     };
 }}

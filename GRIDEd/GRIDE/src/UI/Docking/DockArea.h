@@ -72,6 +72,7 @@ namespace Gride { namespace UI {
             panes = gcnew List<ToolPane^>();
             floats = gcnew Dictionary<ToolPane^, FloatWindow^>();
 
+            headerFont = gcnew SD::Font("Segoe UI", 8.25f, FontStyle::Bold);
             header = gcnew Panel();
             header->Dock = DockStyle::Top;
             header->Height = 26;
@@ -174,9 +175,16 @@ namespace Gride { namespace UI {
             tabs->Invalidate();
         }
 
+    protected:
+        ~DockArea()
+        {
+            if (headerFont != nullptr) { delete headerFont; headerFont = nullptr; }
+        }
+
     private:
         List<ToolPane^>^ panes;
         Dictionary<ToolPane^, FloatWindow^>^ floats;
+        SD::Font^ headerFont;
         Panel^ header;
         Panel^ content;
         TabStrip^ tabs;
@@ -205,10 +213,10 @@ namespace Gride { namespace UI {
         {
             Theme^ t = ThemeManager::Current;
             e->Graphics->Clear(t->Header);
+            if (headerFont == nullptr) return;          // disposed
             ToolPane^ a = ActivePane;
             String^ title = a == nullptr ? String::Empty : a->Title->ToUpperInvariant();
-            SD::Font^ f = gcnew SD::Font("Segoe UI", 8.25f, FontStyle::Bold);
-            TextRenderer::DrawText(e->Graphics, title, f, SD::Rectangle(8, 0, header->Width - 60, header->Height), t->MutedText,
+            TextRenderer::DrawText(e->Graphics, title, headerFont, SD::Rectangle(8, 0, header->Width - 60, header->Height), t->MutedText,
                                    TextFormatFlags::VerticalCenter | TextFormatFlags::Left | TextFormatFlags::EndEllipsis);
             e->Graphics->DrawImage(IconFactory::Get("float"), FloatRect().X + 2, FloatRect().Y + 2);
             e->Graphics->DrawImage(IconFactory::Get("close"), CloseRect().X + 2, CloseRect().Y + 2);

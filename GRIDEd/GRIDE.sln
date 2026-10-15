@@ -5,6 +5,22 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GRIDE", "GRIDE\GRIDE.vcxproj", "{6F1A2B3C-4D5E-4F60-9A7B-1C2D3E4F5A60}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cppparse", "samples\cppparse\cppparse\cppparse.vcxproj", "{6E2D9A1C-4B7F-4F0A-9C3E-2A1B5D7E8F01}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RidePortHarness", "D:\GRA\My Documents\GIT Test\cpp\sandbox\out\gride-review\ride-port\tests\RidePortHarness\RidePortHarness.vcxproj", "{5C2D7E91-6A0B-4F3C-9D8E-21A3B4C5D6E7}"
+	ProjectSection(ProjectDependencies) = postProject
+		{6F1A2B3C-4D5E-4F60-9A7B-1C2D3E4F5A60} = {6F1A2B3C-4D5E-4F60-9A7B-1C2D3E4F5A60}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GrideHarness", "D:\GRA\My Documents\GIT Test\cpp\sandbox\out\gride-review\tests\GrideHarness\GrideHarness.vcxproj", "{0B7E1C2D-3A4B-4C5D-8E9F-102132435465}"
+	ProjectSection(ProjectDependencies) = postProject
+		{6F1A2B3C-4D5E-4F60-9A7B-1C2D3E4F5A60} = {6F1A2B3C-4D5E-4F60-9A7B-1C2D3E4F5A60}
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{CE982799-1CDA-4247-9268-3C485B7C4B7D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{F1D9EA40-3098-412F-8976-819F772EBE45}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,9 +37,30 @@ Global
 		{6F1A2B3C-4D5E-4F60-9A7B-1C2D3E4F5A60}.Release|x64.Build.0 = Release|x64
 		{6F1A2B3C-4D5E-4F60-9A7B-1C2D3E4F5A60}.Release|x86.ActiveCfg = Release|Win32
 		{6F1A2B3C-4D5E-4F60-9A7B-1C2D3E4F5A60}.Release|x86.Build.0 = Release|Win32
+		{6E2D9A1C-4B7F-4F0A-9C3E-2A1B5D7E8F01}.Debug|x64.ActiveCfg = Debug|x64
+		{6E2D9A1C-4B7F-4F0A-9C3E-2A1B5D7E8F01}.Debug|x64.Build.0 = Debug|x64
+		{6E2D9A1C-4B7F-4F0A-9C3E-2A1B5D7E8F01}.Debug|x86.ActiveCfg = Debug|x64
+		{6E2D9A1C-4B7F-4F0A-9C3E-2A1B5D7E8F01}.Release|x64.ActiveCfg = Release|x64
+		{6E2D9A1C-4B7F-4F0A-9C3E-2A1B5D7E8F01}.Release|x64.Build.0 = Release|x64
+		{6E2D9A1C-4B7F-4F0A-9C3E-2A1B5D7E8F01}.Release|x86.ActiveCfg = Release|x64
+		{5C2D7E91-6A0B-4F3C-9D8E-21A3B4C5D6E7}.Debug|x64.ActiveCfg = Debug|x64
+		{5C2D7E91-6A0B-4F3C-9D8E-21A3B4C5D6E7}.Debug|x64.Build.0 = Debug|x64
+		{5C2D7E91-6A0B-4F3C-9D8E-21A3B4C5D6E7}.Debug|x86.ActiveCfg = Debug|x64
+		{5C2D7E91-6A0B-4F3C-9D8E-21A3B4C5D6E7}.Release|x64.ActiveCfg = Debug|x64
+		{5C2D7E91-6A0B-4F3C-9D8E-21A3B4C5D6E7}.Release|x86.ActiveCfg = Debug|x64
+		{0B7E1C2D-3A4B-4C5D-8E9F-102132435465}.Debug|x64.ActiveCfg = Debug|x64
+		{0B7E1C2D-3A4B-4C5D-8E9F-102132435465}.Debug|x64.Build.0 = Debug|x64
+		{0B7E1C2D-3A4B-4C5D-8E9F-102132435465}.Debug|x86.ActiveCfg = Debug|x64
+		{0B7E1C2D-3A4B-4C5D-8E9F-102132435465}.Release|x64.ActiveCfg = Debug|x64
+		{0B7E1C2D-3A4B-4C5D-8E9F-102132435465}.Release|x86.ActiveCfg = Debug|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6E2D9A1C-4B7F-4F0A-9C3E-2A1B5D7E8F01} = {CE982799-1CDA-4247-9268-3C485B7C4B7D}
+		{5C2D7E91-6A0B-4F3C-9D8E-21A3B4C5D6E7} = {F1D9EA40-3098-412F-8976-819F772EBE45}
+		{0B7E1C2D-3A4B-4C5D-8E9F-102132435465} = {F1D9EA40-3098-412F-8976-819F772EBE45}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A1B2C3D4-E5F6-4711-8899-AABBCCDDEEFF}

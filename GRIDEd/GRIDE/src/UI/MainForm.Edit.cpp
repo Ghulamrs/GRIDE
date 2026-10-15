@@ -164,12 +164,17 @@ namespace Gride { namespace UI {
                     if (d != nullptr) n = d->Editor->ReplaceAll(r->Pattern, r->Replacement, r->Options);
                     else
                     {
-                        String^ text = File::ReadAllText(f);
+                        // written back in the file's own encoding (ANSI, UTF-16, BOM or not)
+                        Encoding^ enc = nullptr;
+                        String^ text;
+                        try { text = TextFile::Read(f, enc); }
+                        catch (Exception^ ex) { output->Append("Tools", "Replace All: cannot read " + f + ": " + ex->Message); continue; }
                         n = re->Matches(text)->Count;
                         if (n > 0)
                         {
                             String^ repl = r->Options->UseRegex ? r->Replacement : r->Replacement->Replace("$", "$$");
-                            File::WriteAllText(f, re->Replace(text, repl));
+                            try { TextFile::Write(f, re->Replace(text, repl), enc); }
+                            catch (Exception^ ex) { output->Append("Tools", "Replace All: cannot write " + f + ": " + ex->Message); n = 0; }
                         }
                     }
                     if (n > 0) { total += n; filesChanged++; }
@@ -190,7 +195,12 @@ namespace Gride { namespace UI {
             {
                 EditorDocument^ d = docs->Find(f);
                 array<String^>^ lines;
-                try { lines = d != nullptr ? d->Editor->GetText()->Split(L'\n') : File::ReadAllLines(f); }
+                try
+                {
+                    Encoding^ enc = nullptr;
+                    String^ text = d != nullptr ? d->Editor->GetText() : TextFile::Read(f, enc)->Replace("\r\n", "\n");
+                    lines = text->Split(L'\n');
+                }
                 catch (Exception^) { continue; }
                 bool hit = false;
                 for (int i = 0; i < lines->Length; i++)
@@ -356,23 +366,48 @@ namespace Gride { namespace UI {
 
     void MainForm::HelpUserGuide() { OpenHelpFile("GRIDE_User_Guide"); }
 
-    // opens <HelpDirectory>\<baseName>.(pdf|chm|html|htm|md|txt)
+    // where the help and the docs are looked for, in order: the folder named under Tools > Options >
+    // Projects, then beside the exe and its docs folder (the development layout, where the post-build
+    // step copies docs next to bin), then ..\help and ..\docs beside the exe's folder (the installed
+    // layout: <install>\bin\GRIDE.exe, <install>\help, <install>\docs)
+    List<String^>^ MainForm::HelpFolders()
+    {
+        List<String^>^ dirs = gcnew List<String^>();
+        String^ named = Environment::ExpandEnvironmentVariables(settings->Env->HelpDirectory == nullptr ? String::Empty : settings->Env->HelpDirectory);
+        if (named->Length > 0) dirs->Add(named);
+        String^ exe = PathUtil::AppDirectory();
+        String^ above = Path::GetDirectoryName(exe);
+        for each (String^ d in gcnew array<String^>{ exe, Path::Combine(exe, "docs"), Path::Combine(exe, "help"),
+                                                     above == nullptr ? nullptr : Path::Combine(above, "help"), above == nullptr ? nullptr : Path::Combine(above, "docs") })
+            if (d != nullptr && !dirs->Contains(d)) dirs->Add(d);
+        return dirs;
+    }
+
+    // the first <folder>\<baseName>.<ext> of the help folders, or null
+    String^ MainForm::FindHelpFile(String^ baseName, array<String^>^ extensions)
+    {
+        for each (String^ dir in HelpFolders())
+            for each (String^ ext in extensions)
+            {
+                String^ f = Path::Combine(dir, baseName + ext);
+                try { if (File::Exists(f)) return f; } catch (Exception^) { }
+            }
+        return nullptr;
+    }
+
+    // opens <baseName>.(pdf|chm|html|htm|md|txt) from the help folders
     void MainForm::OpenHelpFile(String^ baseName)
     {
-        String^ dir = Environment::ExpandEnvironmentVariables(settings->Env->HelpDirectory);
-        for each (String^ ext in gcnew array<String^>{ ".pdf", ".chm", ".html", ".htm", ".md", ".txt" })
+        String^ f = FindHelpFile(baseName, gcnew array<String^>{ ".pdf", ".chm", ".html", ".htm", ".md", ".txt" });
+        if (f != nullptr)
         {
-            String^ f = Path::Combine(dir, baseName + ext);
-            if (File::Exists(f))
-            {
-                try { System::Diagnostics::Process::Start(f); }
-                catch (Exception^ ex) { MessageBox::Show(this, ex->Message, "Help"); }
-                return;
-            }
+            try { System::Diagnostics::Process::Start(f); }
+            catch (Exception^ ex) { MessageBox::Show(this, ex->Message, "Help"); }
+            return;
         }
         MessageBox::Show(this, "The reference document is not installed yet.\n\nPlace " + baseName +
-                         ".pdf (or .chm / .html / .md / .txt) in:\n" + dir +
-                         "\n\nThe folder can be changed in Tools > Options > Projects.", "Help",
+                         ".pdf (or .chm / .html / .md / .txt) in one of:\n" + String::Join("\n", HelpFolders()) +
+                         "\n\nThe first folder can be changed in Tools > Options > Projects.", "Help",
                          MessageBoxButtons::OK, MessageBoxIcon::Information);
     }
 
@@ -384,9 +419,9 @@ namespace Gride { namespace UI {
 
     void MainForm::HelpReleaseNotes()
     {
-        String^ f = Path::Combine(Environment::ExpandEnvironmentVariables(settings->Env->HelpDirectory), "ReleaseNotes.txt");
+        String^ f = FindHelpFile("ReleaseNotes", gcnew array<String^>{ ".txt", ".md" });
         String^ text;
-        if (File::Exists(f)) text = File::ReadAllText(f);
+        if (f != nullptr) text = File::ReadAllText(f);
         else text =
             "GRIDE 1.0\r\n"
             "=========\r\n\r\n"

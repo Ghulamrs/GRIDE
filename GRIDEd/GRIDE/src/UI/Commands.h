@@ -104,6 +104,45 @@ namespace Gride { namespace UI {
     };
 
     // -------------------------------------------------------------------------
+    //  the two key sets: Visual Studio's (the commands' own defaults) and RIDE's (its help, 10-keys.md:
+    //  F8 debugs or carries on, F7 / F6 step over / into, F9 sets a breakpoint, Ctrl-Up / Ctrl-Down walk
+    //  the stack, F4 builds, F5 runs, Ctrl-B compiles this file). A set goes under the user's own
+    //  bindings; a key it takes from another command is given back as nothing.
+    public ref class KeySets abstract sealed
+    {
+    public:
+        literal String^ VisualStudio = "visualstudio";
+        literal String^ Ride = "ride";
+
+        static bool IsRide(String^ name) { return String::Compare(name, Ride, true) == 0; }
+
+        static Dictionary<String^, String^>^ For(String^ name)
+        {
+            Dictionary<String^, String^>^ d = gcnew Dictionary<String^, String^>();
+            if (!IsRide(name)) return d;
+            d["Debug.Start"] = "F8";
+            d["Debug.StepOver"] = "F7";
+            d["Debug.StepInto"] = "F6";
+            d["Debug.ToggleBreakpoint"] = "F9";
+            d["Debug.UpStack"] = "Ctrl+Up";
+            d["Debug.DownStack"] = "Ctrl+Down";
+            d["Debug.StartNoDebug"] = "F5";
+            d["Build.BuildWorkspace"] = "F4";
+            d["Build.Compile"] = "Ctrl+B";
+            d["Build.BuildProject"] = String::Empty;
+            d["View.Properties"] = String::Empty;
+            return d;
+        }
+
+        // what the Options page shows for each set
+        static String^ Describe(String^ name)
+        {
+            return IsRide(name) ? "RIDE (F8 debugs or carries on, F7 / F6 step over / into, F9 breakpoint, Ctrl+Up / Ctrl+Down the stack, F4 builds, F5 runs, Ctrl+B compiles)"
+                                : "Visual Studio (F5 debugs, F10 / F11 step over / into, Shift+F11 steps out, F9 breakpoint, F7 builds, Ctrl+F5 runs)";
+        }
+    };
+
+    // -------------------------------------------------------------------------
     public ref class Command
     {
     public:

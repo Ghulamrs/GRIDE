@@ -19,20 +19,46 @@ namespace Gride { namespace Core {
         }
 
         // absolute -> "src/file.c" (relative to baseDir). Different drive => absolute.
+        // Done by hand: System::Uri treats '#' and "%xx" in folder names as URI syntax.
         static String^ MakeRelative(String^ baseDir, String^ fullPath)
         {
             if (String::IsNullOrEmpty(baseDir) || String::IsNullOrEmpty(fullPath)) return fullPath;
             try
             {
-                Uri^ b = gcnew Uri(WithTrailingSlash(Path::GetFullPath(baseDir)));
-                Uri^ t = gcnew Uri(Path::GetFullPath(fullPath));
-                if (b->Scheme != t->Scheme) return fullPath;
-                if (String::Compare(Path::GetPathRoot(b->LocalPath), Path::GetPathRoot(t->LocalPath), true) != 0)
-                    return fullPath;
-                String^ rel = Uri::UnescapeDataString(b->MakeRelativeUri(t)->ToString());
-                return rel->Replace(L'\\', L'/');
+                String^ b = Path::GetFullPath(baseDir);
+                String^ f = Path::GetFullPath(fullPath);
+                if (String::Compare(Path::GetPathRoot(b), Path::GetPathRoot(f), true) != 0) return fullPath;
+                array<String^>^ bp = b->TrimEnd(L'\\')->Split(L'\\');
+                array<String^>^ fp = f->TrimEnd(L'\\')->Split(L'\\');
+                int common = 0;
+                while (common < bp->Length && common < fp->Length &&
+                       String::Compare(bp[common], fp[common], true) == 0) common++;
+                StringBuilder^ sb = gcnew StringBuilder();
+                for (int i = common; i < bp->Length; i++)
+                    if (bp[i]->Length > 0) sb->Append("../");
+                for (int i = common; i < fp->Length; i++)
+                {
+                    sb->Append(fp[i]);
+                    if (i < fp->Length - 1) sb->Append(L'/');
+                }
+                if (sb->Length == 0) return ".";
+                return sb->ToString();
             }
             catch (Exception^) { return fullPath; }
+        }
+
+        // true when child lies inside parent (never parent itself)
+        static bool IsStrictlyUnder(String^ parent, String^ child)
+        {
+            if (String::IsNullOrEmpty(parent) || String::IsNullOrEmpty(child)) return false;
+            try
+            {
+                String^ p = Path::GetFullPath(parent)->TrimEnd(L'\\');
+                String^ c = Path::GetFullPath(child)->TrimEnd(L'\\');
+                if (c->Length <= p->Length + 1) return false;
+                return c->StartsWith(p + "\\", StringComparison::OrdinalIgnoreCase);
+            }
+            catch (Exception^) { return false; }
         }
 
         // "src/file.c" -> D:\...\src\file.c ; absolute paths pass through.

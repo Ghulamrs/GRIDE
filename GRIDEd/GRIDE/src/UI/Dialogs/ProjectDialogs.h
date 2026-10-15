@@ -9,6 +9,7 @@
 // =============================================================================
 #pragma once
 #include "DialogBase.h"
+#include "CompilerOptionsEditor.h"
 #include "../PropertyObjects.h"
 #include "../../Services/ProjectTemplates.h"
 #include "../../Services/BuildEngine.h"      // BuildAction (BatchBuildDialog)
@@ -73,7 +74,7 @@ namespace Gride { namespace UI {
             TableLayoutPanel^ grid = MakeGrid(120);
             grid->Padding = WF::Padding(14, 10, 14, 4);
             nameBox = gcnew TextBox();
-            nameBox->Text = "NavFilter";
+            nameBox->Text = "Project1";
             nameBox->TextChanged += gcnew EventHandler(this, &NewProjectDialog::OnTemplateChanged);
             AddRow(grid, "Project name", nameBox);
             locationBox = gcnew TextBox();
@@ -308,8 +309,23 @@ namespace Gride { namespace UI {
     public ref class ProjectPropertiesDialog : public ThemedDialog
     {
     public:
+        literal String^ CompilerOptionsTab = "Compiler Options";
+
         ProjectPropertiesDialog(GrideProject^ p, Workspace^ w, String^ config, Target target)
             : ThemedDialog(p->Name + " Property Pages", 900, 600)
+        {
+            Build(p, w, config, target, nullptr);
+        }
+
+        // startTab opens the dialog on that page of the right-hand side (Project > Compiler Options)
+        ProjectPropertiesDialog(GrideProject^ p, Workspace^ w, String^ config, Target target, String^ startTab)
+            : ThemedDialog(p->Name + " Property Pages", 900, 600)
+        {
+            Build(p, w, config, target, startTab);
+        }
+
+    private:
+        void Build(GrideProject^ p, Workspace^ w, String^ config, Target target, String^ startTab)
         {
             project = p; workspace = w;
             FormBorderStyle = WF::FormBorderStyle::Sizable;
@@ -357,9 +373,56 @@ namespace Gride { namespace UI {
             if (w != nullptr)
                 for each (GrideProject^ o in w->Projects)
                     if (o != p) depsList->Items->Add(o->Name, p->DependsOn->Contains(o->Name));
+            // the compiler the project's C and C++ go to, and a folder's own choice (RIDE's "a compiler per group")
+            compilerBox = gcnew ComboBox();
+            compilerBox->Dock = DockStyle::Top;
+            compilerBox->DropDownStyle = ComboBoxStyle::DropDownList;
+            compilerBox->Items->AddRange(CompilerChoices());
+            compilerBox->SelectedItem = ChoiceOf(p->Toolchain);
+            if (compilerBox->SelectedIndex < 0) compilerBox->SelectedIndex = 0;
+            emulateOnly = gcnew CheckBox();
+            emulateOnly->Dock = DockStyle::Top;
+            emulateOnly->Text = "Emulate only (TMS320C6747): no .out is linked, Run is Emulate on vm6747";
+            emulateOnly->Checked = p->EmulateOnly;
+            emulateOnly->AutoSize = true;
+            // RIDE's build.args: one argument per line, so a path with a space in it stays one argument
+            argsBox = gcnew TextBox();
+            argsBox->Dock = DockStyle::Top;
+            argsBox->Multiline = true;
+            argsBox->Height = 48;
+            argsBox->ScrollBars = WF::ScrollBars::Vertical;
+            argsBox->Text = String::Join("\r\n", p->ProgramArgs);
+            folderGrid = gcnew DataGridView();
+            folderGrid->Dock = DockStyle::Top;
+            folderGrid->Height = 110;
+            folderGrid->AllowUserToAddRows = false;
+            folderGrid->AllowUserToDeleteRows = false;
+            folderGrid->RowHeadersVisible = false;
+            folderGrid->AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode::Fill;
+            DataGridViewTextBoxColumn^ fc = gcnew DataGridViewTextBoxColumn();
+            fc->HeaderText = "Folder"; fc->ReadOnly = true;
+            DataGridViewComboBoxColumn^ cc = gcnew DataGridViewComboBoxColumn();
+            cc->HeaderText = "Compiler";
+            cc->Items->AddRange(CompilerChoices());
+            cc->FlatStyle = WF::FlatStyle::Flat;
+            folderGrid->Columns->Add(fc);
+            folderGrid->Columns->Add(cc);
+            for each (ProjectFolder^ f in p->Folders)
+            {
+                String^ own;
+                if (!p->FolderToolchains->TryGetValue(f->Name, own)) own = "auto";
+                folderGrid->Rows->Add(f->Name, ChoiceOf(own));
+            }
             split->Panel1->Padding = WF::Padding(8);
             split->Panel1->Controls->Add(depsList);
             split->Panel1->Controls->Add(Heading("Depends on (built first)"));
+            split->Panel1->Controls->Add(folderGrid);
+            split->Panel1->Controls->Add(Heading("Compiler per folder"));
+            split->Panel1->Controls->Add(argsBox);
+            split->Panel1->Controls->Add(Heading("Program arguments (one per line)"));
+            split->Panel1->Controls->Add(emulateOnly);
+            split->Panel1->Controls->Add(compilerBox);
+            split->Panel1->Controls->Add(Heading("Compiler (auto: C to c90, C++ to cpp11)"));
             split->Panel1->Controls->Add(targetsList);
             split->Panel1->Controls->Add(Heading("Targets of this project"));
 
@@ -367,34 +430,83 @@ namespace Gride { namespace UI {
             grid->Dock = DockStyle::Fill;
             grid->ToolbarVisible = false;
             grid->PropertySort = WF::PropertySort::Categorized;
+            // the configuration's values, and RIDE's Compiler Options of the project (read-only for a CCS project, as in RIDE)
+            pages = gcnew TabControl();
+            pages->Dock = DockStyle::Fill;
+            TabPage^ cfgPage = gcnew TabPage("Configuration");
+            cfgPage->Controls->Add(grid);
+            TabPage^ optPage = gcnew TabPage(CompilerOptionsTab);
+            optionsEditor = gcnew CompilerOptionsEditor(p->Options, config, target, p->IsReadOnly);
+            optPage->Controls->Add(optionsEditor);
+            pages->TabPages->Add(cfgPage);
+            pages->TabPages->Add(optPage);
+            if (startTab != nullptr && startTab == CompilerOptionsTab) pages->SelectedTab = optPage;
             split->Panel2->Padding = WF::Padding(4, 8, 8, 8);
-            split->Panel2->Controls->Add(grid);
+            split->Panel2->Controls->Add(pages);
 
             Controls->Add(split);
             Controls->Add(top);
             split->BringToFront();
             AddOkCancel("OK");
-            if (p->IsReadOnly)
-            {
-                Text = Text + "  (read-only CCS project)";
-                okButton->Enabled = false;
-            }
+            // a project read from Visual Studio's or CCS's files: only what GRIDE keeps for it in the workspace
+            // can be changed here - its files are never written
+            if (p->IsReadOnly) Text = Text + "  " + ReadOnlyNote(p);
             ShowCurrent();
+        }
+
+    public:
+        // the title's note for a read-only project, in the words of its kind
+        static String^ ReadOnlyNote(GrideProject^ p)
+        {
+            if (p->IsVs) return "(read-only Visual Studio project: the compiler, the compiler per folder and the arguments can be changed - kept in the workspace)";
+            if (p->IsCcs) return "(read-only CCS project: the compiler, the compiler per folder, the arguments and Emulate only can be changed - kept in the workspace)";
+            return "(read-only project: the compiler, the compiler per folder and the arguments can be changed - kept in the workspace)";
         }
 
     protected:
         virtual bool OnAccept() override
         {
-            project->Configurations->Clear();
-            project->Configurations->AddRange(clones);
-            project->Targets->Clear();
-            for (int i = 0; i < targetsList->Items->Count; i++)
-                if (targetsList->GetItemChecked(i))
-                    project->Targets->Add(TargetInfo::Parse(safe_cast<String^>(targetsList->Items[i])));
-            project->DependsOn->Clear();
-            for each (Object^ o in depsList->CheckedItems) project->DependsOn->Add(safe_cast<String^>(o));
-            project->IsDirty = true;
-            project->Save();
+            if (!project->IsReadOnly)
+            {
+                project->Configurations->Clear();
+                project->Configurations->AddRange(clones);
+                project->Targets->Clear();
+                for (int i = 0; i < targetsList->Items->Count; i++)
+                    if (targetsList->GetItemChecked(i))
+                        project->Targets->Add(TargetInfo::Parse(safe_cast<String^>(targetsList->Items[i])));
+                project->DependsOn->Clear();
+                for each (Object^ o in depsList->CheckedItems) project->DependsOn->Add(safe_cast<String^>(o));
+                optionsEditor->Commit();
+            }
+            // the compiler words, the arguments and emulateOnly: a .pro's own, an imported project's kept in
+            // the workspace's entry (Workspace.h), never in Visual Studio's or CCS's files
+            // a word already meaning the chosen compiler is kept as written ("cl" stays "cl", RIDE's own word being "msvc")
+            String^ chosen = WordOf(safe_cast<String^>(compilerBox->SelectedItem));
+            if (RideToolchain::FromWord(project->Toolchain) != RideToolchain::FromWord(chosen)) project->Toolchain = chosen;
+            folderGrid->EndEdit();
+            for each (DataGridViewRow^ row in folderGrid->Rows)
+            {
+                String^ folder = dynamic_cast<String^>(row->Cells[0]->Value);
+                String^ choice = dynamic_cast<String^>(row->Cells[1]->Value);
+                String^ own;
+                if (folder == nullptr) continue;
+                if (!project->FolderToolchains->TryGetValue(folder, own)) own = "auto";
+                if (RideToolchain::FromWord(own) != RideToolchain::FromWord(WordOf(choice))) project->SetFolderToolchain(folder, WordOf(choice));
+            }
+            project->EmulateOnly = emulateOnly->Checked;
+            project->ProgramArgs->Clear();
+            for each (String^ a in argsBox->Text->Split(gcnew array<wchar_t>{ L'\r', L'\n' }, StringSplitOptions::RemoveEmptyEntries))
+                if (a->Trim()->Length > 0) project->ProgramArgs->Add(a->Trim());
+            if (project->IsImported)
+            {
+                project->IsDirty = false;
+                if (workspace != nullptr) workspace->IsDirty = true;
+            }
+            else
+            {
+                project->IsDirty = true;
+                project->Save();
+            }
             return true;
         }
 
@@ -404,9 +516,43 @@ namespace Gride { namespace UI {
         List<BuildConfiguration^>^ clones;
         ComboBox^ configBox;
         ComboBox^ targetBox;
+        ComboBox^ compilerBox;
+        CheckBox^ emulateOnly;
+        TextBox^ argsBox;
+        DataGridView^ folderGrid;
         CheckedListBox^ targetsList;
         CheckedListBox^ depsList;
         PropertyGrid^ grid;
+        TabControl^ pages;
+        CompilerOptionsEditor^ optionsEditor;
+
+        // the compilers as the dialog names them (the definitions' names), and the words behind them
+        static String^ ChoiceFor(RideTool t)
+        {
+            if (t == RideTool::Auto) return "auto (by language)";
+            String^ name = RideToolchain::Name(t);
+            return t == RideTool::Cl || t == RideTool::HostCxx ? name + " (the machine's own)" : name;
+        }
+        static array<Object^>^ CompilerChoices()
+        {
+            List<Object^>^ r = gcnew List<Object^>();
+            r->Add(ChoiceFor(RideTool::Auto));
+            for each (RideTool t in RideToolchain::Compilers()) r->Add(ChoiceFor(t));
+            return r->ToArray();
+        }
+        static String^ ChoiceOf(String^ word)
+        {
+            RideTool t = RideToolchain::FromWord(word);
+            if (t == RideTool::HostCxx) t = RideTool::Cl;
+            return ChoiceFor(t);
+        }
+        static String^ WordOf(String^ choice)
+        {
+            if (choice == nullptr) return "auto";
+            for each (RideTool t in RideToolchain::Compilers())
+                if (choice == ChoiceFor(t)) return RideToolchain::Word(t);
+            return "auto";
+        }
 
         static Label^ MakeLabel(String^ s)
         {
@@ -424,6 +570,7 @@ namespace Gride { namespace UI {
             for each (BuildConfiguration^ c in clones) if (String::Compare(c->Key, key, true) == 0) found = c;
             if (found == nullptr) { found = gcnew BuildConfiguration(cfg, t); clones->Add(found); }
             grid->SelectedObject = gcnew ConfigurationView(found);
+            if (optionsEditor != nullptr) optionsEditor->SetTarget(t);
         }
 
         void OnSelectionChanged(Object^ sender, EventArgs^ e) { ShowCurrent(); }

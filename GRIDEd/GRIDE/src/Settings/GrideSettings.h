@@ -32,9 +32,24 @@ namespace Gride { namespace Settings {
             ShowWhitespace = false;
             ReopenLastWorkspace = true;
             SaveBeforeBuild = true;
+            JumpToFirstError = true;
+            AskNativeTools = true;
+            RunInIde = true;
             DefaultProjectLocation = Path::Combine(Environment::GetFolderPath(Environment::SpecialFolder::MyDocuments), "GRIDE Projects");
             CcsToolRoot = "C:\\ti\\ccsv7\\tools\\compiler\\c6000_7.4.24";
             HelpDirectory = Path::Combine(PathUtil::AppDirectory(), "docs");
+            RideRoot = String::Empty;
+            RideIncludeDir = String::Empty;
+            RideLibDir = String::Empty;
+            Vcvars = String::Empty;
+            TiCompilerDir = String::Empty;
+            TiLibDir = String::Empty;
+            DefaultCompiler = "auto";
+            SharedIncludes = gcnew List<String^>();
+            SharedLibraries = gcnew List<String^>();
+            CcsEnabled = true;
+            CcsRoot = String::Empty;
+            C6747Debugger = "auto";
             SyntaxColors = gcnew Dictionary<String^, String^>();
         }
         property String^ Theme;
@@ -46,10 +61,48 @@ namespace Gride { namespace Settings {
         property bool    ShowWhitespace;
         property bool    ReopenLastWorkspace;
         property bool    SaveBeforeBuild;
+        property bool    JumpToFirstError;        // a failed build puts the caret on its first error (RIDE)
+        property bool    AskNativeTools;          // RIDE's askNative: offer the vendor's assembler/linker when the project's own fail
+        property bool    RunInIde;                // Start Without Debugging runs in the Output pane (RIDE); off: an external console window
         property String^ DefaultProjectLocation;
         property String^ CcsToolRoot;            // value of ${CG_TOOL_ROOT} for CCS imports
         property String^ HelpDirectory;
+        // RIDE's installation (its bin folder, or the folder above it); empty = found under Program Files
+        property String^ RideRoot;
+        // RIDE's settings.json, merged (section 11 of RIDE-conventions.md); each empty value means what RIDE's does
+        property String^ RideIncludeDir;         // "include": cpp11's headers, relative to the installation; empty: its include folder
+        property String^ RideLibDir;             // "lib": c90's headers; empty: its lib folder
+        property String^ Vcvars;                 // "vcvars": Visual Studio's vcvars64.bat, whose installation is taken before vswhere's
+        property String^ TiCompilerDir;          // "ti": TI's C6000 compiler directory (bin\lnk6x); named, a tms6747 build links against TI's runtime
+        property String^ TiLibDir;               // "tilib": a second directory with rts6740_elf_eh.lib
+        property String^ DefaultCompiler;        // "compiler": the word a new project starts with (auto, c90, cpp11, shalimar, cl)
+        property List<String^>^ SharedIncludes;  // "includes": header directories every compile searches after the project's own
+        property List<String^>^ SharedLibraries; // "libraries": libraries every host link takes
+        property bool    CcsEnabled;             // "ccs.enabled": File > Open > CCS Project
+        property String^ CcsRoot;                // "ccs.root": the CCS installation ${CG_TOOL_ROOT} is found under (C:\ti\ccsv7)
+        property String^ C6747Debugger;          // auto (sim6747 on a .out with lines, else vm6747), sim6747, vm6747; RIDE_DEBUG_* at start win
         property Dictionary<String^, String^>^ SyntaxColors;   // token -> "#RRGGBB" override
+
+        // what ${CG_TOOL_ROOT} is resolved from, in RIDE's order: the CCS root when one is named (the
+        // compiler directory is found under it by version), else TI's compiler directory named outright,
+        // else the compiler directory GRIDEd named before the port (its own setting)
+        String^ CcsCompilerRoot()
+        {
+            if (!String::IsNullOrWhiteSpace(CcsRoot)) return CcsRoot->Trim();
+            if (!String::IsNullOrWhiteSpace(TiCompilerDir)) return TiCompilerDir->Trim();
+            return CcsToolRoot == nullptr ? String::Empty : CcsToolRoot;
+        }
+
+        // the C6747 debugger choice in force: RIDE_DEBUG_VM6747 / RIDE_DEBUG_SIM6747 in the environment
+        // at start win over the setting, as in RIDE
+        String^ EffectiveC6747Debugger()
+        {
+            String^ vm = Environment::GetEnvironmentVariable("RIDE_DEBUG_VM6747");
+            if (!String::IsNullOrWhiteSpace(vm) && vm->Trim() != "0") return "vm6747";
+            String^ sim = Environment::GetEnvironmentVariable("RIDE_DEBUG_SIM6747");
+            if (!String::IsNullOrWhiteSpace(sim) && sim->Trim() != "0") return "sim6747";
+            return String::IsNullOrWhiteSpace(C6747Debugger) ? "auto" : C6747Debugger->Trim()->ToLowerInvariant();
+        }
 
         JsonValue^ ToJson()
         {
@@ -63,9 +116,24 @@ namespace Gride { namespace Settings {
             o->SetBool("showWhitespace", ShowWhitespace);
             o->SetBool("reopenLastWorkspace", ReopenLastWorkspace);
             o->SetBool("saveBeforeBuild", SaveBeforeBuild);
+            o->SetBool("jumpToFirstError", JumpToFirstError);
+            o->SetBool("askNativeTools", AskNativeTools);
+            o->SetBool("runInIde", RunInIde);
             o->SetString("defaultProjectLocation", DefaultProjectLocation);
             o->SetString("ccsToolRoot", CcsToolRoot);
             o->SetString("helpDirectory", HelpDirectory);
+            o->SetString("rideRoot", RideRoot);
+            o->SetString("rideIncludeDir", RideIncludeDir);
+            o->SetString("rideLibDir", RideLibDir);
+            o->SetString("vcvars", Vcvars);
+            o->SetString("tiCompilerDir", TiCompilerDir);
+            o->SetString("tiLibDir", TiLibDir);
+            o->SetString("defaultCompiler", DefaultCompiler);
+            o->SetList("sharedIncludes", SharedIncludes);
+            o->SetList("sharedLibraries", SharedLibraries);
+            o->SetBool("ccsEnabled", CcsEnabled);
+            o->SetString("ccsRoot", CcsRoot);
+            o->SetString("c6747Debugger", C6747Debugger);
             JsonValue^ c = JsonValue::MakeObject();
             for each (KeyValuePair<String^, String^> kv in SyntaxColors) c->SetString(kv.Key, kv.Value);
             o->SetValue("syntaxColors", c);
@@ -83,9 +151,25 @@ namespace Gride { namespace Settings {
             ShowWhitespace = o->GetBool("showWhitespace", ShowWhitespace);
             ReopenLastWorkspace = o->GetBool("reopenLastWorkspace", ReopenLastWorkspace);
             SaveBeforeBuild = o->GetBool("saveBeforeBuild", SaveBeforeBuild);
+            JumpToFirstError = o->GetBool("jumpToFirstError", JumpToFirstError);
+            AskNativeTools = o->GetBool("askNativeTools", AskNativeTools);
+            RunInIde = o->GetBool("runInIde", RunInIde);
             DefaultProjectLocation = o->GetString("defaultProjectLocation", DefaultProjectLocation);
             CcsToolRoot = o->GetString("ccsToolRoot", CcsToolRoot);
             HelpDirectory = o->GetString("helpDirectory", HelpDirectory);
+            RideRoot = o->GetString("rideRoot", RideRoot);
+            RideIncludeDir = o->GetString("rideIncludeDir", RideIncludeDir);
+            RideLibDir = o->GetString("rideLibDir", RideLibDir);
+            Vcvars = o->GetString("vcvars", Vcvars);
+            TiCompilerDir = o->GetString("tiCompilerDir", TiCompilerDir);
+            TiLibDir = o->GetString("tiLibDir", TiLibDir);
+            DefaultCompiler = o->GetString("defaultCompiler", DefaultCompiler);
+            if (String::IsNullOrWhiteSpace(DefaultCompiler)) DefaultCompiler = "auto";
+            if (o->Has("sharedIncludes")) SharedIncludes = o->GetStringList("sharedIncludes");
+            if (o->Has("sharedLibraries")) SharedLibraries = o->GetStringList("sharedLibraries");
+            CcsEnabled = o->GetBool("ccsEnabled", CcsEnabled);
+            CcsRoot = o->GetString("ccsRoot", CcsRoot);
+            C6747Debugger = o->GetString("c6747Debugger", C6747Debugger);
             JsonValue^ c = o->GetObject("syntaxColors");
             if (c != nullptr)
                 for each (String^ k in c->KeyNames) SyntaxColors[k] = c->GetString(k, String::Empty);
@@ -135,12 +219,15 @@ namespace Gride { namespace Settings {
             switch (Lang)
             {
             case Language::C90:
+            {
                 Extensions->AddRange(gcnew array<String^>{ ".c", ".h" });
                 Keywords->AddRange(c90kw);
                 Types->AddRange(c90ty);
                 LineComment = String::Empty;          // C90 has no // comments
                 break;
+            }
             case Language::Cpp11:
+            {
                 Extensions->AddRange(gcnew array<String^>{ ".cpp", ".cc", ".cxx", ".hpp", ".hh" });
                 Keywords->AddRange(c90kw);
                 Keywords->AddRange(gcnew array<String^>{ "alignas", "alignof", "asm", "catch", "class", "constexpr",
@@ -151,13 +238,17 @@ namespace Gride { namespace Settings {
                 Types->AddRange(c90ty);
                 Types->AddRange(gcnew array<String^>{ "bool", "wchar_t", "char16_t", "char32_t", "auto" });
                 break;
+            }
             case Language::Shalimar:
+            {
                 // Placeholder word list - edit it in Tools > Options > Languages > Shalimar
                 Extensions->Add(".shl");
                 Keywords->AddRange(c90kw);
                 Types->AddRange(c90ty);
                 break;
+            }
             case Language::Assembly:
+            {
                 Extensions->AddRange(gcnew array<String^>{ ".asm", ".s", ".sa", ".inc" });
                 Keywords->AddRange(gcnew array<String^>{ ".text", ".data", ".bss", ".sect", ".global", ".def", ".ref",
                     ".word", ".half", ".byte", ".float", ".space", ".align", ".equ", ".set", ".include", ".end",
@@ -167,12 +258,15 @@ namespace Gride { namespace Settings {
                 BlockCommentStart = String::Empty; BlockCommentEnd = String::Empty;
                 Preprocessor = false;
                 break;
+            }
             case Language::LinkerCmd:
+            {
                 Extensions->AddRange(gcnew array<String^>{ ".cmd", ".ld" });
                 Keywords->AddRange(gcnew array<String^>{ "MEMORY", "SECTIONS", "ORIGIN", "LENGTH", "org", "len",
                     "-stack", "-heap", "-l", "-o", "-m", "-c", "-cr", "-x" });
                 Preprocessor = false;
                 break;
+            }
             default:
                 break;
             }
@@ -356,7 +450,10 @@ namespace Gride { namespace Settings {
             Recent = gcnew RecentList();
             ExternalTools = gcnew List<ExternalTool^>();
             KeyBindings = gcnew Dictionary<String^, String^>();
+            KeySet = "visualstudio";
             Snippets = DefaultSnippets();
+            CompilerOptions = gcnew CompilerOptionStore();
+            CcsProjects = JsonValue::MakeObject();
             LastWorkspace = String::Empty;
             FilePath = String::Empty;
             IsPortable = false;
@@ -370,10 +467,49 @@ namespace Gride { namespace Settings {
         property RecentList^ Recent;
         property List<ExternalTool^>^ ExternalTools;
         property Dictionary<String^, String^>^ KeyBindings;
+        property String^ KeySet;                             // "visualstudio" or "ride": the key set under the bindings
         property Dictionary<String^, String^>^ Snippets;     // name -> text (Tools > Code Snippets)
+        // RIDE's installation-level Compiler Options (settings.json "options"): what a new project starts with
+        property CompilerOptionStore^ CompilerOptions;
+        // RIDE's own state for a CCS project, never written into CCS's files (settings.json "ccs.projects"):
+        // absolute directory with forward slashes -> { args, emulateOnly, toolchain, folderToolchains }
+        property JsonValue^ CcsProjects;
         property String^ LastWorkspace;
         property String^ FilePath;      // where this file lives
         property bool IsPortable;       // true when it sits next to GRIDE.exe
+
+        static String^ CcsKey(String^ dir)
+        {
+            try { return Path::GetFullPath(dir)->TrimEnd(L'\\', L'/')->Replace("\\", "/"); }
+            catch (Exception^) { return dir; }
+        }
+        // the entry's key as it was written, a Windows path being the same whatever its case
+        String^ CcsKeyOf(String^ dir)
+        {
+            String^ key = CcsKey(dir);
+            if (CcsProjects != nullptr)
+                for each (String^ k in CcsProjects->KeyNames)
+                    if (String::Compare(k, key, true) == 0) return k;
+            return key;
+        }
+        JsonValue^ CcsState(String^ dir) { return CcsProjects == nullptr ? nullptr : CcsProjects->GetObject(CcsKeyOf(dir)); }
+        void RememberCcsState(String^ dir, JsonValue^ state)
+        {
+            if (CcsProjects == nullptr) CcsProjects = JsonValue::MakeObject();
+            String^ key = CcsKeyOf(dir);
+            if (state == nullptr || state->Count == 0) CcsProjects->Remove(key);
+            else CcsProjects->SetValue(key, state);
+        }
+
+        // the statics the toolchain code reads (where it has no settings object): RIDE's root, TI's
+        // directories, the named vcvars64.bat
+        void PublishPaths()
+        {
+            ToolchainSettings::RideRoot = Env->RideRoot;
+            RideToolchain::TiCompilerDir = Env->TiCompilerDir;
+            RideToolchain::TiLibDir = Env->TiLibDir;
+            VisualStudio::NamedVcvars = Env->Vcvars;
+        }
 
         ToolchainSettings^ Toolchain(Target t)
         {
@@ -435,11 +571,14 @@ namespace Gride { namespace Settings {
             JsonValue^ keys = JsonValue::MakeObject();
             for each (KeyValuePair<String^, String^> kv in KeyBindings) keys->SetString(kv.Key, kv.Value);
             o->SetValue("keyBindings", keys);
+            o->SetString("keySet", KeySet);
 
             JsonValue^ snip = JsonValue::MakeObject();
             for each (KeyValuePair<String^, String^> kv in Snippets) snip->SetString(kv.Key, kv.Value);
             o->SetValue("snippets", snip);
 
+            o->SetValue("compilerOptions", CompilerOptions->ToJson());
+            if (CcsProjects != nullptr && CcsProjects->Count > 0) o->SetValue("ccsProjects", CcsProjects);
             o->SetValue("recent", Recent->ToJson());
             o->SetString("lastWorkspace", LastWorkspace);
             o->SetValue("layout", Layout->ToJson());
@@ -451,6 +590,8 @@ namespace Gride { namespace Settings {
             GrideSettings^ s = gcnew GrideSettings();
             if (o == nullptr || !o->IsObject) return s;
             s->Env->FromJson(o->GetObject("environment"));
+            // the toolchains' defaults and tool search read RIDE's root (and the other paths) as soon as they are known
+            s->PublishPaths();
 
             JsonValue^ tc = o->GetObject("toolchains");
             if (tc != nullptr)
@@ -482,6 +623,7 @@ namespace Gride { namespace Settings {
             JsonValue^ keys = o->GetObject("keyBindings");
             if (keys != nullptr)
                 for each (String^ k in keys->KeyNames) s->KeyBindings[k] = keys->GetString(k, String::Empty);
+            s->KeySet = o->GetString("keySet", s->KeySet);
 
             JsonValue^ snip = o->GetObject("snippets");
             if (snip != nullptr)
@@ -490,6 +632,9 @@ namespace Gride { namespace Settings {
                 for each (String^ k in snip->KeyNames) s->Snippets[k] = snip->GetString(k, String::Empty);
             }
 
+            s->CompilerOptions->FromJson(o->GetObject("compilerOptions"));
+            JsonValue^ ccs = o->GetObject("ccsProjects");
+            if (ccs != nullptr) s->CcsProjects = ccs;
             s->Recent->FromJson(o->GetObject("recent"));
             s->LastWorkspace = o->GetString("lastWorkspace", String::Empty);
             s->Layout->FromJson(o->GetObject("layout"));
@@ -532,11 +677,14 @@ namespace Gride { namespace Settings {
                                  "GRIDE\\gride.settings.json");
         }
 
-        // warning receives a message when the file was unreadable (it is then backed up)
+        // warning receives a message when the file was unreadable (it is then backed up); the toolchain
+        // definitions are loaded first, since the settings' defaults come from them
         static GrideSettings^ Load(String^% warning)
         {
             warning = nullptr;
             String^ path = File::Exists(PortablePath()) ? PortablePath() : UserPath();
+            bool portable = PathUtil::SamePath(path, PortablePath());
+            ToolchainDefinitions::Current = ToolchainDefinitions::Load(ToolchainDefinitions::ShippedPath(), ToolchainDefinitions::UserPath(portable));
             GrideSettings^ s;
             if (File::Exists(path))
             {

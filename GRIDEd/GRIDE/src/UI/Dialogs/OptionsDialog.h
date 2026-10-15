@@ -5,12 +5,13 @@
 //    Toolchains   > Windows | Linux | macOS | TMS320C6747
 //    Languages    > C90 | C++11 | Shalimar | Assembly
 //    Converters   > C <-> Shalimar
-//    Projects     > Defaults and Locations
+//    Projects     > Defaults and Locations | RIDE Paths | Compiler Options
 //
 //  The dialog edits a CLONE of the settings; Result holds it after OK.
 // =============================================================================
 #pragma once
 #include "DialogBase.h"
+#include "CompilerOptionsEditor.h"
 #include "../Commands.h"
 #include "../../Settings/GrideSettings.h"
 
@@ -196,6 +197,9 @@ namespace Gride { namespace UI {
             Section("Start-up and build");
             reopen = Check("Reopen the last workspace at start-up", env->ReopenLastWorkspace); Row(String::Empty, reopen);
             saveBefore = Check("Save all files before building", env->SaveBeforeBuild); Row(String::Empty, saveBefore);
+            jumpFirst = Check("Go to the first error when a build fails", env->JumpToFirstError); Row(String::Empty, jumpFirst);
+            askNative = Check("Offer Visual Studio's (or TI's) assembler and linker when the project's own fail", env->AskNativeTools); Row(String::Empty, askNative);
+            runInIde = Check("Run programs in the Output pane, with an input line (off: an external console window)", env->RunInIde); Row(String::Empty, runInIde);
             Section("Settings file");
             TextBox^ path = Text1(s->FilePath);
             path->ReadOnly = true;
@@ -212,12 +216,15 @@ namespace Gride { namespace UI {
             env->ShowWhitespace = whitespace->Checked;
             env->ReopenLastWorkspace = reopen->Checked;
             env->SaveBeforeBuild = saveBefore->Checked;
+            env->JumpToFirstError = jumpFirst->Checked;
+            env->AskNativeTools = askNative->Checked;
+            env->RunInIde = runInIde->Checked;
         }
     private:
         EnvironmentSettings^ env;
         ComboBox^ theme;
         NumericUpDown^ tabSize;
-        CheckBox^ insertSpaces; CheckBox^ lineNumbers; CheckBox^ whitespace; CheckBox^ reopen; CheckBox^ saveBefore;
+        CheckBox^ insertSpaces; CheckBox^ lineNumbers; CheckBox^ whitespace; CheckBox^ reopen; CheckBox^ saveBefore; CheckBox^ jumpFirst; CheckBox^ askNative; CheckBox^ runInIde;
     };
 
     // ---- Environment > Fonts and Colors ----------------------------------------------------
@@ -307,6 +314,14 @@ namespace Gride { namespace UI {
         {
             settings = s; registry = reg;
             bindings = gcnew Dictionary<String^, String^>(s->KeyBindings);
+            // the key set the bindings go over: Visual Studio's, or RIDE's
+            set = gcnew ComboBox();
+            set->DropDownStyle = ComboBoxStyle::DropDownList;
+            set->Items->Add(KeySets::Describe(KeySets::VisualStudio));
+            set->Items->Add(KeySets::Describe(KeySets::Ride));
+            set->SelectedIndex = KeySets::IsRide(s->KeySet) ? 1 : 0;
+            set->SelectedIndexChanged += gcnew EventHandler(this, &KeyboardPage::OnSet);
+            Row("Key set", set);
             list = gcnew ListView();
             list->View = WF::View::Details;
             list->FullRowSelect = true;
@@ -330,21 +345,29 @@ namespace Gride { namespace UI {
             Row(String::Empty, btns);
             Fill();
         }
-        virtual void Commit() override { settings->KeyBindings = bindings; }
+        virtual void Commit() override
+        {
+            settings->KeyBindings = bindings;
+            settings->KeySet = set->SelectedIndex == 1 ? KeySets::Ride : KeySets::VisualStudio;
+        }
 
     private:
         GrideSettings^ settings;
         CommandRegistry^ registry;
         Dictionary<String^, String^>^ bindings;
+        ComboBox^ set;
         ListView^ list;
         TextBox^ press;
 
+        // the user's binding, else the set's, else the command's own
         String^ ShortcutOf(Command^ c)
         {
             String^ v;
             if (bindings->TryGetValue(c->Id, v)) return v;
+            if (KeySets::For(set->SelectedIndex == 1 ? KeySets::Ride : KeySets::VisualStudio)->TryGetValue(c->Id, v)) return v;
             return c->DefaultShortcut;
         }
+        void OnSet(Object^ sender, EventArgs^ e) { Fill(); }
         void Fill()
         {
             list->BeginUpdate();
@@ -408,22 +431,41 @@ namespace Gride { namespace UI {
         virtual void Commit() override
         {
             tc->ToolDir = toolDir->Value;
-            tc->CompilerC90 = c90->Value; tc->CompilerCpp11 = cpp11->Value; tc->CompilerShalimar = shl->Value;
+            tc->CompilerC90 = c90->Value; tc->CompilerCpp11 = cpp11->Value; tc->CompilerShalimar = shl->Value; tc->CompilerCl = cl->Value;
             tc->Assembler = asmb->Value; tc->Linker = lnk->Value; tc->Runtime = rts->Value; tc->Simulator = sim->Value;
+            tc->DebugAssembler = dasm->Value; tc->DebugLinker = dlnk->Value; tc->RuntimeDir = rtsDir->Value;
+            tc->Emulator = emu->Value; tc->Debugger = dbg->Value;
             tc->IncludeDirs = FromLines(inc); tc->LibDirs = FromLines(lib);
-            tc->CompileCmd = cmdCompile->Text; tc->AssembleCmd = cmdAsm->Text; tc->LinkCmd = cmdLink->Text;
-            tc->RunCmd = cmdRun->Text; tc->DebugCmd = cmdDebug->Text;
+            tc->CompileCmd = cmdCompile->Text; tc->CompileCmdCl = cmdCompileCl->Text; tc->CompileCmdShalimar = cmdCompileShl->Text; tc->AssembleCmd = cmdAsm->Text; tc->LinkCmd = cmdLink->Text;
+            tc->DebugAssembleCmd = cmdDebugAsm->Text; tc->DebugLinkCmd = cmdDebugLink->Text;
+            tc->RunCmd = cmdRun->Text; tc->EmulateCmd = cmdEmulate->Text; tc->DebugCmd = cmdDebug->Text;
             tc->IncludeFlag = fInc->Text; tc->DefineFlag = fDef->Text; tc->LibDirFlag = fLibDir->Text; tc->LibFlag = fLib->Text;
             tc->AsmExt = fAsmExt->Text; tc->ObjExt = fObjExt->Text;
+            tc->SetupScript = setup->Value;
+            tc->EnvironmentVars = EnvLines(env);
+            tc->OutputCodePage = Decimal::ToInt32(codePage->Value);
+            tc->ErrorPattern = errPattern->Text->Trim();
         }
 
     private:
         ToolchainSettings^ tc;
         List<PathField^>^ fields;
-        PathField^ toolDir; PathField^ c90; PathField^ cpp11; PathField^ shl; PathField^ asmb; PathField^ lnk; PathField^ rts; PathField^ sim;
+        PathField^ toolDir; PathField^ c90; PathField^ cpp11; PathField^ shl; PathField^ cl; PathField^ asmb; PathField^ lnk; PathField^ rts; PathField^ sim;
+        PathField^ dasm; PathField^ dlnk; PathField^ rtsDir; PathField^ emu; PathField^ dbg;
         TextBox^ inc; TextBox^ lib;
-        TextBox^ cmdCompile; TextBox^ cmdAsm; TextBox^ cmdLink; TextBox^ cmdRun; TextBox^ cmdDebug;
+        TextBox^ cmdCompile; TextBox^ cmdCompileCl; TextBox^ cmdCompileShl; TextBox^ cmdAsm; TextBox^ cmdLink; TextBox^ cmdDebugAsm; TextBox^ cmdDebugLink;
+        TextBox^ cmdRun; TextBox^ cmdEmulate; TextBox^ cmdDebug;
         TextBox^ fInc; TextBox^ fDef; TextBox^ fLibDir; TextBox^ fLib; TextBox^ fAsmExt; TextBox^ fObjExt;
+        PathField^ setup; TextBox^ env; NumericUpDown^ codePage; TextBox^ errPattern;
+
+        // one NAME=value per line; unlike FromLines, ';' is kept (PATH=a;b;%PATH%)
+        static List<String^>^ EnvLines(TextBox^ t)
+        {
+            List<String^>^ r = gcnew List<String^>();
+            for each (String^ s in t->Text->Split(gcnew array<wchar_t>{ L'\r', L'\n' }, StringSplitOptions::RemoveEmptyEntries))
+                if (s->Trim()->Length > 0) r->Add(s->Trim());
+            return r;
+        }
 
         PathField^ Tool(String^ label, String^ value, bool folder)
         {
@@ -443,27 +485,45 @@ namespace Gride { namespace UI {
             Section("Tools");
             toolDir = Tool("Tool folder", tc->ToolDir, true);
             toolDir->Controls[0]->TextChanged += gcnew EventHandler(this, &ToolchainPage::OnToolDirChanged);
-            c90 = Tool("C90 compiler", tc->CompilerC90, false);
-            cpp11 = Tool("C++11 compiler", tc->CompilerCpp11, false);
+            Label^ names = gcnew Label();
+            names->Text = ProgramsNote();
+            names->Tag = "muted";
+            names->AutoSize = true;
+            names->MaximumSize = SD::Size(560, 0);
+            Row(String::Empty, names);
+            c90 = Tool("C90 compiler (c90)", tc->CompilerC90, false);
+            cpp11 = Tool("C++11 compiler (cpp11)", tc->CompilerCpp11, false);
             shl = Tool("Shalimar compiler", tc->CompilerShalimar, false);
+            cl = Tool("Host compiler (cl)", tc->CompilerCl, false);
             asmb = Tool("Assembler", tc->Assembler, false);
             lnk = Tool("Linker", tc->Linker, false);
+            dasm = Tool("Debug assembler (clang)", tc->DebugAssembler, false);
+            dlnk = Tool("Debug linker (link.exe)", tc->DebugLinker, false);
             rts = Tool("Runtime library", tc->Runtime, false);
-            sim = Tool("Simulator / runner", tc->Simulator, false);
+            rtsDir = Tool("Runtime directory (RTS6x)", tc->RuntimeDir, true);
+            sim = Tool("Simulator (sim6747)", tc->Simulator, false);
+            emu = Tool("Emulator (vm6747)", tc->Emulator, false);
+            dbg = Tool("Debugger", tc->Debugger, false);
             Section("Search paths (one per line)");
             inc = Lines(tc->IncludeDirs, 60); Row("Include directories", inc);
             lib = Lines(tc->LibDirs, 60); Row("Library directories", lib);
             Section("Command templates");
             cmdCompile = Mono(tc->CompileCmd); Row("Compile", cmdCompile);
+            cmdCompileCl = Mono(tc->CompileCmdCl); Row("Compile with cl", cmdCompileCl);
+            cmdCompileShl = Mono(tc->CompileCmdShalimar); Row("Compile Shalimar", cmdCompileShl);
             cmdAsm = Mono(tc->AssembleCmd); Row("Assemble", cmdAsm);
             cmdLink = Mono(tc->LinkCmd); Row("Link", cmdLink);
+            cmdDebugAsm = Mono(tc->DebugAssembleCmd); Row("Debug assemble", cmdDebugAsm);
+            cmdDebugLink = Mono(tc->DebugLinkCmd); Row("Debug link", cmdDebugLink);
             cmdRun = Mono(tc->RunCmd); Row("Run", cmdRun);
+            cmdEmulate = Mono(tc->EmulateCmd); Row("Emulate", cmdEmulate);
             cmdDebug = Mono(tc->DebugCmd); Row("Debug", cmdDebug);
             Label^ macros = gcnew Label();
-            macros->Text = "Macros: $(Compiler) $(Assembler) $(Linker) $(Runtime) $(Simulator) $(ToolDir) $(Source) $(Name) "
-                           "$(AsmFile) $(ObjFile) $(Objects) $(Output) $(Program) $(ObjDir) $(OutDir) $(IncludeFlags) "
-                           "$(DefineFlags) $(LibDirFlags) $(LibFlags) $(Optimise) $(CompileFlags) $(LinkFlags) $(LinkerCmd) "
-                           "$(Config) $(Target) $(ProjectDir) $(ProjectName)";
+            macros->Text = "Macros: $(Compiler) $(Assembler) $(Linker) $(DebugAssembler) $(DebugLinker) $(Runtime) $(RuntimeDir) $(Simulator) "
+                           "$(Emulator) $(Debugger) $(ToolDir) $(Source) $(Sources) $(Name) $(AsmFile) $(AsmFiles) $(ObjFile) $(Objects) $(Output) $(Program) "
+                           "$(ObjDir) $(OutDir) $(Arch) $(ArchFlag) $(ConfigFlags) $(AsmSyntaxFlag) $(LangFlags) $(IncludeFlags) $(DefineFlags) "
+                           "$(LibDirFlags) $(LibFlags) $(CrtLibs) $(Optimise) $(CompileFlags) $(LinkFlags) $(LinkerCmd) $(Config) $(Target) "
+                           "$(ProjectDir) $(ProjectName)";
             macros->Tag = "muted";
             macros->AutoSize = true;
             macros->MaximumSize = SD::Size(560, 0);
@@ -475,6 +535,29 @@ namespace Gride { namespace UI {
             fLib = Mono(tc->LibFlag); Row("Library flag", fLib);
             fAsmExt = Mono(tc->AsmExt); Row("Assembly extension", fAsmExt);
             fObjExt = Mono(tc->ObjExt); Row("Object extension", fObjExt);
+            Section("Tool environment (optional)");
+            setup = gcnew PathField(false, true);
+            setup->Filter = "Batch files (*.bat;*.cmd)|*.bat;*.cmd|All files (*.*)|*.*";
+            setup->Value = tc->SetupScript;
+            Row("Setup script", setup);
+            Label^ setupNote = gcnew Label();
+            setupNote->Text = "e.g. vcvars64.bat for MASM / LINK. When set, each tool runs through cmd.exe after this script "
+                              "(tools may then be found on the PATH it sets). Leave empty to start the tools directly.";
+            setupNote->Tag = "muted";
+            setupNote->AutoSize = true;
+            setupNote->MaximumSize = SD::Size(560, 0);
+            Row(String::Empty, setupNote);
+            env = Lines(tc->EnvironmentVars, 60); Row("Environment (NAME=value)", env);
+            codePage = gcnew NumericUpDown(); codePage->Minimum = Decimal(0); codePage->Maximum = Decimal(65535);
+            codePage->Value = Decimal(Math::Max(0, Math::Min(65535, tc->OutputCodePage)));
+            Row("Output code page (0 = OEM)", codePage);
+            errPattern = Mono(tc->ErrorPattern); Row("Error pattern (regex)", errPattern);
+            Label^ patNote = gcnew Label();
+            patNote->Text = "Extra error format, tried before the built-in ones. Named groups: file, line, col, sev, code, msg.";
+            patNote->Tag = "muted";
+            patNote->AutoSize = true;
+            patNote->MaximumSize = SD::Size(560, 0);
+            Row(String::Empty, patNote);
             Button^ reset = gcnew Button();
             reset->Text = "Reset this target to defaults";
             reset->Click += gcnew EventHandler(this, &ToolchainPage::OnReset);
@@ -487,6 +570,28 @@ namespace Gride { namespace UI {
         void OnToolDirChanged(Object^ sender, EventArgs^ e)
         {
             for each (PathField^ f in fields) { f->BaseDir = toolDir->Value; f->UpdateStatus(); }
+        }
+
+        // the target's programs as toolchain.json names them, and where a bare name is looked for
+        String^ ProgramsNote()
+        {
+            ToolchainDefinitions^ defs = ToolchainDefinitions::Current;
+            TargetDefinition^ td = defs->TargetOf(tc->TargetKind);
+            List<String^>^ parts = gcnew List<String^>();
+            List<String^>^ vars = gcnew List<String^>();
+            if (td != nullptr)
+                for each (KeyValuePair<String^, String^> kv in td->Roles)
+                {
+                    ToolDefinition^ t = defs->Tool(kv.Value);
+                    if (t == nullptr) continue;
+                    String^ names = t->Exe + (t->Aliases->Count > 0 ? "; " + String::Join(", ", t->Aliases) : String::Empty);
+                    parts->Add(kv.Key + ": " + t->Name + " (" + names + ")");
+                    if (t->Lookup->Env->Length > 0 && !vars->Contains("$" + t->Lookup->Env)) vars->Add("$" + t->Lookup->Env);
+                }
+            return "Programs (toolchain.json): " + (parts->Count > 0 ? String::Join("; ", parts) : "none defined for this target") +
+                   ". A name without a folder is looked for in its environment variable" + (vars->Count > 0 ? " (" + String::Join(", ", vars) + ")" : String::Empty) +
+                   ", the tool folder, beside GRIDE.exe, in the installation (Tools > Options > Projects) and on PATH. "
+                   "The names, aliases and argument templates themselves are edited under Toolchains > Definitions.";
         }
 
         void OnReset(Object^ sender, EventArgs^ e)
@@ -572,25 +677,531 @@ namespace Gride { namespace UI {
         {
             env = e;
             loc = gcnew PathField(true, true); loc->Value = e->DefaultProjectLocation; Row("Default project location", loc);
-            Section("Code Composer Studio 7.4 import");
+            Section("RIDE's installation");
+            ride = gcnew PathField(true, true); ride->Value = e->RideRoot; Row("RIDE root or bin", ride);
+            Label^ rideNote = gcnew Label();
+            rideNote->Text = "Where c90, cpp11, shalimar, masm, link, asm6x, lnk6x, vm6747, sim6747 and lib\\rts6x-tms6747 are looked for when a "
+                             "toolchain names a tool without a folder. Empty: %ProgramFiles%\\RIDE\\bin, then PATH.";
+            rideNote->AutoSize = true; rideNote->Tag = "muted"; rideNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, rideNote);
+            Section("Code Composer Studio 7.4 / 5.5 projects");
+            ccsEnabled = Check("Open Code Composer Studio projects (File > Open > CCS Project)", e->CcsEnabled); Row(String::Empty, ccsEnabled);
+            ccsRoot = gcnew PathField(true, true); ccsRoot->Value = e->CcsRoot; Row("CCS installation", ccsRoot);
+            Label^ rootNote = gcnew Label();
+            rootNote->Text = "RIDE's ccs.root (C:\\ti\\ccsv7): ${CG_TOOL_ROOT} is the project's compiler version under its tools\\compiler. "
+                             "Empty: TI's compiler directory (RIDE Paths), else the directory below.";
+            rootNote->AutoSize = true; rootNote->Tag = "muted"; rootNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, rootNote);
             cg = gcnew PathField(true, true); cg->Value = e->CcsToolRoot; Row("${CG_TOOL_ROOT}", cg);
             Label^ n = gcnew Label();
-            n->Text = "Used to expand ${CG_TOOL_ROOT} in include paths read from .cproject files.";
-            n->AutoSize = true; n->Tag = "muted";
+            n->Text = "A compiler directory named outright, used to expand ${CG_TOOL_ROOT} in include paths read from .cproject files when no CCS installation is named.";
+            n->AutoSize = true; n->Tag = "muted"; n->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, n);
             Section("Help");
             help = gcnew PathField(true, true); help->Value = e->HelpDirectory; Row("Help / reference folder", help);
-            loc->UpdateStatus(); cg->UpdateStatus(); help->UpdateStatus();
+            loc->UpdateStatus(); ride->UpdateStatus(); ccsRoot->UpdateStatus(); cg->UpdateStatus(); help->UpdateStatus();
         }
         virtual void Commit() override
         {
             env->DefaultProjectLocation = loc->Value;
+            env->RideRoot = ride->Value;
+            ToolchainSettings::RideRoot = env->RideRoot;
+            env->CcsEnabled = ccsEnabled->Checked;
+            env->CcsRoot = ccsRoot->Value;
             env->CcsToolRoot = cg->Value;
             env->HelpDirectory = help->Value;
         }
     private:
         EnvironmentSettings^ env;
-        PathField^ loc; PathField^ cg; PathField^ help;
+        PathField^ loc; PathField^ ride; PathField^ ccsRoot; PathField^ cg; PathField^ help;
+        CheckBox^ ccsEnabled;
+    };
+
+    // ---- Projects > RIDE Paths: RIDE's settings.json, the keys that are paths and choices ----------------
+    public ref class RidePathsPage : public OptionsPage
+    {
+    public:
+        RidePathsPage(GrideSettings^ s)
+        {
+            env = s->Env;
+            String^ root = RideToolchain::InstallRoot(ToolchainSettings::RideRoot);
+            Section("RIDE's headers (settings.json include / lib)");
+            include = gcnew PathField(true, true); include->Value = env->RideIncludeDir; include->BaseDir = root; Row("cpp11's headers (include)", include);
+            lib = gcnew PathField(true, true); lib->Value = env->RideLibDir; lib->BaseDir = root; Row("c90's headers (lib)", lib);
+            Label^ hdrNote = gcnew Label();
+            hdrNote->Text = "Every cpp11 compile is given the include directory and every c90 compile the lib directory, after the project's own. "
+                            "Relative to RIDE's installation" + (root == nullptr ? " (none found)" : " (" + root + ")") + "; empty: the directory of that name there.";
+            hdrNote->AutoSize = true; hdrNote->Tag = "muted"; hdrNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, hdrNote);
+            Section("Visual Studio (settings.json vcvars)");
+            vcvars = gcnew PathField(false, true); vcvars->Value = env->Vcvars; vcvars->Filter = "Batch files (*.bat)|*.bat|All files (*.*)|*.*"; Row("vcvars64.bat", vcvars);
+            Label^ vsNote = gcnew Label();
+            vsNote->Text = "Names the Visual Studio whose cl, ml64, link.exe and clang are used (its folder is taken; the batch file is never run). Empty: the newest installation vswhere finds.";
+            vsNote->AutoSize = true; vsNote->Tag = "muted"; vsNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, vsNote);
+            Section("TI's C6000 compiler (settings.json ti / tilib)");
+            ti = gcnew PathField(true, true); ti->Value = env->TiCompilerDir; Row("TI compiler directory", ti);
+            tilib = gcnew PathField(true, true); tilib->Value = env->TiLibDir; Row("TI library directory", tilib);
+            Label^ tiNote = gcnew Label();
+            tiNote->Text = "The directory with bin\\lnk6x (ti-cgt-c6000_x.y.z). Named, a TMS320C6747 build links against TI's runtime (rts6740_elf_eh.lib where it is, in lib or in the "
+                           "library directory) instead of RTS6x, and TI's lnk6x stands in for a linker that is not there. Empty: RTS6x beside GRIDE; the newest CCS compiler found under " +
+                           String::Join(", ", ToolchainDefinitions::Current->Ccs->TiRoots) + " when RTS6x is not there" + (RideToolchain::DetectedTiDir() == nullptr ? " (none found now)" : " (found: " + RideToolchain::DetectedTiDir() + ")") + ".";
+            tiNote->AutoSize = true; tiNote->Tag = "muted"; tiNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, tiNote);
+            Section("Shared (settings.json includes / libraries)");
+            includes = Lines(env->SharedIncludes, 60); Row("Header directories every compile searches after the project's own (one per line)", includes);
+            libraries = Lines(env->SharedLibraries, 60); Row("Libraries every host link takes (one per line)", libraries);
+            Section("Defaults");
+            compiler = gcnew ComboBox();
+            compiler->DropDownStyle = ComboBoxStyle::DropDownList;
+            compiler->Items->Add("auto");
+            for each (RideTool t in RideToolchain::Compilers()) compiler->Items->Add(RideToolchain::Word(t));
+            compiler->SelectedItem = env->DefaultCompiler;
+            if (compiler->SelectedIndex < 0) compiler->SelectedIndex = 0;
+            Row("Compiler a new project starts with", compiler);
+            c6747 = gcnew ComboBox();
+            c6747->DropDownStyle = ComboBoxStyle::DropDownList;
+            c6747->Items->AddRange(gcnew array<Object^>{ "auto", "sim6747", "vm6747" });
+            c6747->SelectedItem = env->C6747Debugger;
+            if (c6747->SelectedIndex < 0) c6747->SelectedIndex = 0;
+            Row("TMS320C6747 debugger", c6747);
+            Label^ dbgNote = gcnew Label();
+            dbgNote->Text = "auto: sim6747 on this build's .out when it has a line table, else vm6747 on the assembly (RIDE). RIDE_DEBUG_SIM6747=1 / RIDE_DEBUG_VM6747=1 in the environment at start win.";
+            dbgNote->AutoSize = true; dbgNote->Tag = "muted"; dbgNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, dbgNote);
+            include->UpdateStatus(); lib->UpdateStatus(); vcvars->UpdateStatus(); ti->UpdateStatus(); tilib->UpdateStatus();
+        }
+        virtual void Commit() override
+        {
+            env->RideIncludeDir = include->Value;
+            env->RideLibDir = lib->Value;
+            env->Vcvars = vcvars->Value;
+            env->TiCompilerDir = ti->Value;
+            env->TiLibDir = tilib->Value;
+            env->SharedIncludes = FromLines(includes);
+            env->SharedLibraries = FromLines(libraries);
+            env->DefaultCompiler = safe_cast<String^>(compiler->SelectedItem);
+            env->C6747Debugger = safe_cast<String^>(c6747->SelectedItem);
+        }
+    private:
+        EnvironmentSettings^ env;
+        PathField^ include; PathField^ lib; PathField^ vcvars; PathField^ ti; PathField^ tilib;
+        TextBox^ includes; TextBox^ libraries;
+        ComboBox^ compiler; ComboBox^ c6747;
+    };
+
+    // ---- Projects > Compiler Options: RIDE's installation-level store (settings.json options) -----------
+    public ref class CompilerOptionsPage : public OptionsPage
+    {
+    public:
+        CompilerOptionsPage(GrideSettings^ s)
+        {
+            Label^ n = gcnew Label();
+            n->Text = "RIDE's Compiler Options as the installation sets them: what a new project starts with. A project's own are under Project > Compiler Options; a build takes the project's.";
+            n->AutoSize = true; n->Tag = "muted"; n->MaximumSize = SD::Size(700, 0);
+            grid->ColumnStyles[0]->Width = 0;
+            Row(String::Empty, n);
+            TargetDefinition^ host = ToolchainDefinitions::Current->HostTarget();
+            Target t = host == nullptr ? Target::Windows : TargetInfo::Parse(host->IdeTarget);
+            editor = gcnew CompilerOptionsEditor(s->CompilerOptions, "Debug", t, false);
+            Controls->Add(editor);
+            editor->BringToFront();
+        }
+        virtual void Commit() override { editor->Commit(); }
+    private:
+        CompilerOptionsEditor^ editor;
+    };
+
+    // ---- Toolchains > Definitions (toolchain.json) -----------------------------------------
+    // Edits the user's overrides of the shipped toolchain file: a tool's program name, aliases,
+    // words, lookup, flags and operations, a library's files and directories. Only what differs
+    // from the shipped file is written to the user's file; Restore removes the tool's entry.
+    public ref class ToolchainDefinitionsPage : public OptionsPage
+    {
+    public:
+        ToolchainDefinitionsPage(GrideSettings^ s)
+        {
+            work = s;
+            defs = ToolchainDefinitions::Current;
+            toolView = gcnew Dictionary<String^, JsonValue^>();
+            libView = gcnew Dictionary<String^, JsonValue^>();
+            touched = gcnew HashSet<String^>();
+            currentTool = nullptr; currentLib = nullptr;
+            Build();
+        }
+
+        virtual void Commit() override
+        {
+            CaptureTool(); CaptureLib();
+            if (touched->Count == 0) return;
+            for each (String^ key in touched)
+            {
+                String^ section = key->Substring(0, key->IndexOf(L':'));
+                String^ id = key->Substring(key->IndexOf(L':') + 1);
+                JsonValue^ shipped = defs->ShippedEntry(section, id);
+                JsonValue^ view = section == "tools" ? toolView[id] : libView[id];
+                JsonValue^ ov = defs->IsOverridden(section, id) ? ToolchainDefinitions::Clone(defs->UserEntry(section, id)) : JsonValue::MakeObject();
+                if (section == "tools") ApplyToolDiff(ov, view, shipped); else ApplyLibDiff(ov, view, shipped);
+                defs->SetUserEntry(section, id, ov);
+            }
+            String^ err;
+            if (!defs->SaveUser(err))
+            {
+                MessageBox::Show(this, "The toolchain overrides could not be saved:\n" + err, "GRIDE", MessageBoxButtons::OK, MessageBoxIcon::Warning);
+                return;
+            }
+            // the settings' defaults follow the new definitions; what the user set stays
+            Dictionary<Target, ToolchainSettings^>^ before = gcnew Dictionary<Target, ToolchainSettings^>();
+            for each (Target t in TargetInfo::All()) before[t] = gcnew ToolchainSettings(t);
+            ToolchainDefinitions::Reload();
+            for each (ToolchainSettings^ tc in work->Toolchains) tc->Rebase(before[tc->TargetKind]);
+            defs = ToolchainDefinitions::Current;
+            touched->Clear();
+        }
+
+    private:
+        GrideSettings^ work;
+        ToolchainDefinitions^ defs;
+        Dictionary<String^, JsonValue^>^ toolView;      // what the page shows per tool (the merged entry, edited)
+        Dictionary<String^, JsonValue^>^ libView;
+        HashSet<String^>^ touched;                      // "tools:id" / "libraries:id"
+        String^ currentTool; String^ currentLib;
+        ComboBox^ toolBox; Label^ toolDesc; Label^ toolState;
+        TextBox^ exe; TextBox^ aliases; TextBox^ words; TextBox^ envVar; TextBox^ installDir; CheckBox^ onPath; CheckBox^ vcvars;
+        TextBox^ encoding; TextBox^ diagnostics; TextBox^ archFlag; TextBox^ includeFlag; TextBox^ defineFlag; TextBox^ installIncludes;
+        TextBox^ debugFlags; TextBox^ releaseFlags; TextBox^ codeviewFlag; TextBox^ namedAsmFlag; TextBox^ versionArgs;
+        DataGridView^ ops;
+        ComboBox^ libBox; Label^ libDesc; Label^ libState;
+        TextBox^ libDir; TextBox^ libEnv; TextBox^ libMarker; TextBox^ libDebug; TextBox^ libRelease; TextBox^ libAliases; TextBox^ libAsmDebug; TextBox^ libAsmRelease; TextBox^ libWhen;
+
+        static String^ Joined(JsonValue^ o, String^ key) { return o == nullptr ? String::Empty : String::Join("; ", o->GetStringList(key)); }
+        static List<String^>^ Split(String^ s)
+        {
+            List<String^>^ r = gcnew List<String^>();
+            for each (String^ x in s->Split(gcnew array<wchar_t>{ L';' }, StringSplitOptions::RemoveEmptyEntries)) if (x->Trim()->Length > 0) r->Add(x->Trim());
+            return r;
+        }
+        static String^ Nested(JsonValue^ o, String^ key, String^ sub)
+        {
+            JsonValue^ n = o == nullptr ? nullptr : o->GetObject(key);
+            return n == nullptr ? String::Empty : n->GetString(sub, String::Empty);
+        }
+        static bool NestedBool(JsonValue^ o, String^ key, String^ sub, bool def)
+        {
+            JsonValue^ n = o == nullptr ? nullptr : o->GetObject(key);
+            return n == nullptr ? def : n->GetBool(sub, def);
+        }
+        static JsonValue^ Sub(JsonValue^ o, String^ key)
+        {
+            JsonValue^ n = o->GetObject(key);
+            if (n == nullptr) { n = JsonValue::MakeObject(); o->SetValue(key, n); }
+            return n;
+        }
+        static bool Same(JsonValue^ a, JsonValue^ b)
+        {
+            return String::Equals(a == nullptr ? "null" : JsonWriter::Write(a), b == nullptr ? "null" : JsonWriter::Write(b));
+        }
+        // a scalar or list at [key] (or [key][sub]): set in the override when it differs from the shipped value, removed when not
+        static void DiffAt(JsonValue^ ov, JsonValue^ view, JsonValue^ shipped, String^ key, String^ sub)
+        {
+            JsonValue^ v = view == nullptr ? nullptr : (sub == nullptr ? view->Get(key) : (view->GetObject(key) == nullptr ? nullptr : view->GetObject(key)->Get(sub)));
+            JsonValue^ s = shipped == nullptr ? nullptr : (sub == nullptr ? shipped->Get(key) : (shipped->GetObject(key) == nullptr ? nullptr : shipped->GetObject(key)->Get(sub)));
+            bool differs = !Same(v, s);
+            if (sub == nullptr)
+            {
+                if (differs) ov->SetValue(key, ToolchainDefinitions::Clone(v)); else ov->Remove(key);
+                return;
+            }
+            JsonValue^ n = ov->GetObject(key);
+            if (differs) { if (n == nullptr) { n = JsonValue::MakeObject(); ov->SetValue(key, n); } n->SetValue(sub, ToolchainDefinitions::Clone(v)); }
+            else if (n != nullptr) { n->Remove(sub); if (n->Count == 0) ov->Remove(key); }
+        }
+        static void ApplyToolDiff(JsonValue^ ov, JsonValue^ view, JsonValue^ shipped)
+        {
+            for each (String^ k in gcnew array<String^>{ "exe", "aliases", "words", "outputEncoding", "diagnostics", "archFlag", "includeFlag", "defineFlag", "installIncludeDirs" })
+                DiffAt(ov, view, shipped, k, nullptr);
+            for each (String^ k in gcnew array<String^>{ "env", "installDir", "path", "vcvars" }) DiffAt(ov, view, shipped, "lookup", k);
+            for each (String^ k in gcnew array<String^>{ "Debug", "Release" }) DiffAt(ov, view, shipped, "configFlags", k);
+            for each (String^ k in gcnew array<String^>{ "codeview", "assemblerNamed" }) DiffAt(ov, view, shipped, "asmSyntaxFlags", k);
+            DiffAt(ov, view, shipped, "version", "args");
+            JsonValue^ vops = view->GetObject("operations");
+            JsonValue^ sops = shipped == nullptr ? nullptr : shipped->GetObject("operations");
+            if (vops != nullptr)
+                for each (String^ op in vops->KeyNames)
+                {
+                    JsonValue^ vo = vops->GetObject(op);
+                    JsonValue^ so = sops == nullptr ? nullptr : sops->GetObject(op);
+                    if (vo == nullptr) continue;
+                    JsonValue^ oops = ov->GetObject("operations");
+                    if (!Same(vo->Get("args"), so == nullptr ? nullptr : so->Get("args")))
+                    {
+                        if (oops == nullptr) { oops = JsonValue::MakeObject(); ov->SetValue("operations", oops); }
+                        JsonValue^ oo = oops->GetObject(op);
+                        if (oo == nullptr) { oo = JsonValue::MakeObject(); oops->SetValue(op, oo); }
+                        oo->SetString("args", vo->GetString("args", String::Empty));
+                    }
+                    else if (oops != nullptr && oops->GetObject(op) != nullptr)
+                    {
+                        oops->GetObject(op)->Remove("args");
+                        if (oops->GetObject(op)->Count == 0) oops->Remove(op);
+                        if (oops->Count == 0) ov->Remove("operations");
+                    }
+                }
+        }
+        static void ApplyLibDiff(JsonValue^ ov, JsonValue^ view, JsonValue^ shipped)
+        {
+            for each (String^ k in gcnew array<String^>{ "directory", "directoryEnv", "marker", "aliases", "when" }) DiffAt(ov, view, shipped, k, nullptr);
+            for each (String^ k in gcnew array<String^>{ "Debug", "Release" })
+            {
+                DiffAt(ov, view, shipped, "files", k);
+                DiffAt(ov, view, shipped, "assemblyDirectories", k);
+            }
+        }
+
+        JsonValue^ ViewOf(String^ section, String^ id)
+        {
+            Dictionary<String^, JsonValue^>^ map = section == "tools" ? toolView : libView;
+            JsonValue^ v;
+            if (!map->TryGetValue(id, v))
+            {
+                JsonValue^ m = defs->MergedEntry(section, id);
+                v = m == nullptr ? JsonValue::MakeObject() : ToolchainDefinitions::Clone(m);
+                map[id] = v;
+            }
+            return v;
+        }
+
+        void Build()
+        {
+            Section("toolchain.json");
+            Label^ files = gcnew Label();
+            files->Text = "Shipped: " + (defs->ShippedFound ? defs->ShippedFile : "not found (" + defs->ShippedFile + ")") + "\r\nYour overrides: " + defs->UserFile +
+                          (defs->UserJson != nullptr ? "" : " (none yet)") +
+                          (defs->Problems->Count > 0 ? "\r\n" + String::Join("\r\n", defs->Problems) : "\r\nThe file reads clean.");
+            files->Tag = "muted"; files->AutoSize = true; files->MaximumSize = SD::Size(560, 0);
+            Row(String::Empty, files);
+
+            Section("Tools");
+            toolBox = gcnew ComboBox();
+            toolBox->DropDownStyle = ComboBoxStyle::DropDownList;
+            for each (ToolDefinition^ t in defs->Tools) toolBox->Items->Add(t->Id + "  -  " + t->Name + "  (" + t->Role + ")");
+            toolBox->SelectedIndexChanged += gcnew EventHandler(this, &ToolchainDefinitionsPage::OnToolChanged);
+            Row("Tool", toolBox);
+            toolDesc = gcnew Label(); toolDesc->Tag = "muted"; toolDesc->AutoSize = true; toolDesc->MaximumSize = SD::Size(560, 0);
+            Row(String::Empty, toolDesc);
+            toolState = gcnew Label(); toolState->AutoSize = true; toolState->Tag = "muted";
+            Row("Source", toolState);
+            exe = Mono(String::Empty); Row("Program (exe)", exe);
+            aliases = Mono(String::Empty); Row("Aliases (;)", aliases);
+            words = Mono(String::Empty); Row("Project words (;)", words);
+            envVar = Mono(String::Empty); Row("Environment variable", envVar);
+            installDir = Mono(String::Empty); Row("Installation sub-folder", installDir);
+            onPath = Check("Also looked for on PATH", true); Row(String::Empty, onPath);
+            vcvars = Check("Reached through vcvars64.bat (Visual Studio's)", false); Row(String::Empty, vcvars);
+            versionArgs = Mono(String::Empty); Row("Version query", versionArgs);
+            encoding = Mono(String::Empty); Row("Output encoding", encoding);
+            diagnostics = Mono(String::Empty); Row("Diagnostics shape", diagnostics);
+            archFlag = Mono(String::Empty); Row("Target flag", archFlag);
+            includeFlag = Mono(String::Empty); Row("Include flag", includeFlag);
+            defineFlag = Mono(String::Empty); Row("Define flag", defineFlag);
+            installIncludes = Mono(String::Empty); Row("Installation includes (;)", installIncludes);
+            debugFlags = Mono(String::Empty); Row("Debug flags", debugFlags);
+            releaseFlags = Mono(String::Empty); Row("Release flags", releaseFlags);
+            codeviewFlag = Mono(String::Empty); Row("CodeView syntax flag", codeviewFlag);
+            namedAsmFlag = Mono(String::Empty); Row("Named-assembler syntax flag", namedAsmFlag);
+            ops = gcnew DataGridView();
+            ops->Height = 150;
+            ops->AllowUserToAddRows = false; ops->AllowUserToDeleteRows = false; ops->RowHeadersVisible = false;
+            ops->AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode::Fill;
+            DataGridViewTextBoxColumn^ c1 = gcnew DataGridViewTextBoxColumn(); c1->HeaderText = "Operation"; c1->ReadOnly = true; c1->FillWeight = 22;
+            DataGridViewTextBoxColumn^ c2 = gcnew DataGridViewTextBoxColumn(); c2->HeaderText = "Arguments"; c2->FillWeight = 50;
+            DataGridViewTextBoxColumn^ c3 = gcnew DataGridViewTextBoxColumn(); c3->HeaderText = "What it does"; c3->ReadOnly = true; c3->FillWeight = 28;
+            ops->Columns->Add(c1); ops->Columns->Add(c2); ops->Columns->Add(c3);
+            Row("Operations", ops);
+            Label^ ph = gcnew Label();
+            ph->Text = "Placeholders: " + String::Join(" ", defs->Placeholders->Keys) + " - each is explained in toolchain.json and TOOLCHAIN-FORMAT.md.";
+            ph->Tag = "muted"; ph->AutoSize = true; ph->MaximumSize = SD::Size(560, 0);
+            Row(String::Empty, ph);
+            Button^ restoreTool = gcnew Button();
+            restoreTool->Text = "Restore shipped defaults (this tool)";
+            restoreTool->Click += gcnew EventHandler(this, &ToolchainDefinitionsPage::OnRestoreTool);
+            Row(String::Empty, restoreTool);
+
+            Section("Libraries");
+            libBox = gcnew ComboBox();
+            libBox->DropDownStyle = ComboBoxStyle::DropDownList;
+            for each (LibraryDefinition^ l in defs->Libraries) libBox->Items->Add(l->Id + "  -  " + l->Name + "  (" + l->Kind + ", " + l->Target + ")");
+            libBox->SelectedIndexChanged += gcnew EventHandler(this, &ToolchainDefinitionsPage::OnLibChanged);
+            Row("Library", libBox);
+            libDesc = gcnew Label(); libDesc->Tag = "muted"; libDesc->AutoSize = true; libDesc->MaximumSize = SD::Size(560, 0);
+            Row(String::Empty, libDesc);
+            libState = gcnew Label(); libState->AutoSize = true; libState->Tag = "muted";
+            Row("Source", libState);
+            libDir = Mono(String::Empty); Row("Directory", libDir);
+            libEnv = Mono(String::Empty); Row("Directory variable", libEnv);
+            libMarker = Mono(String::Empty); Row("Marker file", libMarker);
+            libDebug = Mono(String::Empty); Row("Debug file(s)", libDebug);
+            libRelease = Mono(String::Empty); Row("Release file(s)", libRelease);
+            libAliases = Mono(String::Empty); Row("Project aliases (;)", libAliases);
+            libAsmDebug = Mono(String::Empty); Row("Debug assembly directory", libAsmDebug);
+            libAsmRelease = Mono(String::Empty); Row("Release assembly directory", libAsmRelease);
+            libWhen = Mono(String::Empty); Row("Linked when", libWhen);
+            Button^ restoreLib = gcnew Button();
+            restoreLib->Text = "Restore shipped defaults (this library)";
+            restoreLib->Click += gcnew EventHandler(this, &ToolchainDefinitionsPage::OnRestoreLib);
+            Row(String::Empty, restoreLib);
+
+            if (toolBox->Items->Count > 0) toolBox->SelectedIndex = 0;
+            if (libBox->Items->Count > 0) libBox->SelectedIndex = 0;
+            ThemeManager::Apply(this);
+        }
+
+        String^ SelectedId(ComboBox^ box)
+        {
+            String^ s = dynamic_cast<String^>(box->SelectedItem);
+            if (s == nullptr) return nullptr;
+            int at = s->IndexOf("  -  ");
+            return at < 0 ? s : s->Substring(0, at);
+        }
+
+        void OnToolChanged(Object^ sender, EventArgs^ e)
+        {
+            CaptureTool();
+            currentTool = SelectedId(toolBox);
+            ShowTool();
+        }
+        void OnLibChanged(Object^ sender, EventArgs^ e)
+        {
+            CaptureLib();
+            currentLib = SelectedId(libBox);
+            ShowLib();
+        }
+
+        void ShowTool()
+        {
+            if (currentTool == nullptr) return;
+            JsonValue^ v = ViewOf("tools", currentTool);
+            toolDesc->Text = v->GetString("description", String::Empty);
+            toolState->Text = touched->Contains("tools:" + currentTool) ? "changed here (not saved yet)" : defs->IsOverridden("tools", currentTool) ? "your file overrides the shipped entry" : "as shipped";
+            exe->Text = v->GetString("exe", String::Empty);
+            aliases->Text = Joined(v, "aliases");
+            words->Text = Joined(v, "words");
+            envVar->Text = Nested(v, "lookup", "env");
+            installDir->Text = Nested(v, "lookup", "installDir");
+            onPath->Checked = NestedBool(v, "lookup", "path", true);
+            vcvars->Checked = NestedBool(v, "lookup", "vcvars", false);
+            versionArgs->Text = Nested(v, "version", "args");
+            encoding->Text = v->GetString("outputEncoding", String::Empty);
+            diagnostics->Text = v->GetString("diagnostics", String::Empty);
+            archFlag->Text = v->GetString("archFlag", String::Empty);
+            includeFlag->Text = v->GetString("includeFlag", String::Empty);
+            defineFlag->Text = v->GetString("defineFlag", String::Empty);
+            installIncludes->Text = Joined(v, "installIncludeDirs");
+            debugFlags->Text = Nested(v, "configFlags", "Debug");
+            releaseFlags->Text = Nested(v, "configFlags", "Release");
+            codeviewFlag->Text = Nested(v, "asmSyntaxFlags", "codeview");
+            namedAsmFlag->Text = Nested(v, "asmSyntaxFlags", "assemblerNamed");
+            ops->Rows->Clear();
+            JsonValue^ o = v->GetObject("operations");
+            if (o != nullptr)
+                for each (String^ op in o->KeyNames)
+                {
+                    JsonValue^ od = o->GetObject(op);
+                    if (od == nullptr) continue;
+                    ops->Rows->Add(op, od->GetString("args", String::Empty), od->GetString("description", String::Empty));
+                }
+        }
+
+        // the fields back into the view; a change marks the tool
+        void CaptureTool()
+        {
+            if (currentTool == nullptr) return;
+            JsonValue^ v = ViewOf("tools", currentTool);
+            String^ before = JsonWriter::Write(v);
+            v->SetString("exe", exe->Text->Trim());
+            v->SetList("aliases", Split(aliases->Text));
+            v->SetList("words", Split(words->Text));
+            JsonValue^ l = Sub(v, "lookup");
+            l->SetString("env", envVar->Text->Trim()); l->SetString("installDir", installDir->Text->Trim());
+            l->SetBool("path", onPath->Checked); l->SetBool("vcvars", vcvars->Checked);
+            Sub(v, "version")->SetString("args", versionArgs->Text->Trim());
+            v->SetString("outputEncoding", encoding->Text->Trim());
+            v->SetString("diagnostics", diagnostics->Text->Trim());
+            v->SetString("archFlag", archFlag->Text->Trim());
+            v->SetString("includeFlag", includeFlag->Text->Trim());
+            v->SetString("defineFlag", defineFlag->Text->Trim());
+            v->SetList("installIncludeDirs", Split(installIncludes->Text));
+            JsonValue^ cf = Sub(v, "configFlags");
+            cf->SetString("Debug", debugFlags->Text->Trim()); cf->SetString("Release", releaseFlags->Text->Trim());
+            JsonValue^ af = Sub(v, "asmSyntaxFlags");
+            af->SetString("codeview", codeviewFlag->Text->Trim()); af->SetString("assemblerNamed", namedAsmFlag->Text->Trim());
+            ops->EndEdit();
+            JsonValue^ o = Sub(v, "operations");
+            for each (DataGridViewRow^ row in ops->Rows)
+            {
+                String^ op = dynamic_cast<String^>(row->Cells[0]->Value);
+                String^ args = dynamic_cast<String^>(row->Cells[1]->Value);
+                if (op == nullptr) continue;
+                Sub(o, op)->SetString("args", args == nullptr ? String::Empty : args->Trim());
+            }
+            if (!String::Equals(before, JsonWriter::Write(v))) touched->Add("tools:" + currentTool);
+        }
+
+        void ShowLib()
+        {
+            if (currentLib == nullptr) return;
+            JsonValue^ v = ViewOf("libraries", currentLib);
+            libDesc->Text = v->GetString("description", String::Empty);
+            libState->Text = touched->Contains("libraries:" + currentLib) ? "changed here (not saved yet)" : defs->IsOverridden("libraries", currentLib) ? "your file overrides the shipped entry" : "as shipped";
+            libDir->Text = v->GetString("directory", String::Empty);
+            libEnv->Text = v->GetString("directoryEnv", String::Empty);
+            libMarker->Text = v->GetString("marker", String::Empty);
+            libDebug->Text = Nested(v, "files", "Debug");
+            libRelease->Text = Nested(v, "files", "Release");
+            libAliases->Text = Joined(v, "aliases");
+            libAsmDebug->Text = Nested(v, "assemblyDirectories", "Debug");
+            libAsmRelease->Text = Nested(v, "assemblyDirectories", "Release");
+            libWhen->Text = v->GetString("when", String::Empty);
+        }
+
+        void CaptureLib()
+        {
+            if (currentLib == nullptr) return;
+            JsonValue^ v = ViewOf("libraries", currentLib);
+            String^ before = JsonWriter::Write(v);
+            v->SetString("directory", libDir->Text->Trim());
+            v->SetString("directoryEnv", libEnv->Text->Trim());
+            v->SetString("marker", libMarker->Text->Trim());
+            JsonValue^ f = Sub(v, "files");
+            f->SetString("Debug", libDebug->Text->Trim()); f->SetString("Release", libRelease->Text->Trim());
+            v->SetList("aliases", Split(libAliases->Text));
+            if (libAsmDebug->Text->Trim()->Length > 0 || libAsmRelease->Text->Trim()->Length > 0 || v->Has("assemblyDirectories"))
+            {
+                JsonValue^ a = Sub(v, "assemblyDirectories");
+                a->SetString("Debug", libAsmDebug->Text->Trim()); a->SetString("Release", libAsmRelease->Text->Trim());
+            }
+            v->SetString("when", libWhen->Text->Trim());
+            if (!String::Equals(before, JsonWriter::Write(v))) touched->Add("libraries:" + currentLib);
+        }
+
+        void OnRestoreTool(Object^ sender, EventArgs^ e)
+        {
+            if (currentTool == nullptr) return;
+            JsonValue^ shipped = defs->ShippedEntry("tools", currentTool);
+            toolView[currentTool] = shipped == nullptr ? JsonValue::MakeObject() : ToolchainDefinitions::Clone(shipped);
+            touched->Add("tools:" + currentTool);
+            ShowTool();
+            toolState->Text = "shipped defaults (saved with OK)";
+        }
+        void OnRestoreLib(Object^ sender, EventArgs^ e)
+        {
+            if (currentLib == nullptr) return;
+            JsonValue^ shipped = defs->ShippedEntry("libraries", currentLib);
+            libView[currentLib] = shipped == nullptr ? JsonValue::MakeObject() : ToolchainDefinitions::Clone(shipped);
+            touched->Add("libraries:" + currentLib);
+            ShowLib();
+            libState->Text = "shipped defaults (saved with OK)";
+        }
     };
 
     // =========================================================================
@@ -617,11 +1228,15 @@ namespace Gride { namespace UI {
             envNode->Nodes->Add("Keyboard")->Name = "Keyboard";
             TreeNode^ tcNode = tree->Nodes->Add("Toolchains");
             for each (Target t in TargetInfo::All()) tcNode->Nodes->Add(TargetInfo::DisplayName(t))->Name = "TC:" + TargetInfo::Name(t);
+            tcNode->Nodes->Add("Definitions (toolchain.json)")->Name = "TCDEF";
             TreeNode^ lgNode = tree->Nodes->Add("Languages");
             for each (LanguageSettings^ l in work->Languages)
                 if (l->Lang != Language::LinkerCmd) lgNode->Nodes->Add(l->Name)->Name = "LG:" + l->Name;
             tree->Nodes->Add("Converters")->Nodes->Add("C <-> Shalimar")->Name = "Converters";
-            tree->Nodes->Add("Projects")->Nodes->Add("Defaults and Locations")->Name = "Projects";
+            TreeNode^ prNode = tree->Nodes->Add("Projects");
+            prNode->Nodes->Add("Defaults and Locations")->Name = "Projects";
+            prNode->Nodes->Add("RIDE Paths")->Name = "RidePaths";
+            prNode->Nodes->Add("Compiler Options")->Name = "CompilerOptions";
             tree->ExpandAll();
             tree->AfterSelect += gcnew TreeViewEventHandler(this, &OptionsDialog::OnSelect);
 
@@ -655,7 +1270,10 @@ namespace Gride { namespace UI {
     protected:
         virtual bool OnAccept() override
         {
-            for each (OptionsPage^ p in pages->Values) p->Commit();
+            // the definitions page last: its reload rebases the toolchain pages' untouched values
+            for each (KeyValuePair<String^, OptionsPage^> kv in pages) if (kv.Key != "TCDEF") kv.Value->Commit();
+            OptionsPage^ defs;
+            if (pages->TryGetValue("TCDEF", defs)) defs->Commit();
             return true;
         }
 
@@ -674,6 +1292,9 @@ namespace Gride { namespace UI {
             if (key == "Keyboard") return gcnew KeyboardPage(work, registry);
             if (key == "Converters") return gcnew ConvertersPage(work->Converter);
             if (key == "Projects") return gcnew ProjectsPage(work->Env);
+            if (key == "RidePaths") return gcnew RidePathsPage(work);
+            if (key == "CompilerOptions") return gcnew CompilerOptionsPage(work);
+            if (key == "TCDEF") return gcnew ToolchainDefinitionsPage(work);
             if (key->StartsWith("TC:")) return gcnew ToolchainPage(work->Toolchain(TargetInfo::Parse(key->Substring(3))));
             if (key->StartsWith("LG:")) return gcnew LanguagePage(work->LanguageOf(LanguageInfo::Parse(key->Substring(3))));
             return nullptr;

@@ -32,7 +32,7 @@ namespace Gride { namespace UI {
             if (ext == ".grws")
             {
                 if (!CloseWorkspace()) return;
-                SetWorkspace(Workspace::Load(path, settings->Env->CcsToolRoot));
+                SetWorkspace(Workspace::Load(path, settings->Env->CcsCompilerRoot()));
                 AddRecentWorkspace(path);
             }
             else if (ext == ".pro")
@@ -44,8 +44,21 @@ namespace Gride { namespace UI {
             else if (CcsProjectReader::IsCcsProject(path) && (Directory::Exists(path) || ext == ".project" || ext == ".ccsproject" || ext == ".cproject"))
             {
                 if (!CloseWorkspace()) return;
-                SetWorkspace(Workspace::ForSingleProject(CcsProjectReader::Read(path, settings->Env->CcsToolRoot)));
+                SetWorkspace(Workspace::ForSingleProject(CcsProjectReader::Read(path, settings->Env->CcsCompilerRoot())));
                 AddRecentWorkspace(CcsProjectReader::ResolveFolder(path));
+            }
+            // a Visual Studio solution is a workspace of read-only projects; a project alone is one of them
+            else if (VsProjectReader::IsSolution(path))
+            {
+                if (!CloseWorkspace()) return;
+                SetWorkspace(Workspace::ForSolution(VsSolution::Read(path)));
+                AddRecentWorkspace(Path::GetFullPath(path));
+            }
+            else if (VsProjectReader::IsVsProject(path))
+            {
+                if (!CloseWorkspace()) return;
+                SetWorkspace(Workspace::ForSingleProject(VsProjectReader::Read(path, nullptr)));
+                AddRecentWorkspace(Path::GetFullPath(path));
             }
             else if (File::Exists(path)) OpenDocument(path, 0);
         }
@@ -77,6 +90,7 @@ namespace Gride { namespace UI {
         if (w != nullptr) filesPane->SetRoot(w->Directory);
         else filesPane->SetRoot(nullptr);
         RefreshProjectViews();
+        ReportCcsProjects();
         UpdateCombos();
         UpdateStatus();
         RefreshBreakpointsPane();
@@ -103,7 +117,7 @@ namespace Gride { namespace UI {
         try
         {
             workspace->SaveProjects();
-            if (!workspace->IsTemporary) workspace->Save();
+            if (!workspace->IsTemporary && workspace->HasChanges()) workspace->Save();
         }
         catch (Exception^ ex) { output->Append("Tools", "Could not save workspace: " + ex->Message); }
     }
@@ -166,11 +180,25 @@ namespace Gride { namespace UI {
         case NodeKind::Workspace: properties->SetObject(gcnew WorkspaceProperties(workspace)); break;
         case NodeKind::Project:   properties->SetObject(gcnew ProjectProperties(n->Project)); break;
         case NodeKind::File:      properties->SetObject(gcnew FileProperties(n->FilePath, n->Project, settings)); break;
-        default:                  properties->SetObject(gcnew ProjectProperties(n->Project)); break;
+        case NodeKind::SolutionItem: properties->SetObject(gcnew FileProperties(n->FilePath, nullptr, settings)); break;
+        case NodeKind::SolutionFolder: properties->SetObject(gcnew WorkspaceProperties(workspace)); break;
+        default:                  if (n->Project != nullptr) properties->SetObject(gcnew ProjectProperties(n->Project)); break;
         }
     }
 
+    void MainForm::OnExplorerRemove(Object^ sender, EventArgs^ e) { commands->Execute("Project.Remove"); }
+
     void MainForm::OnNavigate(String^ file, int line) { OpenDocument(file, line); }
+
+    // a place a tool named (the Output and Error List panes): a file that is not there is no reason
+    // for a message box on a double-click, the status bar says so
+    void MainForm::OnNavigateTo(String^ file, int line, int column)
+    {
+        if (String::IsNullOrEmpty(file)) return;
+        if (!File::Exists(file)) { SetStatus("Not found: " + file); return; }
+        EditorDocument^ d = OpenDocument(file, 0);
+        if (d != nullptr && line > 0) d->Editor->GoTo(line, column);
+    }
 
     void MainForm::OnStartPageCommand(String^ id) { commands->Execute(id); }
     void MainForm::OnStartPageRecent(String^ path) { OpenPath(path); }
@@ -223,6 +251,11 @@ namespace Gride { namespace UI {
 
         GrideProject^ p = GrideProject::CreateNew(dlg->ProjectLocation, dlg->ProjectName, dlg->Lang, dlg->TemplateName, dlg->Targets);
         ProjectTemplates::Populate(p);
+        // RIDE's settings: the compiler a project starts with ("compiler") and the installation's Compiler Options ("options")
+        String^ word = settings->Env->DefaultCompiler;
+        if (!String::IsNullOrWhiteSpace(word) && String::Compare(word->Trim(), "auto", true) != 0 && RideToolchain::FromWord(word) != RideTool::Auto) p->Toolchain = word->Trim();
+        if (!settings->CompilerOptions->Empty) p->Options->CopyFrom(settings->CompilerOptions);
+        p->Save();
         settings->Env->DefaultProjectLocation = dlg->ProjectLocation;
 
         if (workspace == nullptr || dlg->NewWorkspace)
@@ -230,7 +263,7 @@ namespace Gride { namespace UI {
             if (!CloseWorkspace()) return;
             Workspace^ w = Workspace::ForSingleProject(p);
             if (p->Targets->Count > 0) w->ActiveTarget = p->Targets[0];
-            w->Save();                                  // NavFilter\NavFilter.grws
+            w->Save();                                  // <Name>\<Name>.grws
             SetWorkspace(w);
             AddRecentWorkspace(w->FilePath);
         }
@@ -273,7 +306,8 @@ namespace Gride { namespace UI {
     {
         OpenFileDialog^ dlg = gcnew OpenFileDialog();
         dlg->Title = "Open Project / Workspace";
-        dlg->Filter = "GRIDE workspace or project (*.grws;*.pro)|*.grws;*.pro|CCS 7.4 project (.project;.ccsproject)|.project;.ccsproject|All files (*.*)|*.*";
+        dlg->Filter = "GRIDE workspace or project (*.grws;*.pro)|*.grws;*.pro|CCS 7.4 project (.project;.ccsproject)|.project;.ccsproject|"
+                      "Visual Studio solution or project (*.sln;*.vcxproj;*.vcproj)|*.sln;*.vcxproj;*.vcproj|All files (*.*)|*.*";
         if (dlg->ShowDialog(this) == WF::DialogResult::OK) OpenPath(dlg->FileName);
     }
 
@@ -288,14 +322,153 @@ namespace Gride { namespace UI {
         for each (String^ f in dlg->FileNames) OpenDocument(f, 0);
     }
 
+    // RIDE's Messages lines for every CCS project of the workspace: the options mapped, RIDE's own
+    // instead, unsupported; linked files not here; what RIDE would refuse the project for
+    void MainForm::ReportCcsProjects()
+    {
+        if (workspace == nullptr) return;
+        ApplyCcsStates();
+        for each (GrideProject^ p in workspace->Projects)
+            if (p->IsImported)
+                for each (String^ line in p->ImportReportLines()) output->Append("Tools", line);
+    }
+
+    bool MainForm::HasImportedProject()
+    {
+        GrideProject^ p = ContextProject();
+        return p != nullptr && ((p->IsCcs && p->Ccs != nullptr && p->Ccs->Reading != nullptr) || (p->IsVs && p->Vs != nullptr && p->Vs->Reading != nullptr));
+    }
+
+    // RIDE's own state for a CCS project lives in the settings, never in CCS's files (settings.json
+    // "ccs.projects"): the program's arguments and emulateOnly, which the read-only .project cannot hold,
+    // and here the compiler words too. The workspace's entry keeps them as well; what the entry says
+    // wins, the settings fill in what it does not (a project opened alone, a workspace written before R13)
+    void MainForm::ApplyCcsStates()
+    {
+        if (workspace == nullptr) return;
+        for each (GrideProject^ p in workspace->Projects)
+        {
+            if (!p->IsCcs) continue;
+            JsonValue^ state = settings->CcsState(p->ProjectDir);
+            if (state == nullptr) continue;
+            if (state->Has("args") && p->ProgramArgs->Count == 0) p->ProgramArgs = state->GetStringList("args");
+            if (!p->EmulateOnly) p->EmulateOnly = state->GetBool("emulateOnly", false);
+            if (RideToolchain::FromWord(p->Toolchain) == RideTool::Auto) p->Toolchain = state->GetString("toolchain", p->Toolchain);
+            JsonValue^ ft = state->GetObject("folderToolchains");
+            if (ft != nullptr)
+                for each (String^ folder in ft->KeyNames)
+                {
+                    String^ w = ft->GetString(folder, String::Empty);
+                    if (!p->FolderToolchains->ContainsKey(folder) && RideToolchain::FromWord(w) != RideTool::Auto) p->FolderToolchains[folder] = w;
+                }
+        }
+    }
+
+    void MainForm::RememberCcsState(GrideProject^ p)
+    {
+        if (p == nullptr || !p->IsCcs) return;
+        JsonValue^ state = JsonValue::MakeObject();
+        if (p->ProgramArgs->Count > 0) state->SetList("args", p->ProgramArgs);
+        if (p->EmulateOnly) state->SetBool("emulateOnly", true);
+        if (RideToolchain::FromWord(p->Toolchain) != RideTool::Auto) state->SetString("toolchain", p->Toolchain->Trim());
+        if (p->FolderToolchains->Count > 0)
+        {
+            JsonValue^ ft = JsonValue::MakeObject();
+            for each (KeyValuePair<String^, String^> kv in p->FolderToolchains) ft->SetString(kv.Key, kv.Value);
+            state->SetValue("folderToolchains", ft);
+        }
+        settings->RememberCcsState(p->ProjectDir, state);
+        SettingsManager::Save(settings);
+    }
+
+    // an imported project's compiler words and arguments live in the workspace's entry: a workspace
+    // opened from a Visual Studio solution or project is saved beside it as <name>.grws the first time
+    // (GRIDE's own file - Visual Studio's are never written); one already there is not overwritten. A CCS
+    // project opened alone writes nothing into its folder: the settings keep its state (RememberCcsState)
+    void MainForm::KeepImportedState(GrideProject^ p)
+    {
+        if (workspace == nullptr || p == nullptr || !p->IsImported) return;
+        if (!workspace->IsTemporary) { SaveWorkspace(); return; }
+        if (p->IsCcs) return;
+        if (File::Exists(workspace->FilePath))
+        {
+            output->Append("Tools", "Workspace: " + p->Name + "'s compiler and arguments are kept for this session only - " + workspace->FilePath +
+                                    " is already there; open it to keep them");
+            return;
+        }
+        try
+        {
+            workspace->Save();
+            AddRecentWorkspace(workspace->FilePath);
+            output->Append("Tools", "Workspace: saved as " + workspace->FilePath + " - " + p->Name + "'s compiler and arguments are kept there, its Visual Studio files are never written");
+            UpdateTitle();
+        }
+        catch (Exception^ ex) { output->Append("Tools", "Could not save workspace: " + ex->Message); }
+    }
+
+    bool MainForm::CcsEnabled() { return settings->Env->CcsEnabled; }
+
+    bool MainForm::HasCcsProject()
+    {
+        GrideProject^ p = ContextProject();
+        return p != nullptr && p->IsCcs && p->Ccs != nullptr && p->Ccs->Reading != nullptr;
+    }
+
+    // Project > CCS Mapping: RIDE's read-only dialog - every mapped option of the configuration, then the lists
+    void MainForm::ProjectCcsMapping()
+    {
+        GrideProject^ p = ContextProject();
+        if (p == nullptr) return;
+        if (p->IsCcs && p->Ccs != nullptr && p->Ccs->Reading != nullptr)
+        {
+            TextDialog^ dlg = gcnew TextDialog("CCS mapping - " + p->Name, p->Ccs->Reading->MappingText(String::Compare(CurrentConfig(), "Debug", true) == 0));
+            dlg->ShowDialog(this);
+        }
+        else if (p->IsVs && p->Vs != nullptr && p->Vs->Reading != nullptr)
+        {
+            // what the Visual Studio files say, and what GRIDE builds with: the report lines first, then the reading
+            String^ text = String::Join("\n", p->Vs->ReportLines) + "\n\n" + p->Vs->Reading->MappingText();
+            TextDialog^ dlg = gcnew TextDialog("Visual Studio mapping - " + p->Name, text);
+            dlg->ShowDialog(this);
+        }
+    }
+
     void MainForm::FileOpenCcs()
     {
         FolderBrowserDialog^ dlg = gcnew FolderBrowserDialog();
-        dlg->Description = "Select the Code Composer Studio 7.4 project folder (the one holding .project / .ccsproject)";
+        dlg->Description = "Select the Code Composer Studio project folder (the one holding .project / .ccsproject), or a CCS workspace folder";
         if (dlg->ShowDialog(this) != WF::DialogResult::OK) return;
+        // a workspace is not a project (RIDE): its members are named, and can all come in
+        if (CcsProjectReader::IsCcsWorkspace(dlg->SelectedPath))
+        {
+            String^ error;
+            CcsWorkspace^ ws = CcsWorkspace::Read(dlg->SelectedPath, error);
+            List<String^>^ names = gcnew List<String^>();
+            if (ws != nullptr) for each (CcsWorkspaceMember^ m in ws->Projects) names->Add(m->Name);
+            String^ said = Path::GetFileName(dlg->SelectedPath->TrimEnd(L'\\')) + " is a CCS workspace, not a project - open one of its projects: " +
+                           (names->Count == 0 ? "(none registered)" : String::Join(", ", names));
+            output->Append("Tools", said);
+            for each (String^ n in ws == nullptr ? gcnew List<String^>() : ws->Notes) output->Append("Tools", "CCS workspace: " + n);
+            if (names->Count == 0 || MessageBox::Show(this, said + "\n\nAdd all of them to the current workspace?", "Import CCS Project",
+                                                      MessageBoxButtons::YesNo, MessageBoxIcon::Question) != WF::DialogResult::Yes) return;
+            if (workspace == nullptr) SetWorkspace(Workspace::ForSingleProject(CcsProjectReader::Read(ws->Projects[0]->Location, settings->Env->CcsCompilerRoot())));
+            for each (CcsWorkspaceMember^ m in ws->Projects)
+            {
+                try
+                {
+                    GrideProject^ p = CcsProjectReader::Read(m->Location, settings->Env->CcsCompilerRoot());
+                    if (workspace->AddProject(p)) output->Append("Tools", "Imported CCS project " + p->Name + " (read-only)");
+                }
+                catch (Exception^ ex) { output->Append("Tools", "CCS project " + m->Name + ": " + ex->Message); }
+            }
+            if (!workspace->IsTemporary) SaveWorkspace();
+            RefreshProjectViews();
+            ReportCcsProjects();
+            return;
+        }
         if (!CcsProjectReader::IsCcsProject(dlg->SelectedPath))
         {
-            MessageBox::Show(this, "No .project / .ccsproject found in\n" + dlg->SelectedPath, "Import CCS 7.4 Project",
+            MessageBox::Show(this, "No .project / .ccsproject found in\n" + dlg->SelectedPath, "Import CCS Project",
                              MessageBoxButtons::OK, MessageBoxIcon::Warning);
             return;
         }
@@ -305,11 +478,12 @@ namespace Gride { namespace UI {
         {
             try
             {
-                GrideProject^ p = CcsProjectReader::Read(dlg->SelectedPath, settings->Env->CcsToolRoot);
+                GrideProject^ p = CcsProjectReader::Read(dlg->SelectedPath, settings->Env->CcsCompilerRoot());
                 workspace->AddProject(p);
                 SaveWorkspace();
                 RefreshProjectViews();
                 output->Append("Tools", "Imported CCS project " + p->Name + " (read-only)");
+                for each (String^ line in p->Ccs->ReportLines) output->Append("Tools", line);
             }
             catch (Exception^ ex) { MessageBox::Show(this, ex->Message, "Import CCS 7.4 Project", MessageBoxButtons::OK, MessageBoxIcon::Error); }
             return;
@@ -453,17 +627,21 @@ namespace Gride { namespace UI {
     {
         SD::Font^ f = gcnew SD::Font("Consolas", 9.0f);
         SD::Font^ hf = gcnew SD::Font("Segoe UI", 8.0f, FontStyle::Bold);
-        float y = (float)e->MarginBounds.Top;
-        float lh = f->GetHeight(e->Graphics);
-        e->Graphics->DrawString(String::Format("{0}    page {1}", printDoc->DocumentName, printPage), hf, Brushes::Black,
-                                (float)e->MarginBounds.Left, y - 2 * lh);
-        while (printIndex < printLines->Length && y + lh < e->MarginBounds.Bottom)
+        try
         {
-            String^ text = String::Format("{0,5}  {1}", printIndex + 1, printLines[printIndex]->Replace("\t", "    "));
-            e->Graphics->DrawString(text, f, Brushes::Black, (float)e->MarginBounds.Left, y);
-            y += lh;
-            printIndex++;
+            float y = (float)e->MarginBounds.Top;
+            float lh = f->GetHeight(e->Graphics);
+            e->Graphics->DrawString(String::Format("{0}    page {1}", printDoc->DocumentName, printPage), hf, Brushes::Black,
+                                    (float)e->MarginBounds.Left, y - 2 * lh);
+            while (printIndex < printLines->Length && y + lh < e->MarginBounds.Bottom)
+            {
+                String^ text = String::Format("{0,5}  {1}", printIndex + 1, printLines[printIndex]->Replace("\t", "    "));
+                e->Graphics->DrawString(text, f, Brushes::Black, (float)e->MarginBounds.Left, y);
+                y += lh;
+                printIndex++;
+            }
         }
+        finally { delete f; delete hf; }
         printPage++;
         e->HasMorePages = printIndex < printLines->Length;
     }
@@ -537,7 +715,7 @@ namespace Gride { namespace UI {
         String^ f = explorer->SelectedFile;
         GrideProject^ p = explorer->SelectedProject;
         if (f == nullptr || p == nullptr) return;
-        if (p->IsReadOnly) { MessageBox::Show(this, "CCS projects are read-only in GRIDE.", "Remove"); return; }
+        if (p->IsReadOnly) { MessageBox::Show(this, (p->IsVs ? "Visual Studio" : "CCS") + " projects are read-only in GRIDE.", "Remove"); return; }
         if (MessageBox::Show(this, "Remove " + Path::GetFileName(f) + " from " + p->Name + "?\n(The file stays on disk.)", "Remove",
                              MessageBoxButtons::OKCancel, MessageBoxIcon::Question) != WF::DialogResult::OK) return;
         p->RemoveFile(f);
@@ -561,16 +739,18 @@ namespace Gride { namespace UI {
     {
         OpenFileDialog^ dlg = gcnew OpenFileDialog();
         dlg->Title = "Add Project to Workspace";
-        dlg->Filter = "GRIDE project (*.pro)|*.pro|CCS 7.4 project (.project;.ccsproject)|.project;.ccsproject";
+        dlg->Filter = "GRIDE project (*.pro)|*.pro|CCS 7.4 project (.project;.ccsproject)|.project;.ccsproject|Visual Studio project (*.vcxproj;*.vcproj)|*.vcxproj;*.vcproj";
         if (dlg->ShowDialog(this) != WF::DialogResult::OK) return;
         try
         {
             GrideProject^ p = PathUtil::HasExtension(dlg->FileName, ".pro") ? GrideProject::Load(dlg->FileName)
-                                                                            : CcsProjectReader::Read(dlg->FileName, settings->Env->CcsToolRoot);
+                            : VsProjectReader::IsVsProject(dlg->FileName) ? VsProjectReader::Read(dlg->FileName, workspace == nullptr ? nullptr : workspace->SolutionPath)
+                            : CcsProjectReader::Read(dlg->FileName, settings->Env->CcsCompilerRoot());
             if (workspace == nullptr) { SetWorkspace(Workspace::ForSingleProject(p)); return; }
             if (!workspace->AddProject(p)) { MessageBox::Show(this, "That project is already in the workspace.", "GRIDE"); return; }
             SaveWorkspace();
             RefreshProjectViews();
+            if (p->IsImported) ReportCcsProjects();
         }
         catch (Exception^ ex) { MessageBox::Show(this, ex->Message, "Add Project", MessageBoxButtons::OK, MessageBoxIcon::Error); }
     }
@@ -627,10 +807,24 @@ namespace Gride { namespace UI {
         for (int i = 0; i < workspace->Projects->Count; i++)
         {
             GrideProject^ p = workspace->Projects[i];
-            if (!p->IsCcs) continue;
+            if (!p->IsImported) continue;
             try
             {
-                workspace->Projects[i] = CcsProjectReader::Read(p->ProjectDir, settings->Env->CcsToolRoot);
+                GrideProject^ again;
+                if (p->IsVs)
+                {
+                    again = VsProjectReader::Read(p->FilePath, p->Vs == nullptr ? nullptr : p->Vs->SolutionPath);
+                    again->Vs->SolutionFolder = p->Vs == nullptr ? String::Empty : p->Vs->SolutionFolder;
+                    again->DependsOn->AddRange(p->DependsOn);
+                }
+                else again = CcsProjectReader::Read(p->ProjectDir, settings->Env->CcsCompilerRoot());
+                // what GRIDE keeps for it (the workspace's entry) is not in the files read again
+                again->Toolchain = p->Toolchain;
+                for each (KeyValuePair<String^, String^> kv in p->FolderToolchains) again->FolderToolchains[kv.Key] = kv.Value;
+                again->ProgramArgs = gcnew List<String^>(p->ProgramArgs);
+                again->EmulateOnly = p->EmulateOnly;
+                again->IsDirty = false;
+                workspace->Projects[i] = again;
                 refreshed++;
             }
             catch (Exception^ ex) { output->Append("Tools", "Refresh " + p->Name + ": " + ex->Message); }
@@ -638,7 +832,8 @@ namespace Gride { namespace UI {
         for each (EditorDocument^ d in docs->Documents)
             if (!d->IsUntitled) d->Project = workspace->FindProjectForFile(d->FilePath);
         RefreshProjectViews();
-        SetStatus(String::Format("Refreshed {0} CCS project(s)", refreshed));
+        ReportCcsProjects();
+        SetStatus(String::Format("Refreshed {0} imported project(s)", refreshed));
     }
 
     void MainForm::ProjectOpenFolder()
@@ -655,11 +850,19 @@ namespace Gride { namespace UI {
         else if (Directory::Exists(target)) System::Diagnostics::Process::Start("explorer.exe", "\"" + target + "\"");
     }
 
-    void MainForm::ProjectShowProperties()
+    void MainForm::ProjectShowProperties() { ShowProjectProperties(nullptr); }
+
+    // RIDE's Compiler Options dialog: the project's options, per configuration
+    void MainForm::ProjectCompilerOptions() { ShowProjectProperties(ProjectPropertiesDialog::CompilerOptionsTab); }
+
+    void MainForm::ShowProjectProperties(String^ tab)
     {
         GrideProject^ p = ContextProject();
         if (p == nullptr) return;
-        ProjectPropertiesDialog^ dlg = gcnew ProjectPropertiesDialog(p, workspace, CurrentConfig(), CurrentTarget());
-        if (dlg->ShowDialog(this) == WF::DialogResult::OK) RefreshProjectViews();
+        ProjectPropertiesDialog^ dlg = gcnew ProjectPropertiesDialog(p, workspace, CurrentConfig(), CurrentTarget(), tab);
+        if (dlg->ShowDialog(this) != WF::DialogResult::OK) return;
+        if (p->IsCcs) RememberCcsState(p);
+        KeepImportedState(p);
+        RefreshProjectViews();
     }
 }}

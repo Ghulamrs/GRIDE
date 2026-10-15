@@ -28,20 +28,18 @@ namespace Gride { namespace UI {
         engine->Output += gcnew TextLineHandler(this, &MainForm::OnEngineOutput);
         engine->Message += gcnew BuildMessageHandler(this, &MainForm::OnEngineMessage);
         engine->Finished += gcnew BuildFinishedHandler(this, &MainForm::OnEngineFinished);
+        engine->Asker = gcnew BuildQuestionHandler(this, &MainForm::OnEngineQuestion);
+        runner = gcnew ProgramRunner();
+        runner->Output += gcnew TextLineHandler(this, &MainForm::OnRunOutput);
+        runner->Exited += gcnew ProgramExitedHandler(this, &MainForm::OnRunExited);
 
-        // swap PlaceholderDebugger for the real VM6747 / native debugger later
-        debugger = gcnew PlaceholderDebugger();
-        debugger->StateChanged += gcnew DebugStateHandler(this, &MainForm::OnDebugState);
-        debugger->Stopped += gcnew DebugStopHandler(this, &MainForm::OnDebugStopped);
-        debugger->Output += gcnew TextLineHandler(this, &MainForm::OnDebugOutput);
+        // the placeholder until a session starts: LaunchDebugger attaches the real engine for the build
+        AttachDebugger(gcnew PlaceholderDebugger());
 
         Text = "GRIDE";
         Icon = IconFactory::AppIcon();
         Font = gcnew SD::Font("Segoe UI", 9.0f);
-        StartPosition = FormStartPosition::Manual;
-        LayoutSettings^ l = settings->Layout;
-        Bounds = SD::Rectangle(l->Left, l->Top, Math::Max(800, l->Width), Math::Max(560, l->Height));
-        if (l->Maximized) WindowState = FormWindowState::Maximized;
+        RestoreWindowBounds();
         AllowDrop = true;
         DragEnter += gcnew DragEventHandler(this, &MainForm::OnDragEnter);
         DragDrop += gcnew DragEventHandler(this, &MainForm::OnDragDrop);
@@ -51,14 +49,21 @@ namespace Gride { namespace UI {
         CreateLayout();
         CreatePanes();
         RegisterCommands();
-        commands->ApplyBindings(settings->KeyBindings);
+        ApplyKeySet();
         BuildMenus();
         BuildToolbars();
         BuildContextMenus();
+        docs->EditorMenuFactory = gcnew Func<System::Windows::Forms::ContextMenuStrip^>(this, &MainForm::MakeEditorMenu);
         ResumeLayout(true);
 
         findDialog = gcnew FindReplaceDialog();
         findDialog->Requested += gcnew FindRequestHandler(this, &MainForm::OnFindRequested);
+
+        // the toolchain file in force, and whatever was wrong in it
+        ToolchainDefinitions^ defs = ToolchainDefinitions::Current;
+        output->Append("Tools", "toolchain: " + (defs->ShippedFound ? defs->ShippedFile : "no " + ToolchainDefinitions::FileName + " found") +
+                                (defs->UserJson != nullptr ? " + " + defs->UserFile : String::Empty));
+        for each (String^ p in defs->Problems) output->Append("Tools", "toolchain: " + p);
 
         printDoc = gcnew System::Drawing::Printing::PrintDocument();
         printDoc->PrintPage += gcnew System::Drawing::Printing::PrintPageEventHandler(this, &MainForm::OnPrintPage);
@@ -168,6 +173,7 @@ namespace Gride { namespace UI {
         explorer->FileActivated += gcnew FileActivatedHandler(this, &MainForm::OnExplorerFileActivated);
         explorer->SelectionChanged += gcnew EventHandler(this, &MainForm::OnExplorerSelection);
         explorer->RenameRequested += gcnew RenameHandler(this, &MainForm::OnRenameRequested);
+        explorer->RemoveRequested += gcnew EventHandler(this, &MainForm::OnExplorerRemove);
         classView = gcnew ClassViewPane();
         classView->Navigate += gcnew NavigateHandler(this, &MainForm::OnNavigate);
         filesPane = gcnew FilesPane();
@@ -187,15 +193,19 @@ namespace Gride { namespace UI {
 
         output = gcnew OutputPane();
         output->Navigate += gcnew NavigateHandler(this, &MainForm::OnNavigate);
+        output->NavigateTo += gcnew NavigateColumnHandler(this, &MainForm::OnNavigateTo);
+        output->InputEntered += gcnew TextLineHandler(this, &MainForm::OnOutputInput);
         errorList = gcnew ErrorListPane();
         errorList->Navigate += gcnew NavigateHandler(this, &MainForm::OnNavigate);
+        errorList->NavigateTo += gcnew NavigateColumnHandler(this, &MainForm::OnNavigateTo);
         findResults = gcnew FindResultsPane();
         findResults->Navigate += gcnew NavigateHandler(this, &MainForm::OnNavigate);
         terminal = gcnew TerminalPane();
         watch = gcnew WatchPane();
         locals = gcnew LocalsPane();
         callStack = gcnew CallStackPane();
-        callStack->Navigate += gcnew NavigateHandler(this, &MainForm::OnNavigate);
+        callStack->FrameChosen += gcnew IndexChosenHandler(this, &MainForm::OnFrameChosen);
+        locals->SetRequested += gcnew VariableSetHandler(this, &MainForm::OnVariableSet);
         registers = gcnew RegistersPane();
         memory = gcnew MemoryPane();
         disasm = gcnew DisassemblyPane();
@@ -218,6 +228,32 @@ namespace Gride { namespace UI {
         for each (ToolPane^ p in allPanes)
             if (settings->Layout->HiddenPanes->Contains(p->Key)) p->Home->HidePane(p);
         terminal->ExtraPath = ToolchainPath();
+    }
+
+    // the saved bounds are used only when a screen still shows a usable part of
+    // them (a monitor may have been unplugged or the resolution changed)
+    void MainForm::RestoreWindowBounds()
+    {
+        LayoutSettings^ l = settings->Layout;
+        SD::Rectangle r(l->Left, l->Top, Math::Max(800, l->Width), Math::Max(560, l->Height));
+        bool visible = false;
+        for each (Screen^ s in Screen::AllScreens)
+        {
+            SD::Rectangle common = SD::Rectangle::Intersect(s->WorkingArea, r);
+            if (common.Width >= 120 && common.Height >= 60) { visible = true; break; }
+        }
+        if (visible)
+        {
+            StartPosition = FormStartPosition::Manual;
+            Bounds = r;
+        }
+        else
+        {
+            SD::Rectangle wa = Screen::PrimaryScreen->WorkingArea;
+            StartPosition = FormStartPosition::CenterScreen;
+            Size = SD::Size(Math::Min(r.Width, wa.Width), Math::Min(r.Height, wa.Height));
+        }
+        if (l->Maximized) WindowState = FormWindowState::Maximized;
     }
 
     void MainForm::ApplyLayoutSizes()
@@ -320,13 +356,38 @@ namespace Gride { namespace UI {
 
     void MainForm::ApplySettings()
     {
+        settings->PublishPaths();
         engine->CurrentSettings = settings;
         docs->AppSettings = settings;
-        commands->ApplyBindings(settings->KeyBindings);
+        ApplyKeySet();
         ApplyTheme();
         docs->ApplySettings();
         terminal->ExtraPath = ToolchainPath();
         UpdateStatus();
+    }
+
+    // the key set (Tools > Options > Environment > Keyboard) under the user's own bindings, then RIDE's keys line under the variables
+    void MainForm::ApplyKeySet()
+    {
+        Dictionary<String^, String^>^ merged = KeySets::For(settings->KeySet);
+        for each (KeyValuePair<String^, String^> kv in settings->KeyBindings) merged[kv.Key] = kv.Value;
+        commands->ApplyBindings(merged);
+        if (locals != nullptr) locals->KeysLine = KeysLine();
+    }
+
+    // RIDE's "F8 carries on   F7 steps over   F6 steps into   F9 sets a breakpoint", with this key set's keys
+    String^ MainForm::KeysLine()
+    {
+        array<String^>^ ids = gcnew array<String^>{ "Debug.Start", "Debug.StepOver", "Debug.StepInto", "Debug.ToggleBreakpoint", "Debug.UpStack", "Debug.DownStack" };
+        array<String^>^ keys = gcnew array<String^>(ids->Length);
+        for (int i = 0; i < ids->Length; i++)
+        {
+            Command^ c = commands->Get(ids[i]);
+            keys[i] = c == nullptr ? String::Empty : c->ShortcutText;
+        }
+        String^ line = keys[0] + " carries on   " + keys[1] + " steps over   " + keys[2] + " steps into   " + keys[3] + " sets a breakpoint";
+        if (keys[4]->Length > 0) line += "   " + keys[4] + " looks at what called this   " + keys[5] + " comes back down";
+        return line;
     }
 
     void MainForm::SaveSettings()
@@ -449,7 +510,8 @@ namespace Gride { namespace UI {
         }
         if (!docs->CloseAll(nullptr)) { e->Cancel = true; return; }
         if (debugger->IsActive) debugger->Stop();
-        SaveWorkspace();
+        if (runner->IsRunning) runner->Stop();
+        SaveWorkspace();                            // writes the .grws only when something in it changed
         SaveSettings();
         terminal->StopShell();
         idleTimer->Stop();
@@ -511,7 +573,29 @@ namespace Gride { namespace UI {
             SetStatus(String::Format("({0}) was pressed. Waiting for second key of chord...", KeyText::Format(keyData)));
             return true;
         }
+        // A key such as F2 or Del means different commands depending on focus: in the
+        // Project Explorer it renames / removes the selected file, in the editor it is
+        // Next Bookmark / Delete. Menu shortcuts alone would always pick the editor's.
+        if (explorer->IsEditingLabel && (keyData & (Keys::Control | Keys::Alt)) == Keys::None)
+            return false;                           // the label edit box gets F2, Del, Enter ...
+        if (explorer->HasFocus)
+        {
+            Command^ c = FocusCommand(keyData, gcnew array<String^>{ "Project.Rename", "Project.Remove" });
+            if (c != nullptr) { c->Execute(); return true; }
+        }
         return Form::ProcessCmdKey(msg, keyData);
+    }
+
+    // the command among ids whose shortcut (also a display-only one) is keyData
+    Command^ MainForm::FocusCommand(Keys keyData, array<String^>^ ids)
+    {
+        for each (String^ id in ids)
+        {
+            Command^ c = commands->Get(id);
+            if (c == nullptr || String::IsNullOrEmpty(c->ShortcutText) || c->ShortcutText->Contains(",")) continue;
+            if (KeyText::Parse(c->ShortcutText) == keyData) return c;
+        }
+        return nullptr;
     }
 
     // breakpoints live in the workspace (saved in the .grws) or in a loose map

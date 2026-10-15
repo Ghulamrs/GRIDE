@@ -400,11 +400,27 @@ namespace Gride { namespace Core {
             sb->Append("\r\n");
             return sb->ToString();
         }
+        // writes a temp file first and swaps it in, so a crash or a full disk
+        // never leaves a half-written settings / project / workspace file
         static void WriteFile(String^ path, JsonValue^ v)
         {
-            String^ dir = Path::GetDirectoryName(path);
+            String^ full = Path::GetFullPath(path);
+            String^ dir = Path::GetDirectoryName(full);
             if (!String::IsNullOrEmpty(dir) && !Directory::Exists(dir)) Directory::CreateDirectory(dir);
-            File::WriteAllText(path, Write(v), gcnew UTF8Encoding(false));
+            String^ tmp = full + ".tmp";
+            File::WriteAllText(tmp, Write(v), gcnew UTF8Encoding(false));
+            try
+            {
+                if (!File::Exists(full)) { File::Move(tmp, full); return; }
+                try { File::Replace(tmp, full, nullptr); }
+                catch (IOException^) { File::Copy(tmp, full, true); File::Delete(tmp); }              // e.g. network shares
+                catch (PlatformNotSupportedException^) { File::Copy(tmp, full, true); File::Delete(tmp); }
+            }
+            catch (Exception^)
+            {
+                try { File::Delete(tmp); } catch (Exception^) { }
+                throw;
+            }
         }
         static String^ Quote(String^ s)
         {

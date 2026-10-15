@@ -40,6 +40,9 @@ namespace Gride { namespace UI {
         event EventHandler^ DirtyChanged;
         event DocumentLineHandler^ BreakpointToggled;
 
+        // creates the right-click menu of each new editor (MainForm builds it from its commands)
+        property Func<System::Windows::Forms::ContextMenuStrip^>^ EditorMenuFactory;
+
         property StartPage^ Start { StartPage^ get() { return start; } }
         property List<EditorDocument^>^ Documents { List<EditorDocument^>^ get() { return docs; } }
         property GrideSettings^ AppSettings { GrideSettings^ get() { return settings; } void set(GrideSettings^ s) { settings = s; } }
@@ -236,6 +239,7 @@ namespace Gride { namespace UI {
             d->Tab = tabs->Add(d->Title, d);
             d->Tab->ToolTip = d->IsUntitled ? d->Title : d->FilePath;
             d->Editor->Visible = false;
+            if (EditorMenuFactory != nullptr) d->Editor->SetContextMenu(EditorMenuFactory->Invoke());
             host->Controls->Add(d->Editor);
             d->Editor->ModifiedChanged += gcnew EventHandler(this, &DocumentManager::OnEditorModified);
             d->Editor->CaretMoved += gcnew EventHandler(this, &DocumentManager::OnEditorCaret);
