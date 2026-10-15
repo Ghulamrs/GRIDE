@@ -24,16 +24,12 @@ It also has C ⇄ Shalimar conversion and read-only reading of Code Composer Stu
 
 The output is `bin\<platform>\<config>\GRIDE.exe`, with `toolchain.json` and `lib\ccs\*.tsv` beside it. **Help > View Help** opens the User Guide: GRIDE looks in the help directory named under Tools > Options > Projects, then beside the exe, in `docs` and `help` under it, then in `..\help` and `..\docs` - the installed layout is `<install>\bin\GRIDE.exe` (+ `toolchain.json`), `<install>\help\GRIDE_User_Guide.html`, `<install>\docs\`, `<install>\examples\cppparse` and `<install>\settings.json`. Both configurations build with 0 errors and 0 warnings on the v143 toolset; the post-build event (which copies `docs`) needs `cmd.exe`, so where that is blocked by policy build with `/p:PostBuildEventUseInBuild=false`.
 
-`GRIDE.sln` holds every project GRIDE is built, shown and checked with; Build Solution builds what the configuration selects:
+`GRIDE.sln` holds every project GRIDE is built and shown with; Build Solution builds what the configuration selects:
 
 | Project | Solution folder | Project file | Built in | What it is |
 |---|---|---|---|---|
 | `GRIDE` | - | `GRIDE\GRIDE.vcxproj` | every configuration | the IDE |
 | `cppparse` | samples | `samples\cppparse\cppparse\cppparse.vcxproj` | `Debug \| x64`, `Release \| x64` | the example of section 2, the same project file `samples\cppparse\cppparse.sln` opens; Visual Studio's build of it goes to `sandbox\vs\<config>` beside `GRIDE.sln` (the project's own `$(SolutionDir)sandbox\vs`), never into `samples` - GRIDE's own build of it goes to the project's `.gride` |
-| `RidePortHarness` | tests | `D:\GRA\My Documents\GIT Test\cpp\sandbox\out\gride-review\ride-port\tests\RidePortHarness\RidePortHarness.vcxproj` | `Debug \| x64` only, after `GRIDE` | the RIDE port's harness: a console program compiling `GRIDE\src` in place with its checks; `ride-port\tests\run-ride-port.ps1` runs it |
-| `GrideHarness` | tests | `D:\GRA\My Documents\GIT Test\cpp\sandbox\out\gride-review\tests\GrideHarness\GrideHarness.vcxproj` | `Debug \| x64` only, after `GRIDE` | the earlier harness (the runtime fixes), the same way; `gride-review\tests\run-harness.ps1` runs it |
-
-The two harnesses live in the RIDE port's working folder of the cpp repo, named by absolute path (as their own project files name `GRIDE\src`). Where that folder is missing they show as unavailable, and a `Debug | x64` build of the solution stops at them (`MSB3202`, the project file was not found); the `Release` builds (the installer's is `Release | x64`) and the x86 configurations do not need them and build `GRIDE` - with the example in `Release | x64` - alone.
 
 ## 2. Try it
 
