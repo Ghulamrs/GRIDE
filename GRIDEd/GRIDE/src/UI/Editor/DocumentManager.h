@@ -84,6 +84,7 @@ namespace Gride { namespace UI {
                 Close(d);
                 throw;
             }
+            RefreshTab(d);   // the tab was made before Load named the file
             Activate(d);
             return d;
         }
@@ -312,7 +313,8 @@ namespace Gride { namespace UI {
         {
             EditorDocument^ d = DocOf(sender);
             if (d != nullptr) { d->Tab->Dirty = d->IsDirty; tabs->Invalidate(); }
-            DirtyChanged(this, EventArgs::Empty);
+            // the sender is the document, so a listener can tell a save from an edit
+            DirtyChanged(d != nullptr ? safe_cast<Object^>(d) : this, EventArgs::Empty);
         }
 
         void OnEditorCaret(Object^ sender, EventArgs^ e) { CaretMoved(this, EventArgs::Empty); }

@@ -275,6 +275,8 @@ namespace Gride { namespace UI {
         void OnDocumentActivated(Object^ sender, EventArgs^ e);
         void OnDocumentCaret(Object^ sender, EventArgs^ e);
         void OnDocumentDirty(Object^ sender, EventArgs^ e);
+        void RescanClassView();
+        bool classViewRescanQueued;
         void OnPrintPage(Object^ sender, System::Drawing::Printing::PrintPageEventArgs^ e);
         // File menu
         void FileNewProject();

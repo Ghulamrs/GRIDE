@@ -617,6 +617,7 @@ namespace Gride { namespace Services {
             }
             String^ tiBin = TiBinFor(d);
             if (tiBin != nullptr) dirs->Add(tiBin);
+            for each (String^ own in d->Lookup->Dirs) dirs->Add(Environment::ExpandEnvironmentVariables(own));
             for each (String^ dir in dirs)
                 for each (String^ n in names)
                 {
@@ -660,6 +661,8 @@ namespace Gride { namespace Services {
                 places->Add(tiBin != nullptr ? "TI's compiler directory's " + tiBin
                                              : "TI's compiler directory (none named under Tools > Options > Projects, none found under " + String::Join(", ", Defs()->Ccs->TiRoots) + ")");
             }
+            if (d != nullptr)
+                for each (String^ own in d->Lookup->Dirs) places->Add(Environment::ExpandEnvironmentVariables(own));
             if (d == nullptr || d->Lookup->OnPath) places->Add("PATH");
             return String::Join(", ", places);
         }

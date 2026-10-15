@@ -207,14 +207,33 @@ namespace Gride { namespace UI {
     {
         EditorDocument^ d = docs->Active;
         if (d != nullptr && !d->IsUntitled && !explorer->HasFocus)
+        {
             properties->SetObject(gcnew FileProperties(d->FilePath, d->Project, settings));
+            explorer->Reveal(d->FilePath);   // Track active item: the explorer follows the editor
+        }
         UpdateCombos();
         UpdateStatus();
         UpdateTitle();
     }
 
     void MainForm::OnDocumentCaret(Object^ sender, EventArgs^ e) { UpdateStatus(); }
-    void MainForm::OnDocumentDirty(Object^ sender, EventArgs^ e) { UpdateTitle(); }
+    void MainForm::OnDocumentDirty(Object^ sender, EventArgs^ e)
+    {
+        UpdateTitle();
+        // a document was just saved: Class View reads the files again - once for a Save All
+        EditorDocument^ d = dynamic_cast<EditorDocument^>(sender);
+        if (d != nullptr && !d->IsDirty && !d->IsUntitled && !classViewRescanQueued)
+        {
+            classViewRescanQueued = true;
+            BeginInvoke(gcnew MethodInvoker(this, &MainForm::RescanClassView));
+        }
+    }
+
+    void MainForm::RescanClassView()
+    {
+        classViewRescanQueued = false;
+        classView->Scan(workspace);
+    }
 
     void MainForm::OnRenameRequested(GrideProject^ project, String^ oldPath, String^ newName)
     {

@@ -30,9 +30,10 @@ namespace Gride { namespace Settings {
     public ref class LookupDefinition
     {
     public:
-        LookupDefinition() { Env = String::Empty; InstallDir = String::Empty; OnPath = true; Vcvars = false; Description = String::Empty; }
+        LookupDefinition() { Env = String::Empty; InstallDir = String::Empty; Dirs = gcnew List<String^>(); OnPath = true; Vcvars = false; Description = String::Empty; }
         property String^ Env;
         property String^ InstallDir;
+        property List<String^>^ Dirs;   // folders of its own (%VAR% expanded), looked in before PATH
         property bool OnPath;
         property bool Vcvars;
         property String^ Description;
@@ -1200,6 +1201,7 @@ namespace Gride { namespace Settings {
                     {
                         d->Lookup->Env = l->GetString("env", String::Empty);
                         d->Lookup->InstallDir = l->GetString("installDir", String::Empty);
+                        d->Lookup->Dirs = ReadList(l, "dirs");
                         d->Lookup->OnPath = l->GetBool("path", true);
                         d->Lookup->Vcvars = l->GetBool("vcvars", false);
                         d->Lookup->Description = l->GetString("description", String::Empty);

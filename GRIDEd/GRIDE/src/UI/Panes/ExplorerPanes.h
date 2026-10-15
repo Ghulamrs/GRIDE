@@ -369,6 +369,10 @@ namespace Gride { namespace UI {
 
         void Scan(Workspace^ w)
         {
+            // a rescan (after a save) keeps what was expanded; the first one expands the projects
+            HashSet<String^>^ open = gcnew HashSet<String^>();
+            bool first = tree->Nodes->Count == 0;
+            CollectExpanded(tree->Nodes, open);
             tree->BeginUpdate();
             tree->Nodes->Clear();
             if (w != nullptr)
@@ -376,6 +380,8 @@ namespace Gride { namespace UI {
                 Regex^ fn = gcnew Regex("^(?:static\\s+|extern\\s+|inline\\s+|const\\s+|unsigned\\s+|signed\\s+)*[A-Za-z_][\\w]*[\\s\\*&]+(?<name>[A-Za-z_]\\w*(::\\w+)?)\\s*\\([^;]*$");
                 Regex^ ty = gcnew Regex("^\\s*(typedef\\s+)?(?<kind>struct|class|union|enum)\\s+(?<name>[A-Za-z_]\\w*)");
                 Regex^ td = gcnew Regex("^\\s*}\\s*(?<name>[A-Za-z_]\\w*)\\s*;");
+                // Shalimar: fun <results> = name(params) {
+                Regex^ sf = gcnew Regex("^\\s*fun\\s*<[^>]*>\\s*=\\s*(?<name>[A-Za-z_]\\w*)\\s*\\(");
                 Regex^ mc = gcnew Regex("^\\s*#\\s*define\\s+(?<name>[A-Za-z_]\\w*)");
                 for each (GrideProject^ p in w->Projects)
                 {
@@ -406,6 +412,8 @@ namespace Gride { namespace UI {
                             }
                             m = td->Match(l);
                             if (m->Success) { Leaf(tNode, "typedef " + m->Groups["name"]->Value, "struct", f, i + 1); continue; }
+                            m = sf->Match(l);
+                            if (m->Success) { Leaf(fNode, m->Groups["name"]->Value + "()", "function", f, i + 1); continue; }
                             if (l->Length > 0 && !Char::IsWhiteSpace(l[0]) && !l->StartsWith("#") && !l->StartsWith("/") && !l->StartsWith("*"))
                             {
                                 m = fn->Match(l);
@@ -414,15 +422,32 @@ namespace Gride { namespace UI {
                             }
                         }
                     }
+                    // a group with nothing found is left out, so an empty one does not look like a placeholder
+                    for each (TreeNode^ g in gcnew array<TreeNode^>{ fNode, tNode, mNode })
+                        if (g->Nodes->Count == 0) g->Remove();
+                    if (pn->Nodes->Count == 0) pn->Nodes->Add(gcnew TreeNode("(no symbols found)"));
                     tree->Nodes->Add(pn);
-                    pn->Expand();
+                    if (first) pn->Expand();
                 }
             }
+            if (!first) RestoreExpanded(tree->Nodes, open);
             tree->EndUpdate();
         }
 
     private:
         TreeView^ tree;
+
+        static void CollectExpanded(TreeNodeCollection^ nodes, HashSet<String^>^ open)
+        {
+            for each (TreeNode^ n in nodes)
+                if (n->IsExpanded) { open->Add(n->FullPath); CollectExpanded(n->Nodes, open); }
+        }
+
+        static void RestoreExpanded(TreeNodeCollection^ nodes, HashSet<String^>^ open)
+        {
+            for each (TreeNode^ n in nodes)
+                if (open->Contains(n->FullPath)) { n->Expand(); RestoreExpanded(n->Nodes, open); }
+        }
 
         TreeNode^ Group(TreeNode^ parent, String^ text, String^ icon)
         {

@@ -173,6 +173,10 @@ namespace Gride { namespace Services {
                 if (close < 0) continue;
                 String^ number = line->Substring(open + 1, close - open - 1);
                 if (!Digits(number)) continue;
+                // ln says "path\file.c(9)" or "path\file.c(9)+0x2c"; the program's own "greet(4) is 10" is not a place
+                String^ after = line->Substring(close + 1);
+                if (after->Length > 0 && !after->StartsWith("+0x")) continue;
+                if (!Path::HasExtension(line->Substring(0, open))) continue;
                 stop->File = line->Substring(0, open);
                 stop->Line = ParseInt(number, 10);
                 stop->Stopped = true;
@@ -1245,13 +1249,26 @@ namespace Gride { namespace Services {
             try
             {
                 if (state != DebugState::Running) state = DebugState::Running;
+                DebugStop^ origin = last;
                 DebugStop^ stop = stepping ? AfterStepping(commandId) : AfterMoving(commandId);
+                // an incrementally linked program calls through a thunk (cdemo!ILT+5725(printf)): one
+                // more step reaches the function itself
+                String^ fresh = stop->Said;
+                for (int thunk = 0; thunk < 4 && commandId == "stepInto" && dialect == DebuggerKind::Cdb &&
+                                    !stop->Stopped && !stop->Exited && fresh->Contains("!ILT+"); thunk++)
+                {
+                    String^ said = stop->Said;
+                    stop = AfterMoving(commandId);
+                    fresh = stop->Said;
+                    stop->Said = said + "\n" + stop->Said;
+                }
                 if (commandId == "stepInto" && dialect == DebuggerKind::Cdb && stop->Stopped && AtFunctionEntry(stop->Said))
                 {
                     DebugStop^ first = AfterStepping("stepOver");
                     first->Said = stop->Said + "\n" + first->Said;
                     stop = first;
                 }
+                if (commandId == "stepInto" && dialect == DebuggerKind::Cdb) stop = OutOfNoSource(stop, origin);
                 Announce(stop);
                 return stop;
             }
@@ -1304,6 +1321,36 @@ namespace Gride { namespace Services {
             {
                 before = stop;
                 stop = AfterMoving(commandId);
+                said += "\n" + stop->Said;
+            }
+            stop->Said = said;
+            return stop;
+        }
+
+        // a step into a function with no source here (the CRT's printf: an incremental-link thunk,
+        // then a header under a path of Microsoft's build machine) steps out again and finishes the
+        // line, as Visual Studio steps over what it cannot show
+        bool HasSource(DebugStop^ stop)
+        {
+            if (!stop->Stopped || stop->File->Length == 0) return false;
+            try { return File::Exists(ResolveFile(stop->File)); } catch (Exception^) { return false; }
+        }
+
+        DebugStop^ OutOfNoSource(DebugStop^ stop, DebugStop^ origin)
+        {
+            if (stop->Exited || HasSource(stop)) return stop;
+            String^ said = stop->Said;
+            for (int up = 0; up < 8 && !stop->Exited && !HasSource(stop); up++)
+            {
+                if (proc == nullptr || !proc->Running) break;
+                stop = AfterMoving("stepOut");
+                said += "\n" + stop->Said;
+            }
+            // back on the line the step began from, part way through it: finish it
+            if (HasSource(stop) && origin != nullptr && origin->Stopped && stop->Line == origin->Line &&
+                String::Compare(Path::GetFileName(stop->File), Path::GetFileName(origin->File), true) == 0)
+            {
+                stop = AfterStepping("stepOver");
                 said += "\n" + stop->Said;
             }
             stop->Said = said;
