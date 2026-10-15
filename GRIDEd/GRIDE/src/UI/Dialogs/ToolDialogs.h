@@ -92,7 +92,13 @@ namespace Gride { namespace UI {
             CodeConverter^ c = gcnew CodeConverter(settings);
             String^ tool = c->ToolPath(d);
             if (File::Exists(tool)) logBox->Text = "Converter: " + tool;
-            else logBox->Text = "Converter not installed yet: " + tool + "\r\nSet its path in Tools > Options > Converters.";
+            else
+            {
+                String^ looked = c->LookedIn(d);
+                logBox->Text = "Converter not installed yet: " + tool
+                    + (looked->Length > 0 ? "\r\nLooked in: " + looked : String::Empty)
+                    + "\r\nPut c2s.exe beside GRIDE.exe, or set the converter in Tools > Options > Converters.";
+            }
         }
 
         void OnInputChanged(Object^ sender, EventArgs^ e)
@@ -151,8 +157,9 @@ namespace Gride { namespace UI {
             }
             ListViewGroup^ cg = gcnew ListViewGroup("Converters");
             list->Groups->Add(cg);
-            AddPlain(list, cg, "C -> Shalimar", Environment::ExpandEnvironmentVariables(s->Converter->CToShalimar), found, missing);
-            AddPlain(list, cg, "Shalimar -> C", Environment::ExpandEnvironmentVariables(s->Converter->ShalimarToC), found, missing);
+            CodeConverter^ conv = gcnew CodeConverter(s->Converter);
+            AddConverter(list, cg, conv, "C -> Shalimar", ConvertDirection::CToShalimar, found, missing);
+            AddConverter(list, cg, conv, "Shalimar -> C", ConvertDirection::ShalimarToC, found, missing);
 
             Label^ sum = Heading(String::Format("{0} tool(s) found, {1} not installed yet", found, missing));
             Panel^ host = gcnew Panel();
@@ -177,6 +184,14 @@ namespace Gride { namespace UI {
             String^ path = tc->Resolve(tool);
             bool ok = !String::IsNullOrEmpty(path) && File::Exists(path);
             AddLine(list, g, name, String::IsNullOrEmpty(path) ? "(not set)" : path, ok ? "info" : "warning", ok ? "Found" : "Not installed", ok ? String::Empty : tc->LookedIn(tool));
+            if (ok) found++; else missing++;
+        }
+        // a converter direction: the program that would run, and where toolchain.json's c2s was looked for
+        static void AddConverter(ListView^ list, ListViewGroup^ g, CodeConverter^ conv, String^ name, ConvertDirection d, int% found, int% missing)
+        {
+            String^ path = conv->ToolPath(d);
+            bool ok = !String::IsNullOrEmpty(path) && File::Exists(path);
+            AddLine(list, g, name, String::IsNullOrEmpty(path) ? "(not set)" : path, ok ? "info" : "warning", ok ? "Found" : "Not installed", ok ? String::Empty : conv->LookedIn(d));
             if (ok) found++; else missing++;
         }
         static void AddPlain(ListView^ list, ListViewGroup^ g, String^ name, String^ path, int% found, int% missing)

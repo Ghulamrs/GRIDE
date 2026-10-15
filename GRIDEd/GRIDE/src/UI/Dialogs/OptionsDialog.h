@@ -650,7 +650,9 @@ namespace Gride { namespace UI {
             toC = gcnew PathField(false, true); toC->Value = c->ShalimarToC; Row("Shalimar -> C tool", toC);
             cmd = Mono(c->CommandTemplate); Row("Command template", cmd);
             Label^ m = gcnew Label();
-            m->Text = "Macros: $(Tool) $(Input) $(Output)";
+            m->Text = "Leave the tools and the template empty to use toolchain.json's converter (c2s.exe,\r\n"
+                      "--to-shalimar / --to-c), found beside GRIDE.exe or as its lookup says.\r\n"
+                      "Template macros: $(Tool) $(Input) $(Output)";
             m->AutoSize = true; m->Tag = "muted";
             Row(String::Empty, m);
             open = Check("Open the converted file in the editor", c->OpenResult); Row(String::Empty, open);

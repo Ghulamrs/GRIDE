@@ -298,20 +298,31 @@ namespace Gride { namespace Settings {
     };
 
     // -------------------------------------------------------------------------
+    // Tools > Convert. Empty tool and template (the default) mean toolchain.json's converter (c2s)
+    // with its convertToShalimar / convertToC operation; a value here takes its place.
     public ref class ConverterSettings
     {
     public:
         ConverterSettings()
         {
-            CToShalimar = "C:\\GRIDE\\bin\\c2shl.exe";
-            ShalimarToC = "C:\\GRIDE\\bin\\shl2c.exe";
-            CommandTemplate = "\"$(Tool)\" \"$(Input)\" -o \"$(Output)\"";
+            CToShalimar = String::Empty;
+            ShalimarToC = String::Empty;
+            CommandTemplate = String::Empty;
             OpenResult = true;
         }
-        property String^ CToShalimar;
-        property String^ ShalimarToC;
-        property String^ CommandTemplate;
+        property String^ CToShalimar;       // a converter program in place of c2s, C -> Shalimar
+        property String^ ShalimarToC;       // the same, Shalimar -> C
+        property String^ CommandTemplate;   // $(Tool) $(Input) $(Output); empty: the converter's operation
         property bool OpenResult;
+
+        // GRIDE 1.0's defaults, which named programs that never shipped: read back as "not set"
+        literal String^ Gride1CToShalimar = "C:\\GRIDE\\bin\\c2shl.exe";
+        literal String^ Gride1ShalimarToC = "C:\\GRIDE\\bin\\shl2c.exe";
+        literal String^ Gride1Template = "\"$(Tool)\" \"$(Input)\" -o \"$(Output)\"";
+        static String^ Unless(String^ value, String^ gride1)
+        {
+            return value != nullptr && String::Compare(value->Trim(), gride1, true) == 0 ? String::Empty : value;
+        }
 
         JsonValue^ ToJson()
         {
@@ -325,9 +336,9 @@ namespace Gride { namespace Settings {
         void FromJson(JsonValue^ o)
         {
             if (o == nullptr) return;
-            CToShalimar = o->GetString("CToShalimar", CToShalimar);
-            ShalimarToC = o->GetString("ShalimarToC", ShalimarToC);
-            CommandTemplate = o->GetString("command", CommandTemplate);
+            CToShalimar = Unless(o->GetString("CToShalimar", CToShalimar), Gride1CToShalimar);
+            ShalimarToC = Unless(o->GetString("ShalimarToC", ShalimarToC), Gride1ShalimarToC);
+            CommandTemplate = Unless(o->GetString("command", CommandTemplate), Gride1Template);
             OpenResult = o->GetBool("openResult", OpenResult);
         }
     };
