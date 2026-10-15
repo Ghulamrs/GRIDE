@@ -38,6 +38,8 @@ The output is `<platform>\<config>\GRIDE.exe` (`x64\Release\GRIDE.exe`), with `t
 
 ![GRIDE.sln: GRIDE depends on the eleven tools; shc on cxx1; rts6x on cxx1, asm6x and shc; all build into x64\<config>](docs/solution-dependencies.svg)
 
+The same picture as a PowerPoint slide, with speaker notes: [`docs/solution-dependencies.pptx`](docs/solution-dependencies.pptx).
+
 GRIDE depends on every tool, so building GRIDE (or F5 on it) builds the whole tool chain first. Two of the tools depend on others, because they run what those build (the names are Solution Explorer's, each project file's own: `cc1` builds `c90.exe`, `cxx1` `cpp11.exe`, `shc` `shalimar.exe`, the rest the exe of their name):
 
 ```
