@@ -171,6 +171,7 @@ tools), in that order, from the project's store (`.pro`: `"options": { "debug": 
 | `words` | list | what a project file may call it (`c90`, `cc1`; `msvc`, `cl`, `c++`, `g++`, `clang++`) |
 | `lookup.env` | string | the environment variable that names it outright (`C90`, `VM6747`, `RIDE_CDB`) |
 | `lookup.installDir` | string | the installation sub-folder it lives in (`bin`), empty for a tool that is not the installation's |
+| `lookup.dirs` | list | folders of its own, looked in after the ones above and before PATH; `%VAR%` is expanded (`cdb`: the Windows SDK's `Debuggers\x64`) |
 | `lookup.path` | bool | also looked for on PATH (false for RIDE's `link` and `lnk6x`, which Microsoft's and TI's would be taken for) |
 | `lookup.vcvars` | bool | Visual Studio's, reached through `vcvars64.bat` |
 | `lookup.description` | string | the search in words |

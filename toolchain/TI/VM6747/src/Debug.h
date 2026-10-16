@@ -6,11 +6,26 @@
 // shell, written once, over the Machine below: vm6747 runs the assembly text under it, sim6747 the
 // linked image (its src/Debug.* is this file, copied).
 
+#include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
 namespace dbg {
+
+// A function's parameter or local, as the compilers name it with .dwtag (-g): the C spelling of its
+// type, and where it is - offset bytes from the frame's A15, or a symbol's address; deref when that
+// place holds the variable's address (a Shalimar by-reference parameter).
+struct Variable {
+    std::string name, type, symbol;
+    int offset = 0;
+    bool param = false, deref = false, global = false;
+};
+
+// The .dwtag / .dwendtag lines, one to a line, read into each function's variables by its label
+// (DW_AT_low_pc). A line it does not understand is passed over.
+void readTags(const std::string &text, std::map<std::string, std::vector<Variable> > &byLabel);
 
 // Where an instruction came from: a file as the compiler named it, a line, or no line at all (0).
 struct Position {
@@ -45,6 +60,10 @@ public:
     virtual void setReg(int r, uint32_t v) = 0;
     // The text of a source line, for the echo gdb prints after a stop - or empty.
     virtual std::string sourceLine(const std::string &file, int line) = 0;
+    // -g: the variables of the function entered at entry, or null when the program names none.
+    virtual const std::vector<Variable> *variablesAt(uint32_t entry) const { (void)entry; return nullptr; }
+    // Memory as the program sees it; false where there is none.
+    virtual bool read(uint32_t addr, uint8_t *buf, size_t n) const { (void)addr; (void)buf; (void)n; return false; }
 };
 
 // Run the session: commands from stdin until quit or end of input. The exit status to return.

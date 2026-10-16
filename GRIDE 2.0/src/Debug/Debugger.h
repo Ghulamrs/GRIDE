@@ -366,6 +366,10 @@ namespace Gride
                 if (close < 0) continue;
                 String^ number = line->Substring(open + 1, close - open - 1);
                 if (!Digits(number)) continue;
+                // ln says "path\file.c(9)" or "path\file.c(9)+0x2c"; the program's own "greet(4) is 10" is not a place
+                String^ after = line->Substring(close + 1);
+                if (after->Length > 0 && !after->StartsWith("+0x")) continue;
+                if (!Path::HasExtension(line->Substring(0, open))) continue;
                 stop->File = line->Substring(0, open);
                 stop->Line = ParseInt(number, 10);
                 stop->Stopped = true;
@@ -1309,13 +1313,18 @@ namespace Gride
             List<DebugVariable^>^ found = gcnew List<DebugVariable^>();
             if (session->Has("args")) found->AddRange(DebugTranscript::ReadVariables(dialect, Ask(session->Command("args")), session->Marker));
             found->AddRange(DebugTranscript::ReadVariables(dialect, Ask(session->Command("locals")), session->Marker));
-            for each (DebugVariable^ v in found) v->Address = AddressOf(v->Name);
+            for each (DebugVariable^ v in found)
+            {
+                v->Address = AddressOf(v->Name);
+                // sim6747 and vm6747 know each variable's type from the compilers' .dwtag: whatis says it
+                if (kind == DebuggerKind::C6x && String::IsNullOrEmpty(v->Type)) v->Type = TypeOf(v->Name);
+            }
             return found;
         }
 
         virtual String^ WhyNoLocals() override
         {
-            if (kind == DebuggerKind::C6x) return "no locals: the emulator has none - the assembly carries no variable information";
+            if (kind == DebuggerKind::C6x) return "no locals here: a Debug build (-g) names each function's variables - this function has none, or was built without -g";
             return String::Empty;
         }
 
@@ -1472,13 +1481,9 @@ namespace Gride
             try
             {
                 if (state != DebugState::Running) state = DebugState::Running;
-                DebugStop^ stop = stepping ? AfterStepping(commandId) : AfterMoving(commandId);
-                if (commandId == "stepInto" && dialect == DebuggerKind::Cdb && stop->Stopped && AtFunctionEntry(stop->Said))
-                {
-                    DebugStop^ first = AfterStepping("stepOver");
-                    first->Said = stop->Said + "\n" + first->Said;
-                    stop = first;
-                }
+                DebugStop^ origin = last;
+                DebugStop^ stop = commandId == "stepInto" && dialect == DebuggerKind::Cdb ? CdbStepInto(origin)
+                                : stepping ? AfterStepping(commandId) : AfterMoving(commandId);
                 Announce(stop);
                 return stop;
             }
@@ -1537,6 +1542,85 @@ namespace Gride
             return stop;
         }
 
+        // a stop whose file is on this machine (not the CRT's D:\a\_work\... or the UCRT's minkernel\...)
+        bool HasSource(DebugStop^ stop)
+        {
+            if (!stop->Stopped || stop->File->Length == 0) return false;
+            try { return File::Exists(ResolveFile(stop->File)); } catch (Exception^) { return false; }
+        }
+
+        static bool SamePlace(DebugStop^ a, DebugStop^ b)
+        {
+            return a != nullptr && b != nullptr && a->Stopped && b->Stopped && a->Line == b->Line &&
+                   String::Compare(Path::GetFileName(a->File), Path::GetFileName(b->File), true) == 0;
+        }
+
+        // the source line cdb echoes at a stop (">   16: Shape *make_rect(...) { return ...; }")
+        static String^ EchoedLine(String^ said)
+        {
+            array<String^>^ all = DebugTranscript::Lines(said);
+            for (int i = all->Length - 1; i >= 0; i--)
+            {
+                String^ bare = DebugTranscript::WithoutPrompt(all[i])->Trim();
+                if (!bare->StartsWith(">")) continue;
+                int colon = bare->IndexOf(L':');
+                if (colon > 1) return bare->Substring(colon + 1);
+            }
+            return String::Empty;
+        }
+
+        // cdb's Step Into as Visual Studio does it: each call on the line is entered in turn; one
+        // with no source here (an incremental-link thunk's target in the CRT, Shalimar's shm_line,
+        // printf) is stepped back out of, and the step ends in the first function with source, or
+        // on the next line when the line has none
+        DebugStop^ CdbStepInto(DebugStop^ origin)
+        {
+            String^ said = String::Empty;
+            DebugStop^ stop = gcnew DebugStop();
+            for (int call = 0; call < 24; call++)
+            {
+                stop = AfterMoving("stepInto");
+                String^ fresh = stop->Said;
+                said += "\n" + fresh;
+                // an incrementally linked program calls through a thunk (cdemo!ILT+11090(greet)): it has no
+                // frame of its own, so stepping out of it would run the whole call - one more step reaches
+                // the function itself
+                for (int thunk = 0; thunk < 4 && !stop->Stopped && !stop->Exited && fresh->Contains("!ILT+"); thunk++)
+                {
+                    stop = AfterMoving("stepInto");
+                    fresh = stop->Said;
+                    said += "\n" + fresh;
+                }
+                if (stop->Exited || proc == nullptr || !proc->Running) break;
+                if (HasSource(stop))
+                {
+                    if (SamePlace(stop, origin) && stop->Function == origin->Function) continue;
+                    // at a function's entry its prologue is stepped past, unless the whole body is on
+                    // the entry line (make_rect's "{ return new Rect(w, h); }"): stepping would run it
+                    String^ echoed = EchoedLine(fresh);
+                    int brace = echoed->IndexOf(L'{');
+                    bool oneLine = brace >= 0 && echoed->Substring(brace + 1)->Trim()->Length > 0;
+                    if (AtFunctionEntry(fresh) && !oneLine)
+                    {
+                        stop = AfterStepping("stepOver");
+                        said += "\n" + stop->Said;
+                    }
+                    break;
+                }
+                // no source here: back out to a frame with source
+                for (int up = 0; up < 8 && !stop->Exited && !HasSource(stop) && proc != nullptr && proc->Running; up++)
+                {
+                    stop = AfterMoving("stepOut");
+                    said += "\n" + stop->Said;
+                }
+                if (stop->Exited || !HasSource(stop)) break;
+                // back part way through the line the step began on: enter its next call
+                if (!SamePlace(stop, origin)) break;
+            }
+            stop->Said = said;
+            return stop;
+        }
+
         static bool AtFunctionEntry(String^ said)
         {
             array<String^>^ all = DebugTranscript::Lines(said);
@@ -1565,6 +1649,16 @@ namespace Gride
                 ReadWatches();
                 Print(DebugTranscript::StopLine(file, stop->Line, stop->Function));
                 StopAt(file, stop->Line, stop->Said->Contains("Breakpoint") || stop->Said->Contains("breakpoint") ? "breakpoint" : "step", stop->Function);
+                return;
+            }
+            // cdb answered and the program is still there, stopped where there is no line to show (a
+            // Step Out from main into the runtime): the session goes on, F5 or Shift+F11 carry on from it
+            if (!stop->Exited && dialect == DebuggerKind::Cdb && proc != nullptr && proc->Running)
+            {
+                Print("stopped where there is no source to show - F5 continues, Shift+F11 steps out");
+                ReadWatches();
+                location = nullptr;
+                SetState(DebugState::Break);
                 return;
             }
             exited = stop->Exited;

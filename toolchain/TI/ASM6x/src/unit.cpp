@@ -18,6 +18,7 @@ void Unit::begin_pass(int n)
     sections.clear();
     depends.clear();
     dwRows.clear();
+    dwTags.clear();
     pendingLabels.clear();
     defined = 0;
     /* asm6x numbers .text first whatever the source opens first; it is executable from the

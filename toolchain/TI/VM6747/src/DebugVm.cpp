@@ -31,6 +31,13 @@ public:
     VmMachine(Cpu &cpu, Program &prog, Runtime &rt, const std::string &name) : cpu_(cpu), prog_(prog), rt_(rt), name_(name) {
         for (std::map<uint32_t, std::string>::const_iterator n = prog_.names.begin(); n != prog_.names.end(); ++n)
             if (functionName(n->second) && prog_.code.count(n->first)) functions_[n->first] = n->second;
+        // -g: each function's variables, by the address its label names
+        std::map<std::string, std::vector<dbg::Variable> > byLabel;
+        dbg::readTags(prog_.dwTags, byLabel);
+        for (std::map<uint32_t, std::string>::const_iterator f = functions_.begin(); f != functions_.end(); ++f) {
+            std::map<std::string, std::vector<dbg::Variable> >::const_iterator t = byLabel.find(f->second);
+            if (t != byLabel.end()) variables_[f->first] = t->second;
+        }
         for (std::map<uint32_t, Instr>::const_iterator i = prog_.code.begin(); i != prog_.code.end(); ++i)
             if (i->second.srcLine > 0) { lines_ = true; break; }
     }
@@ -85,8 +92,18 @@ public:
         if (line < 1 || static_cast<size_t>(line) > f->second.size()) return std::string();
         return f->second[static_cast<size_t>(line) - 1];
     }
+    const std::vector<dbg::Variable> *variablesAt(uint32_t entry) const override {
+        std::map<uint32_t, std::vector<dbg::Variable> >::const_iterator v = variables_.find(entry);
+        return v == variables_.end() ? nullptr : &v->second;
+    }
+    bool read(uint32_t addr, uint8_t *buf, size_t n) const override {
+        if (uint64_t(addr) + n > prog_.memory.size()) return false;
+        for (size_t k = 0; k < n; k++) buf[k] = prog_.memory[addr + k];
+        return true;
+    }
 
 private:
+    std::map<uint32_t, std::vector<dbg::Variable> > variables_;
     Cpu &cpu_;
     Program &prog_;
     Runtime &rt_;

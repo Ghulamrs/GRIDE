@@ -434,7 +434,11 @@ struct Assembler {
                     if (!evaluate(u, ln, ln.operands.back(), false, v)) return false;
                     Sym s; s.section = -1; s.offset = static_cast<uint32_t>(v); s.defined = true;
                     u.locals[name] = s;
-                } else if (m == ".end" || m == ".file" || m == ".dwpsn" || m == ".clink" || m == ".nocmp" || m == ".symdepend" ||
+                } else if (m == ".dwtag" || m == ".dwendtag") {
+                    // -g: a function or one of its variables, kept as written for the debugger's Locals (Debug.cpp readTags)
+                    prog.dwTags += m + " " + ln.text + "\n";
+                } else if (m == ".end" || m == ".file" || m == ".dwpsn" || m == ".dwattr" ||
+                           m == ".clink" || m == ".nocmp" || m == ".symdepend" ||
                            m == ".compiler_opts" || m == ".retain" ||
                            m == ".ident" || m == ".p2align" || m == ".size" || m == ".type" ||
                            m == ".battr" || m == ".elfsym" || m == ".hidden" || m == ".gmember" || m == ".endgroup") {

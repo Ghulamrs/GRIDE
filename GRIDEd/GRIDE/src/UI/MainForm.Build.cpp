@@ -416,7 +416,8 @@ namespace Gride { namespace UI {
     // searches the project sources for main()
     bool MainForm::FindEntryPoint(GrideProject^ p, String^% file, int% line)
     {
-        Regex^ re = gcnew Regex("^\\s*(int|void)?\\s*main\\s*\\(");
+        // C and C++ "int main(", Shalimar "fun <> = main("
+        Regex^ re = gcnew Regex("^\\s*((int|void)?\\s*|fun\\s*<[^>]*>\\s*=\\s*)main\\s*\\(");
         if (p != nullptr)
             for each (String^ f in p->AllFiles())
             {
@@ -672,7 +673,9 @@ namespace Gride { namespace UI {
     void MainForm::DebugStoppedUI(StopInfo^ info)
     {
         ClearExecutionMarkers();
-        EditorDocument^ d = OpenDocument(info->File, 0);
+        // a stop in a file that is not on this machine (the CRT's exe_common.inl) is said in the Debug
+        // output and the status bar, not with a message box that would hold up the next F5 or F10
+        EditorDocument^ d = File::Exists(info->File) ? OpenDocument(info->File, 0) : nullptr;
         if (d != nullptr) d->Editor->SetExecutionLine(info->Line);
         // a new stop: what the panes saw at the last one is what a value is compared with (RIDE's NewStop)
         watch->NewStop();

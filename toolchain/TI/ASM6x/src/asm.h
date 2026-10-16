@@ -136,6 +136,7 @@ public:
     std::vector<Symbol> symbols;
     std::vector<Fixup> fixups;
     std::vector<DwRow> dwRows;                  /* the .dwpsn rows of this pass, in source order */
+    std::string dwTags;                         /* the .dwtag / .dwendtag lines of this pass, a line each, as written */
     std::vector<std::string> errors;
     std::vector<std::string> warnings;          /* asm6x mends these with a word; so does this */
     std::vector<std::pair<int, std::string> > depends;  /* .symdepend: (symbol, section name) pairs, R_NONE entries */

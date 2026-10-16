@@ -95,7 +95,14 @@ private:
     void cmdFrame(const std::string &arg);
     void cmdRegisters();
     void cmdInfoBreak();
+    void cmdInfoVariables(bool params);
     bool evaluate(const std::string &expr, uint32_t &value, bool &isRegister, int &reg);
+    // -g: the selected frame's variables, where one lives, and its value as gdb prints it
+    const std::vector<Variable> *frameVariables() const;
+    const Variable *variableNamed(const std::string &name) const;
+    bool addressOf(const Variable &v, uint32_t &addr) const;
+    std::string valueOf(const Variable &v) const;
+    uint32_t read32(uint32_t addr) const;
 };
 
 const Breakpoint *Session::breakAt(uint32_t pc) const {
@@ -268,8 +275,22 @@ void Session::cmdPrint(const std::string &arg, bool typeOnly) {
     std::string e = trim(arg);
     if (!evaluate(e, v, isReg, reg)) {
         std::string name = e;
-        if (!name.empty() && name[0] == '&') name = name.substr(1);
-        if (name.size() > 1 && name[0] == '(' && name[name.size() - 1] == ')') name = name.substr(1, name.size() - 2);
+        bool address = !name.empty() && name[0] == '&';
+        if (address) name = trim(name.substr(1));
+        if (name.size() > 1 && name[0] == '(' && name[name.size() - 1] == ')') name = trim(name.substr(1, name.size() - 2));
+        // -g: a variable of the selected frame - print n, print &(n), whatis n
+        if (const Variable *var = variableNamed(name)) {
+            if (typeOnly) { line("type = " + var->type + (address ? " *" : "")); return; }
+            values_++;
+            if (address) {
+                uint32_t at = 0;
+                if (!addressOf(*var, at)) { line("Can't take address of \"" + name + "\" which isn't an lvalue."); return; }
+                char buf[96];
+                std::snprintf(buf, sizeof buf, "$%d = (%s *) 0x%x", values_, var->type.c_str(), at);
+                line(buf);
+            } else line("$" + std::to_string(values_) + " = " + valueOf(*var));
+            return;
+        }
         line("No symbol \"" + name + "\" in current context.");
         return;
     }
@@ -321,6 +342,104 @@ void Session::cmdFrame(const std::string &arg) {
     line("#" + std::to_string(k) + "  " + place(pc, k > 0));
     Position p;
     if (m_.positionAt(pc, p) && p.known()) line(std::to_string(p.line) + "\t" + m_.sourceLine(p.file, p.line));
+}
+
+uint32_t Session::read32(uint32_t addr) const {
+    uint8_t b[4] = { 0, 0, 0, 0 };
+    if (!m_.read(addr, b, 4)) return 0;
+    return b[0] | (b[1] << 8) | (b[2] << 16) | (static_cast<uint32_t>(b[3]) << 24);
+}
+
+// The selected frame's function's variables, from the tags the compilers wrote (-g).
+const std::vector<Variable> *Session::frameVariables() const {
+    if (!alive_ || !started_) return nullptr;
+    std::string fn;
+    uint32_t entry = 0;
+    if (!m_.functionAt(framePc(frame_), fn, entry)) return nullptr;
+    return m_.variablesAt(entry);
+}
+
+const Variable *Session::variableNamed(const std::string &name) const {
+    const std::vector<Variable> *vs = frameVariables();
+    if (vs == nullptr) return nullptr;
+    for (const Variable &v : *vs) if (v.name == name) return &v;
+    return nullptr;
+}
+
+// A frame variable is at the frame's A15 plus its offset. Every function the compilers write keeps the
+// caller's A15 at the word its own A15 points to (STW A15, *B15 then MV B15, A15), so an outer frame's
+// A15 is read down that chain, one word a frame.
+bool Session::addressOf(const Variable &v, uint32_t &addr) const {
+    if (v.global) {
+        if (!m_.addressOfFunction(v.symbol, addr)) return false;
+    } else {
+        uint32_t a15 = m_.reg(15);
+        for (size_t k = 0; k < frame_; k++) a15 = read32(a15);
+        addr = a15 + static_cast<uint32_t>(v.offset);
+    }
+    if (v.deref) addr = read32(addr);
+    return true;
+}
+
+// The value as gdb prints it: an integer in decimal, a real as %g, a pointer in hex, an aggregate as {...}.
+std::string Session::valueOf(const Variable &v) const {
+    uint32_t addr = 0;
+    if (!addressOf(v, addr)) return "<optimized out>";
+    std::string t = v.type;
+    for (const char *q : { "const ", "volatile " })
+        for (size_t at; (at = t.find(q)) != std::string::npos;) t.erase(at, std::strlen(q));
+    t = trim(t);
+    char buf[64];
+    if (!t.empty() && (t.back() == '*' || t.find("(*") != std::string::npos)) {
+        std::snprintf(buf, sizeof buf, "(%s) 0x%x", v.type.c_str(), read32(addr));
+        return buf;
+    }
+    if (t.empty() || t.find('[') != std::string::npos || t.compare(0, 7, "struct ") == 0 || t.compare(0, 6, "class ") == 0 ||
+        t.compare(0, 6, "union ") == 0)
+        return "{...}";
+    uint8_t b[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    if (t == "double" || t == "long double" || t == "real") {
+        if (!m_.read(addr, b, 8)) return "<unreadable>";
+        double d; std::memcpy(&d, b, 8);
+        std::snprintf(buf, sizeof buf, "%g", d);
+        return buf;
+    }
+    if (t == "float") {
+        if (!m_.read(addr, b, 4)) return "<unreadable>";
+        float f; std::memcpy(&f, b, 4);
+        std::snprintf(buf, sizeof buf, "%g", f);
+        return buf;
+    }
+    bool isUnsigned = t.compare(0, 9, "unsigned ") == 0 || t == "unsigned" || t == "bool" || t == "_Bool";
+    size_t size = 4;
+    if (t.find("char") != std::string::npos || t == "bool" || t == "_Bool") size = 1;
+    else if (t.find("short") != std::string::npos) size = 2;
+    else if (t.find("long long") != std::string::npos) size = 8;
+    if (!m_.read(addr, b, size)) return "<unreadable>";
+    uint64_t u = 0;
+    for (size_t k = size; k-- > 0;) u = (u << 8) | b[k];
+    if (t == "bool" || t == "_Bool") return u ? "true" : "false";
+    if (isUnsigned) { std::snprintf(buf, sizeof buf, "%llu", static_cast<unsigned long long>(u)); return buf; }
+    long long s = size == 8 ? static_cast<long long>(u) : static_cast<long long>(u << (64 - 8 * size)) >> (64 - 8 * size);
+    std::snprintf(buf, sizeof buf, "%lld", s);
+    return buf;
+}
+
+// info args / info locals: "name = value" a line, as gdb answers; a name two blocks share is listed once.
+void Session::cmdInfoVariables(bool params) {
+    if (!alive_ || !started_) { line("No frame selected."); return; }
+    const std::vector<Variable> *vs = frameVariables();
+    if (vs == nullptr) { line("No symbol table info available."); return; }
+    std::vector<std::string> seen;
+    for (const Variable &v : *vs) {
+        if (v.param != params) continue;
+        bool again = false;
+        for (const std::string &s : seen) if (s == v.name) again = true;
+        if (again) continue;
+        seen.push_back(v.name);
+        line(v.name + " = " + valueOf(v));
+    }
+    if (seen.empty()) line(params ? "No arguments." : "No locals.");
 }
 
 void Session::cmdRegisters() {
@@ -381,7 +500,7 @@ int Session::run() {
         else if (verb == "print" || verb == "p") cmdPrint(arg, false);
         else if (verb == "whatis") cmdPrint(arg, true);
         else if (verb == "info") {
-            if (arg == "args" || arg == "locals") line("No symbol table info available.");
+            if (arg == "args" || arg == "locals") cmdInfoVariables(arg == "args");
             else if (arg == "registers" || arg == "reg") cmdRegisters();
             else if (arg == "breakpoints" || arg == "break" || arg == "b") cmdInfoBreak();
             else if (arg == "line" || arg == "source") line(place(m_.pc(), false));
@@ -397,5 +516,72 @@ int Session::run() {
 }  // namespace
 
 int shell(Machine &m) { return Session(m).run(); }
+
+namespace {
+
+// The text of an attribute - DW_AT_name("n") gives n, DW_AT_low_pc(greet) greet - or empty.
+std::string attribute(const std::string &line, const char *key) {
+    size_t at = line.find(key);
+    if (at == std::string::npos) return std::string();
+    at += std::strlen(key);
+    if (at < line.size() && line[at] == '"') {
+        size_t end = line.find('"', at + 1);
+        return end == std::string::npos ? std::string() : line.substr(at + 1, end - at - 1);
+    }
+    size_t end = line.find(')', at);
+    return end == std::string::npos ? std::string() : trim(line.substr(at, end - at));
+}
+
+}  // namespace
+
+// The lines the compilers write, as the assembler kept them - spaced as written, or rebuilt from asm6x's
+// tokens with no space after a comma:
+//   .dwtag DW_TAG_subprogram, DW_AT_name("greet"), DW_AT_low_pc(greet)
+//   .dwtag DW_TAG_formal_parameter, DW_AT_name("n"), DW_AT_type("int"), DW_AT_location[DW_OP_breg15 -44]
+//   .dwtag DW_TAG_variable, ..., DW_AT_location[DW_OP_addr L.s.1]
+//   .dwendtag
+// DW_OP_breg15 is A15 (TI numbers A0-A15 0-15); a location in another register is passed over.
+void readTags(const std::string &text, std::map<std::string, std::vector<Variable> > &byLabel) {
+    std::string label;
+    size_t from = 0;
+    while (from < text.size()) {
+        size_t nl = text.find('\n', from);
+        std::string line = trim(text.substr(from, nl == std::string::npos ? std::string::npos : nl - from));
+        from = nl == std::string::npos ? text.size() : nl + 1;
+        if (line.compare(0, 9, ".dwendtag") == 0) { label.clear(); continue; }
+        if (line.compare(0, 6, ".dwtag") != 0) continue;
+        if (line.find("DW_TAG_subprogram") != std::string::npos) {
+            label = attribute(line, "DW_AT_low_pc(");
+            if (!label.empty()) byLabel[label];
+            continue;
+        }
+        bool param = line.find("DW_TAG_formal_parameter") != std::string::npos;
+        if (label.empty() || (!param && line.find("DW_TAG_variable") == std::string::npos)) continue;
+        Variable v;
+        v.name = attribute(line, "DW_AT_name(");
+        v.type = attribute(line, "DW_AT_type(");
+        v.param = param;
+        size_t loc = line.find("DW_AT_location[");
+        if (v.name.empty() || loc == std::string::npos) continue;
+        size_t end = line.find(']', loc);
+        std::string where = line.substr(loc + 15, end == std::string::npos ? std::string::npos : end - loc - 15);
+        v.deref = where.find("DW_OP_deref") != std::string::npos;
+        size_t breg = where.find("DW_OP_breg"), addr = where.find("DW_OP_addr");
+        if (breg != std::string::npos) {
+            const char *p = where.c_str() + breg + 10;
+            char *after = nullptr;
+            long reg = std::strtol(p, &after, 10);
+            if (reg != 15 || after == p) continue;
+            v.offset = static_cast<int>(std::strtol(after, nullptr, 10));
+        } else if (addr != std::string::npos) {
+            std::string s = trim(where.substr(addr + 10));
+            size_t stop = s.find_first_of(", \t");
+            v.symbol = stop == std::string::npos ? s : s.substr(0, stop);
+            v.global = !v.symbol.empty();
+            if (!v.global) continue;
+        } else continue;
+        byLabel[label].push_back(v);
+    }
+}
 
 }  // namespace dbg

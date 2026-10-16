@@ -874,7 +874,7 @@
       "exe": "cdb.exe",
       "aliases": ["cdb"],
       "words": [],
-      "lookup": { "env": "RIDE_CDB", "installDir": "", "path": true, "vcvars": false, "description": "$RIDE_CDB, the tool folder, PATH, the Windows SDK's Debuggers\\x64" },
+      "lookup": { "env": "RIDE_CDB", "installDir": "", "dirs": ["%ProgramFiles(x86)%\\Windows Kits\\10\\Debuggers\\x64", "%ProgramFiles%\\Windows Kits\\10\\Debuggers\\x64"], "path": true, "vcvars": false, "description": "$RIDE_CDB, the Windows SDK's Debuggers\\x64, PATH" },
       "version": { "args": "-version", "description": "" },
       "outputEncoding": "oem",
       "diagnostics": "none",

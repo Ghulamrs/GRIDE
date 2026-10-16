@@ -505,7 +505,8 @@ namespace Gride
         property String^ EnvVar;              // the environment variable that names it outright ($C90, $VM6747, $RTS6X ...)
         property List<String^>^ Aliases;      // the other names tried, in order (cc1.exe, shc.exe, ASM6x.exe ...)
         property String^ InstallDir;          // the installation sub-folder it lives in (bin; lib\rts6x-tms6747 for the runtime)
-        property bool OnPath;                 // also looked for on PATH (not RIDE's link, which Microsoft's would be taken for)
+        property List<String^>^ Dirs;         // folders of its own, looked in before PATH (cdb: the Windows SDK's Debuggers\x64)
+        property bool OnPath;                // also looked for on PATH (not RIDE's link, which Microsoft's would be taken for)
         property bool Vcvars;                 // Visual Studio's: looked for in its folders (VendorTools.h), as vcvars64.bat would put them on PATH
         property bool TiCompilerDir;          // TI's: looked for in TI's C6000 compiler directory's bin
         property String^ Definition;          // the file's tool (or library) id behind this entry; empty when the file lacks it
@@ -549,6 +550,7 @@ namespace Gride
             if (Aliases == nullptr)        Aliases = gcnew List<String^>();
             if (EnvVar == nullptr)         EnvVar = String::Empty;
             if (InstallDir == nullptr)     InstallDir = String::Empty;
+            if (Dirs == nullptr)           Dirs = gcnew List<String^>();
             if (Definition == nullptr)     Definition = String::Empty;
             if (Operation == nullptr)      Operation = String::Empty;
             if (About == nullptr)          About = String::Empty;
@@ -559,6 +561,7 @@ namespace Gride
         {
             if (def == nullptr) return;
             EnvVar = def->EnvVar; InstallDir = def->InstallDir; OnPath = def->OnPath; Vcvars = def->Vcvars; TiCompilerDir = def->TiCompilerDir;
+            Dirs = gcnew List<String^>(def->Dirs);
             Aliases = gcnew List<String^>(def->Aliases);
             Definition = def->Definition; Operation = def->Operation; About = def->About;
         }
@@ -629,6 +632,7 @@ namespace Gride
             if (InstallDir->Length > 0) for each (String^ d in IdeSettingsPaths::SearchDirs(InstallDir)) sb->Append(d)->Append(", ");
             if (Vcvars) sb->Append("Visual Studio's folders (")->Append(VisualStudio::Where())->Append("), ");
             if (TiCompilerDir) sb->Append("TI's C6000 compiler directory (")->Append(TiCompiler::Dir() == nullptr ? Str("none found") : TiCompiler::Bin())->Append("), ");
+            for each (String^ own in Dirs) sb->Append(System::Environment::ExpandEnvironmentVariables(own))->Append(", ");
             if (OnPath && !IsRuntime) sb->Append("PATH");
             return sb->ToString()->TrimEnd(L' ', L',');
         }
@@ -645,7 +649,7 @@ namespace Gride
             Id = String::Empty; DisplayName = String::Empty; Category = "Tool"; ExecutablePath = String::Empty; Arguments = String::Empty;
             IncludeSwitch = String::Empty; DefineSwitch = String::Empty; LibrarySwitch = String::Empty; ErrorPattern = String::Empty;
             Environment = String::Empty; SetupScript = String::Empty; OutputCodePage = 0; Custom = false;
-            Aliases = gcnew List<String^>(); EnvVar = String::Empty; InstallDir = String::Empty; OnPath = true; Vcvars = false; TiCompilerDir = false;
+            Aliases = gcnew List<String^>(); EnvVar = String::Empty; InstallDir = String::Empty; Dirs = gcnew List<String^>(); OnPath = true; Vcvars = false; TiCompilerDir = false;
             Definition = String::Empty; Operation = String::Empty; About = String::Empty;
         }
 
@@ -681,6 +685,11 @@ namespace Gride
                 {
                     String^ bin = TiCompiler::Bin();
                     if (bin != nullptr && File::Exists(Path::Combine(bin, name))) return Path::GetFullPath(Path::Combine(bin, name));
+                }
+                for each (String^ own in Dirs)
+                {
+                    String^ c = Path::Combine(System::Environment::ExpandEnvironmentVariables(own), name);
+                    if (File::Exists(c)) return Path::GetFullPath(c);
                 }
                 if (OnPath && !IsRuntime) return PathUtil::FindExecutable(name);
             }
@@ -1115,6 +1124,7 @@ namespace Gride
                         d->OutputCodePage = String::Equals(e->OutputEncoding, "utf-8", StringComparison::OrdinalIgnoreCase) ? 65001 : 0;
                         d->LookedFor(e->Lookup->Env, e->Lookup->InstallDir, e->Lookup->OnPath, e->Aliases);
                         d->Vcvars = e->Lookup->Vcvars;
+                        d->Dirs = gcnew List<String^>(e->Lookup->Dirs);
                         d->TiCompilerDir = String::Equals(b->Role, "nativeLinker") && te != nullptr && te->Emulated;
                         d->Definition = e->Id; d->Operation = b->Operation; d->About = e->Description;
                     }

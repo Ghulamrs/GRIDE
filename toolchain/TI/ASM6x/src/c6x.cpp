@@ -1,6 +1,7 @@
 #include "asm.h"
 #include "forms.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -419,6 +420,21 @@ bool C6xTarget::directive(Unit &u, const std::vector<Token> &t, size_t i)
         }
         if (r.file.empty() || r.line <= 0) { u.error(".dwpsn takes file \"name\" and line n"); return true; }
         u.dwRows.push_back(r);
+        return true;
+    }
+    /* .dwtag / .dwattr / .dwendtag (cl6x -g; c90, cpp11 and shalimar -g on tms6747): the functions and
+       their variables. Not yet a .debug_info: kept as their text, a line each, for the .gride.dwtag
+       section assembler.cpp writes - the line rebuilt from its tokens, a string quoted again */
+    if (d == ".DWTAG" || d == ".DWATTR" || d == ".DWENDTAG") {
+        std::string text = t[i].text;
+        for (size_t k = i + 1; k < t.size(); k++) {
+            const bool word = t[k].kind == T_NAME || t[k].kind == T_NUM;
+            const char last = text.empty() ? ' ' : text[text.size() - 1];
+            if (word && (isalnum((unsigned char)last) || last == '_')) text += ' ';
+            if (t[k].kind == T_STR) text += "\"" + t[k].text + "\"";
+            else text += t[k].text;
+        }
+        if (d == ".DWTAG" || d == ".DWENDTAG") u.dwTags += text + "\n";
         return true;
     }
     if (d == ".CLINK" || d == ".RETAIN" || d == ".NOCMP" || d == ".COMPILER_OPTS" || d == ".FILE" ||

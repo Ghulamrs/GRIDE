@@ -1176,6 +1176,23 @@ unsigned Tms6747::unwindWord(bool needFrame) const {
     return 0x83000000u | (needFrame ? 0x7fu << 17 : 0u) | (mask << 4) | 7u;
 }
 
+// -g: the function's parameters and locals in TI's .dwtag spelling, so sim6747 and vm6747 can show them
+// (docs\C6747-LOCALS-DESIGN.md). A frame variable is named from A15 - TI's DWARF register 15 - as
+// localAddr reaches it; a static one by its symbol. Parameters first, in order, as the CodeView path does.
+void Tms6747::emitVariables(const Function &fn) {
+    if (lineSource() == nullptr) return;
+    out_ << "\t.dwtag\tDW_TAG_subprogram, DW_AT_name(\"" << fn.name() << "\"), DW_AT_low_pc(" << fn.name() << ")\n";
+    for (int pass = 0; pass < 2; pass++)
+        for (const Local &l : fn.locals()) {
+            if (l.isParam != (pass == 0) || l.name.empty()) continue;
+            out_ << "\t.dwtag\t" << (l.isParam ? "DW_TAG_formal_parameter" : "DW_TAG_variable")
+                 << ", DW_AT_name(\"" << l.name << "\"), DW_AT_type(\"" << l.type->describe() << "\"), ";
+            if (!l.staticName.empty()) out_ << "DW_AT_location[DW_OP_addr " << l.staticName << "]\n";
+            else out_ << "DW_AT_location[DW_OP_breg15 " << -(kSaveBytes + l.offset) << "]\n";
+        }
+    out_ << "\t.dwendtag\n";
+}
+
 void Tms6747::emitFunction(const Function &fn) {
     resetLabels();
     functionName_ = fn.name();
@@ -1223,6 +1240,7 @@ void Tms6747::emitFunction(const Function &fn) {
     if (!fn.isStatic()) out_ << "\t.global " << fn.name() << "\n";
     out_ << fn.name() << ":\n";
     markLine(fn.pos());                                   // -g: the function's own line, as cl6x's first .dwpsn names it
+    emitVariables(fn);
 
     int frame = align8(fn.frameSize());
     bool needFrame = frame > 0 || hasCall_ || !fn.params().empty() || sretSlot_ != 0;

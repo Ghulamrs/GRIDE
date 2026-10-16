@@ -720,6 +720,29 @@ bool Link::build_sections()
         }
     }
 
+    /*  **.gride.dwtag is carried the same way** - the variables c90, cpp11 and shalimar name with
+     *  .dwtag (-g), kept by asm6x as text: no relocations, the parts one after another, for
+     *  sim6747 --run --debug to show a function's locals. Only the objects on the command line
+     *  carry one; an image built without -g stays as it was. */
+    for (size_t mi = 0; mi < cmdMods && mi < mods.size(); mi++)
+        for (size_t si = 1; si < mods[mi].secs.size(); si++) {
+            InSec &c = mods[mi].secs[si];
+            if ((c.flags & SHF_ALLOC) || c.type != SHT_PROGBITS || c.name != ".gride.dwtag" || c.size == 0) continue;
+            int oi = out_index(".gride.dwtag");
+            if (oi < 0) {
+                OutSec o;
+                o.name = ".gride.dwtag"; o.flags = 0; o.entsize = 0;
+                o.type = SHT_PROGBITS; o.addr = 0; o.size = 0; o.align = 1; o.offset = 0;
+                o.pflags = 0; o.progbits = true; o.debug = true;
+                outs.push_back(o);
+                oi = (int)outs.size() - 1;
+            }
+            c.out = oi;
+            c.live = true;
+            outs[oi].parts.push_back((int)all.size());
+            all.push_back(&c);
+        }
+
     /*  A `{ *(.text:early) *(.text) *(.text:*) }` list is an order, not decoration: the parts
      *  that a pattern names come first, in the order the patterns were written, and whatever
      *  the list does not name keeps the order it was read in after them. */

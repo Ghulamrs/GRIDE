@@ -147,6 +147,22 @@ public:
             if (n.empty() || n[0] == '$' || n[0] == '.' || n.compare(0, 2, "L$") == 0 || n.compare(0, 2, "L.") == 0) continue;
             if (img_.functions.empty() ? inCode(s->first) : img_.functions.count(s->first) != 0) functions_.insert(s->first);
         }
+        // -g: each function's variables from the image's .gride.dwtag, by the address its label names
+        std::map<std::string, std::vector<dbg::Variable> > byLabel;
+        dbg::readTags(img_.dwTags, byLabel);
+        for (std::map<std::string, std::vector<dbg::Variable> >::const_iterator t = byLabel.begin(); t != byLabel.end(); ++t) {
+            uint32_t at = 0;
+            if (addressOfFunction(t->first, at)) variables_[at] = t->second;
+        }
+    }
+    const std::vector<dbg::Variable> *variablesAt(uint32_t entry) const override {
+        std::map<uint32_t, std::vector<dbg::Variable> >::const_iterator v = variables_.find(entry);
+        return v == variables_.end() ? nullptr : &v->second;
+    }
+    bool read(uint32_t addr, uint8_t *buf, size_t n) const override {
+        cpu_.flushStores();   // a store still in flight is part of what a halted debugger shows
+        for (size_t k = 0; k < n; k++) buf[k] = cpu_.memory().read8(addr + static_cast<uint32_t>(k));
+        return true;
     }
     std::string programName() const override { return path_; }
     uint32_t pc() const override { return cpu_.pc(); }
@@ -223,6 +239,7 @@ private:
     LineTable table_;
     bool lines_ = false;
     std::set<uint32_t> functions_;
+    std::map<uint32_t, std::vector<dbg::Variable> > variables_;
     std::map<std::string, std::vector<std::string> > sources_;
     bool inCode(uint32_t a) const {
         for (const Section &s : img_.sections) if (s.code && a >= s.addr && a < s.addr + s.size) return true;

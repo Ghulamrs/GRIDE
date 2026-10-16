@@ -28,9 +28,10 @@ namespace Gride
     public ref class ToolLookup
     {
     public:
-        ToolLookup() { Env = String::Empty; InstallDir = String::Empty; OnPath = true; Vcvars = false; Description = String::Empty; }
+        ToolLookup() { Env = String::Empty; InstallDir = String::Empty; Dirs = gcnew List<String^>(); OnPath = true; Vcvars = false; Description = String::Empty; }
         property String^ Env;
         property String^ InstallDir;
+        property List<String^>^ Dirs;      // folders of its own (cdb: the Windows SDK's Debuggers\x64), %VAR% expanded
         property bool OnPath;
         property bool Vcvars;
         property String^ Description;
@@ -1219,6 +1220,7 @@ namespace Gride
                     {
                         d->Lookup->Env = l->GetString("env", String::Empty);
                         d->Lookup->InstallDir = l->GetString("installDir", String::Empty);
+                        d->Lookup->Dirs = ReadList(l, "dirs");
                         d->Lookup->OnPath = l->GetBool("path", true);
                         d->Lookup->Vcvars = l->GetBool("vcvars", false);
                         d->Lookup->Description = l->GetString("description", String::Empty);

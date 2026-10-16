@@ -65,6 +65,16 @@ bool Assembler::run()
         else unit.warnings = settled.warnings;
     }
     if (!unit.dwRows.empty()) build_debug_line(unit);
+    if (!unit.dwTags.empty()) {
+        /* the variables the compilers name with .dwtag (-g), as text in a section of their own that is not
+           loaded: lnk6x carries it into the image as it carries .debug_line, and sim6747 --debug reads it */
+        Section s;
+        s.name = ".gride.dwtag";
+        s.code = false; s.hasCode = false; s.bss = false; s.writable = false; s.alloc = false;
+        s.kind = SEC_PROGBITS; s.align = 0; s.dataLast = false; s.dataEnd = 0; s.dataBytes = 0; s.compressed = false; s.codeEnd = 0;
+        s.bytes.assign(unit.dwTags.begin(), unit.dwTags.end());
+        unit.sections.push_back(s);
+    }
     std::string err;
     if (!write_elf(unit, output, err)) { unit.errors.push_back(err); return false; }
     return true;
