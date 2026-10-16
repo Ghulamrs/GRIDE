@@ -59,9 +59,26 @@ function Act($what) {
         'Set'       { Menu 'Debug','Set Variable...'; TypeKeys "$rest{ENTER}"; return PaneRows 'Locals' }
         'GoTo'      { Focus-Gride; TypeKeys '^g'; TypeKeys "$rest{ENTER}"; return 'ok' }
         'Output'    { return Get-Output 'Debug' }
+        'Convert'   {
+            # Tools > Convert > C -> Shalimar (Ctrl+Alt+S): its dialog's Convert, then No to adding the file to the project
+            Remove-Item ($rest) -ErrorAction SilentlyContinue
+            Focus-Gride; [System.Windows.Forms.SendKeys]::SendWait('^%s'); Start-Sleep 2
+            $dlg = [Enum32]::TopOf([uint32]$P.Id) | Where-Object { [W32]::Text($_) -eq 'Convert Source' } | Select-Object -First 1
+            if (-not $dlg) { return 'no Convert Source dialog' }
+            $btn = [Enum32]::Children([IntPtr]$dlg) | Where-Object { [W32]::Text($_) -eq 'Convert' } | Select-Object -First 1
+            [SuiteMsg]::PostMessage([IntPtr]$btn, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null; Start-Sleep 4
+            $ask = [Enum32]::TopOf([uint32]$P.Id) | Where-Object { [W32]::Text($_) -eq 'Convert' } | Select-Object -First 1
+            if ($ask) { $no = [Enum32]::Children([IntPtr]$ask) | Where-Object { [W32]::Text($_) -eq '&No' } | Select-Object -First 1
+                        [SuiteMsg]::PostMessage([IntPtr]$no, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null; Start-Sleep 2 }
+            return (Get-Output 'Tools') + "`ntitle: " + (Get-Process -Id $P.Id).MainWindowTitle + "`nwritten: " + (Test-Path $rest)
+        }
     }
     return $null
 }
+Add-Type @"
+using System; using System.Runtime.InteropServices;
+public static class SuiteMsg { [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l); }
+"@
 
 # ---- builds: the whole workspace, both configurations, both targets ----
 foreach ($target in 'Windows', 'TMS320C6747') {
@@ -86,9 +103,11 @@ $debug = @(
         @('Start Debugging', 'stopped at main\.cpp:9'), @('Step Into', 'stopped at rect\.cpp:16'), @('Step Out', 'stopped at main\.cpp:9'), @('Start Debugging', 'returned 0')) },
     @{ Name = 'debug C++11 C6747'; Proj = 'cppshapes'; Target = 'TMS320C6747'; Bps = '{ "cppshapes/src/main.cpp": [9] }'; Open = 'cppshapes\src\main.cpp'; Steps = @(
         @('Start Debugging', 'stopped at main\.cpp:9'), @('Locals', 'shapes \| \{items_ = 0x[0-9a-f]+, size_ = 1, cap_ = \d+\} \| class vector'),
+        @('Step Into', 'stopped at rect\.cpp:16'), @('Step Out', 'stopped at main\.cpp:9'),
         @('Step Over', 'stopped at main\.cpp:10'), @('Start Debugging', 'returned 0')) },
     @{ Name = 'debug Shalimar Windows'; Proj = 'shlmatrix'; Target = 'Windows'; Bps = '{ "shlmatrix/src/matrix.shl": [9] }'; Open = $null; Steps = @(
-        @('Start Debugging', 'stopped at matrix\.shl:9'), @('Step Into', 'stopped at linalg\.shl:\d+ in mul'), @('Step Out', 'stopped at matrix\.shl:(9|10)'),
+        @('Start Debugging', 'stopped at matrix\.shl:9'), @('Step Into', 'stopped at linalg\.shl:\d+ in mul'),
+        @('Locals', 'a \| \{\{1, 2, 0\}, \{0, 1, 3\}, \{4, 0, 1\}\} \| struct real\[\]\[\] \*'), @('Step Out', 'stopped at matrix\.shl:(9|10)'),
         @('Step Over', 'stopped at matrix\.shl:\d+'), @('Step Out', 'no source to show'), @('Start Debugging', 'returned 0')) },
     @{ Name = 'debug Shalimar C6747'; Proj = 'shlmatrix'; Target = 'TMS320C6747'; Bps = '{ "shlmatrix/src/matrix.shl": [9] }'; Open = $null; Steps = @(
         @('Start Debugging', 'stopped at matrix\.shl:9'), @('Step Into', 'stopped at linalg\.shl:\d+'),
@@ -99,6 +118,9 @@ $debug = @(
         @('Start Debugging', 'stopped at data\.c:22'),
         @('Locals', '(?s)primes \| \{2, 3, 5, 7, 11\} \|.*grid \| \{\{1, 2, 3\}, \{4, 5, 6\}\} \|.*p \| \{x = 3, y = -4\} \|.*b \| \{corner = \{\{x = 0, y = 0\}, \{x = 6, y = 2\}\}, label = "box", area = 12\.5\} \|.*name \| \(char \*\) 0x[0-9a-f]+ "cdata"'),
         @('Start Debugging', 'returned 28')) },
+    # Tools > Convert: greet.c to Shalimar with c2s, the result opened, "Converted to" in the Tools output
+    @{ Name = 'convert C to Shalimar'; Proj = 'cdemo'; Target = 'Windows'; Bps = $null; Open = 'cdemo\src\greet.c'; Steps = @(
+        ,@("Convert:$E2E\cdemo\src\greet.shl", '(?s)Converted to .*greet\.shl.*title: greet\.shl - .*written: True')) },   # the comma: one step, not flattened
     @{ Name = 'debug C90 data Windows'; Proj = 'cdata'; Target = 'Windows'; Bps = '{ "cdata/src/data.c": [22] }'; Open = 'cdata\src\data.c'; Steps = @(
         @('Start Debugging', 'stopped at data\.c:22'), @('Locals', '(?s)primes \|.*total \| 28 \|'), @('Start Debugging', 'returned 28')) }
 )

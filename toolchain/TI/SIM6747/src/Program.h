@@ -41,6 +41,7 @@ struct Instr {
     // The source position the last `.dwpsn` before this instruction named (-g), or line 0.
     std::string srcFile;
     int srcLine = 0;
+    bool rowStart = false;   // -g: a .dwpsn came just before this instruction - a line-table row begins here
 };
 
 struct Program {

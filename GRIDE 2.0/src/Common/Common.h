@@ -70,17 +70,11 @@ namespace Gride
     T^ JsonLoad(String^ path)
     {
         DataContractJsonSerializer^ ser = JsonSerializerFor<T>();
-        T^ result = nullptr;
-        FileStream^ fs = File::OpenRead(path);
-        try
-        {
-            result = safe_cast<T^>(ser->ReadObject(fs));
-        }
-        finally
-        {
-            fs->Close();
-        }
-        return result;
+        // a UTF-8 byte-order mark (Notepad's, PowerShell's) is not JSON: the serializer stops at it
+        array<Byte>^ bytes = File::ReadAllBytes(path);
+        int skip = bytes->Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
+        MemoryStream^ ms = gcnew MemoryStream(bytes, skip, bytes->Length - skip);
+        return safe_cast<T^>(ser->ReadObject(ms));
     }
 
     // Save an object as indented JSON. Writes to a temp file first so a crash

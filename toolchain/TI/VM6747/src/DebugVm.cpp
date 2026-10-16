@@ -49,6 +49,10 @@ public:
     void finish() override { if (!finished_) { finished_ = true; rt_.runAtExit(cpu_); } }
     bool hasLines() const override { return lines_; }
     std::string noLinesWhy() const override { return "the assembly carries no .dwpsn - compile with -g"; }
+    bool startsRow(uint32_t pc) const override {
+        std::map<uint32_t, Instr>::const_iterator i = prog_.code.find(pc);
+        return i != prog_.code.end() && i->second.rowStart;
+    }
     bool positionAt(uint32_t pc, dbg::Position &p) const override {
         std::map<uint32_t, Instr>::const_iterator i = prog_.code.find(pc);
         if (i == prog_.code.end()) return false;

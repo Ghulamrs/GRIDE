@@ -191,7 +191,11 @@ void Session::go(Mode mode) {
             if (mode == Next && ((here && depth <= depth0 && p != pos0) || depth < depth0)) { stopped(nullptr, false); return; }
             // A step into a callee passes its entry position - the function's own line, over the prologue - and
             // stops on its first statement, where gdb stops; one that returns stops in the caller wherever it lands.
-            if (mode == Step && ((here && p != pos0 && !(depth > depth0 && p == entryPos_)) || depth < depth0)) { stopped(nullptr, false); return; }
+            // A function written on one line has its first statement on that same line: a new row there, after
+            // the entry, is the statement, and the step stops on it.
+            const bool prologue = depth > depth0 && p == entryPos_ &&
+                                  !(m_.startsRow(pc) && !frames_.empty() && pc != frames_.back().entry);
+            if (mode == Step && ((here && p != pos0 && !prologue) || depth < depth0)) { stopped(nullptr, false); return; }
             if (mode == Finish && depth < depth0) { stopped("Run till exit done: ", false); return; }
         }
         first = false;

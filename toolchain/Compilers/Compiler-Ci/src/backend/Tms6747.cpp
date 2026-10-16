@@ -1176,6 +1176,16 @@ unsigned Tms6747::unwindWord(bool needFrame) const {
     return 0x83000000u | (needFrame ? 0x7fu << 17 : 0u) | (mask << 4) | 7u;
 }
 
+// -g: a type's name for the debugger, an array's bounds in C's order - int [2][3], where describe() reads
+// the nesting inside out (int [3] [2]); every other type as describe() spells it.
+static std::string debugName(const Type *t) {
+    if (!t->isArray()) return t->describe();
+    std::string dims;
+    const Type *e = t;
+    for (; e->isArray(); e = e->pointee()) dims += "[" + std::to_string(e->length()) + "]";
+    return debugName(e) + " " + dims;
+}
+
 // -g: the function's parameters and locals in TI's .dwtag spelling, so sim6747 and vm6747 can show them
 // (docs\C6747-LOCALS-DESIGN.md). A frame variable is named from A15 - TI's DWARF register 15 - as
 // localAddr reaches it; a static one by its symbol. Parameters first, in order, as the CodeView path does.
@@ -1186,7 +1196,7 @@ void Tms6747::emitVariables(const Function &fn) {
         for (const Local &l : fn.locals()) {
             if (l.isParam != (pass == 0) || l.name.empty()) continue;
             out_ << "\t.dwtag\t" << (l.isParam ? "DW_TAG_formal_parameter" : "DW_TAG_variable")
-                 << ", DW_AT_name(\"" << l.name << "\"), DW_AT_type(\"" << l.type->describe() << "\"), ";
+                 << ", DW_AT_name(\"" << l.name << "\"), DW_AT_type(\"" << debugName(l.type) << "\"), ";
             if (!l.staticName.empty()) out_ << "DW_AT_location[DW_OP_addr " << l.staticName << "]\n";
             else out_ << "DW_AT_location[DW_OP_breg15 " << -(kSaveBytes + l.offset) << "]\n";
             noteType(l.type);
@@ -1210,20 +1220,20 @@ void Tms6747::emitTypes() {
     if (lineSource() == nullptr) return;
     std::ostringstream o;
     for (const Type *t : debugTypes_) {
-        const std::string name = t->describe();
+        const std::string name = debugName(t);
         const int size = t->isComplete() ? t->size(target_) : 0;
         if (t->isPointer()) {
-            o << "\t.dwtag\tDW_TAG_pointer_type, DW_AT_name(\"" << name << "\"), DW_AT_type(\"" << (t->pointee()->isFunction() ? std::string("void") : t->pointee()->describe())
+            o << "\t.dwtag\tDW_TAG_pointer_type, DW_AT_name(\"" << name << "\"), DW_AT_type(\"" << (t->pointee()->isFunction() ? std::string("void") : debugName(t->pointee()))
               << "\"), DW_AT_byte_size(" << size << ")\n";
         } else if (t->isArray()) {
-            o << "\t.dwtag\tDW_TAG_array_type, DW_AT_name(\"" << name << "\"), DW_AT_type(\"" << t->pointee()->describe()
+            o << "\t.dwtag\tDW_TAG_array_type, DW_AT_name(\"" << name << "\"), DW_AT_type(\"" << debugName(t->pointee())
               << "\"), DW_AT_upper_bound(" << (t->length() - 1) << "), DW_AT_byte_size(" << size << ")\n";
         } else if (t->isStructOrUnion()) {
             o << "\t.dwtag\t" << (t->kind() == Kind::Union ? "DW_TAG_union_type" : "DW_TAG_structure_type") << ", DW_AT_name(\"" << name
               << "\"), DW_AT_byte_size(" << size << ")\n";
             for (const Member &m : t->members())
                 if (!m.isBitField() && !m.name.empty())
-                    o << "\t.dwtag\tDW_TAG_member, DW_AT_name(\"" << m.name << "\"), DW_AT_type(\"" << m.type->describe()
+                    o << "\t.dwtag\tDW_TAG_member, DW_AT_name(\"" << m.name << "\"), DW_AT_type(\"" << debugName(m.type)
                       << "\"), DW_AT_data_member_location(" << m.offset << ")\n";
         } else {
             const char *enc = t->isFloating() ? "DW_ATE_float"

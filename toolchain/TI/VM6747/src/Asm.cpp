@@ -488,6 +488,7 @@ struct Assembler {
         std::vector<uint8_t> &m = prog.memory;
         // -g: the source position cl6x's `.dwpsn file "f",line n,...` names, carried onto every instruction after it.
         std::string srcFile; int srcLine = 0;
+        bool rowStart = false;   // the next instruction begins a line-table row (a .dwpsn came before it)
         for (const Line &ln : u.lines) {
             // A function's label ends the position before it: its prologue has none until its own .dwpsn.
             if (!ln.label.empty() && ln.label[0] != '$' && ln.label[0] != '.' &&
@@ -506,6 +507,7 @@ struct Assembler {
                             srcLine = std::atoi(o.c_str() + k + 5);
                         }
                     }
+                    rowStart = true;
                     continue;
                 }
                 if (mn == ".text") sec = Text;
@@ -559,6 +561,8 @@ struct Assembler {
             in.line = ln.number;
             in.srcFile = srcFile;
             in.srcLine = srcLine;
+            in.rowStart = rowStart;
+            rowStart = false;
             if (!ln.pred.empty()) {
                 int r;
                 if (!regNumber(u, ln.pred, r)) return fail(u, ln, "bad predicate '" + ln.pred + "'");

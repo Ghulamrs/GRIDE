@@ -109,7 +109,7 @@ namespace Gride { namespace Services {
         virtual List<DebugFrame^>^ CallStack() abstract;
         virtual List<DebugVariable^>^ Locals() abstract;
         virtual String^ Evaluate(String^ expression) abstract;
-        virtual array<Byte>^ ReadMemory(UInt32 address, int length) abstract;
+        virtual array<Byte>^ ReadMemory(UInt64 address, int length) abstract;
 
         // ---- what a real engine adds (RIDE's Debugger); an engine without them answers as below ----
         // the frame looked at: its variables are then what Locals answers (RIDE's selectFrame)
@@ -326,10 +326,10 @@ namespace Gride { namespace Services {
             return "<no target attached - value unavailable>";
         }
 
-        virtual array<Byte>^ ReadMemory(UInt32 address, int length) override
+        virtual array<Byte>^ ReadMemory(UInt64 address, int length) override
         {
             array<Byte>^ b = gcnew array<Byte>(length);
-            for (int i = 0; i < length; i++) b[i] = (Byte)(((address + (UInt32)i) * 31u + 7u) & 0xFF);
+            for (int i = 0; i < length; i++) b[i] = (Byte)(((address + (UInt64)i) * 31u + 7u) & 0xFF);
             return b;
         }
 

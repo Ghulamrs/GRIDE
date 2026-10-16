@@ -1080,7 +1080,18 @@ namespace Gride { namespace Services {
         virtual List<DebugVariable^>^ Locals() override
         {
             if (state != DebugState::Break) return gcnew List<DebugVariable^>();
-            if (dialect == DebuggerKind::Cdb) return DebugTranscript::ReadVariables(dialect, Ask(session->Command("locals")), session->Marker);
+            if (dialect == DebuggerKind::Cdb)
+            {
+                List<DebugVariable^>^ vars = DebugTranscript::ReadVariables(dialect, Ask(session->Command("locals")), session->Marker);
+                // a Shalimar array: cdb shows the pointer to the runtime's record; its contents are read here
+                for each (DebugVariable^ v in vars)
+                    if (ShalimarArrayType(v->Type))
+                    {
+                        UInt64 at;
+                        if (HexValue(v->Value, at)) v->Value = ShalimarArray(at, ShalimarRank(v->Type), ShalimarScalar(v->Type), 0);
+                    }
+                return vars;
+            }
             if (dialect == DebuggerKind::Lldb) return DebugTranscript::ReadVariables(dialect, Ask(session->Command("locals")), session->Marker);
             // gdb lists no addresses, so each variable is asked where it is
             List<DebugVariable^>^ found = gcnew List<DebugVariable^>();
@@ -1093,6 +1104,62 @@ namespace Gride { namespace Services {
                 if (kind == DebuggerKind::C6x && String::IsNullOrEmpty(v->Type)) v->Type = TypeOf(v->Name);
             }
             return found;
+        }
+
+        // ---- Shalimar's arrays on Windows: a pointer to the runtime's {int32 count, int32 element, data} (x64:
+        //      data at +8), cdb's type "struct real[][] *"; a row of a 2-D array is a pointer to another record ----
+        static bool ShalimarArrayType(String^ type)
+        {
+            if (String::IsNullOrEmpty(type)) return false;
+            String^ t = type->Replace(" ", "");
+            return t->EndsWith("[]*") && (t->StartsWith("structreal[]") || t->StartsWith("structint[]") || t->StartsWith("structchar[]"));
+        }
+        static int ShalimarRank(String^ type)
+        {
+            int rank = 0;
+            for (int i = type->IndexOf("[]"); i >= 0; i = type->IndexOf("[]", i + 2)) rank++;
+            return rank;
+        }
+        static String^ ShalimarScalar(String^ type)
+        {
+            String^ t = type->Replace("struct", "")->Trim();
+            return t->Substring(0, t->IndexOf(L'['))->Trim();
+        }
+        static bool HexValue(String^ s, UInt64% value)
+        {
+            String^ a = DebugTranscript::AddressIn(s == nullptr ? String::Empty : s);
+            value = 0;
+            return a->Length > 2 && UInt64::TryParse(a->Substring(2), System::Globalization::NumberStyles::HexNumber, System::Globalization::CultureInfo::InvariantCulture, value);
+        }
+        // {1, 2, 0} - or {{...}, {...}} a rank deeper - as the C6747's simulators print the same array
+        String^ ShalimarArray(UInt64 record, int rank, String^ scalar, int depth)
+        {
+            if (record == 0) return "0x0";
+            array<Byte>^ head = ReadMemory(record, 16);
+            if (head->Length < 16 || depth > 4) return "{...}";
+            int count = BitConverter::ToInt32(head, 0);
+            UInt64 data = BitConverter::ToUInt64(head, 8);
+            if (count < 0) count = 0;
+            int shown = Math::Min(count, 100);
+            if (rank == 1 && scalar == "char")
+            {
+                array<Byte>^ b = ReadMemory(data, Math::Max(shown, 1));
+                System::Text::StringBuilder^ s = gcnew System::Text::StringBuilder("\"");
+                for (int i = 0; i < b->Length && i < count && b[i] != 0; i++) s->Append(b[i] >= 32 && b[i] < 127 ? (wchar_t)b[i] : L'?');
+                return s->Append("\"")->ToString();
+            }
+            int size = rank > 1 ? 8 : scalar == "real" ? 8 : 4;
+            array<Byte>^ body = shown == 0 ? gcnew array<Byte>(0) : ReadMemory(data, shown * size);
+            System::Text::StringBuilder^ out = gcnew System::Text::StringBuilder("{");
+            for (int i = 0; i < shown && (i + 1) * size <= body->Length; i++)
+            {
+                if (i > 0) out->Append(", ");
+                if (rank > 1) out->Append(ShalimarArray(BitConverter::ToUInt64(body, i * size), rank - 1, scalar, depth + 1));
+                else if (scalar == "real") out->Append(BitConverter::ToDouble(body, i * size).ToString("G6", System::Globalization::CultureInfo::InvariantCulture));
+                else out->Append(BitConverter::ToInt32(body, i * size));
+            }
+            if (count > shown) out->Append("...");
+            return out->Append("}")->ToString();
         }
 
         virtual String^ WhyNoLocals() override
@@ -1167,7 +1234,7 @@ namespace Gride { namespace Services {
             return DebugTranscript::ReadRegisters(dialect, Ask(session->Command("registers")), session->Marker);
         }
 
-        virtual array<Byte>^ ReadMemory(UInt32 address, int length) override
+        virtual array<Byte>^ ReadMemory(UInt64 address, int length) override
         {
             if (state != DebugState::Break || !session->Has("memory")) return gcnew array<Byte>(0);
             String^ said = Ask(session->Command("memory")->Replace("$(Count)", length.ToString())->Replace("$(Address)", String::Format("0x{0:x}", address)));

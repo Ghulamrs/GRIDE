@@ -64,6 +64,8 @@ public:
     virtual bool hasLines() const = 0;        // -g: any instruction with a source position
     virtual std::string noLinesWhy() const = 0;
     virtual bool positionAt(uint32_t pc, Position &p) const = 0;
+    // A line-table row begins at pc (a .dwpsn put it there) - a statement starts, even on the line before it.
+    virtual bool startsRow(uint32_t pc) const { (void)pc; return false; }
     // The first address of LINE in the file named by its leaf, or of the nearest line after it that has
     // code; lineUsed says which.
     virtual bool addressOfLine(const std::string &leaf, int line, uint32_t &addr, int &lineUsed) const = 0;

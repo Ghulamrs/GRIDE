@@ -30,13 +30,29 @@ function SourceCombo {
   $h = (All-Windows | Where-Object { $_.Cls -like '*COMBOBOX*' -and $_.Text -in 'Build','Debug','Tools' } | Select-Object -First 1).H
   $AE::FromHandle($h)
 }
+Add-Type @"
+using System; using System.Runtime.InteropServices;
+public struct CbRect { public int L, T, R, B; }
+public static class CbMouse {
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out CbRect r);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
+}
+"@
+# The Output pane's source as a person picks it - a click on the combo, then the source's first letter and Enter -
+# because a UI Automation Select() on its item does not raise WinForms' SelectedIndexChanged, and the pane shows
+# only the source that event selects. Already selected: nothing is clicked.
 function Get-Output($src) {
-  $cb = SourceCombo
-  $ec = $cb.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
-  $ec.Expand(); Start-Sleep -Milliseconds 120
-  $item = Find-Named $cb $src 'ListItem'
-  if ($item) { $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
-  $ec.Collapse(); Start-Sleep -Milliseconds 120
+  $cbw = All-Windows | Where-Object { $_.Cls -like '*COMBOBOX*' -and $_.Text -in 'Build','Debug','Tools' } | Select-Object -First 1
+  if (-not $cbw) { return '' }
+  if ([W32]::Text($cbw.H) -ne $src) {
+    $r = New-Object CbRect; [CbMouse]::GetWindowRect($cbw.H, [ref]$r) | Out-Null
+    Focus-Gride
+    [CbMouse]::SetCursorPos($r.L + 20, [int](($r.T + $r.B) / 2)) | Out-Null
+    [CbMouse]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); [CbMouse]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 400
+    [System.Windows.Forms.SendKeys]::SendWait($src.Substring(0, 1) + '{ENTER}'); Start-Sleep -Milliseconds 400
+  }
   [W32]::Text((OutBox))
 }
 function Status { $sb = $Root.FindFirst($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::StatusBar))); ($sb.FindAll($TS::Children, $CT) | ForEach-Object { $_.Current.Name }) -join ' | ' }

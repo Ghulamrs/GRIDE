@@ -143,11 +143,11 @@
           Outputs="$(OutDir)lib\shmrt-x86_64-windows.lib;$(OutDir)lib\shmrt-x86_64-windows-debug.lib;$(OutDir)lib\shmrt-tms6747\Runtime.s;$(OutDir)lib\shmrt-tms6747-debug\Debug.s">
     <MakeDir Directories="$(OutDir)lib;$(IntDir)rt;$(IntDir)rtd;$(OutDir)lib\shmrt-tms6747;$(OutDir)lib\shmrt-tms6747-debug" />
     <RunTool Exe="$(ToolchainCl)" WorkingDirectory="$(IntDir)rt" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
-             Arguments="$(ShmCl) /Fo&quot;$(IntDir)rt\\&quot; /c @(ShmRuntime->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ')" />
+             Arguments="$(ShmCl) /MT /Fo&quot;$(IntDir)rt\\&quot; /c @(ShmRuntime->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ')" />
     <RunTool Exe="$(ToolchainLib)" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
              Arguments="/nologo /out:&quot;$(OutDir)lib\shmrt-x86_64-windows.lib&quot; @(ShmRuntime->'&quot;$(IntDir)rt\%(Identity).obj&quot;', ' ')" />
     <RunTool Exe="$(ToolchainCl)" WorkingDirectory="$(IntDir)rtd" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
-             Arguments="$(ShmCl) /DSHM_DEBUG=1 /Fo&quot;$(IntDir)rtd\\&quot; /c @(ShmRuntimeDebug->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ')" />
+             Arguments="$(ShmCl) /MTd /DSHM_DEBUG=1 /Fo&quot;$(IntDir)rtd\\&quot; /c @(ShmRuntimeDebug->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ')" />
     <RunTool Exe="$(ToolchainLib)" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
              Arguments="/nologo /out:&quot;$(OutDir)lib\shmrt-x86_64-windows-debug.lib&quot; @(ShmRuntimeDebug->'&quot;$(IntDir)rtd\%(Identity).obj&quot;', ' ')" />
     <Error Condition="!Exists('$(ShmCpp11)')" Text="shc.vcxproj: no cpp11.exe in $(OutDir) - the C6000 runtime is its output; cpp11 is built first in the solution" />

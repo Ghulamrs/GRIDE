@@ -191,6 +191,7 @@ public:
                    "yet turn into a line table and LNK6x does not yet carry into an image";
         return "the image's .debug_line could not be read";
     }
+    bool startsRow(uint32_t pc) const override { return lines_ && table_.rows.count(pc) != 0; }
     bool positionAt(uint32_t pc, dbg::Position &p) const override {
         p = dbg::Position();
         if (!lines_) return inCode(pc);
