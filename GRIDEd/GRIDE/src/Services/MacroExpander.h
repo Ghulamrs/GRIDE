@@ -51,6 +51,23 @@ namespace Gride { namespace Services {
             return sb->ToString();
         }
 
+        // "-D" + list -> -DNAME -DNAME=1 -D"GREETING=hi there": as RIDE's options.cpp quotes them, only a define with a
+        // space, a tab or a quote in it, which then stays one argument (a quote inside is escaped as \")
+        static String^ JoinDefines(String^ flag, IEnumerable<String^>^ items)
+        {
+            StringBuilder^ sb = gcnew StringBuilder();
+            if (items == nullptr) return String::Empty;
+            for each (String^ s in items)
+            {
+                if (String::IsNullOrEmpty(s)) continue;
+                if (sb->Length > 0) sb->Append(L' ');
+                sb->Append(flag);
+                if (s->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) < 0) sb->Append(s);
+                else sb->Append(L'"')->Append(s->Replace("\"", "\\\""))->Append(L'"');
+            }
+            return sb->ToString();
+        }
+
         // plain list of quoted items: "a.obj" "b.obj"
         static String^ JoinQuoted(IEnumerable<String^>^ items)
         {

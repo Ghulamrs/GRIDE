@@ -31,8 +31,8 @@ namespace Gride { namespace UI {
         Cmd("File.NewFile", "&File...", "Ctrl+N", "file", DO(FileNewFile));
         Cmd("File.OpenWorkspace", "&Project / Workspace...", "Ctrl+Shift+O", "open", DO(FileOpenWorkspace));
         Cmd("File.OpenFile", "&File...", "Ctrl+O", "open", DO(FileOpenFile));
-        c = Cmd("File.OpenCcs", "&CCS 7.4 Project...", nullptr, "projectccs", DO(FileOpenCcs)); c->CanExecute = WHEN(CcsEnabled);
-        c = Cmd("File.ImportCcs", "&CCS 7.4 Project...", nullptr, "projectccs", DO(FileOpenCcs)); c->CanExecute = WHEN(CcsEnabled);
+        c = Cmd("File.OpenCcs", "&CCS 7.4 / 5.5 Project...", nullptr, "projectccs", DO(FileOpenCcs)); c->CanExecute = WHEN(CcsEnabled);
+        c = Cmd("File.ImportCcs", "&CCS 7.4 / 5.5 Project...", nullptr, "projectccs", DO(FileOpenCcs)); c->CanExecute = WHEN(CcsEnabled);
         Cmd("File.ImportFolder", "&Existing Folder...", nullptr, "folder", DO(FileImportFolder));
         c = Cmd("File.Close", "&Close", "Ctrl+F4", "close", DO(FileClose)); c->CanExecute = WHEN(HasDocument);
         c = Cmd("File.CloseWorkspace", "Close &Workspace", nullptr, nullptr, DO(FileCloseWorkspace)); c->CanExecute = WHEN(HasWorkspace);

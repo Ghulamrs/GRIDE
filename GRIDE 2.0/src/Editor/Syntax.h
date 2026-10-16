@@ -188,6 +188,7 @@ namespace Gride
                 pattern = R"RX((?<comment>;[^\n]*|^\*[^\n]*)|(?<string>"[^"\n]*"?)|(?<num>\b(?:0[xX][0-9A-Fa-f]+|[0-9]+)\b)|(?<id>(?<![\w.$])\.?[A-Za-z_$][\w$]*))RX";
                 break;
             case EditorMode::AsmGnu:
+            {
                 for each (String^ k in LanguageDefs::C6xKeywords()) if (k->StartsWith(".")) keywords->Add(k);
                 AddAll(keywords, gcnew array<String^>{ ".globl", ".section", ".type", ".size", ".long", ".quad", ".ascii", ".asciz", ".intel_syntax", ".att_syntax" });
                 AddAll(keywords, LanguageDefs::MasmKeywords());
@@ -195,6 +196,7 @@ namespace Gride
                 pattern = R"RX((?<comment>\#[^\n]*|//[^\n]*|/\*[\s\S]*?(?:\*/|\z))|(?<string>"(?:\\.|[^"\\\n])*"?)|(?<num>\$?\b(?:0[xX][0-9A-Fa-f]+|[0-9]+)\b)|(?<id>(?<![\w.%$])[.%]?[A-Za-z_][\w$]*))RX";
                 hasBlockComments = true;
                 break;
+            }
             case EditorMode::Json:
                 keywords->Add("true"); keywords->Add("false"); keywords->Add("null");
                 pattern = R"RX((?<string>"(?:\\.|[^"\\\n])*"?)|(?<num>-?\b[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\b)|(?<id>\b[a-z]+\b))RX";

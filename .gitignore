@@ -16,3 +16,8 @@ x64/
 x86/
 Debug/
 Release/
+# GRIDE 2.0's debugger source shares a name with a build folder
+!/GRIDE 2.0/src/Debug/
+# a tool's IntDir, ar6x's own output; the MSI and its checks
+/toolchain/**/build/
+/installer/dist/

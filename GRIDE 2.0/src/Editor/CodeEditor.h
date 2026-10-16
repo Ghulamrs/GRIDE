@@ -63,11 +63,17 @@ namespace Gride
         }
     };
 
+    public delegate void LineHandler(int line);
+
     public ref class CodeEditor : public UserControl
     {
     public:
         event EventHandler^ DirtyChanged;
         event EventHandler^ CaretChanged;
+        // a click in the gutter's mark column (R10): the window toggles a breakpoint on that 1-based line
+        event LineHandler^ BreakpointClicked;
+
+        literal int MarkWidth = 14;          // the gutter's column for the breakpoint and stop marks
 
         literal int MaxHighlightLength = 4 * 1024 * 1024;   // skip colouring of giant files
         literal int MaxUndo = 500;
@@ -83,7 +89,9 @@ namespace Gride
             committedText = String::Empty;
             mode = EditorMode::PlainText;
             untitledName = "Untitled";
-            gutterDigits = 0;
+            gutterDigits = -1;
+            breakpoints = nullptr;
+            stopLine = 0;
             lastFirstVisible = -1;
             diskTime = DateTime::MinValue;
 
@@ -146,6 +154,17 @@ namespace Gride
         }
 
         property bool IsDirty { bool get() { return dirty; } }
+        // whether a close must ask to save: the text differs from the saved text (the mark is settled
+        // against it first, so a document whose text is as saved never asks)
+        property bool NeedsSaving
+        {
+            bool get()
+            {
+                if (!dirty) return false;
+                SetDirty(!String::Equals(box->Text, savedText));
+                return dirty;
+            }
+        }
 
         property bool IsReadOnly
         {
@@ -170,6 +189,20 @@ namespace Gride
         }
 
         property int CurrentLine   { int get() { return box->GetLineFromCharIndex(box->SelectionStart) + 1; } }
+
+        // the debugger's marks (R10): the file's breakpoints (1-based lines, the set the window shares with the
+        // engine) as red dots, the line the program stopped at as an arrow; 0 for none
+        property SortedSet<int>^ Breakpoints
+        {
+            SortedSet<int>^ get() { return breakpoints; }
+            void set(SortedSet<int>^ v) { breakpoints = v; gutter->Invalidate(); }
+        }
+        property int StopLine
+        {
+            int get() { return stopLine; }
+            void set(int v) { if (stopLine != v) { stopLine = v; gutter->Invalidate(); } }
+        }
+        void RefreshMarks() { gutter->Invalidate(); }
         property int CurrentColumn
         {
             int get()
@@ -227,8 +260,9 @@ namespace Gride
             box->BackColor = box->ReadOnly ? Color::FromArgb(248, 248, 248) : background;
             box->ForeColor = palette[0];
             gutter->BackColor = Color::FromArgb(240, 240, 240);
-            gutter->Visible = s->ShowLineNumbers;
-            gutterDigits = 0;
+            gutter->Visible = true;                  // the marks' column stays; the numbers follow the setting
+            showNumbers = s->ShowLineNumbers;
+            gutterDigits = -1;
             UpdateGutterWidth();
 
             highlighter = gcnew SyntaxHighlighter(mode, settings);
@@ -259,7 +293,7 @@ namespace Gride
             box->Select(0, 0);
             committedCaret = 0;
             SetDirty(false);
-            gutterDigits = 0;
+            gutterDigits = -1;
             UpdateGutterWidth();
             FullRecolor();
         }
@@ -434,6 +468,9 @@ namespace Gride
         IdeSettings^ settings;
         EditorTextBox^ box;
         GutterPanel^ gutter;
+        SortedSet<int>^ breakpoints;
+        int stopLine;
+        bool showNumbers;
         System::Windows::Forms::Timer^ highlightTimer;
         System::Windows::Forms::Timer^ burstTimer;
         SyntaxHighlighter^ highlighter;
@@ -557,7 +594,10 @@ namespace Gride
             }
             burstTimer->Stop();
             burstTimer->Start();
-            SetDirty(true);
+            // changed only when the text differs from the saved text: RichEdit raises TextChanged again as
+            // its window is made after LoadFile, which left a fresh file marked changed until the burst ended
+            // (a close in that time asked to save it); the lengths first, so typing stays cheap
+            SetDirty(box->TextLength != savedText->Length || !String::Equals(box->Text, savedText));
             UpdateGutterWidth();
             ScheduleHighlight();
             gutter->Invalidate();
@@ -607,7 +647,9 @@ namespace Gride
         void OnGutterMouseDown(Object^ sender, MouseEventArgs^ e)
         {
             int idx = box->GetCharIndexFromPosition(Point(2, e->Y));
-            SelectLine(box->GetLineFromCharIndex(idx) + 1);
+            int line = box->GetLineFromCharIndex(idx) + 1;
+            if (e->X < MarkWidth) { BreakpointClicked(line); return; }
+            SelectLine(line);
         }
 
         // ------------------------------------------------------------ context menu
@@ -947,11 +989,32 @@ namespace Gride
         // ------------------------------------------------------------ gutter
         void UpdateGutterWidth()
         {
-            int digits = Math::Max(3, Convert::ToString(LineCount())->Length);
+            int digits = showNumbers ? Math::Max(3, Convert::ToString(LineCount())->Length) : 0;
             if (digits == gutterDigits) return;
             gutterDigits = digits;
-            int w = TextRenderer::MeasureText(gcnew String(L'9', digits), gutter->Font).Width + 14;
-            gutter->Width = w;
+            int w = digits == 0 ? 4 : TextRenderer::MeasureText(gcnew String(L'9', digits), gutter->Font).Width + 14;
+            gutter->Width = MarkWidth + w;
+        }
+
+        // a breakpoint's red dot, the stop's yellow arrow over it (RIDE's markers)
+        void DrawMarks(Graphics^ g, int line1, int y, int lineHeight)
+        {
+            int size = Math::Min(MarkWidth - 4, lineHeight - 2);
+            int top = y + (lineHeight - size) / 2;
+            if (breakpoints != nullptr && breakpoints->Contains(line1))
+            {
+                g->SmoothingMode = System::Drawing::Drawing2D::SmoothingMode::AntiAlias;
+                g->FillEllipse(Brushes::Firebrick, 2, top, size, size);
+            }
+            if (stopLine == line1)
+            {
+                g->SmoothingMode = System::Drawing::Drawing2D::SmoothingMode::AntiAlias;
+                array<Point>^ arrow = gcnew array<Point>{ Point(1, top + size / 2 - 2), Point(1 + size / 2, top + size / 2 - 2), Point(1 + size / 2, top),
+                                                          Point(MarkWidth - 1, top + size / 2), Point(1 + size / 2, top + size), Point(1 + size / 2, top + size / 2 + 2),
+                                                          Point(1, top + size / 2 + 2) };
+                g->FillPolygon(Brushes::Gold, arrow);
+                g->DrawPolygon(Pens::DarkGoldenrod, arrow);
+            }
         }
 
         void OnGutterPaint(Object^ sender, PaintEventArgs^ e)
@@ -980,8 +1043,10 @@ namespace Gride
                     if (y > h) break;
                     prevY = y;
                     RectangleF r(0.0f, (float)y, (float)(gutter->Width - 6), (float)lineHeight);
-                    e->Graphics->DrawString(Convert::ToString(line + 1), gutter->Font,
-                                            line == caretLine ? current : normal, r, sf);
+                    if (showNumbers)
+                        e->Graphics->DrawString(Convert::ToString(line + 1), gutter->Font,
+                                                line == caretLine ? current : normal, r, sf);
+                    DrawMarks(e->Graphics, line + 1, y, lineHeight);
                 }
                 e->Graphics->DrawLine(Pens::LightGray, gutter->Width - 1, 0, gutter->Width - 1, gutter->Height);
             }

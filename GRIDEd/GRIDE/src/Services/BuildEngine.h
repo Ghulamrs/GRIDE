@@ -1088,7 +1088,7 @@ namespace Gride { namespace Services {
             // directory, however it came (shared includes, the target's), would stand in front of them
             if (hostTool) KeepInstallHeadersFrom(inc);
             mx->Set("IncludeFlags", String::IsNullOrEmpty(ownInclude) ? String::Empty : MacroExpander::JoinFlags(includeFlag, inc));
-            mx->Set("DefineFlags", String::IsNullOrEmpty(ownDefine) ? String::Empty : MacroExpander::JoinFlags(defineFlag, cfg->Defines)->Replace("\"", ""));
+            mx->Set("DefineFlags", String::IsNullOrEmpty(ownDefine) ? String::Empty : MacroExpander::JoinDefines(defineFlag, cfg->Defines));
             // a Visual Studio project's own cl settings go to cl after the configuration's flags (/W4 /permissive- /EHsc /MT ...)
             String^ own = String::Empty;
             if (tool == RideTool::Cl && lang != Language::Assembly)
@@ -1163,7 +1163,7 @@ namespace Gride { namespace Services {
             for each (String^ d in cfg->IncludeDirs) inc->Add(p->ToAbsolute(d));
             inc->AddRange(tc->IncludeDirs);
             mx->Set("IncludeFlags", MacroExpander::JoinFlags(tc->IncludeFlag, inc));
-            mx->Set("DefineFlags", MacroExpander::JoinFlags(tc->DefineFlag, cfg->Defines)->Replace("\"", ""));
+            mx->Set("DefineFlags", MacroExpander::JoinDefines(tc->DefineFlag, cfg->Defines));
 
             List<String^>^ libDirs = gcnew List<String^>();
             for each (String^ d in cfg->LibDirs) libDirs->Add(p->ToAbsolute(d));

@@ -1,63 +1,63 @@
 #!/usr/bin/env python3
-"""Washout: a copy of GRIDEd and every project it depends on - their whole source, nothing built.
+"""Washout: a copy of the GRIDE tree - both IDEs and the toolchain they build - its whole source, nothing built.
 
-    python washout.py PARENT            write the copy into PARENT\\GRIDEd
-    python washout.py PARENT --force    replace PARENT\\GRIDEd if it is already there
-    python washout.py PARENT --zip      and pack it as PARENT\\GRIDEd.zip, GRIDEd\\ its one top folder
+    python washout.py PARENT              write the copy into PARENT\\<tree>
+    python washout.py PARENT --force      replace PARENT\\<tree> if it is already there
+    python washout.py PARENT --zip        and pack it as PARENT\\<tree>.zip, <tree>\\ its one top folder
+    python washout.py PARENT --tree DIR   wash the tree at DIR rather than the one this file is in
 
-**Everything the projects are, and nothing they make** (2026-10-15, moved here from RIDE-4.7):
-this repository - GRIDEd\\ with its docs, lib\\ccs, toolchain.json and samples - and each
-repository beside it that GRIDE's toolchain is built from:
+<tree> is the tree's own folder name, and every folder in the copy keeps its own: nothing is renamed.
 
-    Compilers\\  Compiler-Ci (c90), C++Optimize (cpp11), Compiler-Si (shalimar), Converter-C2S (c2s)
-    TI\\         ASM6x, LNK6x, RTS6x, SIM6747, VM6747
-    Windows\\    MASM, LINK
+**Everything the projects are, and nothing they make** (2026-10-15; the shared-toolchain tree, 2026-10-16):
+the tree as its README.md lays it out -
 
-A repository goes whole: every file git tracks in it, as it is on disk (a change not yet
-committed included), and a tracked file missing from the disk as git has it. No file is left
-out for its kind - tests, scripts, docs, binaries git tracks all go. What git does not track
-does not: x64\\, obj\\, logs and test output are what building and testing made. .git does not.
-GRIDE 2.0\\ does not either (2026-10-15): the compact IDE is not part of the solution.
+    GRIDEd\\      GRIDEd; GRIDE.sln builds GRIDE, cppparse and the eleven tools into GRIDEd\\x64\\<Config>
+    GRIDE 2.0\\   GRIDE 2.0; its GRIDE.sln builds GRIDE and the same eleven tools into its own x64\\<Config>
+    toolchain\\   the tools both solutions build, as ..\\toolchain\\...: Compilers\\ (c90, cpp11, shalimar, c2s),
+                 TI\\ (asm6x, lnk6x, rts6x and its ar6x, sim6747, vm6747), Windows\\ (masm, link); MANIFEST.md,
+                 copy-toolchain.py, msbuild\\Toolchain.targets
+    installer\\   windows\\ (the MSI) and macos\\
 
-The copy has one layout, the Windows box's: Compilers\\, TI\\ and Windows\\ inside GRIDEd\\, side
-by side, because their projects and scripts name each other by relative path (shc.sln reaches
-..\\..\\C++Optimize, RTS6x's build.cmd the built cpp11.exe). Build it as CLAUDE.md says.
-Each repository is looked for inside this one (the Windows box) and then beside it (the Mac,
-where Compilers/, TI/ and Windows/ sit beside the GRIDE checkout); either way the copy is the same.
+The tree goes whole: every file git tracks in it, as it is on disk (a change not yet committed included),
+and a tracked file missing from the disk as git has it. No file is left out for its kind - tests, scripts,
+docs, binaries git tracks all go. What git does not track does not: x64\\, obj\\, the tools' build\\,
+installer\\dist\\, .vs\\ are what building and testing made. .git does not. Both IDEs go: GRIDE 2.0\\ is part
+of this tree (the GRIDEd-only washout left it out). The tool trees under toolchain\\ are the minimal copies
+this tree keeps (toolchain\\MANIFEST.md), not repositories of their own: they go as the tree has them, and
+washout does not reach for the tool repositories.
+
+A tree that is not a git working copy (a copy brought to the Mac without .git) is taken from the disk
+instead, less what building makes (BUILT) and the file system's own litter (LITTER); washout says so.
+
+Then it checks that the copy builds the way the tree does: every project each .sln names, and every file,
+import and project reference those projects name, is in the copy. A project a solution names by an absolute
+path is outside any copy; washout lists it, and the solution loads without it. An item a project only lists (None, Text, Image, Content - cppparse's
+..\\README.md, runtime\\ and libcpp\\ today) is not read by the build: one the tree lacks is listed, not fatal.
+Build the copy as README.md says, one solution at a time (W7).
 """
+import ntpath
 import os
+import re
 import shutil
 import subprocess
 import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-NAME = "GRIDEd"                  # the copy's folder, whatever this checkout is called (GRIDE on the Mac)
-LEFT_OUT = ["GRIDE 2.0"]         # in this repository, not part of the solution
 
-# The repositories beside this one that GRIDE's toolchain is built from, as this tree lays them out.
-SIBLINGS = [
-    "Compilers/Compiler-Ci",
-    "Compilers/C++Optimize",
-    "Compilers/Compiler-Si",
-    "Compilers/Converter-C2S",
-    "TI/ASM6x",
-    "TI/LNK6x",
-    "TI/RTS6x",
-    "TI/SIM6747",
-    "TI/VM6747",
-    "Windows/MASM",
-    "Windows/LINK",
+# Taken from the disk only (no git): folders building makes, as paths in the tree. A source folder may share
+# a name with one - GRIDE 2.0\src\Build and src\Debug are source - so these are matched where they are made.
+BUILT = [
+    re.compile(r"(^|/)(x64|obj|\.vs|\.git)(/|$)"),             # each solution's output, VS's own folder
+    re.compile(r"^toolchain/.*/build(/|$)"),                   # a tool's IntDir, ar6x's own output
+    re.compile(r"^installer/dist(/|$)"),                       # the MSI and its checks
 ]
+LITTER = {".DS_Store", "Thumbs.db", "desktop.ini"}
 
-
-def find(rel):
-    """Where the repository rel is here: inside this tree, or beside it; None when neither."""
-    for base in (ROOT, os.path.dirname(ROOT)):
-        repo = os.path.join(base, rel)
-        if os.path.isdir(os.path.join(repo, ".git")):
-            return repo
-    return None
+SLN_PROJECT = re.compile(r'^Project\("\{[^}]+\}"\) = "([^"]+)", "([^"]+)"', re.M)
+PROJECT_ITEM = re.compile(r'<(ClCompile|ClInclude|ResourceCompile|None|Text|Image|CustomBuild|Content|MASM'
+                          r'|ProjectReference|Import) (?:Include|Project)="([^"]+)"')
+LISTED_ONLY = {"None", "Text", "Image", "Content"}   # shown in Solution Explorer; the build never reads them
 
 
 def git(repo, *args):
@@ -76,27 +76,150 @@ def tracked(repo):
     return out
 
 
-def wash(repo, dest, left_out=()):
-    """Copy every tracked file of repo into dest; return (copied, restored, submodules) -
+def on_disk(tree):
+    """(None, None, path) of every file in tree that building did not make - for a tree without git."""
+    out = []
+    for where, subdirs, names in os.walk(tree):
+        rel = os.path.relpath(where, tree).replace(os.sep, "/")
+        rel = "" if rel == "." else rel + "/"
+        subdirs[:] = sorted(d for d in subdirs if not any(b.search(rel + d) for b in BUILT))
+        out += [(None, None, rel + n) for n in sorted(names) if n not in LITTER]
+    return out
+
+
+def wash(tree, dest, entries):
+    """Copy entries of tree into dest; return (copied by top folder, restored, submodules) -
     restored are the tracked files missing from the disk, written as git has them."""
-    copied, restored, submodules = 0, [], []
-    for mode, blob, path in tracked(repo):
-        if any(path.startswith(d + "/") for d in left_out):
-            continue
+    copied, restored, submodules = {}, [], []
+    for mode, blob, path in entries:
         if mode == "160000":
             submodules.append(path)      # a submodule is a repository of its own, not a file
             continue
-        src = os.path.join(repo, path)
+        src = os.path.join(tree, path)
         target = os.path.join(dest, path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         if os.path.isfile(src):
             shutil.copy2(src, target)
         else:
             with open(target, "wb") as fh:
-                fh.write(git(repo, "cat-file", "blob", blob))
+                fh.write(git(tree, "cat-file", "blob", blob))
             restored.append(path)
-        copied += 1
+        top = path.split("/", 1)[0] if "/" in path else "(top files)"
+        copied[top] = copied.get(top, 0) + 1
     return copied, restored, submodules
+
+
+def resolve(base, name, dest):
+    """Where name, as a project or solution writes it relative to base, is: (path, None), or (None, why)."""
+    if ntpath.isabs(name) or name.startswith("\\\\"):
+        return None, "absolute"
+    path = os.path.normpath(os.path.join(base, name.replace("\\", os.sep)))
+    if os.path.relpath(path, dest).startswith(os.pardir):
+        return None, "outside"
+    return path, None
+
+
+def check(dest):
+    """Every project the copy's solutions name, and every item those projects name, is in the copy.
+    Return (missing, listed, outside): what the build needs and is not there; what a project only lists and
+    is not there (the tree lacks it too, or it would have been copied); what no copy can hold."""
+    missing, listed, outside, projects = [], [], [], []
+    for where, subdirs, names in os.walk(dest):
+        subdirs.sort()
+        for sln in sorted(n for n in names if n.endswith(".sln")):
+            path = os.path.join(where, sln)
+            text = open(path, encoding="utf-8-sig", errors="replace").read()
+            named = [(n, p) for n, p in SLN_PROJECT.findall(text) if p.lower().endswith("proj")]
+            inside = 0
+            for name, rel in named:
+                proj, why = resolve(where, rel, dest)
+                if why:
+                    outside.append("%s: %s  %s" % (os.path.relpath(path, dest), name, rel))
+                elif not os.path.isfile(proj):
+                    missing.append("%s: project %s  %s" % (os.path.relpath(path, dest), name, rel))
+                else:
+                    inside += 1
+                    projects.append(proj)
+            print("  %-36s %2d projects, %d in the copy" % (os.path.relpath(path, dest), len(named), inside))
+    seen, items = set(), 0
+    while projects:                      # a project reference brings its project in, as the build does
+        proj = projects.pop()
+        if os.path.normcase(proj) in seen:
+            continue
+        seen.add(os.path.normcase(proj))
+        text = open(proj, encoding="utf-8-sig", errors="replace").read()
+        for kind, names in PROJECT_ITEM.findall(text):
+            for item in names.split(";"):
+                if not item or "$(" in item or "%(" in item or "*" in item:
+                    continue             # MSBuild's own, a property's or a wildcard's: the build resolves those
+                path, why = resolve(os.path.dirname(proj), item, dest)
+                items += 1
+                if why or not os.path.exists(path):
+                    (listed if kind in LISTED_ONLY else missing).append(
+                        "%s: %s %s" % (os.path.relpath(proj, dest), kind, item))
+                elif kind == "ProjectReference":
+                    projects.append(path)
+    print("  %d projects name %d files, imports and references" % (len(seen), items))
+    return missing, listed, outside
+
+
+def main(argv):
+    args, tree, i = [], ROOT, 0
+    while i < len(argv):
+        if argv[i] == "--tree" and i + 1 < len(argv):
+            tree, i = os.path.abspath(argv[i + 1]), i + 2
+            continue
+        if not argv[i].startswith("--"):
+            args.append(argv[i])
+        i += 1
+    if len(args) != 1 or not os.path.isdir(tree):
+        print(__doc__)
+        return 2
+    name = os.path.basename(tree.rstrip("\\/"))
+    dest = os.path.join(os.path.abspath(args[0]), name)
+    archive = dest + ".zip"
+
+    inside = lambda a, b: os.path.normcase(a + os.sep).startswith(os.path.normcase(b + os.sep))
+    if inside(dest, tree) or inside(tree, dest):
+        print("washout: the copy cannot go inside %s, nor hold it" % tree); return 2
+    if os.path.exists(dest) and os.listdir(dest):
+        if "--force" not in argv:
+            print("washout: %s is not empty - give --force to replace it" % dest); return 2
+        shutil.rmtree(dest)
+    if "--zip" in argv and os.path.exists(archive):
+        if "--force" not in argv:
+            print("washout: %s is already there - give --force to replace it" % archive); return 2
+        os.remove(archive)
+
+    if os.path.exists(os.path.join(tree, ".git")):
+        entries = tracked(tree)
+        print("washout: %s - every file git tracks" % tree)
+    else:
+        entries = on_disk(tree)
+        print("washout: %s is not a git working copy - its files from the disk, less what building made" % tree)
+    copied, restored, submodules = wash(tree, dest, entries)
+    for top in sorted(copied):
+        print("  %-36s %5d files" % (top, copied[top]))
+    for r in restored:
+        print("    restored from git %s" % r)
+    for s in submodules:
+        print("    submodule not copied: %s" % s)
+    print("washout: %d files in %s" % (sum(copied.values()), dest))
+
+    missing, listed, outside = check(dest)
+    for o in outside:
+        print("    outside any copy: %s" % o)
+    for l in listed:
+        print("    listed only, not in the tree either: %s" % l)
+    for m in missing:
+        print("    MISSING %s" % m)
+    if missing:
+        print("washout: the copy does not hold everything its projects name - it will not build as the tree does")
+        return 1
+    print("washout: every project and every item they name is in the copy")
+    if "--zip" in argv:
+        print("washout: %s, %.1f MB" % (pack(dest), os.path.getsize(archive) / 1048576.0))
+    return 0
 
 
 def pack(dest):
@@ -110,55 +233,6 @@ def pack(dest):
                 path = os.path.join(where, n)
                 z.write(path, os.path.relpath(path, top))
     return archive
-
-
-def main(argv):
-    args = [a for a in argv if not a.startswith("--")]
-    if len(args) != 1:
-        print(__doc__)
-        return 2
-    parent = os.path.abspath(args[0])
-    dest = os.path.join(parent, NAME)
-    archive = dest + ".zip"
-
-    missing = [s for s in SIBLINGS if find(s) is None]
-    if missing:
-        for s in missing:
-            print("  %-26s MISSING - a repository neither inside nor beside %s" % (s, ROOT))
-        print("washout: nothing written - every project must be here for the copy to build"); return 1
-    repos = [(NAME, ROOT, "")] + [(rel, find(rel), rel) for rel in SIBLINGS]
-
-    inside = lambda a, b: os.path.normcase(a + os.sep).startswith(os.path.normcase(b + os.sep))
-    # nor inside Compilers\\, TI\\ or Windows\\, which hold the repositories
-    for where in sorted({ROOT} | {os.path.dirname(repo) for _, repo, _ in repos[1:]}):
-        if inside(dest, where) or inside(where, dest):
-            print("washout: the copy cannot go inside %s, nor hold it" % where); return 2
-    if os.path.exists(dest) and os.listdir(dest):
-        if "--force" not in argv:
-            print("washout: %s is not empty - give --force to replace it" % dest); return 2
-        shutil.rmtree(dest)
-    if "--zip" in argv and os.path.exists(archive):
-        if "--force" not in argv:
-            print("washout: %s is already there - give --force to replace it" % archive); return 2
-        os.remove(archive)
-
-    total, all_restored, all_submodules = 0, [], []
-    # this repository first; where the siblings are inside it, .git\info\exclude keeps them from its list
-    for name, repo, rel in repos:
-        copied, restored, submodules = wash(repo, os.path.join(dest, rel), LEFT_OUT if repo == ROOT else ())
-        print("  %-26s %5d files%s" % (name, copied,
-                                       ", %d restored from git" % len(restored) if restored else ""))
-        total += copied
-        all_restored += [name + "/" + r for r in restored]
-        all_submodules += [name + "/" + s for s in submodules]
-    for r in all_restored:
-        print("    restored %s" % r)
-    for s in all_submodules:
-        print("    submodule not copied: %s" % s)
-    print("washout: %d files in %s" % (total, dest))
-    if "--zip" in argv:
-        print("washout: %s, %.1f MB" % (pack(dest), os.path.getsize(archive) / 1048576.0))
-    return 0
 
 
 if __name__ == "__main__":

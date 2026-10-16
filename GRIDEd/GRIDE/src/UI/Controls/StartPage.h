@@ -53,7 +53,7 @@ namespace Gride { namespace UI {
             AddLink("New Project...", "File.NewProject", true);
             AddLink("Open Workspace / Project...", "File.OpenWorkspace", true);
             AddLink("Open File...", "File.OpenFile", true);
-            AddLink("Import CCS 7.4 Project...", "File.OpenCcs", true);
+            AddLink("Import CCS 7.4 / 5.5 Project...", "File.OpenCcs", true);
 
             AddHeading("Recent");
             if (recentWorkspaces == nullptr || recentWorkspaces->Count == 0)

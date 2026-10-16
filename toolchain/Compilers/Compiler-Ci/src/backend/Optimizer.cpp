@@ -1,0 +1,1564 @@
+#include "Optimizer.h"
+
+#include <cstring>
+#include <algorithm>
+#include <map>
+
+IrOp IrOp::from(const Op &o) {
+    IrOp r;
+    r.kind = o.kind;
+    r.text.assign(o.text.p, o.text.n);
+    r.disp = o.disp;
+    r.hasDisp = o.hasDisp;
+    r.uimm = o.uimm;
+    r.immNeg = o.immNeg;
+    r.immNumeric = o.immNumeric;
+    return r;
+}
+
+Op IrOp::view() const {
+    return { kind, Str(text), disp, hasDisp, uimm, immNeg, immNumeric };
+}
+
+bool IrOp::same(const IrOp &o) const {
+    return kind == o.kind && text == o.text && disp == o.disp &&
+           hasDisp == o.hasDisp && uimm == o.uimm && immNeg == o.immNeg &&
+           immNumeric == o.immNumeric;
+}
+
+// ---------------------------------------------------------------------------
+// The register model.
+
+// **Every table in this file is a constant with a constant initialiser.** Not
+// a static local built on first use, which would be a guard - a lock, in
+// effect - taken by every thread of the driver's pool on every call.
+
+namespace {
+
+const unsigned kAll = 0xFFFFFFFFu;
+enum { kRax = 0, kRbx = 1, kRcx = 2, kRdx = 3, kRsi = 4, kRdi = 5, kRbp = 6, kRsp = 7,
+       kGprCount = 16, kXmm0 = 16 };
+
+constexpr unsigned bit(int r) { return 1u << static_cast<unsigned>(r); }
+
+// The four names of each general register, widest first.
+constexpr const char *const kGprNames[kGprCount][4] = {
+    { "%rax", "%eax",  "%ax",   "%al"   },
+    { "%rbx", "%ebx",  "%bx",   "%bl"   },
+    { "%rcx", "%ecx",  "%cx",   "%cl"   },
+    { "%rdx", "%edx",  "%dx",   "%dl"   },
+    { "%rsi", "%esi",  "%si",   "%sil"  },
+    { "%rdi", "%edi",  "%di",   "%dil"  },
+    { "%rbp", "%ebp",  "%bp",   "%bpl"  },
+    { "%rsp", "%esp",  "%sp",   "%spl"  },
+    { "%r8",  "%r8d",  "%r8w",  "%r8b"  },
+    { "%r9",  "%r9d",  "%r9w",  "%r9b"  },
+    { "%r10", "%r10d", "%r10w", "%r10b" },
+    { "%r11", "%r11d", "%r11w", "%r11b" },
+    { "%r12", "%r12d", "%r12w", "%r12b" },
+    { "%r13", "%r13d", "%r13w", "%r13b" },
+    { "%r14", "%r14d", "%r14w", "%r14b" },
+    { "%r15", "%r15d", "%r15w", "%r15b" },
+};
+
+// **Which 64-bit register a name is, and how wide the name is.** The high
+// bytes %ah..%dh answer with width 0: they alias their register, so they count
+// as a read and a part write of it, but nothing here will rename one.
+
+// An x87 name answers -2 and is ignored; anything else answers -1, and the
+// instruction naming it is treated as doing anything at all.
+int regLookup(const std::string &name, int &width) {
+    width = 0;
+    if (name.size() < 3 || name[0] != '%') return -1;
+    if (name.compare(0, 4, "%xmm") == 0) {
+        int n = 0;
+        for (std::size_t i = 4; i < name.size(); i++) {
+            if (name[i] < '0' || name[i] > '9') return -1;
+            n = n * 10 + (name[i] - '0');
+            if (n > 15) return -1;
+        }
+        if (name.size() == 4) return -1;
+        width = 16;
+        return kXmm0 + n;
+    }
+    if (name[1] == 's' && name[2] == 't') return -2;
+    const std::size_t n = name.size();
+    // r8..r15, with d, w or b for the narrower names.
+    if (name[1] == 'r' && name[2] >= '0' && name[2] <= '9') {
+        int v = name[2] - '0';
+        std::size_t i = 3;
+        if (i < n && name[i] >= '0' && name[i] <= '9') v = v * 10 + (name[i++] - '0');
+        if (v < 8 || v > 15) return -1;
+        if (i == n) { width = 8; return v; }
+        if (i + 1 != n) return -1;
+        switch (name[i]) {
+        case 'd': width = 4; return v;
+        case 'w': width = 2; return v;
+        case 'b': width = 1; return v;
+        default: return -1;
+        }
+    }
+    // The eight legacy registers: a two-letter core, with r or e in front for
+    // the wide names, and l behind for the low byte of si, di, bp and sp.
+    std::size_t at = 1;
+    int w = 2;
+    if (name[1] == 'r') { at = 2; w = 8; }
+    else if (name[1] == 'e') { at = 2; w = 4; }
+    if (at + 2 != n && at + 3 != n) return -1;
+    const char c0 = name[at], c1 = name[at + 1];
+    int r = -1;
+    bool eightBit = false;
+    if (c1 == 'x' || c1 == 'l' || c1 == 'h') {
+        switch (c0) {
+        case 'a': r = kRax; break;
+        case 'b': r = kRbx; break;
+        case 'c': r = kRcx; break;
+        case 'd': r = kRdx; break;
+        default: return -1;
+        }
+        if (c1 != 'x') {
+            if (w != 2) return -1;
+            eightBit = true;
+            w = c1 == 'l' ? 1 : 0;
+        }
+    } else if (c0 == 's' && c1 == 'i') r = kRsi;
+    else if (c0 == 'd' && c1 == 'i') r = kRdi;
+    else if (c0 == 'b' && c1 == 'p') r = kRbp;
+    else if (c0 == 's' && c1 == 'p') r = kRsp;
+    else return -1;
+    if (at + 3 == n) {
+        // sil, dil, bpl, spl - and nothing else has a third letter.
+        if (eightBit || w != 2 || name[at + 2] != 'l' || r < kRsi) return -1;
+        w = 1;
+    }
+    width = w;
+    return r;
+}
+
+const char *regName(int canon, int width) {
+    int w = width == 8 ? 0 : width == 4 ? 1 : width == 2 ? 2 : 3;
+    return kGprNames[canon][w];
+}
+
+// Whether naming this register at this width costs a REX prefix.
+bool needsRex(int canon, int width) {
+    if (canon >= 8) return true;
+    return width == 1 && canon >= kRsi && canon <= kRsp;
+}
+
+// ---------------------------------------------------------------------------
+// The instruction model.
+
+enum { kFlagsDef = 1, kFlagsUse = 2 };
+
+struct Mnemonic {
+    const char *name;
+    unsigned char len;
+    IrSem::Class cls;
+    unsigned char flags;
+};
+// The length is part of the entry, so a lookup is a length test and a memcmp.
+#define MN(name, cls, flags) { name, sizeof(name) - 1, cls, flags }
+
+// **Every mnemonic the x86-64 walker writes, and what it does.** A mnemonic
+// that is not here is Unknown, which reads and writes everything - so a new
+// instruction in the walker costs an optimisation, never a miscompile.
+constexpr Mnemonic kMnemonics[] = {
+    MN("mov", IrSem::Move, 0),       MN("movq", IrSem::Move, 0),
+    MN("movl", IrSem::Move, 0),      MN("movw", IrSem::Move, 0),
+    MN("movb", IrSem::Move, 0),      MN("movabs", IrSem::Move, 0),
+    MN("movzbq", IrSem::Move, 0),    MN("movzbl", IrSem::Move, 0),
+    MN("movzwq", IrSem::Move, 0),    MN("movzwl", IrSem::Move, 0),
+    MN("movzbw", IrSem::Move, 0),
+    MN("movsbq", IrSem::Move, 0),    MN("movswq", IrSem::Move, 0),
+    MN("movslq", IrSem::Move, 0),    MN("movsbl", IrSem::Move, 0),
+    MN("movswl", IrSem::Move, 0),    MN("movsbw", IrSem::Move, 0),
+    MN("lea", IrSem::Move, 0),
+    MN("movsd", IrSem::Move, 0),     MN("movss", IrSem::Move, 0),
+    MN("movd", IrSem::Move, 0),      MN("movaps", IrSem::Move, 0),
+    MN("movapd", IrSem::Move, 0),    MN("movdqa", IrSem::Move, 0),
+    MN("movups", IrSem::Move, 0),    MN("movupd", IrSem::Move, 0),
+    MN("cvtsi2sdq", IrSem::Move, 0), MN("cvtsi2sdl", IrSem::Move, 0),
+    MN("cvtsi2sd", IrSem::Move, 0),  MN("cvtsi2ssq", IrSem::Move, 0),
+    MN("cvtsi2ssl", IrSem::Move, 0), MN("cvtsi2ss", IrSem::Move, 0),
+    MN("cvttsd2si", IrSem::Move, 0), MN("cvttsd2siq", IrSem::Move, 0),
+    MN("cvttsd2sil", IrSem::Move, 0),MN("cvttss2si", IrSem::Move, 0),
+    MN("cvttss2siq", IrSem::Move, 0),MN("cvttss2sil", IrSem::Move, 0),
+    MN("cvtss2sd", IrSem::Move, 0),  MN("cvtsd2ss", IrSem::Move, 0),
+    MN("sqrtsd", IrSem::Move, 0),    MN("sqrtss", IrSem::Move, 0),
+
+    MN("add", IrSem::Rmw, kFlagsDef),  MN("sub", IrSem::Rmw, kFlagsDef),
+    MN("and", IrSem::Rmw, kFlagsDef),  MN("or", IrSem::Rmw, kFlagsDef),
+    MN("xor", IrSem::Rmw, kFlagsDef),  MN("imul", IrSem::Rmw, kFlagsDef),
+    MN("addq", IrSem::Rmw, kFlagsDef), MN("subq", IrSem::Rmw, kFlagsDef),
+    MN("andq", IrSem::Rmw, kFlagsDef), MN("orq", IrSem::Rmw, kFlagsDef),
+    MN("xorq", IrSem::Rmw, kFlagsDef), MN("imulq", IrSem::Rmw, kFlagsDef),
+    MN("addl", IrSem::Rmw, kFlagsDef), MN("subl", IrSem::Rmw, kFlagsDef),
+    MN("andl", IrSem::Rmw, kFlagsDef), MN("orl", IrSem::Rmw, kFlagsDef),
+    MN("xorl", IrSem::Rmw, kFlagsDef), MN("imull", IrSem::Rmw, kFlagsDef),
+    MN("addw", IrSem::Rmw, kFlagsDef), MN("subw", IrSem::Rmw, kFlagsDef),
+    MN("andw", IrSem::Rmw, kFlagsDef), MN("orw", IrSem::Rmw, kFlagsDef),
+    MN("xorw", IrSem::Rmw, kFlagsDef),
+    MN("addb", IrSem::Rmw, kFlagsDef), MN("subb", IrSem::Rmw, kFlagsDef),
+    MN("andb", IrSem::Rmw, kFlagsDef), MN("orb", IrSem::Rmw, kFlagsDef),
+    MN("xorb", IrSem::Rmw, kFlagsDef),
+    // A shift by zero leaves the flags alone, so a shift is neither a
+    // writer to stop at nor a reader; the flags stay live through it.
+    MN("shl", IrSem::Rmw, 0),  MN("sal", IrSem::Rmw, 0),
+    MN("sar", IrSem::Rmw, 0),  MN("shr", IrSem::Rmw, 0),
+    MN("shlq", IrSem::Rmw, 0), MN("salq", IrSem::Rmw, 0),
+    MN("sarq", IrSem::Rmw, 0), MN("shrq", IrSem::Rmw, 0),
+    MN("shll", IrSem::Rmw, 0), MN("sall", IrSem::Rmw, 0),
+    MN("sarl", IrSem::Rmw, 0), MN("shrl", IrSem::Rmw, 0),
+    MN("shlw", IrSem::Rmw, 0), MN("sarw", IrSem::Rmw, 0),
+    MN("shrw", IrSem::Rmw, 0), MN("shlb", IrSem::Rmw, 0),
+    MN("sarb", IrSem::Rmw, 0), MN("shrb", IrSem::Rmw, 0),
+    MN("addsd", IrSem::Rmw, 0), MN("subsd", IrSem::Rmw, 0),
+    MN("mulsd", IrSem::Rmw, 0), MN("divsd", IrSem::Rmw, 0),
+    MN("addss", IrSem::Rmw, 0), MN("subss", IrSem::Rmw, 0),
+    MN("mulss", IrSem::Rmw, 0), MN("divss", IrSem::Rmw, 0),
+    MN("minsd", IrSem::Rmw, 0), MN("maxsd", IrSem::Rmw, 0),
+    MN("pxor", IrSem::Rmw, 0),  MN("xorps", IrSem::Rmw, 0),
+    MN("xorpd", IrSem::Rmw, 0), MN("andps", IrSem::Rmw, 0),
+    MN("andpd", IrSem::Rmw, 0), MN("orps", IrSem::Rmw, 0),
+    MN("orpd", IrSem::Rmw, 0),
+
+    MN("cmp", IrSem::Cmp, kFlagsDef),   MN("cmpq", IrSem::Cmp, kFlagsDef),
+    MN("cmpl", IrSem::Cmp, kFlagsDef),  MN("cmpw", IrSem::Cmp, kFlagsDef),
+    MN("cmpb", IrSem::Cmp, kFlagsDef),  MN("test", IrSem::Cmp, kFlagsDef),
+    MN("testq", IrSem::Cmp, kFlagsDef), MN("testl", IrSem::Cmp, kFlagsDef),
+    MN("testw", IrSem::Cmp, kFlagsDef), MN("testb", IrSem::Cmp, kFlagsDef),
+    MN("ucomisd", IrSem::Cmp, kFlagsDef), MN("ucomiss", IrSem::Cmp, kFlagsDef),
+    MN("comisd", IrSem::Cmp, kFlagsDef),  MN("comiss", IrSem::Cmp, kFlagsDef),
+
+    MN("neg", IrSem::Unary, kFlagsDef),  MN("negq", IrSem::Unary, kFlagsDef),
+    MN("negl", IrSem::Unary, kFlagsDef), MN("not", IrSem::Unary, 0),
+    MN("notq", IrSem::Unary, 0),         MN("notl", IrSem::Unary, 0),
+    // inc and dec leave CF, so they are not a writer of all the flags.
+    MN("inc", IrSem::Unary, 0),   MN("dec", IrSem::Unary, 0),
+    MN("incq", IrSem::Unary, 0),  MN("decq", IrSem::Unary, 0),
+    MN("incl", IrSem::Unary, 0),  MN("decl", IrSem::Unary, 0),
+
+    MN("push", IrSem::Push, 0), MN("pushq", IrSem::Push, 0),
+    MN("pop", IrSem::Pop, 0),   MN("popq", IrSem::Pop, 0),
+
+    MN("cqo", IrSem::Cqo, 0),   MN("cqto", IrSem::Cqo, 0),
+    MN("cdq", IrSem::Cdq, 0),   MN("cltd", IrSem::Cdq, 0),
+    MN("cltq", IrSem::Cltq, 0), MN("cdqe", IrSem::Cltq, 0),
+    MN("rep movsq", IrSem::Rep, 0),
+
+    // The flags after a division are undefined, so no reader may depend on
+    // what was there before it: it counts as a writer.
+    MN("idiv", IrSem::Div, kFlagsDef),  MN("div", IrSem::Div, kFlagsDef),
+    MN("idivq", IrSem::Div, kFlagsDef), MN("divq", IrSem::Div, kFlagsDef),
+    MN("idivl", IrSem::Div, kFlagsDef), MN("divl", IrSem::Div, kFlagsDef),
+    MN("mul", IrSem::Div, kFlagsDef),   MN("mulq", IrSem::Div, kFlagsDef),
+    MN("mull", IrSem::Div, kFlagsDef),
+
+    MN("fldt", IrSem::X87, 0),   MN("fldl", IrSem::X87, 0),
+    MN("flds", IrSem::X87, 0),   MN("fld", IrSem::X87, 0),
+    MN("fld1", IrSem::X87, 0),   MN("fldz", IrSem::X87, 0),
+    MN("fstpt", IrSem::X87, 0),  MN("fstpl", IrSem::X87, 0),
+    MN("fstps", IrSem::X87, 0),  MN("fstp", IrSem::X87, 0),
+    MN("fildq", IrSem::X87, 0),  MN("fildl", IrSem::X87, 0),
+    MN("fild", IrSem::X87, 0),   MN("fistpq", IrSem::X87, 0),
+    MN("fistpl", IrSem::X87, 0), MN("fisttpq", IrSem::X87, 0),
+    MN("fisttpl", IrSem::X87, 0),MN("fldcw", IrSem::X87, 0),
+    MN("fnstcw", IrSem::X87, 0), MN("fstcw", IrSem::X87, 0),
+    MN("faddp", IrSem::X87, 0),  MN("fsubp", IrSem::X87, 0),
+    MN("fsubrp", IrSem::X87, 0), MN("fmulp", IrSem::X87, 0),
+    MN("fdivp", IrSem::X87, 0),  MN("fdivrp", IrSem::X87, 0),
+    MN("fxch", IrSem::X87, 0),   MN("fchs", IrSem::X87, 0),
+    MN("fabs", IrSem::X87, 0),
+    MN("fucomip", IrSem::X87, kFlagsDef), MN("fcomip", IrSem::X87, kFlagsDef),
+    MN("fucomi", IrSem::X87, kFlagsDef),  MN("fcomi", IrSem::X87, kFlagsDef),
+
+    MN("call", IrSem::Call, 0),
+    MN("ret", IrSem::Ret, 0),
+    MN("leave", IrSem::Leave, 0),
+    MN("nop", IrSem::Nop, 0),
+};
+
+const Mnemonic *findMnemonic(const std::string &m) {
+    const std::size_t n = m.size();
+    for (const Mnemonic &e : kMnemonics)
+        if (n == e.len && std::memcmp(m.data(), e.name, n) == 0) return &e;
+    return nullptr;
+}
+
+bool startsWith(const std::string &s, const char *p) {
+    return s.compare(0, std::strlen(p), p) == 0;
+}
+
+bool isShift(const std::string &m) {
+    return startsWith(m, "sh") || startsWith(m, "sa");
+}
+
+bool isMultiply(const std::string &m) {
+    return m == "imul" || m == "imulq" || m == "imull" || m == "mul" ||
+           m == "mulq" || m == "mull";
+}
+
+bool isX87Store(const std::string &m) {
+    return startsWith(m, "fst") || startsWith(m, "fist") || startsWith(m, "fnst");
+}
+
+// What must be intact when a function returns: the return registers and the
+// ones the callee preserves.
+constexpr unsigned kRetLive = bit(kRax) | bit(kRdx) | bit(kRbx) | bit(kRbp) | bit(kRsp) |
+                          bit(12) | bit(13) | bit(14) | bit(15) |
+                          bit(kXmm0) | bit(kXmm0 + 1);
+
+struct Describer {
+    IrSem s;
+    bool bad = false;
+
+    void read(const IrOp &o, bool fixed) {
+        if (o.kind != Op::Reg && o.kind != Op::Mem && o.kind != Op::Ind) return;
+        int w;
+        int r = regLookup(o.text, w);
+        if (r == -2) return;
+        if (r < 0) { bad = true; return; }
+        s.use |= bit(r);
+        if (fixed) s.fixed |= bit(r);
+    }
+
+    // `alsoRead`: the class reads the destination before writing it.
+    void write(const IrOp &o, bool alsoRead, bool isDst) {
+        if (o.kind == Op::Mem) { s.memWrite = true; read(o, false); return; }
+        if (o.kind == Op::Rip) { s.memWrite = true; return; }
+        if (o.kind != Op::Reg) { bad = true; return; }
+        int w;
+        int r = regLookup(o.text, w);
+        if (r == -2) return;
+        if (r < 0) { bad = true; return; }
+        if (alsoRead) { s.use |= bit(r); s.fixed |= bit(r); }
+        if (w == 8 || w == 4) {
+            s.def |= bit(r);
+            if (isDst && !alsoRead) { s.dstReg = r; s.dstWidth = w; }
+        } else {
+            // A part write keeps the rest of the register, so it reads it.
+            s.part |= bit(r);
+            s.use |= bit(r);
+            s.fixed |= bit(r);
+        }
+    }
+
+    void everything() {
+        s = IrSem();
+        s.cls = IrSem::Unknown;
+        s.use = kAll;
+        s.fixed = kAll;
+        s.flagsUse = s.flagsDef = true;
+        s.memWrite = true;
+    }
+};
+
+IrSem describe(const IrIns &i) {
+    Describer d;
+    IrSem &s = d.s;
+    const Mnemonic *e = findMnemonic(i.m);
+    if (e != nullptr) {
+        s.cls = e->cls;
+        s.flagsDef = (e->flags & kFlagsDef) != 0;
+        s.flagsUse = (e->flags & kFlagsUse) != 0;
+    } else if (!i.m.empty() && i.m[0] == 'j') {
+        s.cls = IrSem::Jump;
+        s.flagsUse = i.m != "jmp";
+    } else if (startsWith(i.m, "set")) {
+        s.cls = IrSem::Set;
+        s.flagsUse = true;
+    } else if (startsWith(i.m, "cmov")) {
+        s.cls = IrSem::Rmw;
+        s.flagsUse = true;
+    } else {
+        d.everything();
+        return s;
+    }
+    if (s.cls == IrSem::Rmw && i.operands == 1) {
+        // imul %r is rax:rdx = rax * r; shl %r is a shift by one.
+        s.cls = isMultiply(i.m) ? IrSem::Div : IrSem::Unary;
+    }
+
+    switch (s.cls) {
+    case IrSem::Move:
+        if (i.operands != 2) { d.bad = true; break; }
+        d.read(i.a, false);
+        d.write(i.b, false, true);
+        break;
+    case IrSem::Rmw:
+        if (i.operands != 2) { d.bad = true; break; }
+        d.read(i.a, isShift(i.m) && i.a.kind == Op::Reg);
+        d.write(i.b, true, false);
+        if (s.flagsUse) {
+            // cmov: the destination keeps its value when the condition fails.
+            s.part |= s.def;
+            s.def = 0;
+        }
+        break;
+    case IrSem::Cmp:
+        if (i.operands != 2) { d.bad = true; break; }
+        d.read(i.a, false);
+        d.read(i.b, false);
+        break;
+    case IrSem::Set:
+        if (i.operands != 1) { d.bad = true; break; }
+        d.write(i.a, true, false);
+        break;
+    case IrSem::Unary:
+        if (i.operands != 1) { d.bad = true; break; }
+        d.write(i.a, true, false);
+        break;
+    case IrSem::Push:
+        if (i.operands != 1) { d.bad = true; break; }
+        d.read(i.a, false);
+        s.use |= bit(kRsp); s.part |= bit(kRsp); s.fixed |= bit(kRsp);
+        s.memWrite = true;
+        break;
+    case IrSem::Pop:
+        if (i.operands != 1) { d.bad = true; break; }
+        d.write(i.a, false, true);
+        s.use |= bit(kRsp); s.part |= bit(kRsp); s.fixed |= bit(kRsp);
+        break;
+    case IrSem::Cqo:
+    case IrSem::Cdq:
+        if (i.operands != 0) { d.bad = true; break; }
+        s.use |= bit(kRax); s.fixed |= bit(kRax);
+        s.def |= bit(kRdx);
+        break;
+    case IrSem::Cltq:
+        if (i.operands != 0) { d.bad = true; break; }
+        s.use |= bit(kRax); s.fixed |= bit(kRax);
+        s.def |= bit(kRax);
+        break;
+    case IrSem::Div:
+        if (i.operands != 1) { d.bad = true; break; }
+        d.read(i.a, false);
+        s.use |= bit(kRax) | bit(kRdx); s.fixed |= bit(kRax) | bit(kRdx);
+        s.def |= bit(kRax) | bit(kRdx);
+        break;
+    case IrSem::X87:
+        if (i.operands > 1) { d.bad = true; break; }
+        if (i.operands == 1) {
+            d.read(i.a, false);
+            if (isX87Store(i.m)) s.memWrite = true;
+        }
+        break;
+    case IrSem::Call:
+        if (i.operands == 1) d.read(i.a, false);
+        s.use = kAll; s.fixed = kAll;
+        s.memWrite = true;
+        break;
+    case IrSem::Jump:
+        // Only what it jumps through: what is live after it is the successors'
+        // to say, through the graph. `use = kAll` here, from the per-run days,
+        // made every chunk that ends in a jump read everything.
+        if (i.operands == 1) d.read(i.a, false);
+        s.fixed |= s.use;
+        break;
+    case IrSem::Ret:
+        s.use = kRetLive; s.fixed = kRetLive;
+        break;
+    case IrSem::Leave:
+        s.use |= bit(kRbp) | bit(kRsp); s.fixed |= bit(kRbp) | bit(kRsp);
+        s.part |= bit(kRbp) | bit(kRsp);
+        break;
+    case IrSem::Nop:
+        break;
+    case IrSem::Rep: {
+        if (i.operands != 0) { d.bad = true; break; }
+        const unsigned r = bit(kRsi) | bit(kRdi) | bit(kRcx);
+        s.use |= r; s.part |= r; s.fixed |= r;
+        s.memWrite = true;
+        break;
+    }
+    case IrSem::Unknown:
+        d.bad = true;
+        break;
+    }
+    if (d.bad) d.everything();
+    return s;
+}
+
+// Whether `o` names canonical register `r`, and at what width. A memory
+// base or an indirect target is always the 64-bit name.
+bool namesReg(const IrOp &o, int r, int &width) {
+    if (o.kind != Op::Reg && o.kind != Op::Mem && o.kind != Op::Ind) return false;
+    int w;
+    if (regLookup(o.text, w) != r) return false;
+    width = w;
+    return true;
+}
+
+// **Whether operand k of x is a read position** - a place a rename of the
+// register it names is a rename of a read. A memory base or an indirect
+// target is one always; a register is one where its class reads that side.
+bool readsAt(const IrIns &x, const IrSem &s, int k) {
+    const IrOp &o = k == 0 ? x.a : x.b;
+    if (o.kind == Op::Mem || o.kind == Op::Ind) return true;
+    if (o.kind != Op::Reg) return false;
+    switch (s.cls) {
+    case IrSem::Move: case IrSem::Rmw: case IrSem::Push: case IrSem::Div:
+    case IrSem::Call: case IrSem::Jump:
+        return k == 0;
+    case IrSem::Cmp:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool isGpr64(const IrOp &o, int &canon) {
+    int w;
+    if (o.kind != Op::Reg) return false;
+    canon = regLookup(o.text, w);
+    return canon >= 0 && canon < kGprCount && w == 8;
+}
+
+// A general register a pass may allocate: any but the two that address the frame.
+bool allocatable(int r) {
+    return r >= 0 && r < kGprCount && r != kRbp && r != kRsp;
+}
+
+bool isReg(const IrOp &o, const char *name) {
+    return o.kind == Op::Reg && o.text == name;
+}
+
+bool isZeroImm(const IrOp &o) {
+    return o.kind == Op::Imm && o.immNumeric && o.uimm == 0;
+}
+
+IrOp regOp(const char *name) {
+    IrOp o;
+    o.kind = Op::Reg;
+    o.text = name;
+    return o;
+}
+
+void refresh(IrIns &x) {
+    x.sem = describe(x);
+    x.semValid = true;
+}
+
+// How far forward a pass looks from one instruction: a long run costs its length.
+const std::size_t kScanLimit = 256;
+
+// A run ends at anything that can leave it other than by falling through.
+bool endsRun(const std::string &m) {
+    return (!m.empty() && m[0] == 'j') || m == "call" || m == "ret";
+}
+
+// **The general registers whose 64-bit self-move is a true no-op.** Moving
+// a 32-bit register onto itself zero-extends into the whole register, and a
+// 16- or 8-bit one is a partial write; only these names may be dropped.
+bool is64Gpr(const std::string &r) {
+    int w;
+    int c = regLookup(r, w);
+    return c >= 0 && c < kGprCount && w == 8;
+}
+
+// **The 64-bit move is spelled `mov` by the walker and `movq` in a few
+// places**; with a 64-bit general register on one side they are the same
+// instruction, and only then is the width certain.
+bool isMov64(const IrIns &i) {
+    return (i.m == "mov" || i.m == "movq") && i.operands == 2;
+}
+
+bool isRegToMem(const IrIns &i) {
+    return isMov64(i) && i.a.kind == Op::Reg && i.b.kind == Op::Mem &&
+           is64Gpr(i.a.text);
+}
+
+bool isMemToReg(const IrIns &i) {
+    return isMov64(i) && i.a.kind == Op::Mem && i.b.kind == Op::Reg &&
+           is64Gpr(i.b.text);
+}
+
+// A push or pop of a 64-bit general register other than the two that address
+// the stack, which is every one the walker's expression stack uses.
+bool isStackOp(const IrIns &i, const char *m) {
+    return i.m == m && i.operands == 1 && i.a.kind == Op::Reg &&
+           is64Gpr(i.a.text) && i.a.text != "%rsp" && i.a.text != "%rbp";
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// Collecting a function.
+
+IrChunk &Optimizer::chunk() {
+    if (chunks_.empty() || !open_) {
+        chunks_.push_back(IrChunk());
+        open_ = true;
+    }
+    return chunks_.back();
+}
+
+void Optimizer::add(IrIns &&i) {
+    // Nothing reaches here: the last chunk ended in a jump or a return and no
+    // label has been defined since.
+    if (unreachable_ && level_ >= 1) {
+        removed_++;
+        return;
+    }
+    bool ends = endsRun(i.m);
+    bool leaves = i.m == "jmp" || i.m == "ret";
+    chunk().ins.push_back(std::move(i));
+    if (ends) {
+        open_ = false;
+        unreachable_ = leaves;
+    }
+}
+
+void Optimizer::ins(const std::string &m) {
+    IrIns i; i.m = m; i.operands = 0;
+    add(std::move(i));
+}
+
+void Optimizer::ins(const std::string &m, const Op &a) {
+    IrIns i; i.m = m; i.operands = 1; i.a = IrOp::from(a);
+    add(std::move(i));
+}
+
+void Optimizer::ins(const std::string &m, const Op &a, const Op &b) {
+    IrIns i; i.m = m; i.operands = 2; i.a = IrOp::from(a); i.b = IrOp::from(b);
+    add(std::move(i));
+}
+
+void Optimizer::defLabel(const std::string &l) {
+    if (chunks_.empty() && level_ < 1) { under_->defLabel(l); return; }
+    chunks_.push_back(IrChunk());
+    chunks_.back().label = l;
+    chunks_.back().hasLabel = true;
+    open_ = true;
+    unreachable_ = false;
+}
+
+// An event lands before the code of the chunk it precedes: on the open chunk
+// while nothing has been written to it, else on a fresh one.
+void Optimizer::event(std::function<void()> f) {
+    if (chunks_.empty()) { f(); return; }
+    IrChunk &c = (open_ && chunks_.back().ins.empty()) ? chunks_.back() : chunk();
+    (c.hasLabel ? c.after : c.before).push_back(std::move(f));
+}
+
+// **Which chunk each one leads to.** A chunk ends at a terminator or where a
+// label or an event began the next, and falls into that next one unless it
+// left by a jump or a return.
+
+// A jump names a label; one defined elsewhere - the function was cut - is a
+// target this graph cannot see.
+void Optimizer::connect() {
+    std::map<std::string, int> at;
+    for (std::size_t k = 0; k < chunks_.size(); k++)
+        if (chunks_[k].hasLabel) at[chunks_[k].label] = static_cast<int>(k);
+    for (std::size_t k = 0; k < chunks_.size(); k++) {
+        IrChunk &c = chunks_[k];
+        c.fall = -1; c.target = -1;
+        const bool next = k + 1 < chunks_.size();
+        if (c.ins.empty()) { c.fall = next ? static_cast<int>(k + 1) : -2; continue; }
+        const IrIns &last = c.ins.back();
+        const bool jump = !last.m.empty() && last.m[0] == 'j';
+        if (jump) {
+            std::map<std::string, int>::const_iterator it =
+                last.operands == 1 && last.a.kind == Op::Lbl ? at.find(last.a.text) : at.end();
+            c.target = it == at.end() ? -2 : it->second;
+        }
+        if (last.m == "ret") continue;
+        if (last.m != "jmp") c.fall = next ? static_cast<int>(k + 1) : -2;
+    }
+}
+
+// **Liveness across the graph.** Each chunk's gen is what it reads before it
+// writes, its kill what it writes whole; in = gen | (out & ~kill), out the
+// union over its successors - everything where one is unseen, nothing after a return.
+
+// Backward to a fixpoint; the flags the same way.
+void Optimizer::semantics(IrIns &x) const {
+    refresh(x);
+    if (x.sem.cls == IrSem::Ret && !rdxLive_) {
+        x.sem.use &= ~bit(kRdx);
+        x.sem.fixed &= ~bit(kRdx);
+    }
+}
+
+void Optimizer::flow() {
+    for (IrChunk &c : chunks_) {
+        unsigned live = 0, kill = 0;
+        bool flags = false, fkill = false;
+        for (std::size_t k = c.ins.size(); k-- > 0;) {
+            if (!c.ins[k].semValid) semantics(c.ins[k]);
+            const IrSem &s = c.ins[k].sem;
+            live = s.use | (live & ~s.def);
+            kill |= s.def;
+            flags = s.flagsUse || (flags && !s.flagsDef);
+            fkill = fkill || s.flagsDef;
+        }
+        c.gen = live; c.kill = kill; c.flagsGen = flags; c.flagsKill = fkill;
+        c.liveIn = live; c.flagsIn = flags;
+    }
+    for (int round = 0; round < 64; round++) {
+        bool changed = false;
+        for (std::size_t k = chunks_.size(); k-- > 0;) {
+            IrChunk &c = chunks_[k];
+            unsigned out = 0;
+            bool fout = false;
+            if (c.fall == -2 || c.target == -2) { out = kAll; fout = true; }
+            if (c.fall >= 0)   { out |= chunks_[c.fall].liveIn;   fout = fout || chunks_[c.fall].flagsIn; }
+            if (c.target >= 0) { out |= chunks_[c.target].liveIn; fout = fout || chunks_[c.target].flagsIn; }
+            if (!c.ins.empty() && c.ins.back().sem.cls == IrSem::Call) fout = false;
+            unsigned in = c.gen | (out & ~c.kill);
+            bool fin = c.flagsGen || (fout && !c.flagsKill);
+            if (out != c.liveOut || in != c.liveIn || fout != c.flagsOut || fin != c.flagsIn) changed = true;
+            c.liveOut = out; c.liveIn = in; c.flagsOut = fout; c.flagsIn = fin;
+        }
+        if (!changed) break;
+    }
+}
+
+void Optimizer::replay() {
+    for (IrChunk &c : chunks_) {
+        for (std::function<void()> &f : c.before) f();
+        if (c.hasLabel) under_->defLabel(c.label);
+        for (std::function<void()> &f : c.after) f();
+        for (const IrIns &i : c.ins) {
+            switch (i.operands) {
+            case 0: under_->ins(i.m); break;
+            case 1: under_->ins(i.m, i.a.view()); break;
+            default: under_->ins(i.m, i.a.view(), i.b.view()); break;
+            }
+        }
+    }
+    chunks_.clear();
+    open_ = false;
+}
+
+// The text is about to be read, cut, or continued by something that cannot
+// stay inside the function: what is held is optimized - twice, since a chunk
+// that reads less leaves less live for the ones before it - and written out.
+void Optimizer::flush() {
+    if (level_ >= 1 && !chunks_.empty()) {
+        connect();
+        for (int round = 0; round < 2; round++) {
+            flow();
+            for (IrChunk &c : chunks_) {
+                if (c.ins.empty()) continue;
+                run_.swap(c.ins);
+                initLive_ = c.liveOut;
+                initFlags_ = c.flagsOut;
+                optimize();
+                run_.swap(c.ins);
+            }
+        }
+    }
+    replay();
+    unreachable_ = false;
+}
+
+void Optimizer::interrupt() { flush(); }
+
+// ---------------------------------------------------------------------------
+// The passes.
+
+void Optimizer::optimize() {
+    peephole();
+    for (int round = 0; round < 4; round++) {
+        bool changed = false;
+        analyse();
+        if (dropExtensions()) { changed = true; compact(); analyse(); }
+        if (fuseLeas())       { changed = true; compact(); analyse(); }
+        if (sinkFrameLeas())  { changed = true; compact(); analyse(); }
+        if (pairStack())      { changed = true; compact(); analyse(); }
+        if (retargetDefs())   { changed = true; compact(); analyse(); }
+        if (renameThroughPair()) { changed = true; compact(); analyse(); }
+        if (foldCompareBranch()) { changed = true; compact(); analyse(); }
+        if (moveSourceReads())   { changed = true; compact(); analyse(); }
+        if (dropDeadDefs())      { changed = true; compact(); analyse(); }
+        if (propagateCopies()){ changed = true; compact(); }
+        if (!changed) break;
+    }
+    analyse();
+    shorten();
+    compact();
+}
+
+void Optimizer::compact() {
+    kept_.clear();
+    kept_.reserve(run_.size());
+    for (IrIns &i : run_)
+        if (!i.dead) kept_.push_back(std::move(i));
+    run_.swap(kept_);
+}
+
+// **What each instruction does, and what is live after it.** Backward over
+// the run, from what the graph says follows it - see flow().
+void Optimizer::analyse() {
+    const std::size_t n = run_.size();
+    liveOut_.resize(n);
+    flagsLiveOut_.resize(n);
+    for (std::size_t i = 0; i < n; i++)
+        if (!run_[i].semValid) semantics(run_[i]);
+
+    unsigned live = initLive_;
+    bool flags = initFlags_;
+    for (std::size_t k = n; k-- > 0;) {
+        const IrSem &s = run_[k].sem;
+        liveOut_[k] = live;
+        flagsLiveOut_[k] = flags ? 1 : 0;
+        live = s.use | (live & ~s.def);
+        flags = s.flagsUse || (flags && !s.flagsDef);
+    }
+}
+
+// **Each pattern is between an instruction and the last one kept**, which is
+// what lets a chain fall: a store and two reloads lose both reloads. The first
+// three never fire on what the walker writes today; the fourth is its idiom.
+void Optimizer::peephole() {
+    std::vector<IrIns> &kept = kept_;
+    kept.clear();
+    kept.reserve(run_.size());
+    for (IrIns &i : run_) {
+        // mov %r, %r: a 64-bit self-move does nothing.
+        if (isMov64(i) && i.a.kind == Op::Reg && i.b.kind == Op::Reg &&
+            i.a.text == i.b.text && is64Gpr(i.a.text)) {
+            removed_++;
+            continue;
+        }
+        if (!kept.empty() && isMemToReg(i)) {
+            const IrIns &p = kept.back();
+            // mov %r, m ; mov m, %r: the reload reads back what %r still holds.
+            if (isRegToMem(p) && p.a.text == i.b.text && p.b.same(i.a)) {
+                removed_++;
+                continue;
+            }
+            // mov m, %r ; mov m, %r: the second load reads what the first did,
+            // unless %r is the address it reads through.
+            if (isMemToReg(p) && p.a.same(i.a) && p.b.text == i.b.text &&
+                i.a.text.find(i.b.text) == std::string::npos) {
+                removed_++;
+                continue;
+            }
+        }
+        // push %x ; pop %y is mov %x, %y, and nothing at all when %y is %x: rsp
+        // and the flags end as they began, and the word written below rsp is
+        // one nothing reads - the frame is addressed from rbp, the stack upward.
+
+        // **At both levels, though it looks like a size-for-speed trade.** The
+        // pair is two bytes and the mov three, so it was gated to -O2 once and
+        // measured: .text came out 51,408 bytes LARGER at -O1, not smaller.
+
+        // It is an enabling transformation - once the pair is a mov, copy
+        // propagation sees through it and usually deletes it. Withholding it
+        // costs both size and speed, so it is not a knob.
+
+        // What is: docs/O1-O2-STUDY-2026-09-21.md, where cl's -O2 proved to
+        // be exactly -O1 -Oi -Ot - unrolled loops, inline block moves and
+        // aligned loop heads - and TI's levels proved to be amounts instead.
+        if (!kept.empty() && isStackOp(i, "pop") && isStackOp(kept.back(), "push")) {
+            IrIns &p = kept.back();
+            if (p.a.text == i.a.text) {
+                kept.pop_back();
+                removed_ += 2;
+            } else {
+                p.m = "mov";
+                p.operands = 2;
+                p.b = i.a;
+                p.semValid = false;
+                removed_++;
+            }
+            continue;
+        }
+        kept.push_back(std::move(i));
+    }
+    run_.swap(kept);
+}
+
+// **A sign- or zero-extension of a register that already is one.** The
+// walker widens every 32-bit result with `movslq %eax, %rax` and does not
+// remember having just done so; the state here does.
+
+// Forward over the run, with what is known of each register cleared by any
+// write to it.
+bool Optimizer::dropExtensions() {
+    enum { kSext32 = 1, kZext8 = 2, kZext16 = 4 };
+    unsigned char known[kGprCount] = { 0 };
+    bool changed = false;
+    for (std::size_t i = 0; i < run_.size(); i++) {
+        IrIns &x = run_[i];
+        const IrSem &s = run_[i].sem;
+        if (s.cls == IrSem::Move && x.a.kind == Op::Reg && x.b.kind == Op::Reg) {
+            int wa, wb;
+            int ra = regLookup(x.a.text, wa);
+            int rb = regLookup(x.b.text, wb);
+            if (ra >= 0 && ra == rb && rb < kGprCount && (wb == 8 || wb == 4)) {
+                bool noop = false;
+                if (x.m == "movslq" && wa == 4 && wb == 8) noop = (known[rb] & kSext32) != 0;
+                else if ((x.m == "movzbq" || x.m == "movzbl") && wa == 1)
+                    noop = (known[rb] & kZext8) != 0;
+                else if ((x.m == "movzwq" || x.m == "movzwl") && wa == 2)
+                    noop = (known[rb] & kZext16) != 0;
+                if (noop) {
+                    x.dead = true;
+                    removed_++;
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        if (s.cls == IrSem::Unknown) {
+            for (int r = 0; r < kGprCount; r++) known[r] = 0;
+            continue;
+        }
+        const unsigned written = s.def | s.part;
+        for (int r = 0; r < kGprCount; r++)
+            if (written & bit(r)) known[r] = 0;
+        if (s.cls == IrSem::Cltq) {
+            known[kRax] = kSext32;
+        } else if (s.cls == IrSem::Move && s.dstReg >= 0 && s.dstReg < kGprCount) {
+            unsigned char k = 0;
+            const std::string &m = x.m;
+            if (m == "movslq" || m == "movsbq" || m == "movswq") {
+                k = kSext32;
+            } else if (m == "movzbq" || m == "movzbl") {
+                k = kSext32 | kZext8 | kZext16;
+            } else if (m == "movzwq" || m == "movzwl") {
+                k = kSext32 | kZext16;
+            } else if ((m == "mov" || m == "movq" || m == "movl" || m == "movabs") &&
+                       x.a.kind == Op::Imm && x.a.immNumeric) {
+                if (!x.a.immNeg) {
+                    if (x.a.uimm < 128) k = kSext32 | kZext8 | kZext16;
+                    else if (x.a.uimm < 65536) k = kSext32 | kZext16;
+                    else if (x.a.uimm < (1ull << 31)) k = kSext32;
+                } else if (s.dstWidth == 8 && x.a.uimm <= (1ull << 31)) {
+                    k = kSext32;
+                }
+            } else if ((m == "mov" || m == "movq") && x.a.kind == Op::Reg && s.dstWidth == 8) {
+                int wa;
+                int ra = regLookup(x.a.text, wa);
+                if (ra >= 0 && ra < kGprCount && wa == 8) k = known[ra];
+            }
+            known[s.dstReg] = k;
+        }
+    }
+    return changed;
+}
+
+// **`lea M, %r` followed by a use of memory at (%r)**: the address goes into
+// the operand and the lea goes, when %r is read nowhere else in that
+// instruction and its value is dead afterwards.
+
+// Dead because that instruction overwrites it, or because nothing later
+// reads it before writing it.
+bool Optimizer::fuseLeas() {
+    bool changed = false;
+    for (std::size_t i = 0; i + 1 < run_.size(); i++) {
+        IrIns &l = run_[i];
+        if (l.dead || l.m != "lea" || l.operands != 2) continue;
+        if (l.a.kind != Op::Mem && l.a.kind != Op::Rip) continue;
+        int r;
+        if (!isGpr64(l.b, r) || !allocatable(r)) continue;
+
+        IrIns &x = run_[i + 1];
+        if (x.dead) continue;
+        const IrSem &s = run_[i + 1].sem;
+        if (s.cls == IrSem::Unknown) continue;
+
+        IrOp *mo = nullptr;
+        if (x.operands >= 1 && x.a.kind == Op::Mem && x.a.text == l.b.text) mo = &x.a;
+        else if (x.operands == 2 && x.b.kind == Op::Mem && x.b.text == l.b.text) mo = &x.b;
+        if (mo == nullptr) continue;
+
+        IrOp fused = l.a;
+        if (l.a.kind == Op::Rip) {
+            // The spelling of a rip-relative operand carries no displacement.
+            if (mo->hasDisp && mo->disp != 0) continue;
+        } else {
+            // A push or pop moves rsp before or after the access; keep clear.
+            if (l.a.text == "%rsp" && (s.cls == IrSem::Push || s.cls == IrSem::Pop)) continue;
+            long long d = (l.a.hasDisp ? l.a.disp : 0) + (mo->hasDisp ? mo->disp : 0);
+            if (d > 0x7fffffffLL || d < -0x80000000LL) continue;
+            fused.disp = d;
+            fused.hasDisp = d != 0;
+        }
+
+        // The instruction as it would be, so its reads are the real ones.
+        const IrOp saved = *mo;
+        *mo = fused;
+        const IrSem t = describe(x);
+        const bool dead = (t.def & bit(r)) != 0 || (liveOut_[i + 1] & bit(r)) == 0;
+        if (t.cls == IrSem::Unknown || (t.use & bit(r)) != 0 || !dead) {
+            *mo = saved;
+            continue;
+        }
+        x.sem = t;
+        x.semValid = true;
+        l.dead = true;
+        removed_++;
+        changed = true;
+    }
+    return changed;
+}
+
+// **A push and the pop that takes it back**, with nothing between that moves
+// rsp or reads the stack: the same register both times, and both go; another
+// register untouched between, and the push is a move to it.
+
+// Otherwise the pushed register intact until the pop, and the pop is a move
+// from it. The word below rsp is one nothing reads, as peephole() says.
+
+// **The address of a frame slot, taken once and used as a base several
+// times.** `lea D(%rbp), %r ; ... k(%r) ...` is the walker's `i++` idiom - it
+// wants the address twice - and fuseLeas takes only a single use.
+
+// Every use is rewritten to `D+k(%rbp)` and the lea goes, so the slot is
+// reached by its own displacement, which is what lets a later pass see the
+// accesses rather than an address taken where none really is.
+bool Optimizer::sinkFrameLeas() {
+    bool changed = false;
+    const std::size_t n = run_.size();
+    std::vector<std::size_t> uses;
+    for (std::size_t i = 0; i + 1 < n; i++) {
+        IrIns &l = run_[i];
+        if (l.dead || l.m != "lea" || l.operands != 2) continue;
+        if (l.a.kind != Op::Mem || l.a.text != "%rbp") continue;
+        int r;
+        if (!isGpr64(l.b, r) || !allocatable(r)) continue;
+        const long long base = l.a.hasDisp ? l.a.disp : 0;
+
+        uses.clear();
+        bool ok = true, dead = false;
+        for (std::size_t j = i + 1; j < n && ok; j++) {
+            if (j - i > kScanLimit) { ok = false; break; }
+            IrIns &x = run_[j];
+            if (x.dead) continue;
+            const IrSem &s = x.sem;
+            if (s.cls == IrSem::Unknown || s.cls == IrSem::Call) { ok = false; break; }
+            if (s.use & bit(r)) {
+                // Only as a memory base, and only where the displacements add.
+                for (int k = 0; k < x.operands && ok; k++) {
+                    const IrOp &o = k == 0 ? x.a : x.b;
+                    int w;
+                    if (!namesReg(o, r, w)) continue;
+                    if (o.kind != Op::Mem) { ok = false; break; }
+                    const long long d = base + (o.hasDisp ? o.disp : 0);
+                    if (d > 0x7fffffffLL || d < -0x80000000LL) ok = false;
+                }
+                if (!ok) break;
+                uses.push_back(j);
+            }
+            if (s.def & bit(r)) { dead = true; break; }
+            if (s.part & bit(r)) { ok = false; break; }
+        }
+        if (!ok || uses.empty()) continue;
+        if (!dead && (liveOut_[n - 1] & bit(r))) continue;
+
+        for (std::size_t j : uses) {
+            IrIns &x = run_[j];
+            for (int k = 0; k < x.operands; k++) {
+                IrOp &o = k == 0 ? x.a : x.b;
+                int w;
+                if (o.kind != Op::Mem || !namesReg(o, r, w)) continue;
+                o.disp = base + (o.hasDisp ? o.disp : 0);
+                o.hasDisp = o.disp != 0;
+                o.text = "%rbp";
+            }
+            refresh(x);
+        }
+        l.dead = true;
+        removed_++;
+        changed = true;
+    }
+    return changed;
+}
+
+bool Optimizer::pairStack() {
+    bool changed = false;
+    const std::size_t n = run_.size();
+    for (std::size_t i = 0; i < n; i++) {
+        IrIns &p = run_[i];
+        if (p.dead || !isStackOp(p, "push")) continue;
+        int x;
+        if (!isGpr64(p.a, x)) continue;
+        bool xChanged = false;
+        unsigned touched = 0;
+        for (std::size_t j = i + 1; j < n && j - i <= kScanLimit; j++) {
+            IrIns &q = run_[j];
+            if (q.dead) continue;
+            const IrSem &s = run_[j].sem;
+            if (s.cls == IrSem::Unknown) break;
+            if (isStackOp(q, "pop")) {
+                int y;
+                if (!isGpr64(q.a, y)) break;
+                if (y == x) {
+                    if (xChanged) break;
+                    p.dead = q.dead = true;
+                    removed_ += 2;
+                } else if ((touched & bit(y)) == 0) {
+                    p.m = "mov"; p.operands = 2; p.b = q.a;
+                    q.dead = true;
+                    removed_++;
+                    refresh(p);
+                } else if (!xChanged) {
+                    q.m = "mov"; q.operands = 2; q.b = q.a; q.a = p.a;
+                    p.dead = true;
+                    removed_++;
+                    refresh(q);
+                } else {
+                    break;
+                }
+                changed = true;
+                break;
+            }
+            if ((s.use | s.def | s.part) & bit(kRsp)) break;
+            touched |= s.use | s.def | s.part;
+            if ((s.def | s.part) & bit(x)) xChanged = true;
+        }
+    }
+    return changed;
+}
+
+// **A register written whole and at once copied elsewhere**, its first home
+// dead after the copy: write it to the second home in the first place.
+//   movq -8(%rbp), %rax ; mov %rax, %rdi   ->   movq -8(%rbp), %rdi
+bool Optimizer::retargetDefs() {
+    bool changed = false;
+    for (std::size_t i = 0; i + 1 < run_.size(); i++) {
+        IrIns &x = run_[i];
+        const IrSem &s = run_[i].sem;
+        if (x.dead || (s.cls != IrSem::Move && s.cls != IrSem::Pop)) continue;
+        if (!allocatable(s.dstReg)) continue;
+
+        IrIns &c = run_[i + 1];
+        if (c.dead || !isMov64(c)) continue;
+        int ra, rb;
+        if (!isGpr64(c.a, ra) || !isGpr64(c.b, rb)) continue;
+        if (ra != s.dstReg || !allocatable(rb) || rb == ra) continue;
+        if (liveOut_[i + 1] & bit(ra)) continue;
+
+        IrOp &dst = s.cls == IrSem::Pop ? x.a : x.b;
+        dst.text = regName(rb, s.dstWidth);
+        refresh(x);
+        c.dead = true;
+        removed_++;
+        changed = true;
+    }
+    return changed;
+}
+
+// Whether x touches register r without naming it - cqo's rax, a shift's rcx.
+static bool implicitly(const IrIns &x, const IrSem &s, int r) {
+    if (((s.use | s.def | s.part) & bit(r)) == 0) return false;
+    int w;
+    for (int k = 0; k < x.operands; k++)
+        if (namesReg(k == 0 ? x.a : x.b, r, w)) return false;
+    return true;
+}
+
+// **A condition made into a number and then tested again.** `a < b` is a
+// compare, a `setl %al` and a widening, because the value is an int the
+// language may keep; where the branch is its only reader, the flags said it.
+bool Optimizer::foldCompareBranch() {
+    struct Cond { const char *set; const char *jump; const char *inverse; };
+    static const Cond kConds[] = {
+        { "sete", "je", "jne" },   { "setne", "jne", "je" },
+        { "setl", "jl", "jge" },   { "setge", "jge", "jl" },
+        { "setle", "jle", "jg" },  { "setg", "jg", "jle" },
+        { "setb", "jb", "jae" },   { "setae", "jae", "jb" },
+        { "setbe", "jbe", "ja" },  { "seta", "ja", "jbe" },
+        { "setp", "jp", "jnp" },   { "setnp", "jnp", "jp" },
+    };
+    bool changed = false;
+    std::vector<std::size_t> live;
+    live.reserve(run_.size());
+    for (std::size_t i = 0; i < run_.size(); i++)
+        if (!run_[i].dead) live.push_back(i);
+
+    for (std::size_t k = 0; k + 3 < live.size(); k++) {
+        IrIns &set = run_[live[k]];
+        IrIns &wide = run_[live[k + 1]];
+        IrIns &test = run_[live[k + 2]];
+        IrIns &jump = run_[live[k + 3]];
+
+        const Cond *cond = nullptr;
+        for (const Cond &c : kConds)
+            if (set.m == c.set) { cond = &c; break; }
+        if (cond == nullptr || set.operands != 1 || set.a.kind != Op::Reg) continue;
+        int byteReg;
+        {
+            int w;
+            byteReg = regLookup(set.a.text, w);
+            if (byteReg < 0 || byteReg >= kGprCount || w != 1) continue;
+        }
+
+        // The widening: the byte just set, into a general register.
+        if (wide.m != "movzbq" && wide.m != "movzbl") continue;
+        if (wide.operands != 2 || wide.a.kind != Op::Reg || wide.b.kind != Op::Reg) continue;
+        int w1, w2;
+        if (regLookup(wide.a.text, w1) != byteReg || w1 != 1) continue;
+        const int wideReg = regLookup(wide.b.text, w2);
+        if (wideReg < 0 || wideReg >= kGprCount) continue;
+
+        // The test against zero, and the branch that reads it.
+        if (test.m != "cmp" || test.operands != 2) continue;
+        const bool zero = test.a.kind == Op::Imm &&
+                          ((test.a.immNumeric && !test.a.immNeg && test.a.uimm == 0) ||
+                           (!test.a.immNumeric && test.a.text == "0"));
+        if (!zero || test.b.kind != Op::Reg) continue;
+        int w3;
+        if (regLookup(test.b.text, w3) != wideReg) continue;
+        if (jump.operands != 1 || jump.a.kind != Op::Lbl) continue;
+        if (jump.m != "je" && jump.m != "jne") continue;
+
+        // Nothing may want the number, or the flags the test would have left.
+        const std::size_t at = live[k + 3];
+        if (liveOut_[at] & (bit(byteReg) | bit(wideReg))) continue;
+        if (flagsLiveOut_[at]) continue;
+
+        jump.m = jump.m == std::string("jne") ? cond->jump : cond->inverse;
+        jump.semValid = false;
+        set.dead = wide.dead = test.dead = true;
+        removed_ += 3;
+        changed = true;
+        k += 3;
+    }
+    return changed;
+}
+
+// **A value saved round a computation that only needed another register.**
+// To compute an address into the scratch register the walker writes `push
+// %rax ; ... into %rax ; mov %rax, %r10 ; pop %rax` - 1,400 times over sixteen files.
+
+// When the middle writes %rax whole before it reads it, reads it nowhere
+// implicitly, and never touches %r10 or the stack, it can be written in %r10
+// from the start, and the push, the copy and the pop all go.
+bool Optimizer::renameThroughPair() {
+    bool changed = false;
+    const std::size_t n = run_.size();
+    for (std::size_t i = 0; i + 2 < n; i++) {
+        IrIns &p = run_[i];
+        if (p.dead || !isStackOp(p, "push")) continue;
+        int x;
+        if (!isGpr64(p.a, x) || !allocatable(x)) continue;
+
+        // The middle: up to the copy out, which the pop of the same register follows.
+        bool defined = false, ok = true;
+        std::size_t j = i + 1;
+        for (; j < n && ok; j++) {
+            if (j - i > kScanLimit) { ok = false; break; }
+            const IrIns &q = run_[j];
+            if (q.dead) continue;
+            const IrSem &s = q.sem;
+            if (isStackOp(q, "pop")) break;
+            if (s.cls == IrSem::Unknown || s.cls == IrSem::Call) { ok = false; break; }
+            if ((s.use | s.def | s.part) & bit(kRsp)) { ok = false; break; }
+            if (implicitly(q, s, x)) { ok = false; break; }
+            if (!defined) {
+                if ((s.use | s.part) & bit(x)) { ok = false; break; }
+                if (s.def & bit(x)) defined = true;
+            }
+        }
+        if (!ok || j >= n || !defined) continue;
+        IrIns &q = run_[j];
+        int y;
+        if (!isGpr64(q.a, y) || y != x) continue;
+
+        // The last of the middle is `mov x, r`, r otherwise untouched in it.
+        std::size_t c = j;
+        while (c > i + 1 && run_[c - 1].dead) c--;
+        c--;
+        if (c <= i) continue;
+        IrIns &copy = run_[c];
+        int ra, r;
+        if (!isMov64(copy) || !isGpr64(copy.a, ra) || !isGpr64(copy.b, r)) continue;
+        if (ra != x || r == x || !allocatable(r)) continue;
+        for (std::size_t k = i + 1; k < c && ok; k++) {
+            if (run_[k].dead) continue;
+            const IrSem &s = run_[k].sem;
+            if ((s.use | s.def | s.part) & bit(r)) ok = false;
+            // Every naming of x must be one a rename can spell in r.
+            int w;
+            for (int o = 0; o < run_[k].operands && ok; o++)
+                if (namesReg(o == 0 ? run_[k].a : run_[k].b, x, w) && (w == 0 || w == 16)) ok = false;
+        }
+        if (!ok) continue;
+
+        for (std::size_t k = i + 1; k < c; k++) {
+            IrIns &m = run_[k];
+            if (m.dead) continue;
+            int w;
+            bool touched = false;
+            for (int o = 0; o < m.operands; o++) {
+                IrOp &op = o == 0 ? m.a : m.b;
+                if (namesReg(op, x, w)) { op.text = regName(r, w); touched = true; }
+            }
+            if (touched) refresh(m);
+        }
+        p.dead = copy.dead = q.dead = true;
+        removed_ += 3;
+        changed = true;
+        i = j;
+    }
+    return changed;
+}
+
+
+// **A register written and never read.** A move or lea into a general register
+// that nothing reads before it is written again, with no store and no flags
+// anyone wants, does nothing: the walker's post-increment keeps its old value so.
+bool Optimizer::dropDeadDefs() {
+    bool changed = false;
+    for (std::size_t i = 0; i < run_.size(); i++) {
+        IrIns &x = run_[i];
+        const IrSem &s = x.sem;
+        if (x.dead || s.cls != IrSem::Move || s.memWrite) continue;
+        if (!allocatable(s.dstReg) || x.b.kind != Op::Reg) continue;
+        if (s.flagsDef && flagsLiveOut_[i]) continue;
+        if (liveOut_[i] & bit(s.dstReg)) continue;
+        x.dead = true;
+        removed_++;
+        changed = true;
+    }
+    return changed;
+}
+
+// **A copy whose source is read on, until the source is written again.** After
+// `mov a, b` the two hold one value, so those reads may name b instead - all
+// of them, so that a is dead at the copy and retargetDefs can write b at once.
+
+// Neither may be written between, a's own redefinition ending the range; and
+// a read that only b's spelling could not take - a high byte, an implicit
+// operand - stops it, as does a range that leaves the run with a still live.
+bool Optimizer::moveSourceReads() {
+    bool changed = false;
+    const std::size_t n = run_.size();
+    std::vector<std::size_t> reads;
+    for (std::size_t i = 0; i + 1 < n; i++) {
+        IrIns &c = run_[i];
+        if (c.dead || !isMov64(c)) continue;
+        int a, b;
+        if (!isGpr64(c.a, a) || !isGpr64(c.b, b) || a == b) continue;
+        if (!allocatable(a) || !allocatable(b)) continue;
+        if (!(liveOut_[i] & bit(a))) continue;      // nothing to move
+
+        reads.clear();
+        bool ok = true, closed = false;
+        for (std::size_t j = i + 1; j < n && ok; j++) {
+            if (j - i > kScanLimit) { ok = false; break; }
+            const IrIns &x = run_[j];
+            if (x.dead) continue;
+            const IrSem &s = x.sem;
+            if (s.cls == IrSem::Unknown || s.cls == IrSem::Call) { ok = false; break; }
+            if ((s.def | s.part) & bit(b)) { ok = false; break; }
+            if (s.use & bit(b)) { ok = false; break; }
+            if (s.use & bit(a)) {
+                if ((s.fixed & bit(a)) || (s.part & bit(a))) { ok = false; break; }
+                int w;
+                for (int k = 0; k < x.operands && ok; k++) {
+                    const IrOp &o = k == 0 ? x.a : x.b;
+                    if (!namesReg(o, a, w)) continue;
+                    if (w == 0 || w == 16) ok = false;
+                    if (o.kind != Op::Reg && w != 8) ok = false;
+                }
+                if (!ok) break;
+                reads.push_back(j);
+            }
+            if (s.def & bit(a)) { closed = true; break; }
+        }
+        if (!ok || reads.empty()) continue;
+        if (!closed && (liveOut_[n - 1] & bit(a))) continue;
+
+        for (std::size_t j : reads) {
+            IrIns &x = run_[j];
+            int w;
+            for (int k = 0; k < x.operands; k++) {
+                IrOp &o = k == 0 ? x.a : x.b;
+                if (namesReg(o, a, w) && readsAt(x, x.sem, k)) o.text = regName(b, w);
+            }
+            refresh(x);
+        }
+        changed = true;
+    }
+    return changed;
+}
+
+// **A copy whose destination dies before the run ends, or is overwritten in
+// it**: every read of the destination between reads the source instead,
+// and the copy goes.
+
+// The source must be intact at each of those reads, and each must be an
+// operand a rename can reach - not an implicit one, not the shift count,
+// not the destination of a read-modify-write.
+bool Optimizer::propagateCopies() {
+    bool changed = false;
+    const std::size_t n = run_.size();
+    std::vector<std::size_t> uses;
+    for (std::size_t i = 0; i < n; i++) {
+        IrIns &c = run_[i];
+        if (c.dead || !isMov64(c)) continue;
+        int ra, rb;
+        if (!isGpr64(c.a, ra) || !isGpr64(c.b, rb)) continue;
+        if (!allocatable(ra) || !allocatable(rb) || ra == rb) continue;
+
+        uses.clear();
+        bool ok = true, dead = false, sourceChanged = false;
+        int penalty = 0;
+        for (std::size_t j = i + 1; j < n && ok; j++) {
+            if (j - i > kScanLimit) { ok = false; break; }
+            const IrIns &x = run_[j];
+            if (x.dead) continue;
+            const IrSem &s = run_[j].sem;
+            if (s.cls == IrSem::Unknown) { ok = false; break; }
+            if (s.use & bit(rb)) {
+                if (sourceChanged || (s.fixed & bit(rb))) { ok = false; break; }
+                int w;
+                for (int k = 0; k < x.operands; k++) {
+                    const IrOp &o = k == 0 ? x.a : x.b;
+                    if (!namesReg(o, rb, w) || !readsAt(x, s, k)) continue;
+                    if (w == 0 || w == 16) { ok = false; break; }
+                    if (o.kind != Op::Reg && w != 8) { ok = false; break; }
+                    if (w != 8 && needsRex(ra, w) && !needsRex(rb, w)) penalty++;
+                }
+                if (!ok) break;
+                uses.push_back(j);
+            }
+            if (s.def & bit(rb)) { dead = true; break; }
+            if (s.part & bit(rb)) { ok = false; break; }
+            if ((s.def | s.part) & bit(ra)) sourceChanged = true;
+        }
+        if (!ok) continue;
+        if (!dead) dead = (liveOut_[n - 1] & bit(rb)) == 0;
+        if (!dead) continue;
+        // Each rewritten name may grow by a REX byte; the copy is three.
+        if (penalty >= 3) continue;
+
+        for (std::size_t j : uses) {
+            IrIns &x = run_[j];
+            int w;
+            for (int k = 0; k < x.operands; k++) {
+                IrOp &o = k == 0 ? x.a : x.b;
+                if (namesReg(o, rb, w) && readsAt(x, run_[j].sem, k)) o.text = regName(ra, w);
+            }
+            refresh(x);
+        }
+        c.dead = true;
+        removed_++;
+        changed = true;
+    }
+    return changed;
+}
+
+// **The same instruction in fewer bytes.** None of these changes what a
+// register holds; the one that touches the flags is taken only where the
+// flags are dead.
+void Optimizer::shorten() {
+    const std::size_t n = run_.size();
+    for (std::size_t i = 0; i < n; i++) {
+        IrIns &x = run_[i];
+        if (x.dead) continue;
+        x.semValid = false;
+
+        // mov $imm, %r64 with imm in [0, 2^32): movl $imm, %r32 zero-extends
+        // and is two bytes shorter, five where the assembler chose movabs;
+        // and zero, where nothing reads the flags, is xor %r32, %r32.
+        if ((x.m == "mov" || x.m == "movq" || x.m == "movabs") && x.operands == 2 &&
+            x.a.kind == Op::Imm && x.a.immNumeric) {
+            int r;
+            if (isGpr64(x.b, r)) {
+                if (!x.a.immNeg && x.a.uimm < (1ull << 32)) {
+                    if (x.a.uimm == 0 && !flagsLiveOut_[i]) {
+                        x.m = "xor";
+                        x.a = regOp(regName(r, 4));
+                        x.b = x.a;
+                    } else {
+                        x.m = "movl";
+                        x.b.text = regName(r, 4);
+                    }
+                } else if (x.m == "movabs" && x.a.immNeg && x.a.uimm <= (1ull << 31)) {
+                    x.m = "mov";
+                }
+                continue;
+            }
+        }
+        // lea D(b), %r ; add $n, %r is lea D+n(b), %r where nothing reads the
+        // flags the add would have set: four bytes for eight.
+        if (x.m == "lea" && x.operands == 2 && x.a.kind == Op::Mem && i + 1 < n) {
+            IrIns &y = run_[i + 1];
+            int r, r2;
+            if (!y.dead && y.m == "add" && y.operands == 2 && y.a.kind == Op::Imm &&
+                y.a.immNumeric && isGpr64(x.b, r) && isGpr64(y.b, r2) && r == r2 &&
+                !flagsLiveOut_[i + 1] && x.a.text != x.b.text) {
+                long long d = x.a.hasDisp ? x.a.disp : 0;
+                long long add = y.a.immNeg ? -static_cast<long long>(y.a.uimm)
+                                           : static_cast<long long>(y.a.uimm);
+                if (y.a.uimm < (1ull << 31) && d + add < (1ll << 31) && d + add >= -(1ll << 31)) {
+                    x.a.disp = d + add;
+                    x.a.hasDisp = x.a.disp != 0;
+                    y.dead = true;
+                    removed_++;
+                }
+            }
+            continue;
+        }
+        if (x.m == "movl" && x.operands == 2 && isZeroImm(x.a) && x.b.kind == Op::Reg &&
+            !flagsLiveOut_[i]) {
+            int w;
+            int r = regLookup(x.b.text, w);
+            if (r >= 0 && r < kGprCount && w == 4) {
+                x.m = "xor";
+                x.a = x.b;
+            }
+            continue;
+        }
+
+        // cmp $0, %r sets every flag as test %r, %r does, one byte shorter.
+        if ((x.m == "cmp" || x.m == "cmpq" || x.m == "cmpl" || x.m == "cmpw" || x.m == "cmpb") &&
+            x.operands == 2 && isZeroImm(x.a) && x.b.kind == Op::Reg) {
+            int w;
+            int r = regLookup(x.b.text, w);
+            if (r >= 0 && r < kGprCount && w != 0) {
+                x.m = "test" + x.m.substr(3);
+                x.a = x.b;
+            }
+            continue;
+        }
+
+        // mov %rbp, %rsp ; pop %rbp is leave, one byte for four.
+        if (x.m == "mov" && x.operands == 2 && isReg(x.a, "%rbp") && isReg(x.b, "%rsp") &&
+            i + 1 < n && run_[i + 1].m == "pop" && run_[i + 1].operands == 1 &&
+            isReg(run_[i + 1].a, "%rbp")) {
+            x.m = "leave";
+            x.operands = 0;
+            run_[i + 1].dead = true;
+            removed_++;
+            continue;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Everything else ends the function's text and goes through in order.
+
+void Optimizer::functionBegin(const std::string &name, bool exported) {
+    interrupt(); under_->functionBegin(name, exported);
+}
+void Optimizer::prologue(int frameSize) { interrupt(); under_->prologue(frameSize); }
+void Optimizer::functionEnd(const std::string &name) { interrupt(); under_->functionEnd(name); }
+void Optimizer::fileEntry(int n, const std::string &name) { interrupt(); under_->fileEntry(n, name); }
+void Optimizer::location(int file, int line, int column) {
+    event([this, file, line, column]() { under_->location(file, line, column); });
+}
+void Optimizer::predefine(const std::vector<std::string> &names) { interrupt(); under_->predefine(names); }
+void Optimizer::preamble(std::ostream &o) { interrupt(); under_->preamble(o); }
+void Optimizer::postamble(std::ostream &o) { interrupt(); under_->postamble(o); }
+void Optimizer::globl(const std::string &name) { interrupt(); under_->globl(name); }
+void Optimizer::textSection() { interrupt(); under_->textSection(); }
+void Optimizer::rodataSection() { interrupt(); under_->rodataSection(); }
+void Optimizer::dataSection() { interrupt(); under_->dataSection(); }
+void Optimizer::bssSection() { interrupt(); under_->bssSection(); }
+void Optimizer::objectType(const std::string &name) { interrupt(); under_->objectType(name); }
+void Optimizer::objectSize(const std::string &name, int size) { interrupt(); under_->objectSize(name, size); }
+void Optimizer::align(int n) { interrupt(); under_->align(n); }
+void Optimizer::zero(int n) { interrupt(); under_->zero(n); }
+void Optimizer::dataInt(int size, long long v) { interrupt(); under_->dataInt(size, v); }
+void Optimizer::dataSym(const std::string &sym, long long off) { interrupt(); under_->dataSym(sym, off); }
+void Optimizer::dataBytes(const std::string &bytes) { interrupt(); under_->dataBytes(bytes); }

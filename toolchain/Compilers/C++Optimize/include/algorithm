@@ -1,0 +1,223 @@
+// <algorithm> - the few that are reached for.
+//
+// **Everything here is a template over iterators, and an iterator in this
+// library is a pointer.** `vector<T>::iterator` is `T *` and a map's is a
+// `pair<K, V> *`, so these work on arrays and on this library's containers
+// alike, which is the property that makes them worth having as templates rather
+// than as members.
+//
+// What is not here: `stable_sort`, `find_if`, and the rest of the header. They are
+// absent because nothing calls them, and adding them untested would be adding
+// the appearance of a library rather than a library.
+#ifndef _CXX1_ALGORITHM
+#define _CXX1_ALGORITHM
+
+#include <cstddef>
+
+namespace std {
+
+template <class In, class Out>
+Out copy(In from, In to, Out into) {
+    while (from != to) {
+        *into = *from;
+        ++into;
+        ++from;
+    }
+    return into;
+}
+
+// **Written with an `if` and not a conditional**, and the reason is a compiler
+// limit worth recording rather than working around silently: `return b < a ? b
+// : a;` over two `const T &` is an lvalue and should be returnable as a
+// reference, and this compiler reads the conditional as a temporary and refuses
+// it. The two forms say the same thing; this one compiles.
+template <class T>
+const T &min(const T &a, const T &b) {
+    if (b < a) return b;
+    return a;
+}
+
+template <class T>
+const T &max(const T &a, const T &b) {
+    if (a < b) return b;
+    return a;
+}
+
+template <class In, class T>
+In find(In from, In to, const T &want) {
+    while (from != to && !(*from == want)) ++from;
+    return from;
+}
+
+template <class In, class T>
+std::size_t count(In from, In to, const T &want) {
+    std::size_t seen = 0;
+    while (from != to) {
+        if (*from == want) seen++;
+        ++from;
+    }
+    return seen;
+}
+
+
+// **sort - [alg.sort], an introsort** (L02, 2026-10-13): quicksort on a median-of-three pivot
+// down to runs of 16, heapsort for a range that has recursed 2 log2(n) deep without getting
+// there, then one insertion pass over the nearly sorted whole - O(n log n) in the worst case, as
+// [alg.sort] asks. It needs random-access iterators, which every container here has (pointers).
+// Not stable; `stable_sort` is not here. The helpers are plain templates called with every
+// argument deduced and qualified with std::, which is what this compiler's templates need.
+template <class It>
+void __sort_swap(It a, It b) {
+    auto held = *a;
+    *a = *b;
+    *b = held;
+}
+
+template <class It, class Less>
+void __sort_sift(It base, long at, long n, Less less) {
+    for (;;) {
+        long child = 2 * at + 1;
+        if (child >= n) return;
+        if (child + 1 < n && less(base[child], base[child + 1])) child++;
+        if (!less(base[at], base[child])) return;
+        std::__sort_swap(base + at, base + child);
+        at = child;
+    }
+}
+
+template <class It, class Less>
+void __sort_heap(It from, It to, Less less) {
+    const long n = (long)(to - from);
+    for (long at = n / 2 - 1; at >= 0; at--) std::__sort_sift(from, at, n, less);
+    for (long end = n - 1; end > 0; end--) {
+        std::__sort_swap(from, from + end);
+        std::__sort_sift(from, 0, end, less);
+    }
+}
+
+// The median of the first, middle and last goes to the front and is the pivot (Hoare's scheme
+// with the pivot at the low end, so both parts are non-empty and the recursion always shrinks).
+template <class It, class Less>
+void __sort_intro(It from, It to, long depth, Less less) {
+    while ((long)(to - from) > 16) {
+        if (depth == 0) { std::__sort_heap(from, to, less); return; }
+        depth--;
+        It mid = from + (long)(to - from) / 2;
+        It last = to - 1;
+        if (less(*mid, *from)) std::__sort_swap(mid, from);
+        if (less(*last, *mid)) {
+            std::__sort_swap(last, mid);
+            if (less(*mid, *from)) std::__sort_swap(mid, from);
+        }
+        std::__sort_swap(from, mid);
+        auto pivot = *from;
+        It i = from - 1;
+        It j = to;
+        for (;;) {
+            do { ++i; } while (less(*i, pivot));
+            do { --j; } while (less(pivot, *j));
+            if (i >= j) break;
+            std::__sort_swap(i, j);
+        }
+        It cut = j + 1;
+        if (cut - from < to - cut) { std::__sort_intro(from, cut, depth, less); from = cut; }
+        else { std::__sort_intro(cut, to, depth, less); to = cut; }
+    }
+}
+
+template <class It, class Less>
+void sort(It from, It to, Less less) {
+    long n = (long)(to - from);
+    if (n < 2) return;
+    long depth = 0;
+    for (long k = n; k > 1; k >>= 1) depth += 2;
+    std::__sort_intro(from, to, depth, less);
+    for (It i = from + 1; i != to; ++i)
+        for (It j = i; j != from; ) {
+            It prev = j - 1;
+            if (!less(*j, *prev)) break;
+            std::__sort_swap(prev, j);
+            j = prev;
+        }
+}
+
+// The two-argument form is the same with `<`; T comes from the element, deduced through `&*from`.
+template <class T>
+struct __sort_less {
+    bool operator()(const T &a, const T &b) const { return a < b; }
+};
+
+template <class It, class T>
+void __sort_by_less(It from, It to, T *) {
+    std::sort(from, to, std::__sort_less<T>());
+}
+
+template <class It>
+void sort(It from, It to) {
+    if (from != to) std::__sort_by_less(from, to, &*from);
+}
+
+}  // namespace std
+
+#endif
+
+// **reverse - [alg.reverse].** Swaps from both ends until they meet; the
+// element type is deduced from a pointer to one, this header having no
+// iterator_traits.
+template <class It, class T>
+void reverseSwap(It a, It b, T *) {
+    T held(*a);
+    *a = *b;
+    *b = held;
+}
+
+template <class It>
+void reverse(It from, It to) {
+    while (from != to) {
+        --to;
+        if (from == to) break;
+        reverseSwap(from, to, &*from);
+        ++from;
+    }
+}
+
+// **max_element and min_element - [alg.min.max].** The first iterator whose
+// element no other beats, which is what makes them stable: `<` is asked in the
+// order the standard fixes, so an earlier equal element wins for max_element
+// and for min_element alike. `to` is returned for an empty range.
+template <class It>
+It max_element(It from, It to) {
+    if (from == to) return to;
+    It best = from;
+    for (It i = from; i != to; ++i)
+        if (*best < *i) best = i;
+    return best;
+}
+
+// The same, ordered by a comparison the caller writes.
+template <class It, class Less>
+It max_element(It from, It to, Less less) {
+    if (from == to) return to;
+    It best = from;
+    for (It i = from; i != to; ++i)
+        if (less(*best, *i)) best = i;
+    return best;
+}
+
+template <class It>
+It min_element(It from, It to) {
+    if (from == to) return to;
+    It best = from;
+    for (It i = from; i != to; ++i)
+        if (*i < *best) best = i;
+    return best;
+}
+
+template <class It, class Less>
+It min_element(It from, It to, Less less) {
+    if (from == to) return to;
+    It best = from;
+    for (It i = from; i != to; ++i)
+        if (less(*i, *best)) best = i;
+    return best;
+}

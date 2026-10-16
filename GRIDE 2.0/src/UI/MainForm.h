@@ -14,6 +14,9 @@
 //  +-------------------------------------------------------------------+
 // ============================================================================
 #include "OptionsDialog.h"
+#include "../Build/ProgramRunner.h"
+#include "DebugPanes.h"
+#include "HelpFiles.h"
 
 using namespace System::Collections::Concurrent;
 using System::Threading::CancellationTokenSource;
@@ -32,7 +35,7 @@ namespace Gride
         property String^ FilePath;
     };
 
-    public enum class JobKind { Build, Rebuild, Clean, Run, BuildAndRun, Convert, CompileFile };
+    public enum class JobKind { Build, Rebuild, Clean, Run, BuildAndRun, Convert, CompileFile, BuildAndDebug };
 
     public ref class BuildJob
     {
@@ -47,6 +50,7 @@ namespace Gride
         property BuildResult^ Result;
         property int ExitCode;
         property String^ SingleFile;                      // CompileFile
+        property RunHow How;                              // BuildAndRun: what runs once the build succeeded
         property System::Threading::CancellationToken Token;
     };
 
@@ -61,7 +65,11 @@ namespace Gride
             settingsWarning = warning;
             outQueue = gcnew ConcurrentQueue<String^>();
             msgQueue = gcnew ConcurrentQueue<BuildMessage^>();
+            breakpoints = gcnew Dictionary<String^, SortedSet<int>^>(StringComparer::OrdinalIgnoreCase);
+            debugger = nullptr;
+            stoppedIn = nullptr;
             parser = gcnew ErrorParser();
+            runner = gcnew ProgramRunner(gcnew Action<String^>(this, &MainForm::EnqueueOutput), gcnew Action<int, bool>(this, &MainForm::OnProgramExited));
             untitledCounter = 0;
 
             SuspendLayout();
@@ -109,6 +117,7 @@ namespace Gride
             Form::OnShown(e);
             RestoreSplitters();
             if (settingsWarning != nullptr) Ui::Error(this, settingsWarning);
+            ReportToolchainProblems();
 
             bool opened = false;
             if (startupArgs != nullptr)
@@ -151,6 +160,9 @@ namespace Gride
         System::Windows::Forms::Timer^ flushTimer;
         ErrorParser^ parser;
         FindReplaceDialog^ findDialog;
+        ProgramRunner^ runner;              // the program running in the Output pane (RIDE's window)
+        CancellationTokenSource^ verifyCts; // a Verify running on its own thread
+        bool verifying;
 
         // ------------------------------------------------------------ controls
         MenuStrip^ menu;
@@ -169,6 +181,7 @@ namespace Gride
         TabPage^ pageOutput;
         TabPage^ pageErrors;
         TextBox^ txtOutput;
+        TextBox^ txtInput;                  // the running program's input line, under the Output pane
         ListView^ lvErrors;
 
         ToolStripStatusLabel^ lblStatus;
@@ -192,6 +205,39 @@ namespace Gride
         ToolStripMenuItem^ miAddExisting;
         ToolStripMenuItem^ miRemove;
         ToolStripMenuItem^ miProjProps;
+        ToolStripMenuItem^ miCcsMapping;
+        ToolStripMenuItem^ miCompilerOptions;
+        // ---- the debugger (R10): the session, the breakpoints shared with the editors and the engine, the panes
+        DebugEngine^ debugger;
+        Dictionary<String^, SortedSet<int>^>^ breakpoints;
+        CodeEditor^ stoppedIn;                 // the editor showing the stop's arrow
+        LocalsPane^ localsPane;
+        WatchPane^ watchPane;
+        CallStackPane^ callStackPane;
+        RegistersPane^ registersPane;
+        MemoryPane^ memoryPane;
+        BreakpointsPane^ breakpointsPane;
+        TabPage^ pageLocals;
+        TabPage^ pageWatch;
+        TabPage^ pageCallStack;
+        TabPage^ pageRegisters;
+        TabPage^ pageMemory;
+        TabPage^ pageBreakpoints;
+        ToolStripMenuItem^ miDebugStart;
+        ToolStripMenuItem^ miToggleBreakpoint;
+        ToolStripMenuItem^ miStepOver;
+        ToolStripMenuItem^ miStepInto;
+        ToolStripMenuItem^ miStepOut;
+        ToolStripMenuItem^ miRunToCursor;
+        ToolStripMenuItem^ miUpStack;
+        ToolStripMenuItem^ miDownStack;
+        ToolStripMenuItem^ miWatchExpression;
+        ToolStripMenuItem^ miSetVariable;
+        ToolStripMenuItem^ miStopDebugging;
+        ToolStripMenuItem^ miDeleteBreakpoints;
+        // which C++ project of a solution to open (the .sln, its projects' names) -> the name, or nullptr; nullptr: the dialog
+        Func<String^, List<String^>^, String^>^ projectChooser;
+        ToolStripMenuItem^ miImportCcs;
         ToolStripMenuItem^ miBuild;
         ToolStripMenuItem^ miCompileFile;
         ToolStripMenuItem^ miEdit;
@@ -202,6 +248,8 @@ namespace Gride
         ToolStripMenuItem^ miBuildStop;
         ToolStripMenuItem^ miBuildRun;
         ToolStripMenuItem^ miRun;
+        ToolStripMenuItem^ miEmulate;
+        ToolStripMenuItem^ miVerify;
         ToolStripMenuItem^ miStop;
         ToolStripMenuItem^ miConvC2S;
         ToolStripMenuItem^ miConvS2C;
@@ -319,12 +367,49 @@ namespace Gride
 
             bottomTabs = gcnew TabControl();
             bottomTabs->Dock = DockStyle::Fill;
+            // the running program's input line (RIDE's window): Enter hands the line over, Ctrl+Z ends the input
+            txtInput = gcnew TextBox();
+            txtInput->Dock = DockStyle::Fill;
+            txtInput->Font = txtOutput->Font;
+            txtInput->Enabled = false;
+            txtInput->KeyDown += gcnew KeyEventHandler(this, &MainForm::OnInputKeyDown);
+            Label^ inputLabel = gcnew Label();
+            inputLabel->Text = "Program input:";
+            inputLabel->AutoSize = false;
+            inputLabel->Width = 100;
+            inputLabel->Dock = DockStyle::Left;
+            inputLabel->TextAlign = ContentAlignment::MiddleLeft;
+            Panel^ inputPanel = gcnew Panel();
+            inputPanel->Height = txtInput->PreferredHeight;
+            inputPanel->Dock = DockStyle::Bottom;
+            inputPanel->Controls->Add(txtInput);
+            inputPanel->Controls->Add(inputLabel);
             pageOutput = gcnew TabPage("Output");
             pageOutput->Controls->Add(txtOutput);
+            pageOutput->Controls->Add(inputPanel);
             pageErrors = gcnew TabPage("Error List");
             pageErrors->Controls->Add(lvErrors);
             bottomTabs->TabPages->Add(pageOutput);
             bottomTabs->TabPages->Add(pageErrors);
+            // the debugger's panes (R10: RIDE's DebugView in GRIDEd's panes)
+            localsPane = gcnew LocalsPane();
+            localsPane->KeysLine = KeysLine();
+            localsPane->SetRequested += gcnew VariableSetHandler(this, &MainForm::OnVariableSet);
+            watchPane = gcnew WatchPane();
+            callStackPane = gcnew CallStackPane();
+            callStackPane->FrameChosen += gcnew IndexChosenHandler(this, &MainForm::LookAtFrame);
+            registersPane = gcnew RegistersPane();
+            memoryPane = gcnew MemoryPane();
+            breakpointsPane = gcnew BreakpointsPane();
+            breakpointsPane->Navigate += gcnew NavigateHandler(this, &MainForm::OnBreakpointNavigate);
+            breakpointsPane->RemoveRequested += gcnew NavigateHandler(this, &MainForm::OnBreakpointRemove);
+            pageLocals = AddPanePage("Locals", localsPane);
+            pageWatch = AddPanePage("Watch", watchPane);
+            pageCallStack = AddPanePage("Call Stack", callStackPane);
+            pageRegisters = AddPanePage("Registers", registersPane);
+            pageMemory = AddPanePage("Memory", memoryPane);
+            pageBreakpoints = AddPanePage("Breakpoints", breakpointsPane);
+            watchPane->UpdateFrom(nullptr);
 
             // ---- splitters
             splitRight = gcnew SplitContainer();
@@ -405,7 +490,7 @@ namespace Gride
             AddSep(file);
             AddItem(file, "Open P&roject...", GRIDE_EH(OnOpenProject), Keys::Control | Keys::Shift | Keys::O, nullptr);
             AddItem(file, "&Open File...", GRIDE_EH(OnOpenFile), Keys::Control | Keys::O, nullptr);
-            AddItem(file, "&Import CCS 7.4 Project (read-only)...", GRIDE_EH(OnImportCcs), Keys::None, nullptr);
+            miImportCcs = AddItem(file, "&Import CCS Project (7.4 / 5.5, read-only)...", GRIDE_EH(OnImportCcs), Keys::None, nullptr);
             AddSep(file);
             miCloseFile = AddItem(file, "&Close File", GRIDE_EH(OnCloseFile), Keys::Control | Keys::F4, nullptr);
             miCloseProject = AddItem(file, "Close Projec&t", GRIDE_EH(OnCloseProject), Keys::None, nullptr);
@@ -458,6 +543,8 @@ namespace Gride
             miRemove = AddItem(proj, "&Remove from Project", GRIDE_EH(OnRemoveFile), Keys::None, nullptr);
             AddSep(proj);
             miProjProps = AddItem(proj, "&Properties...", GRIDE_EH(OnProjectProperties), Keys::Alt | Keys::F7, nullptr);
+            miCompilerOptions = AddItem(proj, "&Compiler Options...", GRIDE_EH(OnCompilerOptions), Keys::None, nullptr);
+            miCcsMapping = AddItem(proj, "CCS / VS &Mapping...", GRIDE_EH(OnCcsMapping), Keys::None, nullptr);
 
             // ---- Build
             miBuild = AddItem(build, "&Build Project", GRIDE_EH(OnBuild), Keys::Control | Keys::Shift | Keys::B, nullptr);
@@ -467,9 +554,29 @@ namespace Gride
             AddSep(build);
             miBuildStop = AddItem(build, "Cancel Build", GRIDE_EH(OnStop), Keys::Control | Keys::Cancel, "Ctrl+Break");
 
-            // ---- Debug (run on target: native console, VM6747, or configured runner)
+            // ---- Debug: the program runs in the Output pane (RIDE's window); on the C6747 the simulator,
+            // or the emulator on the assembly; Verify runs both and compares them
+            // the debugger (R10), on RIDE's keys: F8 starts and carries on, F7 steps over, F6 steps into, F9 sets a
+            // breakpoint, Ctrl+Up / Ctrl+Down walk the stack
+            miDebugStart = AddItem(debug, "Start / &Continue Debugging", GRIDE_EH(OnDebugStart), Keys::F8, nullptr);
+            miToggleBreakpoint = AddItem(debug, "Toggle &Breakpoint", GRIDE_EH(OnToggleBreakpoint), Keys::F9, nullptr);
+            miStepOver = AddItem(debug, "Step &Over", GRIDE_EH(OnStepOver), Keys::F7, nullptr);
+            miStepInto = AddItem(debug, "Step &Into", GRIDE_EH(OnStepInto), Keys::F6, nullptr);
+            miStepOut = AddItem(debug, "Step Ou&t", GRIDE_EH(OnStepOut), Keys::None, nullptr);
+            miRunToCursor = AddItem(debug, "Run to &Cursor", GRIDE_EH(OnRunToCursor), Keys::None, nullptr);
+            miUpStack = AddItem(debug, "&Up the Stack", GRIDE_EH(OnUpStack), Keys::Control | Keys::Up, nullptr);
+            miDownStack = AddItem(debug, "&Down the Stack", GRIDE_EH(OnDownStack), Keys::Control | Keys::Down, nullptr);
+            miWatchExpression = AddItem(debug, "&Watch Expression...", GRIDE_EH(OnWatchExpression), Keys::None, nullptr);
+            miSetVariable = AddItem(debug, "Set &Variable...", GRIDE_EH(OnSetVariable), Keys::None, nullptr);
+            miStopDebugging = AddItem(debug, "Stop Debu&gging", GRIDE_EH(OnStopDebugging), Keys::None, nullptr);
+            miDeleteBreakpoints = AddItem(debug, "Delete All Breakpoi&nts", GRIDE_EH(OnDeleteBreakpoints), Keys::None, nullptr);
+            AddSep(debug);
             miBuildRun = AddItem(debug, "Build and &Run", GRIDE_EH(OnBuildAndRun), Keys::F5, nullptr);
             miRun = AddItem(debug, "Run &Without Building", GRIDE_EH(OnRun), Keys::Control | Keys::F5, nullptr);
+            String^ emulatorName = ProgramLauncher::EmulatorNameOf(nullptr);
+            TargetEntry^ emulated = ProgramLauncher::EmulatedEntry();
+            miEmulate = AddItem(debug, String::Concat("&Emulate on ", emulatorName), GRIDE_EH(OnEmulate), Keys::None, nullptr);
+            miVerify = AddItem(debug, String::Format("&Verify ({0} against {1})", emulatorName, ProgramLauncher::ToolNameOf(emulated, "simulator")), GRIDE_EH(OnVerify), Keys::None, nullptr);
             miStop = AddItem(debug, "&Stop", GRIDE_EH(OnStop), Keys::Shift | Keys::F5, nullptr);
 
             // ---- Tools
@@ -478,8 +585,20 @@ namespace Gride
             AddSep(tools);
             AddItem(tools, "&Options...", GRIDE_EH(OnOptions), Keys::None, nullptr);
             AddItem(tools, "&Toolchain Settings...", GRIDE_EH(OnToolchainOptions), Keys::None, nullptr);
+            AddItem(tools, "Check Tool&chain", GRIDE_EH(OnCheckToolchain), Keys::None, nullptr);
 
-            // ---- Help
+            // ---- Help (R13: GRIDEd's items - this page, RIDE's manual at a chapter, the Shalimar language)
+            ToolStripMenuItem^ languageRef = gcnew ToolStripMenuItem(HelpFiles::LanguageMenu);
+            ToolStripMenuItem^ toolchainRef = gcnew ToolStripMenuItem(HelpFiles::ToolchainMenu);
+            for each (HelpItem^ h in HelpFiles::Items())
+            {
+                ToolStripMenuItem^ under = h->Menu == HelpFiles::LanguageMenu ? languageRef : h->Menu == HelpFiles::ToolchainMenu ? toolchainRef : help;
+                ToolStripMenuItem^ mi = AddItem(under, h->Text, GRIDE_EH(OnHelpPage), h->File == HelpFiles::ViewHelpFile ? Keys::F1 : Keys::None, nullptr);
+                mi->Tag = h->File;
+            }
+            help->DropDownItems->Add(languageRef);
+            help->DropDownItems->Add(toolchainRef);
+            AddSep(help);
             AddItem(help, "&Placeholder Reference", GRIDE_EH(OnPlaceholderHelp), Keys::None, nullptr);
             AddItem(help, "&Keyboard Shortcuts", GRIDE_EH(OnShortcutHelp), Keys::None, nullptr);
             AddSep(help);
@@ -592,7 +711,7 @@ namespace Gride
             CodeEditor^ ed = ActiveEditor();
             bool hasProject = project != nullptr;
             bool writable = hasProject && !project->IsReadOnly;
-            bool canBuild = writable && !busy;
+            bool canBuild = hasProject && (writable || project->IsImported) && !busy;     // a CCS or Visual Studio project builds, read-only
 
             miCloseFile->Enabled = ed != nullptr;
             miCloseProject->Enabled = hasProject && !busy;
@@ -613,14 +732,39 @@ namespace Gride
                                      project->ContainsFile(ed->FilePath);
             miRebuild->Enabled = canBuild;
             miClean->Enabled = canBuild;
-            miBuildRun->Enabled = canBuild;
-            miRun->Enabled = canBuild;
-            miStop->Enabled = busy;
-            miBuildStop->Enabled = busy;
+            // one program at a time; Stop ends a build or the running program (RIDE's Stop)
+            bool programBusy = ProgramBusy();
+            bool canRun = canBuild && !programBusy;
+            bool emulatedTarget = hasProject && TargetInfo::Get(project->TargetValue)->Emulated;
+            miBuildRun->Enabled = canRun;
+            miRun->Enabled = canRun;
+            miEmulate->Enabled = canRun && emulatedTarget;
+            miVerify->Enabled = canRun && emulatedTarget;
+            miStop->Enabled = busy || programBusy;
+            miBuildStop->Enabled = busy || programBusy;
             tbBuild->Enabled = canBuild;
-            tbRun->Enabled = canBuild;
-            tbStop->Enabled = busy;
-            cboConfig->Enabled = writable && !busy;
+            tbRun->Enabled = canRun;
+            tbStop->Enabled = busy || programBusy;
+            cboConfig->Enabled = hasProject && (writable || project->IsImported) && !busy;
+            miCcsMapping->Enabled = hasProject && project->IsImported;
+            // the debugger's commands by the session's state (a disabled item leaves its key to the editor)
+            bool debugging = debugger != nullptr && debugger->IsActive;
+            bool stopped = debugging && debugger->State == DebugState::Break;
+            miDebugStart->Enabled = stopped || (canRun && !debugging);
+            miDebugStart->Text = stopped ? "&Continue" : "Start / &Continue Debugging";
+            miToggleBreakpoint->Enabled = ed != nullptr && ed->FilePath != nullptr;
+            miStepOver->Enabled = stopped;
+            miStepInto->Enabled = stopped;
+            miStepOut->Enabled = stopped;
+            miRunToCursor->Enabled = stopped && ed != nullptr && ed->FilePath != nullptr;
+            miUpStack->Enabled = stopped;
+            miDownStack->Enabled = stopped && debugger->CurrentFrame > 0;
+            miWatchExpression->Enabled = true;
+            miSetVariable->Enabled = stopped;
+            miStopDebugging->Enabled = debugging;
+            miDeleteBreakpoints->Enabled = breakpoints->Count > 0;
+            miCompilerOptions->Enabled = hasProject && !busy;
+            miImportCcs->Enabled = settings->CcsEnabled && !busy;
             cboTarget->Enabled = writable && !busy;
 
             String^ ext = (ed != nullptr && ed->FilePath != nullptr) ? Path::GetExtension(ed->FilePath) : String::Empty;
@@ -631,7 +775,7 @@ namespace Gride
             String^ title = AppInfo::Name;
             if (hasProject)
             {
-                String^ ro = project->IsReadOnly ? gcnew String(" [CCS, read-only]") : String::Empty;
+                String^ ro = project->IsImported ? String::Format(" [{0}, read-only]", CcsLabel(project)) : project->IsReadOnly ? gcnew String(" [CCS, read-only]") : String::Empty;
                 title = String::Format("{0}{1} - {2}", project->Name, ro, AppInfo::Name);
             }
             if (ed != nullptr) title = String::Format("{0}{1} - {2}", ed->DisplayName, ed->IsDirty ? gcnew String("*") : String::Empty, title);
@@ -666,12 +810,48 @@ namespace Gride
         }
 
         // ============================================================ helpers
+        // "CCS 7.4" / "CCS 5.5", as the project's .ccsproject says; "Visual Studio 2022 v143" for a Visual Studio project
+        static String^ CcsLabel(GrideProject^ p)
+        {
+            if (p != nullptr && p->IsVs) return p->Vs->Label;
+            if (p == nullptr || !p->IsCcs) return "CCS";
+            return p->Ccs->CcsVersion->Length == 0 ? Str("CCS 5.5") : String::Concat("CCS ", p->Ccs->CcsVersion->Length >= 3 ? p->Ccs->CcsVersion->Substring(0, 3) : p->Ccs->CcsVersion);
+        }
+
+        // Project > CCS / VS Mapping: RIDE's read-only dialog - what CCS set and what GRIDE builds with; for a Visual
+        // Studio project the reading (every configuration's values, the items, what is not mapped) and GRIDE's lines
+        void OnCcsMapping(Object^ sender, EventArgs^ e)
+        {
+            if (project != nullptr && project->IsVs)
+            {
+                Ui::ShowText(this, String::Format("{0} - {1} mapping", project->Name, CcsLabel(project)), VsMappingText(project)->Replace("\n", "\r\n"));
+                return;
+            }
+            if (project == nullptr || !project->IsCcs) return;
+            Ui::ShowText(this, String::Format("{0} - {1} mapping", project->Name, CcsLabel(project)),
+                         project->Ccs->MappingText(BuildEngine::IsDebugConfig(project->ActiveConfig()->Name))->Replace("\n", "\r\n"));
+        }
+
+        // a Visual Studio project's mapping: GRIDE's lines, what RIDE's compilers are given, the reading
+        static String^ VsMappingText(GrideProject^ p)
+        {
+            StringBuilder^ t = gcnew StringBuilder();
+            for each (String^ l in p->Vs->ReportLines) t->Append(l)->Append("\n");
+            t->Append("\nBuilt here with RIDE's compilers for x86_64-windows into .gride\\ beside the project; c90, cpp11 and shalimar take Compiler Options' defaults (");
+            ToolEntry^ c90 = ToolchainFile::Current->ToolByRole("cCompiler");
+            CompilerOptionStore^ none = gcnew CompilerOptionStore();
+            TargetEntry^ win = TargetInfo::Get(TargetKind::Windows)->Entry;
+            t->Append(String::Format("c90 Debug {0}, Release {1}", CompilerOptionRules::Flags(none, c90, "Debug", win), CompilerOptionRules::Flags(none, c90, "Release", win)));
+            t->Append("), the configuration's defines, include directories and libraries.\n\n");
+            t->Append(p->Vs->Reading->MappingText());
+            return t->ToString();
+        }
+
         static bool IsProjectFile(String^ path)
         {
             String^ name = Path::GetFileName(path);
             String^ ext = Path::GetExtension(path);
-            return String::Equals(ext, ".pro", StringComparison::OrdinalIgnoreCase) ||
-                   String::Equals(name, ".project", StringComparison::OrdinalIgnoreCase);
+            return String::Equals(ext, ".pro", StringComparison::OrdinalIgnoreCase) || CcsImporter::IsProjectFile(path) || VsImporter::IsVsFile(path);
         }
 
 
@@ -694,15 +874,44 @@ namespace Gride
             try { full = Path::GetFullPath(path); }
             catch (Exception^ ex) { ShowException("Invalid project path.", ex); return; }
             if (project != nullptr && PathUtil::SamePath(project->FilePath, full)) return;
-            if (!CloseProjectInternal()) return;
 
             GrideProject^ p = nullptr;
+            bool vs = VsImporter::IsVsFile(full);
+            bool ccs = !vs && (CcsImporter::IsProjectFile(full) || Directory::Exists(full));
+            if (ccs && !settings->CcsEnabled)
+            {
+                Ui::Error(this, String::Format("Could not open project:\n{0}\n\nOpening CCS projects is turned off under Tools > Options > RIDE Paths.", full));
+                return;
+            }
+            // GRIDE 2.0 holds one project: a solution with several C++ projects asks which (before anything is closed)
+            String^ member = nullptr;
+            if (vs && VsImporter::IsSolution(full) && File::Exists(full))
+            {
+                List<String^>^ names;
+                try { names = VsImporter::CppProjectNames(full); }
+                catch (Exception^ ex) { ShowException(String::Format("Could not open project:\n{0}", full), ex); return; }
+                if (names->Count > 1)
+                {
+                    member = projectChooser != nullptr ? projectChooser->Invoke(full, names)
+                           : Ui::Choose(this, Path::GetFileName(full), String::Format("{0} holds {1} C++ projects. GRIDE opens one - which?", Path::GetFileName(full), names->Count), names);
+                    if (member == nullptr) return;
+                }
+            }
+            if (!CloseProjectInternal()) return;
             try
             {
-                if (String::Equals(Path::GetFileName(full), ".project", StringComparison::OrdinalIgnoreCase))
+                if (vs)
+                {
+                    p = VsImporter::Import(full, member);
+                    ApplyCcsState(p);
+                }
+                else if (ccs)
+                {
                     p = CcsImporter::Import(full);
+                    ApplyCcsState(p);
+                }
                 else
-                    p = GrideProject::Load(full);
+                    p = VsImporter::LoadPro(full);           // GRIDE's own project, or one standing for a Visual Studio project (R12)
             }
             catch (Exception^ ex)
             {
@@ -711,15 +920,60 @@ namespace Gride
             }
             project = p;
             RememberProjectTime();
-            settings->AddRecentProject(full);
+            settings->AddRecentProject(p->IsVs && p->Vs->StateFile->Length == 0 ? p->FilePath : full);     // a Visual Studio project by its project file (its solution is found again); one a .pro stands for by the .pro
             SaveSettings();
             RefreshTree();
             RefreshCombos();
             UpdateUi();
-            if (project->IsReadOnly)
+            if (project->IsVs)
+            {
+                // what was read, what each configuration is built from, what is not mapped
+                for each (String^ line in project->Vs->ReportLines) EnqueueOutput(line);
+                if (project->Vs->ReportLines->Count > 0) ShowBottom(pageOutput);
+                SetStatus(String::Format("Opened Visual Studio project '{0}' (read-only: built with GRIDE's toolchain into .gride, edited in Visual Studio; {1} files)", project->Name, project->SourceFiles->Count));
+            }
+            else if (project->IsCcs)
+            {
+                // RIDE's Messages lines about the reading: what is not supported, RIDE's own instead, the sources, the refusals
+                for each (String^ line in project->CcsReportLines) EnqueueOutput(line);
+                if (project->CcsReportLines->Count > 0) ShowBottom(pageOutput);
+                SetStatus(String::Format("Opened CCS project '{0}' (read-only: built as RIDE builds it, edited in CCS; {1} files)", project->Name, project->SourceFiles->Count));
+            }
+            else if (project->IsReadOnly)
                 SetStatus(String::Format("Imported CCS project '{0}' (read-only, {1} files)", project->Name, project->SourceFiles->Count));
             else
                 SetStatus(String::Format("Opened project '{0}'", project->Name));
+        }
+
+        // RIDE's own state for a CCS project lives in the settings (ccs.projects), never in CCS's files: the
+        // configuration chosen, the program's arguments, emulateOnly - what the read-only .project cannot hold;
+        // a Visual Studio project's likewise, by its project file (R08)
+        void ApplyCcsState(GrideProject^ p)
+        {
+            if (p == nullptr || !p->IsImported) return;
+            if (p->IsVs && p->Vs->StateFile->Length > 0) return;          // the .pro standing for it keeps its state (R12)
+            CcsProjectState^ st = p->IsVs ? settings->VsState(p->FilePath) : settings->CcsState(p->ProjectDir);
+            if (st == nullptr) return;
+            if (!String::IsNullOrEmpty(st->Toolchain)) p->Toolchain = st->Toolchain;
+            if (p->FindConfig(st->Configuration) != nullptr) p->ActiveConfiguration = p->FindConfig(st->Configuration)->Name;
+            p->ProgramArgs = st->ProgramArgs == nullptr ? nullptr : gcnew List<String^>(st->ProgramArgs);
+            p->EmulateOnly = st->EmulateOnly;
+            p->Normalize();
+        }
+
+        void RememberCcsState(GrideProject^ p)
+        {
+            if (p == nullptr || !p->IsImported) return;
+            if (p->IsVs && p->Vs->StateFile->Length > 0)
+            {
+                // the .pro standing for it (R12); the Visual Studio files are never written
+                try { VsImporter::SaveState(p); }
+                catch (Exception^ ex) { ShowException(String::Format("Could not write {0}", p->Vs->StateFile), ex); }
+                return;
+            }
+            if (p->IsVs) settings->RememberVsState(p->FilePath, p->ActiveConfiguration, p->ProgramArgs, p->EmulateOnly, p->Toolchain);
+            else settings->RememberCcsState(p->ProjectDir, p->ActiveConfiguration, p->ProgramArgs, p->EmulateOnly, p->Toolchain);
+            SaveSettings();
         }
 
         bool CloseProjectInternal()
@@ -772,6 +1026,20 @@ namespace Gride
             return n;
         }
 
+        // the node of a Visual Studio filter path ("Source\UI\Dialogs"), made with its parents as needed
+        TreeNode^ VsFolderNode(TreeNode^ root, Dictionary<String^, TreeNode^>^ made, String^ path)
+        {
+            TreeNode^ at;
+            if (made->TryGetValue(path, at)) return at;
+            int cut = path->LastIndexOf(L'\\');
+            TreeNode^ parent = cut > 0 ? VsFolderNode(root, made, path->Substring(0, cut)) : root;
+            at = MakeFolderNode(cut > 0 ? path->Substring(cut + 1) : path);
+            at->ToolTipText = path;
+            parent->Nodes->Add(at);
+            made[path] = at;
+            return at;
+        }
+
         void RefreshTree()
         {
             String^ selected = nullptr;
@@ -783,7 +1051,7 @@ namespace Gride
             if (project != nullptr)
             {
                 String^ rootText = project->IsReadOnly
-                    ? String::Format("{0}  (CCS 7.4, read-only)", project->Name)
+                    ? String::Format("{0}  ({1}, read-only)", project->Name, CcsLabel(project))
                     : String::Format("{0}  [{1}, {2}]", project->Name, project->Language, project->Target);
                 TreeNode^ root = gcnew TreeNode(rootText);
                 root->Tag = gcnew NodeInfo(NodeKind::Project, project->FilePath);
@@ -793,6 +1061,10 @@ namespace Gride
                 TreeNode^ hdrNode = MakeFolderNode("Header Files");
                 TreeNode^ otherNode = MakeFolderNode("Other Files");
                 TreeNode^ toSelect = nullptr;
+                // a Visual Studio project's files sit in its filters (its .filters, else their directories), nested at '\'
+                Dictionary<String^, TreeNode^>^ vsFolders = project->IsVs ? gcnew Dictionary<String^, TreeNode^>(StringComparer::OrdinalIgnoreCase) : nullptr;
+                if (vsFolders != nullptr)
+                    for each (String^ f in project->Vs->Reading->Filters) VsFolderNode(root, vsFolders, f);
 
                 for each (String^ rel in project->SourceFiles)
                 {
@@ -806,18 +1078,30 @@ namespace Gride
                         n->Text = String::Format("{0}  (missing)", rel);
                         n->ForeColor = Color::Gray;
                     }
-                    if (TargetInfo::IsSource(ext, settings)) srcNode->Nodes->Add(n);
+                    String^ vsFolder;
+                    if (vsFolders != nullptr && project->Vs->FolderOf->TryGetValue(rel, vsFolder))
+                    {
+                        n->Text = Path::GetFileName(rel);
+                        if (!File::Exists(full)) n->Text = String::Format("{0}  (missing)", n->Text);
+                        bool notBuilt = project->ActiveConfig()->Excludes(full) && TargetInfo::IsSource(ext, settings);
+                        if (notBuilt) { n->ForeColor = Color::Gray; n->ToolTipText = String::Format("{0} (not built in {1})", full, project->ActiveConfig()->Name); }
+                        VsFolderNode(root, vsFolders, vsFolder)->Nodes->Add(n);
+                    }
+                    else if (TargetInfo::IsSource(ext, settings)) srcNode->Nodes->Add(n);
                     else if (TargetInfo::IsHeader(ext)) hdrNode->Nodes->Add(n);
                     else otherNode->Nodes->Add(n);
                     if (selected != nullptr && PathUtil::SamePath(selected, full)) toSelect = n;
                 }
-                root->Nodes->Add(srcNode);
-                root->Nodes->Add(hdrNode);
-                root->Nodes->Add(otherNode);
+                if (vsFolders == nullptr)
+                {
+                    root->Nodes->Add(srcNode);
+                    root->Nodes->Add(hdrNode);
+                    root->Nodes->Add(otherNode);
+                }
 
                 if (project->CcsConfigurations != nullptr && project->CcsConfigurations->Count > 0)
                 {
-                    TreeNode^ cc = MakeFolderNode("CCS Build Configurations (read-only)");
+                    TreeNode^ cc = MakeFolderNode(project->IsVs ? "Visual Studio Configurations (read-only)" : "CCS Build Configurations (read-only)");
                     for each (CcsConfiguration^ c in project->CcsConfigurations)
                     {
                         TreeNode^ cn = cc->Nodes->Add(c->Name);
@@ -931,6 +1215,7 @@ namespace Gride
             ed->Dock = DockStyle::Fill;
             ed->DirtyChanged += GRIDE_EH(OnEditorDirtyChanged);
             ed->CaretChanged += GRIDE_EH(OnEditorCaretChanged);
+            ed->BreakpointClicked += gcnew LineHandler(this, &MainForm::OnGutterBreakpoint);
             return ed;
         }
 
@@ -986,6 +1271,8 @@ namespace Gride
                 return nullptr;
             }
             ed->IsReadOnly = project != nullptr && project->IsReadOnly && project->ContainsFile(full);
+            SortedSet<int>^ marks;
+            if (breakpoints->TryGetValue(full, marks)) ed->Breakpoints = marks;
             AddEditorTab(ed);
             settings->AddRecentFile(full);
             return ed;
@@ -1081,7 +1368,7 @@ namespace Gride
         bool CloseTab(TabPage^ page)
         {
             CodeEditor^ ed = dynamic_cast<CodeEditor^>(page->Tag);
-            if (ed != nullptr && ed->IsDirty && !ed->IsReadOnly)
+            if (ed != nullptr && !ed->IsReadOnly && ed->NeedsSaving)
             {
                 docs->SelectedTab = page;
                 System::Windows::Forms::DialogResult r = MessageBox::Show(this,
@@ -1105,7 +1392,7 @@ namespace Gride
             {
                 if (p == keep) continue;
                 CodeEditor^ ed = dynamic_cast<CodeEditor^>(p->Tag);
-                if (ed != nullptr && ed->IsDirty && !ed->IsReadOnly) dirty->Add(ed);
+                if (ed != nullptr && !ed->IsReadOnly && ed->NeedsSaving) dirty->Add(ed);
             }
             if (dirty->Count > 0)
             {
@@ -1212,7 +1499,7 @@ namespace Gride
                 if (!CloseProjectInternal()) return;
                 String^ folder = d->ProjectFolder;
                 Directory::CreateDirectory(folder);
-                GrideProject^ p = GrideProject::Create(d->ProjectName, folder, d->Language, d->Target);
+                GrideProject^ p = GrideProject::Create(d->ProjectName, folder, d->Language, d->Target, settings);   // the settings' compiler and options
                 String^ mainFile = nullptr;
                 if (d->CreateMainFile)
                 {
@@ -1245,6 +1532,7 @@ namespace Gride
             switch (lang)
             {
             case LanguageKind::Cpp11:
+            {
                 lines = gcnew array<String^>{
                     String::Format("// {0} - created by GRIDE 2.0 (C++11)", fileName),
                     "#include <iostream>", "",
@@ -1252,12 +1540,16 @@ namespace Gride
                     "    std::cout << \"Hello from GRIDE\" << std::endl;",
                     "    return 0;", "}", "" };
                 break;
+            }
             case LanguageKind::Shalimar:
+            {
                 lines = gcnew array<String^>{
                     String::Format("// {0} - created by GRIDE 2.0 (Shalimar)", fileName),
                     "// Write your Shalimar program here.", "" };
                 break;
+            }
             default:
+            {
                 lines = gcnew array<String^>{
                     String::Format("/* {0} - created by GRIDE 2.0 (C90) */", fileName),
                     "#include <stdio.h>", "",
@@ -1265,6 +1557,7 @@ namespace Gride
                     "    printf(\"Hello from GRIDE\\n\");",
                     "    return 0;", "}", "" };
                 break;
+            }
             }
             return String::Join("\r\n", lines);
         }
@@ -1284,7 +1577,8 @@ namespace Gride
         void OnOpenProject(Object^ sender, EventArgs^ e)
         {
             OpenFileDialog^ d = gcnew OpenFileDialog();
-            d->Filter = "GRIDE project (*.pro)|*.pro|CCS 7.4 / Eclipse project (.project)|.project;*.project|All files (*.*)|*.*";
+            d->Filter = "GRIDE project (*.pro)|*.pro|CCS 7.4 / 5.5 project (.project, .ccsproject, .cproject)|.project;.ccsproject;.cproject;*.project;*.ccsproject;*.cproject|"
+                        "Visual Studio solution or C++ project (*.sln, *.vcxproj, *.vcproj)|*.sln;*.vcxproj;*.vcproj|All files (*.*)|*.*";
             d->InitialDirectory = DefaultFolder();
             try
             {
@@ -1296,13 +1590,16 @@ namespace Gride
         void OnImportCcs(Object^ sender, EventArgs^ e)
         {
             FolderBrowserDialog^ d = gcnew FolderBrowserDialog();
-            d->Description = "Select the CCS 7.4 project folder (the one that contains .project and .cproject)";
+            d->Description = "Select a CCS 7.4 or 5.5 project folder (the one with .project, .ccsproject and .cproject)";
             try
             {
                 if (d->ShowDialog(this) != System::Windows::Forms::DialogResult::OK) return;
-                String^ dotProject = Path::Combine(d->SelectedPath, ".project");
-                if (!File::Exists(dotProject)) { Ui::Error(this, "This folder has no .project file."); return; }
-                OpenProject(dotProject);
+                if (!CcsReading::IsProject(d->SelectedPath) && !CcsWorkspace::IsWorkspace(d->SelectedPath))
+                {
+                    Ui::Error(this, "This folder is not a CCS project (it needs .project and .ccsproject) or a CCS workspace.");
+                    return;
+                }
+                OpenProject(CcsReading::IsProject(d->SelectedPath) ? Path::Combine(d->SelectedPath, ".project") : d->SelectedPath);
             }
             finally { delete d; }
         }
@@ -1585,14 +1882,42 @@ namespace Gride
             ProjectPropertiesDialog^ d = gcnew ProjectPropertiesDialog(project);
             try
             {
-                if (d->ShowDialog(this) != System::Windows::Forms::DialogResult::OK || project->IsReadOnly) return;
+                if (d->ShowDialog(this) != System::Windows::Forms::DialogResult::OK) return;
                 if (busy) { Ui::Info(this, "Properties cannot be changed while a build is running."); return; }
+                if (project->IsImported && d->ImportedView != nullptr)
+                {
+                    d->ImportedView->ApplyTo(project);
+                    RememberCcsState(project);
+                    UpdatePropertyGrid();
+                    UpdateUi();
+                    return;
+                }
+                if (project->IsReadOnly) return;
                 d->View->ApplyTo(project);
                 SaveProject();
                 RefreshTree();
                 RefreshCombos();
                 RefreshEditorModes();
                 UpdateUi();
+            }
+            finally { delete d; }
+        }
+
+        // RIDE's Compiler Options of the project, per configuration; a CCS project's options are its
+        // configurations' (the mapping shows them)
+        void OnCompilerOptions(Object^ sender, EventArgs^ e)
+        {
+            if (project == nullptr) return;
+            if (project->IsImported) { OnCcsMapping(sender, e); return; }
+            if (project->IsReadOnly) { Ui::Info(this, "This project is read-only."); return; }
+            CompilerOptionsDialog^ d = gcnew CompilerOptionsDialog(project);
+            try
+            {
+                if (d->ShowDialog(this) != System::Windows::Forms::DialogResult::OK) return;
+                if (busy) { Ui::Info(this, "Compiler Options cannot be changed while a build is running."); return; }
+                project->SetOptionStore(d->Result);
+                SaveProject();
+                UpdatePropertyGrid();
             }
             finally { delete d; }
         }
@@ -1611,9 +1936,10 @@ namespace Gride
 
         void OnConfigChanged(Object^ sender, EventArgs^ e)
         {
-            if (updatingCombos || project == nullptr || project->IsReadOnly || cboConfig->SelectedItem == nullptr) return;
+            if (updatingCombos || project == nullptr || (project->IsReadOnly && !project->IsImported) || cboConfig->SelectedItem == nullptr) return;
             project->ActiveConfiguration = safe_cast<String^>(cboConfig->SelectedItem);
-            SaveProject();
+            if (project->IsImported) RememberCcsState(project);
+            else SaveProject();
             UpdatePropertyGrid();
             UpdateUi();
         }
@@ -1628,14 +1954,288 @@ namespace Gride
             UpdateUi();
         }
 
+        // ============================================================ the debugger (R10)
+        TabPage^ AddPanePage(String^ title, Control^ pane)
+        {
+            TabPage^ page = gcnew TabPage(title);
+            page->Controls->Add(pane);
+            bottomTabs->TabPages->Add(page);
+            return page;
+        }
+
+        // RIDE's keys line under the variables, from the Debug menu's keys
+        static String^ KeysLine()
+        {
+            return "F8 carries on   F7 steps over   F6 steps into   F9 sets a breakpoint   Ctrl+Up / Ctrl+Down walks the stack   name = value below sets a variable";
+        }
+
+        // the file's breakpoints; made (and handed to its editor) when asked to
+        SortedSet<int>^ BreakpointsOf(String^ file, bool make)
+        {
+            SortedSet<int>^ set;
+            if (breakpoints->TryGetValue(file, set)) return set;
+            if (!make) return nullptr;
+            set = gcnew SortedSet<int>();
+            breakpoints[file] = set;
+            TabPage^ t = FindTab(file);
+            if (t != nullptr) safe_cast<CodeEditor^>(t->Tag)->Breakpoints = set;
+            return set;
+        }
+
+        // F9, or a click in the gutter: a breakpoint on the line, or none; the engine told while it is stopped
+        void ToggleBreakpoint(String^ file, int line)
+        {
+            if (String::IsNullOrEmpty(file) || line < 1) return;
+            SortedSet<int>^ set = BreakpointsOf(file, true);
+            if (!set->Remove(line)) set->Add(line);
+            if (set->Count == 0) breakpoints->Remove(file);
+            TabPage^ t = FindTab(file);
+            if (t != nullptr) { CodeEditor^ ed = safe_cast<CodeEditor^>(t->Tag); ed->Breakpoints = set->Count == 0 ? nullptr : set; ed->RefreshMarks(); }
+            breakpointsPane->Fill(breakpoints);
+            if (debugger != nullptr && debugger->State == DebugState::Break) debugger->BreakpointsChanged();
+            SetStatus(set->Contains(line) ? String::Format("a breakpoint on {0}:{1}", Path::GetFileName(file), line) : String::Format("no breakpoint on {0}:{1}", Path::GetFileName(file), line));
+            UpdateUi();
+        }
+
+        void OnToggleBreakpoint(Object^ sender, EventArgs^ e)
+        {
+            CodeEditor^ ed = ActiveEditor();
+            if (ed == nullptr || ed->FilePath == nullptr) return;
+            ToggleBreakpoint(Path::GetFullPath(ed->FilePath), ed->CurrentLine);
+        }
+
+        void OnGutterBreakpoint(int line)
+        {
+            CodeEditor^ ed = ActiveEditor();
+            if (ed != nullptr && ed->FilePath != nullptr) ToggleBreakpoint(Path::GetFullPath(ed->FilePath), line);
+        }
+
+        void OnDeleteBreakpoints(Object^ sender, EventArgs^ e)
+        {
+            breakpoints->Clear();
+            for each (TabPage^ p in docs->TabPages) { CodeEditor^ ed = dynamic_cast<CodeEditor^>(p->Tag); if (ed != nullptr) ed->Breakpoints = nullptr; }
+            breakpointsPane->Fill(breakpoints);
+            if (debugger != nullptr && debugger->State == DebugState::Break) debugger->BreakpointsChanged();
+            UpdateUi();
+        }
+
+        void OnBreakpointNavigate(String^ file, int line)
+        {
+            CodeEditor^ ed = OpenFile(file);
+            if (ed != nullptr) ed->GoToLine(line);
+        }
+
+        void OnBreakpointRemove(String^ file, int line) { ToggleBreakpoint(file, line); }
+
+        // F8: carries on when stopped; else builds the Debug configuration and starts the debugger on it
+        void OnDebugStart(Object^ sender, EventArgs^ e)
+        {
+            if (debugger != nullptr && debugger->State == DebugState::Break) { debugger->Continue(); return; }
+            if (debugger != nullptr && debugger->IsActive) return;
+            if (busy || ProgramBusy()) return;
+            if (project == nullptr) { Ui::Info(this, "Open or create a project first."); return; }
+            if (!BuildEngine::IsDebugConfig(project->ActiveConfig()->Name))
+            {
+                // RIDE's refusal before anything is built
+                DebugLaunch^ l = DebuggerChoice::For(project, settings);
+                ShowBottom(pageOutput);
+                EnqueueOutput(l->WhyNot);
+                SetStatus(l->WhyNot);
+                return;
+            }
+            if (!PrepareBuild()) return;
+            BuildJob^ job = MakeJob(JobKind::BuildAndDebug);
+            SetStatus("Build started (for the debugger)...");
+            StartJob(job, true);
+        }
+
+        // the engine that debugs the build (DebuggerChoice: RIDE's), its events marshalled to the window
+        void StartDebugging()
+        {
+            DebugLaunch^ l = DebuggerChoice::For(project, settings);
+            ShowBottom(pageOutput);
+            if (!l->Possible)
+            {
+                EnqueueOutput(String::Concat("[debug] ", l->WhyNot->Length > 0 ? l->WhyNot : Str("nothing can debug this build")));
+                SetStatus(l->WhyNot);
+                return;
+            }
+            if (debugger != nullptr) { debugger->Stop(); debugger = nullptr; }
+            DebugEngine^ d = l->Kind == DebuggerKind::Shalimar ? safe_cast<DebugEngine^>(gcnew ShalimarSession(l)) : safe_cast<DebugEngine^>(gcnew ProcessDebugger(l));
+            d->StateChanged += gcnew DebugStateHandler(this, &MainForm::OnDebuggerState);
+            d->Stopped += gcnew DebugStopHandler(this, &MainForm::OnDebuggerStopped);
+            d->Output += gcnew TextLineHandler(this, &MainForm::OnDebuggerLine);
+            d->ProgramOutput += gcnew TextLineHandler(this, &MainForm::EnqueueOutput);
+            d->SetBreakpoints(breakpoints);
+            List<String^>^ files = gcnew List<String^>();
+            for each (String^ f in project->SourceFiles) files->Add(project->ResolvePath(f));
+            d->SetSourceFiles(files);
+            debugger = d;
+            localsPane->ClearView();
+            watchPane->UpdateFrom(d);
+            SetStatus(String::Format("debugging with {0}", l->Backend));
+            if (!d->Start(l->Program, project->TargetValue, nullptr, 0))
+            {
+                SetStatus("the debugger did not start - see the Output pane");
+                debugger = nullptr;
+                watchPane->ClearView();
+            }
+            UpdateUi();
+        }
+
+        void OnDebuggerLine(String^ line) { EnqueueOutput(String::Concat("[debug] ", line)); }
+
+        void OnDebuggerState(DebugState state)
+        {
+            if (InvokeRequired) { BeginInvoke(gcnew DebugStateHandler(this, &MainForm::OnDebuggerState), state); return; }
+            DebugEngine^ d = debugger;
+            if (d == nullptr) { UpdateUi(); return; }
+            if (state == DebugState::Running) ClearStopArrow();
+            if (state == DebugState::Idle)
+            {
+                ClearStopArrow();
+                localsPane->ClearView();
+                callStackPane->ClearView();
+                registersPane->ClearView();
+                memoryPane->ClearView();
+                watchPane->ClearView();
+                // RIDE's end line, and where to go from there
+                if (d->Exited)
+                {
+                    EnqueueOutput("[debug] F8 starts it again. The breakpoints are still where you put them.");
+                    SetStatus(String::Format("the program returned {0}", d->ExitStatus));
+                }
+                else SetStatus("debugging ended");
+                debugger = nullptr;
+            }
+            UpdateUi();
+        }
+
+        void OnDebuggerStopped(StopInfo^ info)
+        {
+            if (InvokeRequired) { BeginInvoke(gcnew DebugStopHandler(this, &MainForm::OnDebuggerStopped), info); return; }
+            if (debugger == nullptr || info == nullptr) return;
+            localsPane->NewStop();
+            watchPane->NewStop();
+            ShowStop(info->File, info->Line, true);
+            RefreshDebugPanes();
+            ShowBottom(pageLocals);
+            SetStatus(info->Function->Length > 0 ? String::Format("{0}:{1} in {2}", Path::GetFileName(info->File), info->Line, info->Function)
+                                                 : String::Format("{0}:{1}", Path::GetFileName(info->File), info->Line));
+            UpdateUi();
+        }
+
+        // the file it stopped in opened, the caret on the line; the arrow when it is the stop itself
+        void ShowStop(String^ file, int line, bool arrow)
+        {
+            if (String::IsNullOrEmpty(file) || !File::Exists(file) || line < 1) return;
+            CodeEditor^ ed = OpenFile(file);
+            if (ed == nullptr) return;
+            ed->GoToLine(line);
+            if (arrow)
+            {
+                ClearStopArrow();
+                ed->StopLine = line;
+                stoppedIn = ed;
+            }
+        }
+
+        void ClearStopArrow()
+        {
+            if (stoppedIn != nullptr) stoppedIn->StopLine = 0;
+            stoppedIn = nullptr;
+        }
+
+        void RefreshDebugPanes()
+        {
+            DebugEngine^ d = debugger;
+            localsPane->UpdateFrom(d);
+            watchPane->UpdateFrom(d);
+            callStackPane->UpdateFrom(d);
+            registersPane->UpdateFrom(d);
+            memoryPane->UpdateFrom(d);
+        }
+
+        void OnStepOver(Object^ sender, EventArgs^ e) { if (debugger != nullptr && debugger->State == DebugState::Break) debugger->StepOver(); }
+        void OnStepInto(Object^ sender, EventArgs^ e) { if (debugger != nullptr && debugger->State == DebugState::Break) debugger->StepInto(); }
+        void OnStepOut(Object^ sender, EventArgs^ e) { if (debugger != nullptr && debugger->State == DebugState::Break) debugger->StepOut(); }
+
+        void OnRunToCursor(Object^ sender, EventArgs^ e)
+        {
+            CodeEditor^ ed = ActiveEditor();
+            if (debugger == nullptr || debugger->State != DebugState::Break || ed == nullptr || ed->FilePath == nullptr) return;
+            debugger->RunToCursor(Path::GetFullPath(ed->FilePath), ed->CurrentLine);
+        }
+
+        void OnStopDebugging(Object^ sender, EventArgs^ e)
+        {
+            DebugEngine^ d = debugger;
+            if (d == nullptr) return;
+            d->Stop();
+        }
+
+        // Ctrl+Up / Ctrl+Down (RIDE's): the frame above or below looked at, the editor on its line, the panes
+        // refreshed; the status bar says where that is (RIDE's sentences)
+        void OnUpStack(Object^ sender, EventArgs^ e) { if (debugger != nullptr && debugger->State == DebugState::Break) LookAtFrame(debugger->CurrentFrame + 1); }
+        void OnDownStack(Object^ sender, EventArgs^ e) { if (debugger != nullptr && debugger->State == DebugState::Break) LookAtFrame(debugger->CurrentFrame - 1); }
+
+        void LookAtFrame(int index)
+        {
+            DebugEngine^ d = debugger;
+            if (d == nullptr || d->State != DebugState::Break) return;
+            if (index < 0) { SetStatus("this is where the program stopped - there is nothing below it"); return; }
+            String^ cannot = d->WhyNoStackWalk();
+            if (!String::IsNullOrEmpty(cannot) && index > 0) { SetStatus(cannot); return; }
+            List<DebugFrame^>^ frames = d->CallStack();
+            if (index >= frames->Count) { SetStatus("nothing called main, which is the top"); return; }
+            if (index != d->CurrentFrame && !d->SelectFrame(index)) { SetStatus(String::Format("{0} cannot look at another frame", d->Backend)); return; }
+            DebugFrame^ f = frames[index];
+            ShowStop(f->File, f->Line, false);
+            RefreshDebugPanes();
+            SetStatus(index == 0 ? Str("back where it stopped")
+                                 : String::Format("{0}:{1} in {2} - where the call came from", Path::GetFileName(f->File), f->Line, f->Function));
+            UpdateUi();
+        }
+
+        // name = value: the engine sets it; its complaint in the Output pane
+        void OnVariableSet(String^ name, String^ value)
+        {
+            DebugEngine^ d = debugger;
+            if (d == nullptr || d->State != DebugState::Break) return;
+            String^ said;
+            if (!d->SetVariable(name, value, said))
+            {
+                EnqueueOutput(String::Format("[debug] {0} = {1}: {2}", name, value, said));
+                SetStatus(said);
+            }
+            RefreshDebugPanes();
+        }
+
+        void OnWatchExpression(Object^ sender, EventArgs^ e)
+        {
+            String^ text = InputDialog::Ask(this, "Watch Expression", "An expression to watch (read again at every stop):", String::Empty);
+            if (String::IsNullOrWhiteSpace(text)) return;
+            watchPane->AddExpression(text);
+            ShowBottom(pageWatch);
+        }
+
+        void OnSetVariable(Object^ sender, EventArgs^ e)
+        {
+            String^ text = InputDialog::Ask(this, "Set Variable", "name = value:", String::Empty);
+            if (String::IsNullOrWhiteSpace(text)) return;
+            int eq = text->IndexOf(L'=');
+            if (eq <= 0) return;
+            OnVariableSet(text->Substring(0, eq)->Trim(), text->Substring(eq + 1)->Trim());
+        }
+
         // ============================================================ Build / Run / Convert
         bool PrepareBuild()
         {
             if (busy) return false;
             if (project == nullptr) { Ui::Info(this, "Open or create a project first."); return false; }
-            if (project->IsReadOnly)
+            if (project->IsReadOnly && !project->IsImported)
             {
-                Ui::Info(this, "Imported CCS 7.4 projects are read-only in GRIDE. Build them in Code Composer Studio.");
+                Ui::Info(this, "This project is read-only in GRIDE.");
                 return false;
             }
             if (settings->SaveBeforeBuild && !SaveAll()) return false;
@@ -1671,10 +2271,24 @@ namespace Gride
         {
             BuildJob^ job = gcnew BuildJob();
             job->Kind = kind;
-            // Work on copies so the UI can never change them under the worker thread.
-            job->Project = JsonClone<GrideProject>(project);
-            job->Project->FilePath = project->FilePath;
-            job->Project->Normalize();
+            // Work on copies so the UI can never change them under the worker thread. A CCS or Visual Studio
+            // project is read afresh for every build, as RIDE reads it (its configurations carry what a .pro cannot hold).
+            if (project->IsImported)
+            {
+                job->Project = project->IsVs ? VsImporter::Read(project->FilePath, project->Vs->SolutionPath) : CcsImporter::Import(project->FilePath);
+                job->Project->ActiveConfiguration = project->ActiveConfiguration;
+                job->Project->Toolchain = project->Toolchain;
+                if (project->IsVs) job->Project->Vs->StateFile = project->Vs->StateFile;
+                job->Project->ProgramArgs = project->ProgramArgs == nullptr ? nullptr : gcnew List<String^>(project->ProgramArgs);
+                job->Project->EmulateOnly = project->EmulateOnly;
+                job->Project->Normalize();
+            }
+            else
+            {
+                job->Project = JsonClone<GrideProject>(project);
+                job->Project->FilePath = project->FilePath;
+                job->Project->Normalize();
+            }
             job->Settings = JsonClone<IdeSettings>(settings);
             job->Settings->Normalize();
             return job;
@@ -1710,9 +2324,12 @@ namespace Gride
         }
         void OnRebuild(Object^ sender, EventArgs^ e) { StartBuild(JobKind::Rebuild); }
         void OnClean(Object^ sender, EventArgs^ e) { StartBuild(JobKind::Clean); }
-        void OnBuildAndRun(Object^ sender, EventArgs^ e) { StartBuild(JobKind::BuildAndRun); }
-        void OnRun(Object^ sender, EventArgs^ e) { StartBuild(JobKind::Run); }
+        void OnBuildAndRun(Object^ sender, EventArgs^ e) { StartRun(RunHow::Run, true); }
+        void OnRun(Object^ sender, EventArgs^ e) { StartRun(RunHow::Run, false); }
+        void OnEmulate(Object^ sender, EventArgs^ e) { StartRun(RunHow::Emulate, true); }
+        void OnVerify(Object^ sender, EventArgs^ e) { StartRun(RunHow::Verify, true); }
 
+        // RIDE's Stop: the build, else the program running in the Output pane and everything it started
         void OnStop(Object^ sender, EventArgs^ e)
         {
             if (busy && cts != nullptr)
@@ -1720,6 +2337,141 @@ namespace Gride
                 cts->Cancel();
                 SetStatus("Stopping...");
             }
+            else if (runner->IsRunning)
+            {
+                SetStatus("Stopping the program...");
+                runner->Stop();
+            }
+            else if (verifying && verifyCts != nullptr)
+            {
+                SetStatus("Stopping the verify...");
+                verifyCts->Cancel();
+            }
+            else if (debugger != nullptr && debugger->IsActive) OnStopDebugging(sender, e);
+        }
+
+        bool ProgramBusy() { return runner != nullptr && (runner->IsRunning || verifying); }
+
+        // F5, Ctrl+F5, Emulate, Verify: a run this machine cannot make is turned away before anything is
+        // built (RIDE's buildAndRun); otherwise the build, then the program in the Output pane
+        void StartRun(RunHow how, bool build)
+        {
+            if (busy || ProgramBusy()) return;
+            if (project == nullptr) { Ui::Info(this, "Open or create a project first."); return; }
+            String^ refused = ProgramLauncher::Refusal(project, how);
+            if (refused != nullptr)
+            {
+                ClearBuildOutput();
+                ShowBottom(pageOutput);
+                EnqueueOutput(refused);
+                SetStatus(refused);
+                return;
+            }
+            if (!build)
+            {
+                ClearBuildOutput();
+                RunChosen(how);
+                return;
+            }
+            if (!PrepareBuild()) return;
+            BuildJob^ job = MakeJob(JobKind::BuildAndRun);
+            job->How = how;
+            SetStatus("Build started...");
+            StartJob(job, true);
+        }
+
+        // the project's program, run as RIDE's window runs one: in the Output pane with an input line and
+        // "[program returned N]" at the end; on the C6747 the simulator on the .out (the emulator on the
+        // assembly when the project says emulateOnly), Emulate the emulator, Verify both, compared
+        void RunChosen(RunHow how)
+        {
+            if (project == nullptr || ProgramBusy()) return;
+            ShowBottom(pageOutput);
+            TargetInfo^ t = TargetInfo::Get(project->TargetValue);
+            // the way before the port, kept as an option: the program in a console window of its own
+            if (!settings->RunInIde && how == RunHow::Run && t->RunsNatively)
+            {
+                int rc = BuildEngine::RunOutput(project, settings, gcnew Action<String^>(this, &MainForm::EnqueueOutput), System::Threading::CancellationToken::None);
+                SetStatus(rc == 0 ? Str("Started in a console window") : Str("The program could not be started"));
+                return;
+            }
+            RunPlan^ plan = ProgramLauncher::Plan(project, settings, how);
+            if (plan->Error != nullptr) { EnqueueOutput(plan->Error); SetStatus(plan->Error); return; }
+            for each (String^ note in plan->Notes) EnqueueOutput(note);
+            if (plan->How == RunHow::Verify)
+            {
+                if (verifyCts != nullptr) delete verifyCts;
+                verifyCts = gcnew CancellationTokenSource();
+                verifying = true;
+                VerifyJob^ job = gcnew VerifyJob(this, plan, verifyCts->Token);
+                System::Threading::Thread^ th = gcnew System::Threading::Thread(gcnew System::Threading::ThreadStart(job, &VerifyJob::Run));
+                th->IsBackground = true;
+                th->Start();
+                SetStatus(String::Format("Verifying {0} on {1} and {2}...", plan->OutName, plan->EmulatorName, plan->SimulatorName));
+                UpdateUi();
+                return;
+            }
+            EnqueueOutput(plan->Shown);
+            if (!runner->Start(plan->Exe, plan->Args, plan->WorkDir, plan->Tool, plan->CodePage)) { SetStatus("The program could not be started"); return; }
+            txtInput->Enabled = true;
+            txtInput->Focus();
+            SetStatus(String::Format("Running {0} - type its input below the output; Stop (Shift+F5) ends it", Path::GetFileName(plan->Exe)));
+            UpdateUi();
+        }
+
+        // Verify on a thread of its own: both programs captured, the lines into the Output pane
+        ref class VerifyJob
+        {
+        public:
+            VerifyJob(MainForm^ form, RunPlan^ plan, System::Threading::CancellationToken token) { this->form = form; this->plan = plan; this->token = token; }
+            void Run()
+            {
+                int status = 2;
+                try { status = ProgramRunner::Verify(plan, gcnew Action<String^>(form, &MainForm::EnqueueOutput), token); }
+                catch (Exception^ ex) { form->EnqueueOutput(String::Concat("[verify] ", ex->Message)); }
+                form->OnProgramExited(status, token.IsCancellationRequested);
+            }
+        private:
+            MainForm^ form;
+            RunPlan^ plan;
+            System::Threading::CancellationToken token;
+        };
+
+        // the program ended (a worker thread): "[program returned N]" or "[stopped]" after its last line
+        void OnProgramExited(int status, bool stopped)
+        {
+            EnqueueOutput(String::Empty);
+            EnqueueOutput(stopped ? Str("[stopped]") : String::Format("[program returned {0}]", status));
+            if (closing || IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke(gcnew Action<int, bool>(this, &MainForm::ProgramEnded), gcnew array<Object^>{ status, stopped }); }
+            catch (InvalidOperationException^) { }
+        }
+
+        void ProgramEnded(int status, bool stopped)
+        {
+            verifying = false;
+            txtInput->Enabled = false;
+            SetStatus(stopped ? Str("The program was stopped") : String::Format("The program returned {0}", status));
+            UpdateUi();
+        }
+
+        // the input line: Enter hands the line to the program (and shows it, as a console echoes), Ctrl+Z ends its input
+        void OnInputKeyDown(Object^ sender, KeyEventArgs^ e)
+        {
+            if (e->Control && e->KeyCode == Keys::Z)
+            {
+                e->SuppressKeyPress = true;
+                runner->CloseInput();
+                EnqueueOutput("^Z");
+                txtInput->Enabled = false;
+                return;
+            }
+            if (e->KeyCode != Keys::Enter) return;
+            e->SuppressKeyPress = true;
+            String^ line = txtInput->Text;
+            txtInput->Clear();
+            if (runner->Write(line)) EnqueueOutput(line);
+            else SetStatus("No program is running to read that");
         }
 
         void StartConversion(bool toShalimar)
@@ -1759,6 +2511,20 @@ namespace Gride
         void EnqueueOutput(String^ s) { outQueue->Enqueue(s); }
         void EnqueueMessage(BuildMessage^ m) { msgQueue->Enqueue(m); }
 
+        // the native question (RIDE's askNative) asked from the build's thread: a Yes/No box on the window's
+        bool AskFromBuild(String^ question)
+        {
+            if (closing || IsDisposed) return false;
+            try { return safe_cast<bool>(Invoke(gcnew Func<String^, bool>(this, &MainForm::AskOnWindow), gcnew array<Object^>{ question })); }
+            catch (Exception^) { return false; }
+        }
+
+        bool AskOnWindow(String^ question)
+        {
+            FlushQueues();                  // the build's output so far, above the question
+            return !closing && Ui::Confirm(this, question);
+        }
+
         void OnWorkerDoWork(Object^ sender, DoWorkEventArgs^ e)
         {
             BuildJob^ job = safe_cast<BuildJob^>(e->Argument);
@@ -1779,13 +2545,12 @@ namespace Gride
                 {
                     BuildEngine^ engine = gcnew BuildEngine(job->Project, job->Settings, out, msg, token);
                     engine->SingleFile = job->SingleFile;
+                    engine->Asker = gcnew Func<String^, bool>(this, &MainForm::AskFromBuild);
                     BuildAction action = BuildAction::Build;
                     if (job->Kind == JobKind::Rebuild) action = BuildAction::Rebuild;
                     else if (job->Kind == JobKind::Clean) action = BuildAction::Clean;
                     else if (job->Kind == JobKind::CompileFile) action = BuildAction::CompileFile;
-                    job->Result = engine->Execute(action);
-                    if (job->Kind == JobKind::BuildAndRun && job->Result->Success && !token.IsCancellationRequested)
-                        job->ExitCode = BuildEngine::RunOutput(job->Project, job->Settings, out, token);
+                    job->Result = engine->Execute(action);      // a BuildAndRun's program runs on the window's thread afterwards (RunChosen)
                     break;
                 }
                 }
@@ -1799,6 +2564,13 @@ namespace Gride
 
         void OnWorkerCompleted(Object^ sender, RunWorkerCompletedEventArgs^ e)
         {
+            // the worker posts this to the thread that started it; where that thread had no window's
+            // synchronization context it arrives on a pool thread, and is handed to the window's
+            if (InvokeRequired)
+            {
+                if (!IsDisposed) BeginInvoke(gcnew RunWorkerCompletedEventHandler(this, &MainForm::OnWorkerCompleted), gcnew array<Object^>{ sender, e });
+                return;
+            }
             FlushQueues();
             SetBusy(false);
             if (closing) return;            // window is shutting down: no dialogs, no new tabs
@@ -1817,8 +2589,24 @@ namespace Gride
                 else if (job->Result->Success) SetStatus(String::Format("Build succeeded  ({0} warning(s))", job->Result->Warnings));
                 else SetStatus(String::Format("Build failed  ({0} error(s))", job->Result->Errors));
                 if (errorCount > 0) ShowBottom(pageErrors);
+                // RIDE puts the caret on the first error of a failed build
+                if (!job->Result->Success && !job->Result->Cancelled && settings->JumpToFirstError && job->Result->FirstError != nullptr)
+                {
+                    BuildMessage^ first = job->Result->FirstError;
+                    if (!String::IsNullOrEmpty(first->FilePath) && first->Line > 0)
+                    {
+                        GoToMessage(first);
+                        SetStatus(String::Format("{0}:{1}: error: {2}", Path::GetFileName(first->FilePath), first->Line, first->Text));
+                    }
+                }
             }
             else if (job->Kind == JobKind::Run) SetStatus(job->ExitCode == 0 ? gcnew String("Run finished") : String::Format("Run ended with code {0}", job->ExitCode));
+            // a successful build of Build and Run, Emulate or Verify: the program now runs in the Output pane
+            if (job->Kind == JobKind::BuildAndRun && job->Result != nullptr && job->Result->Success && !job->Result->Cancelled && project != nullptr)
+                RunChosen(job->How);
+            // a successful build for F8: the debugger now (R10)
+            if (job->Kind == JobKind::BuildAndDebug && job->Result != nullptr && job->Result->Success && !job->Result->Cancelled && project != nullptr)
+                StartDebugging();
 
             if (job->Kind == JobKind::Convert)
             {
@@ -1923,6 +2711,7 @@ namespace Gride
             String^ baseDir = project != nullptr ? project->ProjectDir : nullptr;
             String^ text = lines[lineIndex];
             BuildMessage^ m = parser->Parse(text, (Regex^)nullptr, baseDir);
+            if (m == nullptr) m = parser->ParseLocation(text, baseDir);      // RIDE's whereIs_: a place with no severity word
             if (m == nullptr)
             {
                 // Find in Files result:  C:\path\file.c(12,5): text
@@ -2061,11 +2850,13 @@ namespace Gride
         void ShowOptions(bool toolsPage)
         {
             OptionsDialog^ d = gcnew OptionsDialog(settings);
+            String^ openAfter = nullptr;
             try
             {
                 if (toolsPage) d->SelectToolsPage();
                 if (d->ShowDialog(this) != System::Windows::Forms::DialogResult::OK) return;
                 IdeSettings^ s = d->Result;
+                openAfter = d->OpenAfter;
                 // keep values the dialog does not own (layout, recents)
                 s->RecentFiles = settings->RecentFiles;
                 s->RecentProjects = settings->RecentProjects;
@@ -2082,26 +2873,90 @@ namespace Gride
                 UpdateUi();
             }
             finally { delete d; }
+            if (openAfter != nullptr && File::Exists(openAfter)) OpenFile(openAfter);
+        }
+
+        // what toolchain.json's reader found wrong, at start-up
+        void ReportToolchainProblems()
+        {
+            ToolchainFile^ f = ToolchainFile::Current;
+            if (f->Problems->Count == 0) return;
+            StringBuilder^ sb = gcnew StringBuilder();
+            for each (String^ p in f->Problems) sb->Append(p)->Append("\r\n");
+            txtOutput->AppendText(sb->ToString());
+        }
+
+        // Tools > Check Toolchain: the files read again, their problems, and where every tool was found or looked for
+        void OnCheckToolchain(Object^ sender, EventArgs^ e)
+        {
+            ToolchainFile^ f = ToolchainFile::Reload();
+            settings->Normalize();
+            StringBuilder^ sb = gcnew StringBuilder();
+            sb->Append("------ Toolchain check ------\r\n");
+            sb->AppendFormat("toolchain.json (shipped): {0}{1}\r\n", f->ShippedFile, f->ShippedFound ? "" : " - not found");
+            sb->AppendFormat("toolchain.json (user): {0}{1}\r\n", f->UserFile, f->UserFileExists ? "" : " - none, the shipped values apply");
+            for each (String^ p in f->Problems) sb->Append(p)->Append("\r\n");
+            if (f->Problems->Count == 0) sb->Append("no problems in toolchain.json\r\n");
+            for each (ToolDefinition^ t in settings->Tools)
+            {
+                String^ found = t->ResolvedPath();
+                if (!t->IsConfigured()) sb->AppendFormat("{0}: not configured{1}\r\n", t->DisplayName, t->Defined ? "" : " - toolchain.json defines nothing for it");
+                else if (found != nullptr) sb->AppendFormat("{0}: {1}{2}\r\n", t->DisplayName, found, t->Custom ? " (changed under Options)" : "");
+                else sb->AppendFormat("{0}: '{1}' not found{2}\r\n", t->DisplayName, t->ExecutablePath, t->IsBareName() ? " - looked in " + t->LookedIn() : "");
+            }
+            txtOutput->AppendText(sb->ToString());
+            UpdateUi();
+        }
+
+        // a Help item: its page from the help folders (HelpFiles), else what was looked for
+        void OnHelpPage(Object^ sender, EventArgs^ e)
+        {
+            ToolStripItem^ item = dynamic_cast<ToolStripItem^>(sender);
+            String^ name = item != nullptr ? dynamic_cast<String^>(item->Tag) : nullptr;
+            if (name == nullptr) return;
+            String^ f = HelpFiles::Find(name);
+            if (f == nullptr)
+            {
+                SetStatus(String::Concat(name, " not found"));
+                Ui::Info(this, HelpFiles::Missing(name, HelpFiles::ExeDirectory()));
+                return;
+            }
+            try { HelpFiles::Open(f); SetStatus(String::Concat("Opened ", f)); }
+            catch (Exception^ ex) { ShowException(String::Format("Could not open:\n{0}", f), ex); }
         }
 
         void OnPlaceholderHelp(Object^ sender, EventArgs^ e)
         {
-            Ui::Info(this,
-                "Placeholders usable in tool arguments:\n\n"
-                "{in}          input file\n"
-                "{out}         output file\n"
-                "{objs}        all object files (linker)\n"
-                "{libs}        libraries, each with the tool's library switch\n"
-                "{cmdfiles}    TMS6747 linker command files (*.cmd) in the project\n"
-                "{runtime}     RTS6747 runtime library path\n"
-                "{includes}    include folders, each with the include switch\n"
-                "{defines}     defines of the active configuration\n"
-                "{flags}       compiler flags of the active configuration\n"
-                "{linkflags}   linker flags of the active configuration\n"
-                "{target}      windows | linux | macos | tms6747\n"
-                "{config}      Debug | Release | ...\n"
-                "{name}        project name\n"
-                "{projectdir} {outdir} {objdir} {exe} {map}");
+            StringBuilder^ sb = gcnew StringBuilder();
+            sb->Append("Placeholders in a tool's arguments. GRIDE's spelling first, then toolchain.json's where it has one; both are filled in.\r\n\r\n");
+            array<String^>^ own = gcnew array<String^>{
+                "{in}          input file: the source being compiled ($(Source)), the assembly being assembled ($(AsmFile)), the file converted",
+                "{out}         output file: the assembly written ($(AsmFile)), the object ($(ObjFile)), the program linked ($(Output))",
+                "{objs}        all object files (linker) - $(Objects)",
+                "{libs}        libraries, each with the tool's library switch - $(LibFlags)",
+                "{crtlibs}     the C runtime libraries the Windows link names for the configuration - $(CrtLibs)",
+                "{cmdfiles}    TMS6747 linker command files (*.cmd) in the project, or the one GRIDE writes; $(LinkerCmd) is the first of them, unquoted",
+                "{runtime}     RTS6x runtime library file (the Debug file for a Debug build) - $(Runtime)",
+                "{runtimedir}  its directory (lnk6x -i) - $(RuntimeDir)",
+                "{includes}    include folders, each with the include switch - $(IncludeFlags)",
+                "{defines}     defines of the active configuration - $(DefineFlags)",
+                "{configflags} the tool's flags for the configuration from toolchain.json (c90's -g -D_DEBUG=1 / -O2 -DNDEBUG=1 ...) - $(ConfigFlags)",
+                "{flags}       compiler flags of the active configuration - $(CompileFlags)",
+                "{linkflags}   linker flags of the active configuration - $(LinkFlags)",
+                "{arch}        the target as the compilers take it: x86_64-windows | x86_64-linux | arm64-darwin | tms6747 - $(Arch); $(ArchFlag) is the tool's spelling of it",
+                "{config}      the configuration's name; $(Config) is Debug or Release",
+                "{name}        project name - $(ProjectName); $(Name) is the object name of the file being compiled",
+                "{args}        the program's arguments (runners) - $(Arguments)",
+                "{exe}         the program - $(Program)",
+                "{projectdir} {outdir} {objdir} {asmdir} {map} - $(ProjectDir) $(OutDir) $(ObjDir)" };
+            for each (String^ l in own) sb->Append(l)->Append("\r\n");
+            ToolchainFile^ f = ToolchainFile::Current;
+            if (f->PlaceholderOrder->Count > 0)
+            {
+                sb->Append("\r\ntoolchain.json's placeholders, as its placeholders section explains them (the ones a build fills in here are listed above; the others are empty until the revision that gives them a meaning):\r\n\r\n");
+                for each (String^ k in f->PlaceholderOrder) sb->AppendFormat("{0,-24} {1}\r\n", k, f->Placeholder(k));
+            }
+            Ui::ShowText(this, "Placeholder Reference", sb->ToString());
         }
 
         void OnShortcutHelp(Object^ sender, EventArgs^ e)
@@ -2114,7 +2969,9 @@ namespace Gride
                 "Ctrl+F  Find    Ctrl+H  Replace    F3  Find next    Ctrl+G  Go to line\n"
                 "Tab / Shift+Tab  Indent / outdent selected lines\n"
                 "Ctrl+Shift+B  Build    F5  Build and run    Ctrl+F5  Run    Shift+F5  Stop\n"
-                "Alt+F7  Project properties    F4  Properties window\n"
+                "F8  Start debugging / carry on    F9  Breakpoint    F7  Step over    F6  Step into\n"
+                "Ctrl+Up / Ctrl+Down  While stopped: the frame that called this one / back down\n"
+                "Alt+F7  Project properties    F4  Properties window    F1  Help\n"
                 "Middle-click a tab to close it. Double-click an error to jump to it.");
         }
 
@@ -2124,7 +2981,10 @@ namespace Gride
                 "{0}  (version {1})\n\n"
                 "IDE for the C90, C++11 and Shalimar compilers.\n"
                 "Targets: Windows (MASM/LINK), Linux, macOS, TMS6747 DSP (ASM6x/LNK6x/RTS6747/VM6747).\n"
-                "Reads Code Composer Studio 7.4 projects (read-only).\n\n"
+                "Reads Code Composer Studio 7.4 / 5.5 projects and Visual Studio solutions (read-only).\n"
+                "Debugs with RIDE's debuggers: sim6747 and vm6747, cdb (or lldb), a Shalimar program's own session.\n"
+                "Follows RIDE's conventions (the RIDE port, R01-R13); Help has RIDE 5.17's manual and Express Help.\n"
+                "Its example is cppparse, built with Visual Studio's cl and link.exe.\n\n"
                 "C++/CLI, .NET Framework 4.8, Windows Forms.", AppInfo::Name, AppInfo::Version));
         }
 
@@ -2156,7 +3016,7 @@ namespace Gride
                 closing = true;
                 Enabled = false;                // no menu clicks while we wait
                 // give the tools a moment to be killed before the window goes away
-                Diagnostics::Stopwatch^ sw = Diagnostics::Stopwatch::StartNew();
+                System::Diagnostics::Stopwatch^ sw = System::Diagnostics::Stopwatch::StartNew();
                 while (worker->IsBusy && sw->ElapsedMilliseconds < 8000)
                 {
                     Application::DoEvents();
@@ -2165,6 +3025,15 @@ namespace Gride
                 Enabled = true;
             }
             if (!CloseAllDocuments(nullptr)) { e->Cancel = true; closing = false; return; }
+            if (debugger != nullptr) { debugger->Stop(); debugger = nullptr; }         // the debugger and its program go with the window
+            // a program still running in the Output pane is stopped with the window
+            if (ProgramBusy())
+            {
+                closing = true;
+                if (verifyCts != nullptr) verifyCts->Cancel();
+                runner->Stop();
+                runner->WaitForExit(3000);
+            }
             SaveLayout();
             if (project != nullptr) settings->LastProject = project->FilePath;
             SaveSettings();

@@ -1,0 +1,844 @@
+#include "Driver.h"
+#include "Name.h"
+
+#include "Check.h"
+#include "CodeGen.h"
+#include "Diag.h"
+#include "Parser.h"
+#include "Resolve.h"
+#include "Target.h"
+#include "Token.h"
+#include "backend/Emitter.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <algorithm>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dirent.h>
+#include <glob.h>
+#include <limits.h>
+#include <unistd.h>
+#endif
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
+#include <vector>
+
+namespace shalimar {
+
+// **1.2 is the first version this compiler has had a number for**, numbered alongside the RStudio that drives it - see CLAUDE.md.
+const char *shcVersion() { return "1.3"; }
+
+// The line printed before each compile and by --version. `-nologo` omits it.
+const char *Driver::bannerLine() { return "©2026 G. R. Akhtar - Shalimar 1.3"; }
+
+
+void Driver::usage() const {
+    std::cerr <<
+        program::kName << " " << shcVersion() << " - the Shalimar compiler\n"
+        "\n"
+        "usage: shc [options] file.shm\n"
+        "\n"
+        "  -o <path>          where the result goes\n"
+        "  -S                 stop after writing assembly\n"
+        "  -c                 stop after assembling\n"
+        "  --target=<name>    arm64-darwin | x86_64-linux | x86_64-windows | tms6747\n"
+        "                     (tms6747 is assembled on any host by asm6x, the\n"
+        "                     project's C6000 assembler - SHALIMAR_AS, or the one beside\n"
+        "                     shc - and linked into a .out by TI's lnk6x where CCS\n"
+        "                     is: SHALIMAR_TI names its C6000 compiler directory,\n"
+        "                     SHALIMAR_TILIB one holding rts6740_elf_eh.lib)\n"
+        "  --runtime=<path>   the runtime archive to link against; for tms6747 the\n"
+        "                     directory of its assembly, lib/shmrt-tms6747\n"
+        "  --with=<path>      a library holding what 'uses' declared;\n"
+        "                     repeatable, linked in the order given\n"
+        "  --no-search        do not look in the other files beside this one\n"
+        "  --version          say which shc this is, and stop\n"
+        "  -g                 write debug information, so lldb, gdb or cdb can stop on\n"
+        "                     a line and show the variables; nothing else changes\n"
+        "  --debug            link the runtime a debugger can stop, which\n"
+        "                     changes nothing about what is compiled\n"
+        "\n"
+        "  A call to a function this file does not define is looked for in the\n"
+        "  other Shalimar files beside it, and what is found is compiled in.\n"
+        "  There is nothing to declare and nothing to list: a program becomes\n"
+        "  a library by renaming its main() to something a caller can say.\n"
+        "  Naming files after the program uses those instead of looking.\n";
+}
+
+std::string Driver::stem(const std::string &path) {
+    size_t slash = path.find_last_of("/\\");
+    std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
+    size_t dot = base.find_last_of('.');
+    return dot == std::string::npos ? base : base.substr(0, dot);
+}
+
+std::string Driver::leafOf(const std::string &path) {
+    size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+std::string Driver::directoryOf(const std::string &path) {
+    size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? std::string(".") : path.substr(0, slash);
+}
+
+bool Driver::readFile(const std::string &path, std::string &into) {
+    std::ifstream in(path.c_str(), std::ios::binary);
+    if (!in) return false;
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    into = buffer.str();
+    return true;
+}
+
+bool Driver::writeFile(const std::string &path, const std::string &text) {
+    std::ofstream out(path.c_str(), std::ios::binary);
+    if (!out) return false;
+    out << text;
+    return out.good();
+}
+
+bool Driver::looksLikeShalimar(const std::string &name) {
+    const char *suffixes[] = {".shl", ".shm"};
+    for (int i = 0; i < 2; ++i) {
+        const size_t n = std::string(suffixes[i]).size();
+        if (name.size() > n && name.compare(name.size() - n, n, suffixes[i]) == 0) return true;
+    }
+    return false;
+}
+
+static std::vector<std::string> filesIn(const std::string &directory, bool (*take)(const std::string &)) {
+    std::vector<std::string> found;
+#ifdef _WIN32
+    WIN32_FIND_DATAA entry;
+    HANDLE handle = FindFirstFileA((directory + "\\*").c_str(), &entry);
+    if (handle == INVALID_HANDLE_VALUE) return found;
+    do {
+        if (take(entry.cFileName))
+            found.push_back(directory + "\\" + entry.cFileName);
+    } while (FindNextFileA(handle, &entry));
+    FindClose(handle);
+#else
+    DIR *open = opendir(directory.c_str());
+    if (!open) return found;
+    while (struct dirent *entry = readdir(open)) {
+        if (take(entry->d_name))
+            found.push_back(directory + "/" + entry->d_name);
+    }
+    closedir(open);
+#endif
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
+std::vector<std::string> Driver::shalimarFilesIn(const std::string &directory) {
+    return filesIn(directory, looksLikeShalimar);
+}
+
+// The C6000 runtime is a directory of assembly, one .s per runtime source -
+// macOS leaves "name 2.s" copies beside files it rewrites, and those are not
+// part of it.
+static bool looksLikeAssembly(const std::string &name) {
+    return name.size() > 2 && name.compare(name.size() - 2, 2, ".s") == 0 &&
+           name.find(' ') == std::string::npos;
+}
+
+std::vector<std::string> Driver::assemblyFilesIn(const std::string &directory) {
+    return filesIn(directory, looksLikeAssembly);
+}
+
+#ifdef _WIN32
+// ml64 and link are on PATH only inside a Developer Command Prompt, and an editor launched from
+// Explorer is not one. Found once, then every command runs through a batch file that sources
+// vcvars first - a file rather than a prefix because cmd's quote handling cannot be relied on with several quoted paths and an '&&'.
+static std::string findVcvars() {
+    char folder[MAX_PATH];
+    char temp[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, folder) != 0 &&
+        GetTempFileNameA(folder, program::kName, 0, temp) != 0) {
+        std::string ask =
+            "\"\"C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe\""
+            " -latest -products * -property installationPath > \"";
+        ask += temp; ask += "\"\"";
+        std::string root;
+        if (std::system(ask.c_str()) == 0) {
+            std::ifstream answer(temp);
+            std::getline(answer, root);
+        }
+        std::remove(temp);
+        while (!root.empty() && (root.back() == '\n' || root.back() == '\r')) root.pop_back();
+        if (!root.empty()) {
+            const std::string bat = root + "\\VC\\Auxiliary\\Build\\vcvars64.bat";
+            std::ifstream there(bat.c_str());
+            if (there) return bat;
+        }
+    }
+    static const char *const roots[] = {
+        "C:\\Program Files\\Microsoft Visual Studio\\2022\\",
+        "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\"
+    };
+    static const char *const editions[] = {
+        "Community", "Professional", "Enterprise", "BuildTools"
+    };
+    for (std::size_t r = 0; r < sizeof roots / sizeof roots[0]; ++r) {
+        for (std::size_t e = 0; e < sizeof editions / sizeof editions[0]; ++e) {
+            const std::string bat = std::string(roots[r]) + editions[e] +
+                                    "\\VC\\Auxiliary\\Build\\vcvars64.bat";
+            std::ifstream there(bat.c_str());
+            if (there) return bat;
+        }
+    }
+    return std::string();
+}
+
+static std::string developerShell() {
+    const char *inside = std::getenv("VCToolsInstallDir");
+    if (inside != nullptr && inside[0] != '\0') return std::string();
+    static bool asked = false;
+    static std::string cached;
+    if (!asked) { asked = true; cached = findVcvars(); }
+    return cached;
+}
+#endif
+
+int Driver::shell(const std::string &command) {
+#ifdef _WIN32
+    // cmd /c strips the outer quotes of a command that begins and ends with
+    // one, so it is given a pair of its own to eat.
+    const std::string vcvars = developerShell();
+    if (vcvars.empty()) return std::system(("\"" + command + "\"").c_str());
+
+    char folder[MAX_PATH];
+    char script[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, folder) == 0 ||
+        GetTempFileNameA(folder, program::kName, 0, script) == 0) {
+        return std::system(("\"" + command + "\"").c_str());
+    }
+    // **The reserved name is kept until the script is done**: removed first, a
+    // second compiler running at once was handed it and overwrote this script.
+    std::string batch = script;
+    batch += ".cmd";
+    {
+        std::ofstream out(batch.c_str());
+        if (!out) { std::remove(script); return std::system(("\"" + command + "\"").c_str()); }
+        out << "@echo off\n";
+        out << "call \"" << vcvars << "\" >nul 2>&1\n";
+        out << command << "\n";
+    }
+    const int rc = std::system(("\"" + batch + "\"").c_str());
+    std::remove(batch.c_str());
+    std::remove(script);
+    return rc;
+#else
+    return std::system(command.c_str());
+#endif
+}
+
+static std::string shellQuote(const std::string &path) {
+    return "\"" + path + "\"";
+}
+
+static bool exists(const std::string &path) {
+    std::ifstream file(path.c_str());
+    return file.good();
+}
+
+static std::string programDirectory(const std::string &argv0) {
+    std::string full;
+
+#if defined(_WIN32)
+    char buffer[MAX_PATH];
+    DWORD wrote = GetModuleFileNameA(NULL, buffer, sizeof buffer);
+    if (wrote > 0 && wrote < sizeof buffer) full.assign(buffer, wrote);
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(NULL, &size);
+    std::vector<char> buffer(size + 1, '\0');
+    if (size != 0 && _NSGetExecutablePath(&buffer[0], &size) == 0)
+        full = &buffer[0];
+#else
+    char buffer[4096];
+    ssize_t wrote = readlink("/proc/self/exe", buffer, sizeof buffer - 1);
+    if (wrote > 0) full.assign(buffer, static_cast<size_t>(wrote));
+#endif
+
+    if (full.empty()) full = argv0;
+
+#ifndef _WIN32
+
+    char resolved[PATH_MAX];
+    if (realpath(full.c_str(), resolved) != NULL) full = resolved;
+#endif
+
+    size_t slash = full.find_last_of("/\\");
+    return slash == std::string::npos ? std::string(".") : full.substr(0, slash);
+}
+
+std::string Driver::defaultRuntimeObject(const std::string &targetName) const {
+#ifdef _WIN32
+    const char *extension = ".lib";
+#else
+    const char *extension = ".a";
+#endif
+    // The C6000 runtime is not an archive but a directory of the assembly
+    // cpp11 wrote for it, lib/shmrt-tms6747, which asm6x assembles with the
+    // program.
+    if (targetName == "tms6747") extension = "";
+    const std::string leaf =
+        "/shmrt-" + targetName + (debug_ ? "-debug" : "") + extension;
+    const std::string here = programDirectory(program_);
+
+    const std::string beside = here + "/lib" + leaf;
+    if (exists(beside)) return beside;
+
+    const std::string installed = here + "/../lib" + leaf;
+    if (exists(installed)) return installed;
+
+    return beside;
+}
+
+// **A file name with `*` or `?` in it, expanded here**, as cl does: cmd hands the pattern through as
+// written, and a POSIX shell only when it was quoted. The matches come back sorted; a plain name is itself.
+static std::vector<std::string> expandPattern(const std::string &arg) {
+    std::vector<std::string> found;
+    if (arg.find_first_of("*?") == std::string::npos || std::ifstream(arg.c_str()).good()) {
+        found.push_back(arg);
+        return found;
+    }
+#ifdef _WIN32
+    const size_t slash = arg.find_last_of("/\\");
+    const std::string dir = slash == std::string::npos ? std::string() : arg.substr(0, slash + 1);
+    WIN32_FIND_DATAA entry;
+    HANDLE h = FindFirstFileA(arg.c_str(), &entry);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) found.push_back(dir + entry.cFileName);
+        } while (FindNextFileA(h, &entry));
+        FindClose(h);
+    }
+    std::sort(found.begin(), found.end());
+#else
+    glob_t g;
+    if (glob(arg.c_str(), 0, nullptr, &g) == 0)
+        for (size_t k = 0; k < g.gl_pathc; k++) found.push_back(g.gl_pathv[k]);
+    globfree(&g);
+#endif
+    return found;
+}
+
+bool Driver::parseArguments(const std::vector<std::string> &arguments) {
+    for (size_t i = 1; i < arguments.size(); ++i) {
+        const std::string &a = arguments[i];
+        if (a == "-o" && i + 1 < arguments.size()) {
+            output_ = arguments[++i];
+        } else if (a == "-S") {
+            assemblyOnly_ = true;
+        } else if (a == "-c") {
+            objectOnly_ = true;
+        } else if (a.compare(0, 9, "--target=") == 0) {
+            targetName_ = a.substr(9);
+        } else if (a.compare(0, 10, "--runtime=") == 0) {
+            runtimeObject_ = a.substr(10);
+        } else if (a.compare(0, 7, "--with=") == 0) {
+            // A library holding what `uses <...> = f(...)` declared. Named on the command line
+            // rather than in the source, for the reason C splits a header from -l: the program says
+            // what it calls, the build says where that lives. Repeatable, and given to the linker in the order written.
+            libraries_.push_back(a.substr(7));
+        } else if (a == "--no-search") {
+            search_ = false;
+        } else if (a == "-O0") {
+            optimize_ = 0;
+        } else if (a == "-O1") {
+            optimize_ = 1;
+        } else if (a == "-O2") {
+            optimize_ = 2;
+        } else if (a == "--debug") {
+            debug_ = true;
+        } else if (a == "-g") {
+            debugInfo_ = true;
+        } else if (a == "--version") {
+            std::cout << bannerLine() << "\n";
+            answered_ = true;
+            return false;
+        } else if (a == "-h" || a == "--help") {
+            usage();
+            answered_ = true;
+            return false;
+        } else if (a == "-nologo") {
+            quiet_ = true;
+        } else if (!a.empty() && a[0] == '-') {
+            std::cerr << program::kName << ": unknown option " << a << "\n";
+            return false;
+        } else {
+            // The program is the first file named, so a pattern standing for it must name one; the
+            // rest are companions, taken once each and never the program again.
+            std::vector<std::string> found = expandPattern(a);
+            if (found.empty()) {
+                std::cerr << program::kName << ": no file matches " << a << "\n";
+                return false;
+            }
+            if (input_.empty() && found.size() > 1) {
+                std::cerr << program::kName << ": " << a << " matches " << found.size()
+                          << " files, and the first file named is the program - name it, then the rest\n";
+                return false;
+            }
+            for (const std::string &f : found) {
+                if (input_.empty()) input_ = f;
+                else if (f != input_ && std::find(companions_.begin(), companions_.end(), f) == companions_.end())
+                    companions_.push_back(f);
+            }
+        }
+    }
+    if (input_.empty()) {
+        usage();
+        return false;
+    }
+    // **A unit is named by its file's bare name**, so two files of one name would be one unit twice.
+    for (size_t i = 0; i < companions_.size(); ++i) {
+        const std::string &seen = leafOf(companions_[i]) == leafOf(input_) ? input_ : std::string();
+        std::string other = seen;
+        for (size_t k = 0; k < i && other.empty(); ++k)
+            if (leafOf(companions_[k]) == leafOf(companions_[i])) other = companions_[k];
+        if (!other.empty()) {
+            std::cerr << program::kName << ": " << other << " and " << companions_[i]
+                      << " would both be the unit " << leafOf(companions_[i]) << "\n";
+            return false;
+        }
+    }
+    if (targetName_.empty()) targetName_ = Target::hostName();
+    return true;
+}
+
+int Driver::run(const std::vector<std::string> &arguments) {
+    program_ = arguments.empty() ? program::kName : arguments[0];
+    // **A question answered is not a failure.** --version and --help leave with 0 and a bad argument with 2; both used to be 2.
+    if (!parseArguments(arguments)) return answered_ ? 0 : 2;
+
+    // **Before each compile, once the arguments are known good.** cc1 and cxx1 print their banner the same way; -nologo omits it.
+    saysDone_ = !quiet_;
+    if (!quiet_) std::cerr << bannerLine() << "\n";
+
+    std::unique_ptr<Target> target = Target::forName(targetName_);
+    if (!target) {
+        std::cerr << program::kName << ": unknown target " << targetName_ << "\n";
+        return 2;
+    }
+
+    std::vector<std::string> files;
+    files.push_back(input_);
+    if (!companions_.empty()) {
+        for (const std::string &name : companions_) files.push_back(name);
+    } else if (search_) {
+        for (const std::string &beside : shalimarFilesIn(directoryOf(input_))) {
+            if (beside != input_ && stem(beside) != stem(input_)) files.push_back(beside);
+        }
+    }
+
+    Diagnostics diagnostics;
+    std::vector<std::string> names;
+    for (const std::string &path : files) names.push_back(leafOf(path));
+    diagnostics.nameUnits(names);
+
+    std::vector<Unit> units;
+    for (size_t i = 0; i < files.size(); ++i) {
+        std::string source;
+        if (!readFile(files[i], source)) {
+            std::cerr << program::kName << ": cannot read " << files[i] << "\n";
+            return 2;
+        }
+
+        LexResult lexed = tokenize(source);
+        if (lexed.failed) {
+
+            if (i > 0) {
+                std::cerr << program::kName << ": ignoring " << names[i] << ": " << lexed.error << "\n";
+                continue;
+            }
+            diagnostics.error(static_cast<int>(i), lexed.errorLine, lexed.error);
+            std::string text;
+            diagnostics.writeTo(text);
+            std::cout << text;
+            return 1;
+        }
+
+        Diagnostics quiet;
+        Parser parser(lexed.tokens, i == 0 ? diagnostics : quiet, static_cast<int>(i));
+        std::unique_ptr<Program> parsed = parser.parse();
+        if (i > 0) {
+            if (!parsed) {
+                std::string why;
+                quiet.writeTo(why);
+                if (!why.empty() && why[why.size() - 1] == '\n') why.resize(why.size() - 1);
+                std::cerr << program::kName << ": ignoring " << names[i] << ": " << why << "\n";
+                continue;
+            }
+            Unit other;
+            other.name = names[i];
+            other.program = std::move(parsed);
+            units.push_back(std::move(other));
+            continue;
+        }
+        Unit first;
+        first.name = names[0];
+        first.program = std::move(parsed);
+        units.insert(units.begin(), std::move(first));
+    }
+
+    std::unique_ptr<Program> program;
+    if (!units.empty() && units[0].program) program = std::move(units[0].program);
+    if (diagnostics.hasUnsupported()) {
+        for (const Message &m : diagnostics.unsupportedItems()) {
+            std::cerr << program::kName << ": not compiled yet: " << m.text
+                      << " (line " << m.line << ")\n";
+        }
+        return 3;
+    }
+    if (!program) {
+        std::string text;
+        diagnostics.writeTo(text);
+        std::cout << text;
+        return 1;
+    }
+
+    if (program && units.size() > 1) {
+        std::vector<Unit> others(std::make_move_iterator(units.begin() + 1),
+                                 std::make_move_iterator(units.end()));
+        Resolver resolver(diagnostics);
+        if (!resolver.resolve(units[0] = Unit{names[0], std::move(program)}, others)) {
+            std::string text;
+            diagnostics.writeTo(text);
+            std::cout << text;
+            return 1;
+        }
+        program = std::move(units[0].program);
+
+        for (const std::string &from : resolver.used())
+            std::cerr << program::kName << ": also compiled " << from << "\n";
+    }
+
+    Checker checker(diagnostics);
+    const bool sound = checker.check(*program);
+    {
+        std::string text;
+        diagnostics.writeTo(text);
+        std::cout << text;
+    }
+
+    if (diagnostics.hasUnsupported()) {
+        for (const Message &m : diagnostics.unsupportedItems()) {
+            std::cerr << program::kName << ": not compiled yet: " << m.text
+                      << " (line " << m.line << ")\n";
+        }
+        return 3;
+    }
+    if (!sound) return 1;
+
+    // **A declaration without a library is a link failure this compiler can see coming.** With
+    // nothing named by --with= the linker would say "undefined symbol _f", which names neither the
+    // declaration nor the cure; said here instead, and only when linking, since -c and -S leave the link to somebody who may bring the library.
+    if (!program->foreign().empty() && libraries_.empty() &&
+        !objectOnly_ && !assemblyOnly_) {
+        std::cerr << program::kName << ": '" << program->foreign()[0].name
+                  << "' is declared with 'uses' and comes from a library, but no\n"
+                     "     library was named. Add --with=<path> - see"
+                     " docs/FOREIGN.md.\n";
+        return 1;
+    }
+
+    std::unique_ptr<Emitter> emitter = debugInfo_ ? target->newDebugEmitter() : target->newEmitter();
+    emitter->setOptimize(optimize_);
+    if (debugInfo_) emitter->setDebugInfo(files, workingDirectory());
+    CodeGen generator(*emitter);
+    generator.run(*program, input_, names);
+
+    const bool named = !output_.empty();
+    const bool ti = target->name() == "tms6747";
+    if (output_.empty()) {
+        output_ = stem(input_);
+
+        if (ti) { if (!assemblyOnly_ && !objectOnly_) output_ += ".out"; }
+#ifdef _WIN32
+        else if (!assemblyOnly_ && !objectOnly_) output_ += ".exe";
+#endif
+    }
+
+    const std::string assemblyPath =
+        assemblyOnly_ ? output_ : output_ + (debugInfo_ ? target->debugAssemblyExtension()
+                                                        : target->assemblyExtension());
+    if (!writeFile(assemblyPath, emitter->text())) {
+        std::cerr << program::kName << ": cannot write " << assemblyPath << "\n";
+        return 2;
+    }
+    if (assemblyOnly_) { produced_.push_back(assemblyPath); return 0; }
+
+    if (ti) return finishTi(assemblyPath, named);
+
+    if (!target->isHost()) {
+        std::cerr << program::kName << ": " << targetName_ << " assembly is in " << assemblyPath
+                  << "; this host can only assemble " << Target::hostName() << "\n";
+        return 2;
+    }
+
+    if (runtimeObject_.empty()) runtimeObject_ = defaultRuntimeObject(targetName_);
+
+#ifdef _WIN32
+
+    const std::string objectPath =
+        objectOnly_ ? (named ? output_ : output_ + ".obj") : output_ + ".obj";
+
+    // The assembler is ml64 unless SHALIMAR_AS names another that takes its
+    // command line - the project's own does, and RIDE names it this way, as
+    // it names c90's and cpp11's through C90_AS and CPP11_AS.
+    const char *as = std::getenv(program::env("AS").c_str());
+    const std::string assembler = (as != nullptr && as[0] != '\0') ? shellQuote(as) : "ml64";
+    std::string command = assembler + " /nologo /c /Fo" + shellQuote(objectPath) + " " +
+                          shellQuote(assemblyPath);
+    // **-g is the GNU spelling, and clang assembles it** - the road cpp11 took: MASM has no words
+    // for a line table, and clang's COFF assembler writes the CodeView that link.exe /DEBUG makes a PDB of.
+    if (debugInfo_) {
+        const std::string clang = windowsClang();
+        if (clang.empty()) {
+            std::cerr << program::kName << ": -g on this target needs clang to assemble the debug information,\n"
+                         "     and none was found - Visual Studio's 'C++ Clang tools' component, LLVM under\n"
+                         "     Program Files, or clang.exe on the PATH; " << program::env("CLANG")
+                      << " names one\n";
+            std::remove(assemblyPath.c_str());
+            return 2;
+        }
+        command = shellQuote(clang) + " -target x86_64-pc-windows-msvc -c -x assembler -o " +
+                  shellQuote(objectPath) + " " + shellQuote(assemblyPath);
+    }
+    int status = shell(command);
+    if (status != 0) {
+        std::cerr << program::kName << ": the assembler failed - the command was:\n  " << command << "\n";
+        noteWindowsToolchain();
+        std::remove(assemblyPath.c_str());
+        return 2;
+    }
+    std::remove(assemblyPath.c_str());
+    if (objectOnly_) { produced_.push_back(objectPath); return 0; }
+
+    // And the linker the same way: SHALIMAR_LD names one that takes link.exe's
+    // command line - the project's own does - else Microsoft's.
+    const char *ld = std::getenv(program::env("LD").c_str());
+    const std::string linker = (ld != nullptr && ld[0] != '\0') ? shellQuote(ld) : "link";
+    // /debug makes the PDB cdb reads; /incremental:no with it, or every call goes through an
+    // ILT thunk the linker adds and a debugger stepping into a runtime call lands in the thunk.
+    command = linker + " /nologo /subsystem:console" + (debugInfo_ ? " /debug /incremental:no" : "") +
+              " /out:" + shellQuote(output_) + " " + shellQuote(objectPath);
+    for (std::size_t i = 0; i < libraries_.size(); ++i)
+        command += " " + shellQuote(libraries_[i]);
+    command += " " + shellQuote(runtimeObject_);
+    status = shell(command);
+
+    std::remove(objectPath.c_str());
+    if (status != 0) {
+        std::cerr << program::kName << ": the linker failed - the command was:\n  " << command << "\n";
+        noteWindowsToolchain();
+        return 2;
+    }
+    produced_.push_back(output_);
+    return 0;
+#else
+    std::string command;
+    // -g on the link line too: on a Mac that is what makes clang run dsymutil, so the debug
+    // information outlives the object the driver assembled and discarded.
+    const std::string gnuDebug = debugInfo_ ? " -g" : "";
+    if (objectOnly_) {
+        command = "c++" + gnuDebug + " -c -o " + shellQuote(named ? output_ : output_ + ".o") + " " +
+                  shellQuote(assemblyPath);
+    } else {
+        // **-lm, named rather than relied upon:** a borrowed `sin` is a direct call to libm, which older glibc does not link without it - docs/FOREIGN.md.
+        command = "c++" + gnuDebug + " -o " + shellQuote(output_) + " " + shellQuote(assemblyPath);
+        // Before the runtime, because a library may call into it and a linker
+        // reads left to right.
+        for (std::size_t i = 0; i < libraries_.size(); ++i)
+            command += " " + shellQuote(libraries_[i]);
+        command += " " + shellQuote(runtimeObject_) + " -lm";
+    }
+
+    const int status = shell(command);
+    std::remove(assemblyPath.c_str());
+    if (status == 0) produced_.push_back(objectOnly_ && !named ? output_ + ".o" : output_);
+    return status == 0 ? 0 : 2;
+#endif
+}
+
+// **Wherever a clang is, on the Windows box**: SHALIMAR_CLANG, Visual Studio's own (the "C++ Clang
+// tools" component, in any edition), a standalone LLVM, then the PATH - cpp11's search, measured there.
+std::string Driver::windowsClang() {
+#ifdef _WIN32
+    const char *env = std::getenv(program::env("CLANG").c_str());
+    if (env != nullptr && env[0] != '\0') return env;
+    std::vector<std::string> tries;
+    const std::string llvm = "\\VC\\Tools\\Llvm\\x64\\bin\\clang.exe";
+    const char *vc = std::getenv("VCINSTALLDIR");
+    if (vc != nullptr && vc[0] != '\0') tries.push_back(std::string(vc) + "Tools\\Llvm\\x64\\bin\\clang.exe");
+    const char *pf = std::getenv("ProgramFiles");
+    if (pf != nullptr && pf[0] != '\0') {
+        static const char *const editions[] = {"Community", "Professional", "Enterprise", "BuildTools"};
+        for (const char *e : editions)
+            tries.push_back(std::string(pf) + "\\Microsoft Visual Studio\\2022\\" + e + llvm);
+        tries.push_back(std::string(pf) + "\\LLVM\\bin\\clang.exe");
+    }
+    char onPath[MAX_PATH];
+    if (SearchPathA(nullptr, "clang.exe", nullptr, MAX_PATH, onPath, nullptr) > 0) tries.push_back(onPath);
+    for (std::size_t i = 0; i < tries.size(); i++)
+        if (exists(tries[i])) return tries[i];
+    return std::string();
+#else
+    return "clang";
+#endif
+}
+
+// The directory a debugger resolves the source names against - DW_AT_comp_dir.
+std::string Driver::workingDirectory() {
+#ifdef _WIN32
+    char buffer[MAX_PATH];
+    const DWORD n = GetCurrentDirectoryA(sizeof buffer, buffer);
+    return n > 0 && n < sizeof buffer ? std::string(buffer) : std::string();
+#else
+    char buffer[PATH_MAX];
+    return getcwd(buffer, sizeof buffer) != nullptr ? std::string(buffer) : std::string();
+#endif
+}
+
+// The linker command file lnk6x needs: one flat memory for the C6747 and
+// every section the compilers and TI's runtime write placed in it - the same
+// file RIDE, cpp11 and VM6747's tests link with.
+static const char *const kTiLinkCommands =
+    "--rom_model\n"
+    "--stack_size=0x4000\n"
+    "--heap_size=0x100000\n"
+    "MEMORY\n"
+    "{\n"
+    "    RAM : origin = 0xC0000000, length = 0x04000000\n"
+    "}\n"
+    "SECTIONS\n"
+    "{\n"
+    "    .text        > RAM\n"
+    "    .const       > RAM\n"
+    "    .data        > RAM\n"
+    "    .bss         > RAM\n"
+    "    .far         > RAM\n"
+    "    .fardata     > RAM\n"
+    "    .neardata    > RAM\n"
+    "    .rodata      > RAM\n"
+    "    .cinit       > RAM\n"
+    "    .init_array  > RAM\n"
+    "    .switch      > RAM\n"
+    "    .cio         > RAM\n"
+    "    .stack       > RAM\n"
+    "    .sysmem      > RAM\n"
+    "    .vm6747.eh   > RAM\n"
+    "}\n";
+
+static std::string environment(const char *name) {
+    const char *value = std::getenv(name);
+    return value != nullptr ? std::string(value) : std::string();
+}
+
+// **The tms6747 target reaches an object on any host and a program where CCS is.** asm6x takes the assembly -
+// SHALIMAR_AS names it, else the one beside this program, else PATH - and without -c the object, the runtime's objects
+// and the libraries go to TI's lnk6x into a .out: SHALIMAR_TI names CCS's compiler directory, SHALIMAR_TILIB one holding rts6740_elf_eh.lib, SHALIMAR_LD the linker.
+int Driver::finishTi(const std::string &assemblyPath, bool named) {
+    std::string assembler = environment(program::env("AS").c_str());
+    if (assembler.empty()) {
+        const std::string here = programDirectory(program_);
+        if (exists(here + "/asm6x.exe")) assembler = here + "/asm6x.exe";
+        else if (exists(here + "/asm6x")) assembler = here + "/asm6x";
+        else assembler = "asm6x";
+    }
+    const std::string objectPath =
+        objectOnly_ ? (named ? output_ : output_ + ".obj") : output_ + ".obj";
+    std::string command = shellQuote(assembler) + " " + shellQuote(assemblyPath) +
+                          " -o " + shellQuote(objectPath);
+    int status = shell(command);
+    std::remove(assemblyPath.c_str());
+    if (status != 0) {
+        std::cerr << program::kName << ": the assembler failed - the command was:\n  " << command << "\n"
+                  << "     asm6x is the project's C6000 assembler; SHALIMAR_AS names it\n";
+        return 2;
+    }
+    if (objectOnly_) { produced_.push_back(objectPath); return 0; }
+
+    // the runtime: every .s of the directory, assembled beside the program's object
+    std::vector<std::string> made;
+    made.push_back(objectPath);
+    if (runtimeObject_.empty()) runtimeObject_ = defaultRuntimeObject("tms6747");
+    std::vector<std::string> runtime = assemblyFilesIn(runtimeObject_);
+    if (runtime.empty()) {
+        std::cerr << program::kName << ": no C6000 runtime at " << runtimeObject_
+                  << " - a directory of the assembly cpp11 wrote for it, lib/shmrt-tms6747;"
+                     " --runtime= names it\n";
+        std::remove(objectPath.c_str());
+        return 2;
+    }
+    for (size_t i = 0; i < runtime.size(); ++i) {
+        const std::string object = output_ + "-rt" + std::to_string(i) + ".obj";
+        command = shellQuote(assembler) + " " + shellQuote(runtime[i]) + " -o " + shellQuote(object);
+        if (shell(command) != 0) {
+            std::cerr << program::kName << ": the assembler failed on the runtime - the command was:\n  " << command << "\n";
+            for (size_t k = 0; k < made.size(); ++k) std::remove(made[k].c_str());
+            return 2;
+        }
+        made.push_back(object);
+    }
+
+    std::string linker = environment(program::env("LD").c_str());
+    const std::string ti = environment(program::env("TI").c_str());
+    if (linker.empty()) {
+        if (!ti.empty()) linker = exists(ti + "/bin/lnk6x.exe") ? ti + "/bin/lnk6x.exe" : ti + "/bin/lnk6x";
+        else linker = "lnk6x";
+    }
+    std::vector<std::string> libraryDirs;
+    if (!ti.empty()) libraryDirs.push_back(ti + "/lib");
+    const std::string tilib = environment(program::env("TILIB").c_str());
+    if (!tilib.empty()) libraryDirs.push_back(tilib);
+    std::string rts = "rts6740_elf.lib";
+    for (size_t i = 0; i < libraryDirs.size(); ++i)
+        if (exists(libraryDirs[i] + "/rts6740_elf_eh.lib")) rts = "rts6740_elf_eh.lib";
+    const std::string commandFile = output_ + ".lnk.cmd";
+    if (!writeFile(commandFile, kTiLinkCommands)) {
+        std::cerr << program::kName << ": cannot write " << commandFile << "\n";
+        for (size_t k = 0; k < made.size(); ++k) std::remove(made[k].c_str());
+        return 2;
+    }
+    command = shellQuote(linker) + " -mv6740 --abi=eabi";
+    for (size_t i = 0; i < libraryDirs.size(); ++i) command += " -i " + shellQuote(libraryDirs[i]);
+    command += " " + shellQuote(commandFile);
+    for (size_t k = 0; k < made.size(); ++k) command += " " + shellQuote(made[k]);
+    for (size_t i = 0; i < libraries_.size(); ++i) command += " " + shellQuote(libraries_[i]);
+    command += " -l " + rts + " -o " + shellQuote(output_);
+    status = shell(command);
+    for (size_t k = 0; k < made.size(); ++k) std::remove(made[k].c_str());
+    std::remove(commandFile.c_str());
+    if (status != 0) {
+        std::cerr << program::kName << ": the linker failed - the command was:\n  " << command << "\n"
+                  << "     lnk6x and rts6740_elf.lib are TI's, under CCS's C6000 compiler\n"
+                     "     directory: SHALIMAR_TI names it, SHALIMAR_TILIB a directory holding\n"
+                     "     rts6740_elf_eh.lib, SHALIMAR_LD the linker itself\n";
+        return 2;
+    }
+    produced_.push_back(output_);
+    return 0;
+}
+
+void Driver::noteWindowsToolchain() {
+#ifdef _WIN32
+    std::cerr << program::kName << ": ml64 and link ship with Visual Studio and are on PATH only inside\n"
+        "     a Developer Command Prompt, or after vcvars64.bat has been run;\n"
+        "     " << program::env("AS") << " names another assembler that takes ml64's command line.\n";
+#endif
+}
+
+}

@@ -33,6 +33,16 @@ namespace Gride
         literal int EM_SETUNDOLIMIT        = 0x0452;
         literal int EM_GETSCROLLPOS        = 0x04DD;
         literal int EM_SETSCROLLPOS        = 0x04DE;
+
+        // a job object holds a running program and everything it starts, so Stop ends the whole tree
+        [DllImport("kernel32.dll", EntryPoint = "CreateJobObjectW", CharSet = CharSet::Unicode, SetLastError = true)]
+        static IntPtr CreateJobObject(IntPtr attributes, String^ name);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [returnvalue: MarshalAs(UnmanagedType::Bool)] static bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [returnvalue: MarshalAs(UnmanagedType::Bool)] static bool TerminateJobObject(IntPtr job, unsigned int exitCode);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [returnvalue: MarshalAs(UnmanagedType::Bool)] static bool CloseHandle(IntPtr handle);
     };
 
     public ref class AppInfo abstract sealed
@@ -47,10 +57,19 @@ namespace Gride
 
     // ---------------------------------------------------------------- JSON
     // Load an object of DataContract type T from a JSON file.
+    // a dictionary is written as a JSON object (RIDE's "options": { "debug": { ... } }), not as key/value pairs
+    template<typename T>
+    DataContractJsonSerializer^ JsonSerializerFor()
+    {
+        DataContractJsonSerializerSettings^ settings = gcnew DataContractJsonSerializerSettings();
+        settings->UseSimpleDictionaryFormat = true;
+        return gcnew DataContractJsonSerializer(T::typeid, settings);
+    }
+
     template<typename T>
     T^ JsonLoad(String^ path)
     {
-        DataContractJsonSerializer^ ser = gcnew DataContractJsonSerializer(T::typeid);
+        DataContractJsonSerializer^ ser = JsonSerializerFor<T>();
         T^ result = nullptr;
         FileStream^ fs = File::OpenRead(path);
         try
@@ -69,7 +88,7 @@ namespace Gride
     template<typename T>
     void JsonSave(String^ path, T^ obj)
     {
-        DataContractJsonSerializer^ ser = gcnew DataContractJsonSerializer(T::typeid);
+        DataContractJsonSerializer^ ser = JsonSerializerFor<T>();
         MemoryStream^ ms = gcnew MemoryStream();
         System::Xml::XmlDictionaryWriter^ w =
             JsonReaderWriterFactory::CreateJsonWriter(ms, Encoding::UTF8, false, true, "  ");
@@ -94,7 +113,7 @@ namespace Gride
     template<typename T>
     T^ JsonClone(T^ obj)
     {
-        DataContractJsonSerializer^ ser = gcnew DataContractJsonSerializer(T::typeid);
+        DataContractJsonSerializer^ ser = JsonSerializerFor<T>();
         MemoryStream^ ms = gcnew MemoryStream();
         ser->WriteObject(ms, obj);
         ms->Position = 0;
@@ -222,6 +241,88 @@ namespace Gride
         {
             if (l == nullptr) return String::Empty;
             return String::Join(";", l->ToArray());
+        }
+
+        // an argument quoted so a program's command-line parser reads it back whole (CommandLineToArgvW's
+        // rules: backslashes doubled before a quote, the quote escaped); RIDE quotes every argument
+        static String^ QuoteArgument(String^ a)
+        {
+            if (a == nullptr) a = String::Empty;
+            StringBuilder^ sb = gcnew StringBuilder("\"");
+            int slashes = 0;
+            for each (wchar_t c in a)
+            {
+                if (c == L'\\') { slashes++; continue; }
+                if (c == L'"') { sb->Append(L'\\', slashes * 2 + 1)->Append(L'"'); slashes = 0; continue; }
+                if (slashes > 0) sb->Append(L'\\', slashes);
+                slashes = 0;
+                sb->Append(c);
+            }
+            if (slashes > 0) sb->Append(L'\\', slashes * 2);
+            return sb->Append(L'"')->ToString();
+        }
+
+        static String^ QuoteArguments(List<String^>^ args)
+        {
+            if (args == nullptr) return String::Empty;
+            List<String^>^ q = gcnew List<String^>();
+            for each (String^ a in args) q->Add(QuoteArgument(a));
+            return String::Join(" ", q->ToArray());
+        }
+
+        // a command line split into its arguments as a program reads them (quotes group, backslashes
+        // before a quote escape it) - the program's arguments typed on one line
+        static List<String^>^ SplitArguments(String^ s)
+        {
+            List<String^>^ r = gcnew List<String^>();
+            if (s == nullptr) return r;
+            StringBuilder^ cur = gcnew StringBuilder();
+            bool inQuotes = false, any = false;
+            int n = s->Length;
+            for (int i = 0; i < n; )
+            {
+                wchar_t c = s[i];
+                if (!inQuotes && (c == L' ' || c == L'\t'))
+                {
+                    if (any) { r->Add(cur->ToString()); cur->Clear(); any = false; }
+                    i++;
+                    continue;
+                }
+                any = true;
+                if (c == L'\\')
+                {
+                    int k = 0;
+                    while (i < n && s[i] == L'\\') { k++; i++; }
+                    if (i < n && s[i] == L'"')
+                    {
+                        if (k / 2 > 0) cur->Append(L'\\', k / 2);
+                        if (k % 2 == 1) { cur->Append(L'"'); i++; }
+                    }
+                    else cur->Append(L'\\', k);
+                    continue;
+                }
+                if (c == L'"')
+                {
+                    if (inQuotes && i + 1 < n && s[i + 1] == L'"') { cur->Append(L'"'); i += 2; continue; }
+                    inQuotes = !inQuotes;
+                    i++;
+                    continue;
+                }
+                cur->Append(c);
+                i++;
+            }
+            if (any) r->Add(cur->ToString());
+            return r;
+        }
+
+        // the arguments as one line again, quoted only where an argument needs it
+        static String^ JoinArguments(List<String^>^ args)
+        {
+            if (args == nullptr) return String::Empty;
+            List<String^>^ q = gcnew List<String^>();
+            for each (String^ a in args)
+                q->Add(a->Length == 0 || a->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) >= 0 ? QuoteArgument(a) : a);
+            return String::Join(" ", q->ToArray());
         }
     };
 

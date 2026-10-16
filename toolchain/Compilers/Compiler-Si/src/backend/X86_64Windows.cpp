@@ -1,0 +1,81 @@
+#include "X86_64Windows.h"
+
+namespace shalimar {
+
+void X86_64WindowsEmitter::beginModule(const std::string &sourceName) {
+    sourceName_ = sourceName;
+
+}
+
+void X86_64WindowsEmitter::beginFunction(const std::string &name) {
+    const std::string s = symbol(name);
+    noteDefined(s);
+    openProcedure_ = s;
+    blank();
+    raw("PUBLIC\t" + s);
+    raw(s + "\tPROC");
+    prologueMark_ = text_.size();
+}
+
+void X86_64WindowsEmitter::endFunction(int slots) {
+    emitEpilogue(slots);
+    raw(openProcedure_ + "\tENDP");
+    openProcedure_.clear();
+    text_.insert(prologueMark_, prologue(slots));
+}
+
+void X86_64WindowsEmitter::label(int id) {
+    raw(labelName(id) + ":");
+}
+
+void X86_64WindowsEmitter::emitGlobalBlock(int slots) {
+    globalSlots_ = slots;
+}
+
+void X86_64WindowsEmitter::openConstSection() {
+    raw("CONST\tSEGMENT");
+}
+
+void X86_64WindowsEmitter::closeConstSection() {
+    raw("CONST\tENDS");
+}
+
+void X86_64WindowsEmitter::endModule() {
+    std::string header;
+    header += "; " + sourceName_ + "\n";
+    header += "OPTION\tCASEMAP:NONE\n";
+
+    // **A C library function can share its name with an x87 instruction.** FABS is a mnemonic
+    // ml64 has known since the 8087, so `EXTRN fabs:PROC` answers `A2008: syntax error : fabs`;
+    // OPTION NOKEYWORD is MASM's own answer, safe module-wide because this compiler emits no x87 at all, and listed from the externals actually used.
+    std::string suppressed;
+    for (const std::string &name : externals()) {
+        if (name == "fabs") suppressed += (suppressed.empty() ? "" : " ") + name;
+    }
+    if (!suppressed.empty()) {
+        header += "OPTION\tNOKEYWORD:<" + suppressed + ">\n";
+    }
+
+    for (const std::string &name : externals()) {
+        header += "EXTRN\t" + name + ":PROC\n";
+    }
+    header += "\n_TEXT\tSEGMENT\n";
+
+    text_ = header + text_;
+    raw("_TEXT\tENDS");
+    if (globalSlots_ > 0) {
+        blank();
+        raw("_BSS\tSEGMENT");
+        raw(globalsLabel() + "\tQWORD\t" + std::to_string(globalSlots_) + " DUP (0)");
+        raw("_BSS\tENDS");
+    }
+    if (!data_.empty()) {
+        blank();
+        openConstSection();
+        text_ += data_;
+        closeConstSection();
+    }
+    raw("END");
+}
+
+}

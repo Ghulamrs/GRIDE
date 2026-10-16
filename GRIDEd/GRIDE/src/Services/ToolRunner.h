@@ -42,7 +42,7 @@ namespace Gride { namespace Services {
         literal int ExitStartFailed = -1;
         literal int ExitCancelled = -2;
 
-        ToolRunner() { cancelled = false; }
+        ToolRunner() { cancelled = false; lineLock = gcnew Object(); }
 
         event TextLineHandler^ Line;          // raised on worker / pool threads
 
@@ -169,10 +169,16 @@ namespace Gride { namespace Services {
 
     private:
         volatile bool cancelled;
+        Object^ lineLock;
 
+        // stdout and stderr are read on two pool threads: one line at a time to the handlers, so a handler
+        // collecting into a List (ProgramRunner::Capture for Verify) is never entered twice at once
         void OnData(Object^ sender, DataReceivedEventArgs^ e)
         {
-            if (e->Data != nullptr) Line(e->Data);
+            if (e->Data == nullptr) return;
+            System::Threading::Monitor::Enter(lineLock);
+            try { Line(e->Data); }
+            finally { System::Threading::Monitor::Exit(lineLock); }
         }
 
         static Encoding^ OutputEncoding(ToolRunOptions^ options)

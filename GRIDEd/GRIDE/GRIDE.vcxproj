@@ -92,11 +92,6 @@
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>main</EntryPointSymbol>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(SolutionDir)docs\" xcopy /Y /I /E /Q "$(SolutionDir)docs" "$(OutDir)docs\" &gt;nul
-exit /b 0</Command>
-      <Message>Copy help folder next to GRIDE.exe</Message>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -111,11 +106,6 @@ exit /b 0</Command>
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>main</EntryPointSymbol>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(SolutionDir)docs\" xcopy /Y /I /E /Q "$(SolutionDir)docs" "$(OutDir)docs\" &gt;nul
-exit /b 0</Command>
-      <Message>Copy help folder next to GRIDE.exe</Message>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -130,11 +120,6 @@ exit /b 0</Command>
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>main</EntryPointSymbol>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(SolutionDir)docs\" xcopy /Y /I /E /Q "$(SolutionDir)docs" "$(OutDir)docs\" &gt;nul
-exit /b 0</Command>
-      <Message>Copy help folder next to GRIDE.exe</Message>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -149,11 +134,6 @@ exit /b 0</Command>
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>main</EntryPointSymbol>
     </Link>
-    <PostBuildEvent>
-      <Command>if exist "$(SolutionDir)docs\" xcopy /Y /I /E /Q "$(SolutionDir)docs" "$(OutDir)docs\" &gt;nul
-exit /b 0</Command>
-      <Message>Copy help folder next to GRIDE.exe</Message>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -238,6 +218,12 @@ exit /b 0</Command>
   </ImportGroup>
   <Target Name="CopyToolchainFile" AfterTargets="Build">
     <Copy SourceFiles="$(ProjectDir)toolchain.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <!-- the help beside the exe (Help > View Help looks in docs beside it): an MSBuild copy, not the old post-build
+         xcopy, so the build needs no cmd.exe -->
+    <ItemGroup>
+      <GrideDocs Include="$(SolutionDir)docs\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(GrideDocs)" DestinationFiles="@(GrideDocs->'$(OutDir)docs\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(ProjectDir)lib\ccs\options-ccs74-C6000_8.2.tsv;$(ProjectDir)lib\ccs\options-ccs55-C6000_7.4.tsv" DestinationFolder="$(OutDir)lib\ccs" SkipUnchangedFiles="true" />
   </Target>
 </Project>

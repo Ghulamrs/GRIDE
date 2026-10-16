@@ -158,7 +158,7 @@ namespace Gride { namespace UI {
                 for each (GrideProject^ p in workspace->Projects)
                 {
                     String^ label = p->Name + "   [" + LanguageInfo::Name(p->Lang) + "]";
-                    if (p->IsCcs) label = p->Name + "   [CCS 7.4, read-only]";
+                    if (p->IsCcs) label = p->Name + "   [" + (p->Template != nullptr && p->Template->StartsWith("CCS 5.5") ? "CCS 5.5" : "CCS 7.4") + ", read-only]";
                     else if (p->IsVs) label = p->Name + "   [" + (p->Vs != nullptr && p->Vs->Version->Length > 0 ? p->Vs->Version->Split(L',')[0] : "Visual Studio") +
                                               (p->Vs != nullptr && p->Vs->Toolset->Length > 0 ? " " + p->Vs->Toolset : String::Empty) + ", read-only]";
                     TreeNode^ pn = MakeNode(label, FileIcons::ForProject(p), gcnew NodeInfo(NodeKind::Project, p, p->FilePath, nullptr));

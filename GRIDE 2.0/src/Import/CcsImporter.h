@@ -1,250 +1,164 @@
 #pragma once
 // ============================================================================
-//  GRIDE 2.0 - Code Composer Studio 7.4 project import (Phase 11)
-//  Reads the Eclipse ".project" and ".cproject" XML files and turns them into
-//  a READ-ONLY GrideProject: files can be viewed, nothing can be saved/built.
+//  GRIDE 2.0 - Code Composer Studio 7.4 / 5.5 projects (Phase 11, RIDE's
+//  reading since the RIDE port's R06)
+//  A CCS project folder holds three XML files - .project (Eclipse: the name,
+//  linked resources), .ccsproject (TI: the device, the compiler version, ELF or
+//  COFF), .cproject (CDT: the configurations and their options). CcsReading
+//  (CcsReading.h) reads them as RIDE does; this turns the reading into a
+//  READ-ONLY GrideProject that builds as RIDE builds one: the C6747, each
+//  configuration's mapped options, its exclusions, its linker command file and
+//  libraries, the program in the temporary directory - nothing is ever written
+//  into the CCS folder. The project is read afresh at every open and build.
 // ============================================================================
 #include "../Toolchain/Toolchain.h"
-
-using namespace System::Xml;
 
 namespace Gride
 {
     public ref class CcsImporter abstract sealed
     {
     public:
-        // path = the ".project" file (or the folder that contains it)
+        // .project, .ccsproject or .cproject: each opens its folder (RIDE)
+        static bool IsProjectFile(String^ path) { return CcsReading::IsProjectFile(path); }
+
+        // path = the project folder or one of its three files. A workspace folder is refused with RIDE's
+        // sentence naming its projects; RIDE's refusals of a project are notes, and the reading goes on.
         static GrideProject^ Import(String^ path)
         {
-            String^ dotProject = Directory::Exists(path) ? Path::Combine(path, ".project") : Path::GetFullPath(path);
-            if (!File::Exists(dotProject))
-                throw gcnew FileNotFoundException("No CCS/Eclipse .project file found.", dotProject);
-            String^ dir = Path::GetDirectoryName(dotProject);
+            String^ full = Path::GetFullPath(path);
+            String^ dir = Directory::Exists(full) ? full : Path::GetDirectoryName(full);
+            if (!CcsReading::IsProject(dir) && CcsWorkspace::IsWorkspace(dir))
+            {
+                String^ error;
+                CcsWorkspace^ ws = CcsWorkspace::Read(dir, error);
+                List<String^>^ names = gcnew List<String^>();
+                if (ws != nullptr) for each (CcsWorkspaceMember^ m in ws->Projects) names->Add(m->Name);
+                throw gcnew IOException(String::Format("{0} is a CCS workspace, not a project - open one of its projects: {1}",
+                                                       Path::GetFileName(dir->TrimEnd(L'\\', L'/')), names->Count == 0 ? Str("(none registered)") : String::Join(", ", names)));
+            }
+            // the workspace the folder is registered in gives WORKSPACE_LOC, the path variables and the build macros
+            CcsWorkspace^ ws = nullptr;
+            String^ wsDir = CcsWorkspace::WorkspaceOf(dir);
+            if (wsDir->Length > 0) { String^ error; ws = CcsWorkspace::Read(wsDir, error); }
+            CcsReading^ r = CcsReading::Read(dir, CompilerRoot(), ws);
+            return FromReading(r);
+        }
 
-            XmlDocument^ doc = gcnew XmlDocument();
-            doc->XmlResolver = nullptr;              // never fetch external DTDs
-            doc->Load(dotProject);
-            XmlNode^ nameNode = doc->SelectSingleNode("/projectDescription/name");
-            String^ name = nameNode != nullptr ? nameNode->InnerText->Trim() : Path::GetFileName(dir);
-            if (String::IsNullOrWhiteSpace(name)) name = Path::GetFileName(dir);
+        // what ${CG_TOOL_ROOT} is found from, in RIDE's order: the CCS installation named under Tools > Options
+        // (ccs.root: the project's compiler version under its tools\compiler), else TI's compiler directory -
+        // named there (ti), else the newest one found under the ccs section's roots
+        static String^ CompilerRoot()
+        {
+            String^ root = IdeSettingsPaths::CcsRoot;
+            if (!String::IsNullOrWhiteSpace(root)) return System::Environment::ExpandEnvironmentVariables(root->Trim()->Trim(L'"'));
+            String^ ti = TiCompiler::Dir();
+            return ti == nullptr ? String::Empty : ti;
+        }
 
+        // the reading as a GRIDE project
+        static GrideProject^ FromReading(CcsReading^ r)
+        {
+            String^ dir = r->Dir->Replace(L'/', L'\\');
             GrideProject^ p = gcnew GrideProject();
-            p->Name = name;
-            p->OutputName = name;
+            p->Name = r->Name;
+            p->OutputName = r->Name;
             p->Target = Names::TargetName(TargetKind::TMS6747);
-            p->FilePath = dotProject;
+            p->FilePath = Path::Combine(dir, ".project");
+            p->Configurations = gcnew List<BuildConfiguration^>();
+
+            // the files: every configuration's sources and command files, the folder's headers, the kinds RIDE
+            // does not build, and an excluded file all the same (shown, not built)
+            List<String^>^ all = gcnew List<String^>();
+            for each (CcsConfig^ c in r->Configs)
+            {
+                for each (String^ s in c->Sources) AddUnique(all, s);
+                for each (String^ s in c->Link->CmdFiles) AddUnique(all, s);
+                for each (String^ e in c->Excluded) { String^ abs = r->Dir + "/" + e; if (File::Exists(Native(abs))) AddUnique(all, abs); }
+            }
+            for each (String^ h in r->Headers) AddUnique(all, r->Dir + "/" + h);
+            for each (String^ n in r->NotBuilt) AddUnique(all, Rooted(n) ? n : r->Dir + "/" + n);
+            bool cpp = false;
+            for each (String^ f in all)
+            {
+                p->AddFile(Native(f));
+                String^ ext = Path::GetExtension(f)->ToLowerInvariant();
+                if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".c++") cpp = true;
+            }
+            p->Language = Names::LanguageName(cpp ? LanguageKind::Cpp11 : LanguageKind::C90);
+
+            // the configurations as GRIDE builds them: RIDE's mapping into the fields the engine reads
+            for each (CcsConfig^ c in r->Configs)
+            {
+                BuildConfiguration^ b = gcnew BuildConfiguration(c->IsDebug ? "Debug" : "Release");
+                b->Defines->AddRange(c->Defines);
+                // the compilers' configuration flags: CCS's optimisation (RIDE's default where it stored none:
+                // -O2 for Release, nothing for Debug; -O0 is never written) and -g as CCS says (RIDE's default
+                // where it did not); --no_compress is cpp11's (RIDE's cpp11.compress)
+                List<String^>^ flags = gcnew List<String^>();
+                String^ opt = c->Opt->Length > 0 ? c->Opt : (c->IsDebug ? String::Empty : Str("-O2"));
+                if (opt->Length > 0 && opt != "-O0") flags->Add(opt);
+                if (c->DebugSaid ? c->Debug : c->IsDebug) flags->Add("-g");
+                String^ common = String::Join(" ", flags);
+                b->ConfigFlagsByRole = gcnew Dictionary<String^, String^>();
+                b->ConfigFlagsByRole["cCompiler"] = common;
+                b->ConfigFlagsByRole["cppCompiler"] = c->NoCompress ? (common->Length > 0 ? common + " --no_compress" : Str("--no_compress")) : common;
+                List<String^>^ extra = gcnew List<String^>();
+                for each (String^ u in c->Undefines) extra->Add("-U" + u);
+                b->Flags = String::Join(" ", extra);
+                List<String^>^ link = gcnew List<String^>();
+                if (c->Link->Heap->Length > 0) link->Add("--heap_size=" + c->Link->Heap);
+                if (c->Link->Stack->Length > 0) link->Add("--stack_size=" + c->Link->Stack);
+                if (c->Link->RomModel == 1) link->Add("--rom_model");
+                else if (c->Link->RomModel == 0) link->Add("--ram_model");
+                b->LinkFlags = String::Join(" ", link);
+                b->OutputDir = Path::Combine(GrideProject::CcsBuildRoot(r->Name), b->Name);
+                for each (String^ i in c->Includes) b->IncludePathsHere->Add(Native(i));
+                for each (String^ s in c->Link->SearchPaths) b->LibraryDirs->Add(Native(s));
+                b->LibrariesHere->AddRange(c->Link->Libraries);
+                for each (String^ e in c->Excluded) b->ExcludedFiles->Add(Native(r->Dir + "/" + e));
+                b->LinkerCommandFiles = gcnew List<String^>();
+                for each (String^ cmd in c->Link->CmdFiles) b->LinkerCommandFiles->Add(Native(cmd));
+                p->Configurations->Add(b);
+
+                // what the tree shows under the project (read-only): RIDE's mapping of this configuration
+                CcsConfiguration^ shown = gcnew CcsConfiguration();
+                shown->Name = c->Name;
+                shown->Options->AddRange(c->Mapped);
+                for each (String^ cmd in c->Link->CmdFiles) shown->Options->Add("linker command file: " + cmd);
+                for each (String^ u in c->Unsupported) shown->Options->Add("not supported, RIDE's default instead: " + u);
+                for each (String^ o in c->OwnInstead) shown->Options->Add("RIDE's own instead of: " + o);
+                for each (String^ e in c->Excluded) shown->Options->Add("excluded from the build: " + e);
+                p->CcsConfigurations->Add(shown);
+            }
+            // no Debug or Release configuration read (RIDE refuses that, noted): GRIDE's two, still built in the temporary directory
+            if (p->Configurations->Count == 0)
+                for each (String^ name in gcnew array<String^>{ "Debug", "Release" })
+                {
+                    BuildConfiguration^ b = gcnew BuildConfiguration(name);
+                    b->OutputDir = Path::Combine(GrideProject::CcsBuildRoot(r->Name), name);
+                    b->LinkerCommandFiles = gcnew List<String^>();
+                    p->Configurations->Add(b);
+                }
             p->Normalize();
             p->IsReadOnly = true;
+            p->Ccs = r;
 
-            // ---- files inside the project folder
-            List<String^>^ files = gcnew List<String^>();
-            CollectFiles(dir, dir, files, 0);
-            bool hasCpp = false;
-
-            // ---- linked resources (files that live outside the folder)
-            //      <location>C:/x/a.c</location>  or  <locationURI>PARENT-1-PROJECT_LOC/common/a.c</locationURI>
-            Dictionary<String^, String^>^ vars = ReadVariables(doc, dir);
-            for each (XmlNode^ link in doc->SelectNodes("/projectDescription/linkedResources/link"))
-            {
-                XmlNode^ typeNode = link->SelectSingleNode("type");
-                if (typeNode != nullptr && String::Equals(typeNode->InnerText->Trim(), "2"))
-                {
-                    // type 2 = linked folder: add its files
-                    String^ folder = ResolveLocation(link, dir, vars);
-                    if (folder != nullptr && Directory::Exists(folder)) CollectFiles(folder, folder, files, 0);
-                    continue;
-                }
-                String^ l = ResolveLocation(link, dir, vars);
-                try
-                {
-                    if (l != nullptr && File::Exists(l) && IsWanted(Path::GetExtension(l)))
-                        files->Add(Path::GetFullPath(l));
-                }
-                catch (ArgumentException^) {}
-            }
-
-            for each (String^ f in files)
-            {
-                if (p->AddFile(f))
-                {
-                    String^ e = Path::GetExtension(f)->ToLowerInvariant();
-                    if (String::Equals(e, ".cpp") || String::Equals(e, ".cc") || String::Equals(e, ".cxx")) hasCpp = true;
-                }
-            }
-            p->Language = Names::LanguageName(hasCpp ? LanguageKind::Cpp11 : LanguageKind::C90);
-
-            // ---- build configurations from .cproject (display only)
-            String^ cproject = Path::Combine(dir, ".cproject");
-            if (File::Exists(cproject))
-            {
-                try { ReadConfigurations(cproject, p->CcsConfigurations); }
-                catch (Exception^ ex)
-                {
-                    CcsConfiguration^ c = gcnew CcsConfiguration();
-                    c->Name = "(could not read .cproject)";
-                    c->Options->Add(ex->Message);
-                    p->CcsConfigurations->Add(c);
-                }
-            }
+            // the lines the Output pane shows at open (RIDE's Messages and the sources line)
+            for each (CcsConfig^ c in r->Configs) p->CcsReportLines->Add(r->Report(c->IsDebug));
+            String^ sources = r->SourceReport();
+            if (sources->Length > 0) p->CcsReportLines->Add(sources);
+            for each (String^ refusal in r->Refusals)
+                p->CcsReportLines->Add(String::Format("CCS project {0}: RIDE would refuse it - {1}; read all the same, the build stands on what was read", r->Name, refusal));
             return p;
         }
 
     private:
-        // Eclipse path variables: PROJECT_LOC, PARENT_LOC, WORKSPACE_LOC + <variableList> entries
-        static Dictionary<String^, String^>^ ReadVariables(XmlDocument^ doc, String^ projectDir)
+        static String^ Native(String^ p) { return p->Replace(L'/', L'\\'); }
+        static bool Rooted(String^ p) { return p->Length > 1 && (p[1] == L':' || p[0] == L'/' || p[0] == L'\\'); }
+        static void AddUnique(List<String^>^ into, String^ one)
         {
-            Dictionary<String^, String^>^ v = gcnew Dictionary<String^, String^>(StringComparer::OrdinalIgnoreCase);
-            v["PROJECT_LOC"] = projectDir;
-            String^ parent = Path::GetDirectoryName(projectDir);
-            v["PARENT_LOC"] = parent != nullptr ? parent : projectDir;
-            v["WORKSPACE_LOC"] = parent != nullptr ? parent : projectDir;   // best guess: projects usually sit in the workspace
-            for each (XmlNode^ n in doc->SelectNodes("/projectDescription/variableList/variable"))
-            {
-                XmlNode^ name = n->SelectSingleNode("name");
-                XmlNode^ value = n->SelectSingleNode("value");
-                if (name == nullptr || value == nullptr) continue;
-                String^ val = value->InnerText->Trim();
-                if (val->StartsWith("file:/", StringComparison::OrdinalIgnoreCase)) val = val->Substring(6)->TrimStart(L'/');
-                v[name->InnerText->Trim()] = ExpandUri(Uri::UnescapeDataString(val), projectDir, v);
-            }
-            return v;
-        }
-
-        // "PARENT-2-PROJECT_LOC/a/b.c" -> two folders above the project + a/b.c ; "VAR/x" -> value of VAR + x
-        static String^ ExpandUri(String^ uri, String^ projectDir, Dictionary<String^, String^>^ vars)
-        {
-            String^ u = uri->Replace(L'/', L'\\');
-            Match^ m = Regex::Match(u, R"RX(^PARENT-(\d+)-([A-Za-z_][\w]*)(.*)$)RX");
-            if (m->Success)
-            {
-                String^ basePath = nullptr;
-                if (!vars->TryGetValue(m->Groups[2]->Value, basePath)) return nullptr;
-                int up = Int32::Parse(m->Groups[1]->Value);
-                for (int i = 0; i < up && basePath != nullptr; i++) basePath = Path::GetDirectoryName(basePath);
-                if (basePath == nullptr) return nullptr;
-                return Path::GetFullPath(String::Concat(basePath, m->Groups[3]->Value));
-            }
-            Match^ v = Regex::Match(u, R"RX(^\$?\{?([A-Za-z_][\w]*)\}?(\\.*)?$)RX");
-            String^ value = nullptr;
-            if (v->Success && vars->TryGetValue(v->Groups[1]->Value, value))
-                return Path::GetFullPath(String::Concat(value, v->Groups[2]->Value));
-            if (Path::IsPathRooted(u)) return Path::GetFullPath(u);
-            return nullptr;
-        }
-
-        static String^ ResolveLocation(XmlNode^ link, String^ projectDir, Dictionary<String^, String^>^ vars)
-        {
-            try
-            {
-                XmlNode^ loc = link->SelectSingleNode("location");
-                if (loc != nullptr)
-                {
-                    String^ l = loc->InnerText->Trim()->Replace(L'/', L'\\');
-                    return Path::IsPathRooted(l) ? Path::GetFullPath(l) : nullptr;
-                }
-                XmlNode^ uri = link->SelectSingleNode("locationURI");
-                if (uri != nullptr)
-                {
-                    String^ u = Uri::UnescapeDataString(uri->InnerText->Trim());
-                    if (u->StartsWith("file:/", StringComparison::OrdinalIgnoreCase)) u = u->Substring(6)->TrimStart(L'/');
-                    return ExpandUri(u, projectDir, vars);
-                }
-            }
-            catch (Exception^) {}
-            return nullptr;
-        }
-
-        static bool IsWanted(String^ ext)
-        {
-            if (String::IsNullOrEmpty(ext)) return false;
-            String^ e = ext->ToLowerInvariant();
-            array<String^>^ wanted = gcnew array<String^>{
-                ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".asm", ".s", ".sa", ".inc", ".cmd",
-                ".cfg", ".tcf", ".ccxml", ".opt", ".gel" };
-            return Array::IndexOf(wanted, e) >= 0;
-        }
-
-        static bool IsSkippedFolder(String^ name)
-        {
-            array<String^>^ skip = gcnew array<String^>{
-                "debug", "release", ".settings", ".launches", ".git", ".svn", ".metadata", "build" };
-            return Array::IndexOf(skip, name->ToLowerInvariant()) >= 0;
-        }
-
-        static void CollectFiles(String^ root, String^ dir, List<String^>^ files, int depth)
-        {
-            if (depth > 12) return;
-            try
-            {
-                array<String^>^ fs = Directory::GetFiles(dir);
-                Array::Sort(fs, StringComparer::OrdinalIgnoreCase);
-                for each (String^ f in fs)
-                    if (IsWanted(Path::GetExtension(f))) files->Add(f);
-                array<String^>^ ds = Directory::GetDirectories(dir);
-                Array::Sort(ds, StringComparer::OrdinalIgnoreCase);
-                for each (String^ d in ds)
-                    if (!IsSkippedFolder(Path::GetFileName(d))) CollectFiles(root, d, files, depth + 1);
-            }
-            catch (UnauthorizedAccessException^) {}
-            catch (IOException^) {}
-        }
-
-        static String^ ShortName(String^ id)
-        {
-            if (String::IsNullOrEmpty(id)) return String::Empty;
-            // "com.ti.ccstudio.buildDefinitions.C6000_7.4.compilerID.OPT_LEVEL.123" -> "OPT_LEVEL"
-            array<String^>^ parts = id->Split(L'.');
-            for (int i = parts->Length - 1; i >= 0; i--)
-            {
-                int n;
-                if (!Int32::TryParse(parts[i], n) && parts[i]->Length > 1) return parts[i];
-            }
-            return id;
-        }
-
-        static void ReadConfigurations(String^ cproject, List<CcsConfiguration^>^ list)
-        {
-            XmlDocument^ doc = gcnew XmlDocument();
-            doc->XmlResolver = nullptr;
-            doc->Load(cproject);
-            HashSet<String^>^ seen = gcnew HashSet<String^>(StringComparer::OrdinalIgnoreCase);
-            for each (XmlNode^ cfgNode in doc->SelectNodes("//configuration[@name]"))
-            {
-                XmlElement^ cfg = dynamic_cast<XmlElement^>(cfgNode);
-                if (cfg == nullptr) continue;
-                String^ cname = cfg->GetAttribute("name");
-                if (String::IsNullOrWhiteSpace(cname) || !seen->Add(cname)) continue;
-
-                CcsConfiguration^ c = gcnew CcsConfiguration();
-                c->Name = cname;
-                String^ art = cfg->GetAttribute("artifactName");
-                String^ artExt = cfg->GetAttribute("artifactExtension");
-                if (!String::IsNullOrEmpty(art))
-                    c->Options->Add(String::Format("Output = {0}{1}{2}", art, String::IsNullOrEmpty(artExt) ? String::Empty : Str("."), artExt));
-
-                for each (XmlNode^ optNode in cfg->SelectNodes(".//option"))
-                {
-                    XmlElement^ opt = dynamic_cast<XmlElement^>(optNode);
-                    if (opt == nullptr) continue;
-                    String^ key = opt->GetAttribute("name");
-                    if (String::IsNullOrWhiteSpace(key)) key = ShortName(opt->GetAttribute("superClass"));
-                    String^ val = opt->GetAttribute("value");
-                    if (String::IsNullOrEmpty(val))
-                    {
-                        List<String^>^ vals = gcnew List<String^>();
-                        for each (XmlNode^ lv in opt->SelectNodes("listOptionValue"))
-                        {
-                            XmlElement^ lve = dynamic_cast<XmlElement^>(lv);
-                            if (lve != nullptr && !String::IsNullOrEmpty(lve->GetAttribute("value")))
-                                vals->Add(lve->GetAttribute("value"));
-                        }
-                        val = String::Join("; ", vals->ToArray());
-                    }
-                    if (String::IsNullOrWhiteSpace(val) || String::IsNullOrWhiteSpace(key)) continue;
-                    c->Options->Add(String::Format("{0} = {1}", key->Trim(), val->Trim()));
-                }
-                list->Add(c);
-            }
+            for each (String^ x in into) if (String::Equals(x, one, StringComparison::OrdinalIgnoreCase)) return;
+            into->Add(one);
         }
     };
 }

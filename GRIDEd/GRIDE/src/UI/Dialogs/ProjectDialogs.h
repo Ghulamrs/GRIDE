@@ -43,7 +43,7 @@ namespace Gride { namespace UI {
             languages->Dock = DockStyle::Fill;
             languages->IntegralHeight = false;
             languages->ItemHeight = 22;
-            languages->Items->AddRange(gcnew array<Object^>{ "C90", "C++11", "Shalimar", "Import CCS 7.4..." });
+            languages->Items->AddRange(gcnew array<Object^>{ "C90", "C++11", "Shalimar", "Import CCS 7.4 / 5.5..." });
             languages->SelectedIndexChanged += gcnew EventHandler(this, &NewProjectDialog::OnLanguageChanged);
 
             templates = gcnew ListBox();
@@ -176,7 +176,7 @@ namespace Gride { namespace UI {
             templates->Items->Clear();
             if (ImportCcs)
             {
-                templates->Items->Add("Open CCS 7.4 project (read-only)");
+                templates->Items->Add("Open CCS 7.4 / 5.5 project (read-only)");
                 okButton->Text = "Choose...";
             }
             else

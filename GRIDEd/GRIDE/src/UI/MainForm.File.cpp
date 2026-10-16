@@ -325,7 +325,7 @@ namespace Gride { namespace UI {
     {
         OpenFileDialog^ dlg = gcnew OpenFileDialog();
         dlg->Title = "Open Project / Workspace";
-        dlg->Filter = "GRIDE workspace or project (*.grws;*.pro)|*.grws;*.pro|CCS 7.4 project (.project;.ccsproject)|.project;.ccsproject|"
+        dlg->Filter = "GRIDE workspace or project (*.grws;*.pro)|*.grws;*.pro|CCS 7.4 / 5.5 project (.project;.ccsproject)|.project;.ccsproject|"
                       "Visual Studio solution or project (*.sln;*.vcxproj;*.vcproj)|*.sln;*.vcxproj;*.vcproj|All files (*.*)|*.*";
         if (dlg->ShowDialog(this) == WF::DialogResult::OK) OpenPath(dlg->FileName);
     }
@@ -492,7 +492,7 @@ namespace Gride { namespace UI {
             return;
         }
         if (workspace != nullptr && !workspace->IsTemporary &&
-            MessageBox::Show(this, "Add the CCS project to the current workspace?\n(No = open it on its own)", "Import CCS 7.4 Project",
+            MessageBox::Show(this, "Add the CCS project to the current workspace?\n(No = open it on its own)", "Import CCS Project",
                              MessageBoxButtons::YesNo, MessageBoxIcon::Question) == WF::DialogResult::Yes)
         {
             try
@@ -504,7 +504,7 @@ namespace Gride { namespace UI {
                 output->Append("Tools", "Imported CCS project " + p->Name + " (read-only)");
                 for each (String^ line in p->Ccs->ReportLines) output->Append("Tools", line);
             }
-            catch (Exception^ ex) { MessageBox::Show(this, ex->Message, "Import CCS 7.4 Project", MessageBoxButtons::OK, MessageBoxIcon::Error); }
+            catch (Exception^ ex) { MessageBox::Show(this, ex->Message, "Import CCS Project", MessageBoxButtons::OK, MessageBoxIcon::Error); }
             return;
         }
         OpenPath(dlg->SelectedPath);
@@ -758,7 +758,7 @@ namespace Gride { namespace UI {
     {
         OpenFileDialog^ dlg = gcnew OpenFileDialog();
         dlg->Title = "Add Project to Workspace";
-        dlg->Filter = "GRIDE project (*.pro)|*.pro|CCS 7.4 project (.project;.ccsproject)|.project;.ccsproject|Visual Studio project (*.vcxproj;*.vcproj)|*.vcxproj;*.vcproj";
+        dlg->Filter = "GRIDE project (*.pro)|*.pro|CCS 7.4 / 5.5 project (.project;.ccsproject)|.project;.ccsproject|Visual Studio project (*.vcxproj;*.vcproj)|*.vcxproj;*.vcproj";
         if (dlg->ShowDialog(this) != WF::DialogResult::OK) return;
         try
         {

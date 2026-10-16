@@ -144,16 +144,62 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Common\Common.h" />
+    <ClInclude Include="src\Common\Json.h" />
+    <ClInclude Include="src\Toolchain\ToolchainFile.h" />
+    <ClInclude Include="src\Toolchain\VendorTools.h" />
+    <ClInclude Include="src\Settings\CompilerOptions.h" />
     <ClInclude Include="src\Settings\IdeSettings.h" />
     <ClInclude Include="src\Project\GrideProject.h" />
     <ClInclude Include="src\Editor\Syntax.h" />
     <ClInclude Include="src\Editor\CodeEditor.h" />
     <ClInclude Include="src\Toolchain\Toolchain.h" />
     <ClInclude Include="src\Build\BuildEngine.h" />
+    <ClInclude Include="src\Build\ProgramRunner.h" />
+    <ClInclude Include="src\Debug\NativeConsole.h" />
+    <ClInclude Include="src\Debug\DebugProcess.h" />
+    <ClInclude Include="src\Debug\Debugger.h" />
+    <ClInclude Include="src\Debug\ShalimarSession.h" />
+    <ClInclude Include="src\Import\CcsReading.h" />
     <ClInclude Include="src\Import\CcsImporter.h" />
+    <ClInclude Include="src\Import\VsSolution.h" />
+    <ClInclude Include="src\Import\VsImporter.h" />
     <ClInclude Include="src\UI\Dialogs.h" />
+    <ClInclude Include="src\UI\CompilerOptionsEditor.h" />
+    <ClInclude Include="src\UI\DebugPanes.h" />
+    <ClInclude Include="src\UI\HelpFiles.h" />
     <ClInclude Include="src\UI\OptionsDialog.h" />
     <ClInclude Include="src\UI\MainForm.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="toolchain.json" />
+    <None Include="lib\ccs\options-ccs74-C6000_8.2.tsv" />
+    <None Include="lib\ccs\options-ccs55-C6000_7.4.tsv" />
+    <None Include="docs\GRIDE_Help.html" />
+    <None Include="docs\RIDE_Manual.html" />
+    <None Include="docs\Shalimar_Reference.html" />
+    <None Include="docs\C90_Reference.html" />
+    <None Include="docs\Cpp11_Reference.html" />
+    <None Include="docs\MASM_LINK_Reference.html" />
+    <None Include="docs\ASM6x_LNK6x_Reference.html" />
+    <None Include="docs\RTS6747_Reference.html" />
+    <None Include="docs\VM6747_Reference.html" />
+    <None Include="docs\TOOLCHAIN-FORMAT.md" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="CopyToolchainFile" AfterTargets="Build">
+    <Copy SourceFiles="$(ProjectDir)toolchain.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <!-- TI's option definitions for reading CCS projects (toolchain.json's ccs section names them) -->
+    <ItemGroup>
+      <CcsDefinitionFiles Include="$(ProjectDir)lib\ccs\*.tsv" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CcsDefinitionFiles)" DestinationFolder="$(OutDir)lib\ccs" SkipUnchangedFiles="true" />
+  </Target>
+  <!-- Help (R13): GRIDE's page, RIDE's manual and its chapter pages, the Shalimar reference and the toolchain
+       file's format, in docs beside the exe, where Help looks after the exe's own folder -->
+  <Target Name="CopyHelpFiles" AfterTargets="Build">
+    <ItemGroup>
+      <HelpFiles Include="$(ProjectDir)docs\*.html;$(ProjectDir)docs\*.md" />
+    </ItemGroup>
+    <Copy SourceFiles="@(HelpFiles)" DestinationFolder="$(OutDir)docs" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

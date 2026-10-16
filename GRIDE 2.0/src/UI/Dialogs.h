@@ -5,6 +5,7 @@
 // ============================================================================
 #include "../Editor/CodeEditor.h"
 #include "../Import/CcsImporter.h"
+#include "../Import/VsImporter.h"
 
 using namespace System::ComponentModel;
 
@@ -81,6 +82,62 @@ namespace Gride
         {
             return MessageBox::Show(owner, text, AppInfo::Name, MessageBoxButtons::YesNo, MessageBoxIcon::Question)
                    == System::Windows::Forms::DialogResult::Yes;
+        }
+
+        // one of a list (a solution's C++ projects): the one chosen, or nullptr
+        static String^ Choose(IWin32Window^ owner, String^ title, String^ prompt, List<String^>^ items)
+        {
+            Form^ f = gcnew Form();
+            SetupDialog(f, title, 420, 300);
+            Label^ l = AddLabel(f, prompt, 12, 10);
+            l->MaximumSize = System::Drawing::Size(396, 0);
+            ListBox^ list = gcnew ListBox();
+            list->Location = Point(12, 40);
+            list->Size = System::Drawing::Size(396, 186);
+            for each (String^ i in items) list->Items->Add(i);
+            if (list->Items->Count > 0) list->SelectedIndex = 0;
+            f->Controls->Add(list);
+            Button^ ok = AddButton(f, "Open", 252, 236, 75);
+            ok->DialogResult = System::Windows::Forms::DialogResult::OK;
+            Button^ cancel = AddButton(f, "Cancel", 333, 236, 75);
+            cancel->DialogResult = System::Windows::Forms::DialogResult::Cancel;
+            f->AcceptButton = ok;
+            f->CancelButton = cancel;
+            try
+            {
+                bool picked = f->ShowDialog(owner) == System::Windows::Forms::DialogResult::OK;
+                return picked && list->SelectedItem != nullptr ? safe_cast<String^>(list->SelectedItem) : nullptr;
+            }
+            finally { delete f; }
+        }
+
+        // a read-only text window for a long reference (Help > Placeholder Reference)
+        static void ShowText(IWin32Window^ owner, String^ title, String^ text)
+        {
+            Form^ f = gcnew Form();
+            SetupDialog(f, title, 920, 560);
+            f->FormBorderStyle = System::Windows::Forms::FormBorderStyle::Sizable;
+            f->MaximizeBox = true;
+            TextBox^ t = gcnew TextBox();
+            t->Multiline = true;
+            t->ReadOnly = true;
+            t->WordWrap = false;
+            t->ScrollBars = System::Windows::Forms::ScrollBars::Both;
+            t->Font = gcnew System::Drawing::Font("Consolas", 9.0f);
+            t->BackColor = SystemColors::Window;
+            t->Text = text;
+            t->TabStop = false;
+            t->Dock = DockStyle::Fill;
+            f->Controls->Add(t);
+            Button^ close = gcnew Button();
+            close->Text = "Close";
+            close->DialogResult = System::Windows::Forms::DialogResult::Cancel;
+            close->Dock = DockStyle::Bottom;
+            close->Height = 30;
+            f->Controls->Add(close);
+            f->CancelButton = close;
+            try { f->ShowDialog(owner); }
+            finally { delete f; }
         }
     };
 
@@ -351,8 +408,14 @@ namespace Gride
         property LanguageKind Language;
         [Category("General"), Description("Target platform: Windows (MASM/LINK), Linux, macOS, or TMS6747 DSP (ASM6x/LNK6x/RTS6747).")]
         property TargetKind Target;
+        [Category("General"), Description("RIDE's toolchain word: auto (each file's own compiler), c90, cpp11 or shalimar (cc1, cxx1 and shc are the same). A compiler named for a file it does not take refuses the build.")]
+        property String^ Toolchain;
+        [Category("General"), Description("RIDE's emulateOnly (TMS6747): the build stops at the assembly, which vm6747 runs - no asm6x, no lnk6x, no .out.")]
+        property bool EmulateOnly;
         [Category("Output"), Description("Output file name without extension.")]
         property String^ OutputName;
+        [Category("Run"), Description("The program's arguments as a command line: separated by spaces, one that holds a space in double quotes. Each reaches the program whole. The C6747 simulator takes none - Emulate hands them to the program.")]
+        property String^ ProgramArguments;
         [Category("Paths"), Description("Include folders, separated by ';'. Relative to the project folder.")]
         property String^ IncludePaths;
         [Category("Paths"), Description("Libraries to link, separated by ';'.")]
@@ -377,7 +440,10 @@ namespace Gride
             v->Name = p->Name;
             v->Language = p->LanguageValue;
             v->Target = p->TargetValue;
+            v->Toolchain = p->Toolchain;
+            v->EmulateOnly = p->EmulateOnly;
             v->OutputName = p->OutputName;
+            v->ProgramArguments = PathUtil::JoinArguments(p->Arguments());
             v->IncludePaths = PathUtil::JoinList(p->IncludePaths);
             v->Libraries = PathUtil::JoinList(p->Libraries);
             v->Configuration = c->Name;
@@ -394,7 +460,10 @@ namespace Gride
             if (!String::IsNullOrWhiteSpace(Name)) p->Name = Name->Trim();
             p->Language = Names::LanguageName(Language);
             p->Target = Names::TargetName(Target);
+            p->Toolchain = ToolWords::Canonical(Toolchain);
+            p->EmulateOnly = EmulateOnly;
             p->OutputName = String::IsNullOrWhiteSpace(OutputName) ? p->Name : OutputName->Trim();
+            p->ProgramArgs = PathUtil::SplitArguments(ProgramArguments);
             p->IncludePaths = PathUtil::SplitList(IncludePaths);
             p->Libraries = PathUtil::SplitList(Libraries);
             BuildConfiguration^ c = p->ActiveConfig();
@@ -403,6 +472,47 @@ namespace Gride
             c->AsmFlags = AssemblerFlags == nullptr ? String::Empty : AssemblerFlags->Trim();
             c->LinkFlags = LinkerFlags == nullptr ? String::Empty : LinkerFlags->Trim();
             c->OutputDir = OutputDirectory;
+            p->Normalize();
+        }
+    };
+
+    // a project read from another IDE (CCS, Visual Studio): read-only but for the run - the program's
+    // arguments and RIDE's emulateOnly, kept in GRIDE's settings (RIDE's ccs.projects; a Visual Studio
+    // project's by its project file), never written into the other IDE's files
+    [DefaultProperty("ProgramArguments")]
+    public ref class ImportedProjectPropertiesView
+    {
+    public:
+        [Category("Project"), ReadOnly(true), Description("The project's name.")]
+        property String^ Name;
+        [Category("Project"), ReadOnly(true), Description("Where the project was read from: a CCS project's folder, a Visual Studio project's file. GRIDE writes nothing into its files.")]
+        property String^ ReadFrom;
+        [Category("Project"), ReadOnly(true), Description("The configuration built. Change it from the toolbar.")]
+        property String^ Configuration;
+        [Category("Build"), Description("The compiler: auto (RIDE's, by each file's language: c90, cpp11, shalimar), c90, cpp11, or msvc - Visual Studio's own cl (cl is the same word), which a Visual Studio project is written for. Kept with GRIDE's state for this project (its .pro, else the settings), never in its files.")]
+        property String^ Toolchain;
+        [Category("Run"), Description("The program's arguments as a command line: separated by spaces, one that holds a space in double quotes. Kept with GRIDE's state for this project (its .pro, else the settings), not in its files.")]
+        property String^ ProgramArguments;
+        [Category("Run"), Description("RIDE's emulateOnly (a TMS6747 build): the build stops at the assembly, which vm6747 runs - no asm6x, no lnk6x, no .out. Kept with GRIDE's state for this project.")]
+        property bool EmulateOnly;
+
+        static ImportedProjectPropertiesView^ FromProject(GrideProject^ p)
+        {
+            ImportedProjectPropertiesView^ v = gcnew ImportedProjectPropertiesView();
+            v->Name = p->Name;
+            v->ReadFrom = p->IsVs ? (p->Vs->StateFile->Length > 0 ? String::Format("{0} (through {1})", p->FilePath, p->Vs->StateFile) : p->FilePath) : p->ProjectDir;
+            v->Toolchain = p->Toolchain;
+            v->Configuration = p->ActiveConfig()->Name;
+            v->ProgramArguments = PathUtil::JoinArguments(p->Arguments());
+            v->EmulateOnly = p->EmulateOnly;
+            return v;
+        }
+
+        void ApplyTo(GrideProject^ p)
+        {
+            p->ProgramArgs = PathUtil::SplitArguments(ProgramArguments);
+            p->EmulateOnly = EmulateOnly;
+            p->Toolchain = ToolWords::Canonical(Toolchain);
             p->Normalize();
         }
     };
@@ -457,13 +567,15 @@ namespace Gride
             FormBorderStyle = System::Windows::Forms::FormBorderStyle::Sizable;
             MinimumSize = System::Drawing::Size(420, 360);
             view = ProjectPropertiesView::FromProject(project);
+            ccsView = project->IsImported ? ImportedProjectPropertiesView::FromProject(project) : nullptr;
+            bool editable = !project->IsReadOnly || ccsView != nullptr;     // an imported project's run settings are GRIDE's
             if (project->IsReadOnly) TypeDescriptor::AddAttributes(view, gcnew ReadOnlyAttribute(true));
 
             grid = gcnew PropertyGrid();
             grid->Dock = DockStyle::Fill;
             grid->ToolbarVisible = false;
             grid->PropertySort = PropertySort::Categorized;
-            grid->SelectedObject = view;
+            grid->SelectedObject = ccsView != nullptr ? safe_cast<Object^>(ccsView) : safe_cast<Object^>(view);
 
             // Buttons in a right-to-left flow panel: they always stay visible at the right.
             FlowLayoutPanel^ bottom = gcnew FlowLayoutPanel();
@@ -472,14 +584,14 @@ namespace Gride
             bottom->FlowDirection = FlowDirection::RightToLeft;
             bottom->Padding = System::Windows::Forms::Padding(8, 8, 8, 8);
             Button^ cancel = gcnew Button();
-            cancel->Text = project->IsReadOnly ? Str("Close") : Str("Cancel");
+            cancel->Text = editable ? Str("Cancel") : Str("Close");
             cancel->Size = System::Drawing::Size(80, 26);
             cancel->DialogResult = System::Windows::Forms::DialogResult::Cancel;
             Button^ ok = gcnew Button();
             ok->Text = "OK";
             ok->Size = System::Drawing::Size(80, 26);
             ok->DialogResult = System::Windows::Forms::DialogResult::OK;
-            ok->Visible = !project->IsReadOnly;
+            ok->Visible = editable;
             bottom->Controls->Add(cancel);
             bottom->Controls->Add(ok);
 
@@ -490,9 +602,11 @@ namespace Gride
         }
 
         property ProjectPropertiesView^ View { ProjectPropertiesView^ get() { return view; } }
+        property ImportedProjectPropertiesView^ ImportedView { ImportedProjectPropertiesView^ get() { return ccsView; } }
 
     private:
         ProjectPropertiesView^ view;
+        ImportedProjectPropertiesView^ ccsView;
         PropertyGrid^ grid;
     };
 }
