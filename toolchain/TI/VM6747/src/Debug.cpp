@@ -108,6 +108,8 @@ private:
     bool addressOf(const Variable &v, uint32_t &addr) const;
     std::string valueOf(const Variable &v) const;
     std::string formatAt(const TypeInfo &t, uint32_t addr, int depth) const;
+    bool lvalueOf(const std::string &expr, std::string &type, uint32_t &addr);
+    uint32_t sizeOfType(const std::string &type) const;
     std::string scalarAt(const TypeInfo &t, uint32_t addr) const;
     uint32_t read32(uint32_t addr) const;
 };
@@ -374,6 +376,19 @@ void Session::cmdPrint(const std::string &arg, bool typeOnly) {
             } else line("$" + std::to_string(values_) + " = " + valueOf(*var));
             return;
         }
+        // a member, an element, what a pointer points to: p.x, primes[2], b.corner[1].y, *name
+        std::string ltype; uint32_t laddr = 0;
+        if (lvalueOf(name, ltype, laddr)) {
+            if (typeOnly) { line("type = " + ltype + (address ? " *" : "")); return; }
+            values_++;
+            char buf[160];
+            if (address) { std::snprintf(buf, sizeof buf, "$%d = (%s *) 0x%x", values_, ltype.c_str(), laddr); line(buf); return; }
+            const TypeInfo *ti = m_.typeNamed(ltype);
+            std::string shown = ti == nullptr ? "<unknown type " + ltype + ">"
+                              : ti->kind == TypeInfo::Pointer ? "(" + ltype + ") " + scalarAt(*ti, laddr) : formatAt(*ti, laddr, 0);
+            line("$" + std::to_string(values_) + " = " + shown);
+            return;
+        }
         // arithmetic over the frame's scalar variables, registers and numbers: n*2, (sum + i) / 2, -n
         double number = 0; bool real = false; std::string bad;
         const char *p = e.c_str();
@@ -387,7 +402,15 @@ void Session::cmdPrint(const std::string &arg, bool typeOnly) {
             return;
         }
         if (bad == "Division by zero") line(bad);
-        else line("No symbol \"" + (bad.empty() ? name : bad) + "\" in current context.");
+        else {
+            // a variable there is, but the access is not: an index out of range, a member it does not have
+            size_t lead = name.find_first_not_of("* \t");
+            size_t end = lead == std::string::npos ? lead : name.find_first_not_of("_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", lead);
+            const std::string base = lead == std::string::npos ? std::string() : name.substr(lead, end == std::string::npos ? std::string::npos : end - lead);
+            if (!base.empty() && base != name && variableNamed(base) != nullptr)
+                line(name.find('[') != std::string::npos ? "Index out of range in \"" + name + "\"." : "There is no member named that in \"" + name + "\".");
+            else line("No symbol \"" + (bad.empty() ? name : bad) + "\" in current context.");
+        }
         return;
     }
     if (typeOnly) { line(reg == 64 ? "type = void (*)()" : "type = int"); return; }
@@ -407,13 +430,14 @@ void Session::cmdSet(const std::string &arg) {
     size_t eq = a.find('=');
     if (eq == std::string::npos) { line("A syntax error in expression, near `'."); return; }
     std::string lhs = trim(a.substr(0, eq)), rhs = trim(a.substr(eq + 1));
-    // -g: a variable of the selected frame - its bytes written as its type stores them
-    if (const Variable *target = variableNamed(lhs)) {
-        std::string t = target->type;
+    // -g: a variable of the selected frame, or a member or element of one (p.x = 5, a[2] = 7) - its bytes written
+    // as its type stores them
+    std::string ltype; uint32_t laddr = 0;
+    if (lvalueOf(lhs, ltype, laddr)) {
+        std::string t = ltype;
         for (const char *q : { "const ", "volatile " })
             for (size_t at; (at = t.find(q)) != std::string::npos;) t.erase(at, std::strlen(q));
         t = trim(t);
-        uint32_t addr = 0;
         uint8_t b[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
         size_t size = 0;
         char *end = nullptr;
@@ -431,7 +455,7 @@ void Session::cmdSet(const std::string &arg) {
         }
         if (size == 0) { line("Invalid cast."); return; }
         if (end == nullptr || trim(end).size() != 0) { line("No symbol \"" + rhs + "\" in current context."); return; }
-        if (!addressOf(*target, addr) || !m_.write(addr, b, size)) line("Cannot access memory at address " + std::to_string(addr));
+        if (!m_.write(laddr, b, size)) line("Cannot access memory at address " + std::to_string(laddr));
         return;
     }
     uint32_t v = 0; bool isReg = false; int reg = -1;
@@ -485,8 +509,11 @@ const std::vector<Variable> *Session::frameVariables() const {
 const Variable *Session::variableNamed(const std::string &name) const {
     const std::vector<Variable> *vs = frameVariables();
     if (vs == nullptr) return nullptr;
-    for (const Variable &v : *vs) if (v.name == name) return &v;
-    return nullptr;
+    // the last one of that name: a block's own variable is declared after the one it hides, and a stop inside
+    // the block is where it is asked for (the tags carry no block ranges yet - docs\C6747-LOCALS-DESIGN.md, phase F)
+    const Variable *found = nullptr;
+    for (const Variable &v : *vs) if (v.name == name) found = &v;
+    return found;
 }
 
 // A frame variable is at the frame's A15 plus its offset. Every function the compilers write keeps the
@@ -588,6 +615,78 @@ std::string Session::formatAt(const TypeInfo &t, uint32_t addr, int depth) const
     return out + "}";
 }
 
+uint32_t Session::sizeOfType(const std::string &type) const {
+    const TypeInfo *t = m_.typeNamed(type);
+    if (t == nullptr) return 4;
+    if (t->kind == TypeInfo::RuntimeArray) return 4;   // a variable of it holds a pointer
+    return t->size > 0 ? static_cast<uint32_t>(t->size) : 4;
+}
+
+// An lvalue in C's postfix syntax over the frame's variables: name, name.member, ptr->member, a[i] (i any
+// arithmetic), *ptr, and any chain of them - b.corner[1].y. Its type and address; false for anything else.
+bool Session::lvalueOf(const std::string &expr, std::string &type, uint32_t &addr) {
+    const char *p = expr.c_str();
+    int derefs = 0;
+    while (*skipSpace(p) == '*') { p++; derefs++; }
+    skipSpace(p);
+    const char *s = p;
+    while (*p == '_' || (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9')) p++;
+    const Variable *var = variableNamed(std::string(s, p));
+    if (var == nullptr || !addressOf(*var, addr)) return false;
+    type = var->type;
+    for (;;) {
+        const char c = *skipSpace(p);
+        const TypeInfo *t = m_.typeNamed(type);
+        if (c == '.' || (c == '-' && p[1] == '>')) {
+            if (t == nullptr) return false;
+            if (c == '-') {
+                if (t->kind != TypeInfo::Pointer) return false;
+                addr = read32(addr);
+                t = m_.typeNamed(t->element);
+                if (t == nullptr) return false;
+                p++;
+            }
+            p++;
+            skipSpace(p);
+            const char *m = p;
+            while (*p == '_' || (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9')) p++;
+            const std::string member(m, p);
+            if (t->kind != TypeInfo::Struct && t->kind != TypeInfo::Union) return false;
+            bool found = false;
+            for (const TypeInfo::Member &mb : t->members)
+                if (mb.name == member) { addr += static_cast<uint32_t>(mb.offset); type = mb.type; found = true; break; }
+            if (!found) return false;
+        } else if (c == '[') {
+            if (t == nullptr) return false;
+            p++;
+            double index = 0; bool real = false; std::string bad;
+            if (!arithmetic(p, index, real, bad) || *skipSpace(p) != ']') return false;
+            p++;
+            const long n = static_cast<long>(index);
+            if (t->kind == TypeInfo::Array) {
+                if (n < 0 || n >= t->count) return false;
+                addr += static_cast<uint32_t>(n) * sizeOfType(t->element);
+            } else if (t->kind == TypeInfo::Pointer) {
+                addr = read32(addr) + static_cast<uint32_t>(n) * sizeOfType(t->element);
+            } else if (t->kind == TypeInfo::RuntimeArray) {
+                // Shalimar's {count, element, data}, the variable a pointer to it
+                const uint32_t record = read32(addr);
+                if (record == 0 || n < 0 || n >= static_cast<long>(static_cast<int32_t>(read32(record)))) return false;
+                addr = read32(record + 8) + static_cast<uint32_t>(n) * sizeOfType(t->element);
+            } else return false;
+            type = t->element;
+        } else break;
+    }
+    if (*skipSpace(p) != '\0') return false;
+    for (int k = 0; k < derefs; k++) {
+        const TypeInfo *t = m_.typeNamed(type);
+        if (t == nullptr || t->kind != TypeInfo::Pointer) return false;
+        addr = read32(addr);
+        type = t->element;
+    }
+    return true;
+}
+
 std::string Session::valueOf(const Variable &v) const {
     uint32_t addr = 0;
     if (!addressOf(v, addr)) return "<optimized out>";
@@ -635,21 +734,23 @@ std::string Session::valueOf(const Variable &v) const {
     return buf;
 }
 
-// info args / info locals: "name = value" a line, as gdb answers; a name two blocks share is listed once.
+// info args / info locals: "name = value" a line, as gdb answers. A name an inner block reuses is listed twice,
+// each with its own value, as gdb lists them; the same variable named twice (two loops' i in one slot) once.
 void Session::cmdInfoVariables(bool params) {
     if (!alive_ || !started_) { line("No frame selected."); return; }
     const std::vector<Variable> *vs = frameVariables();
     if (vs == nullptr) { line("No symbol table info available."); return; }
-    std::vector<std::string> seen;
+    std::vector<const Variable *> shown;
     for (const Variable &v : *vs) {
         if (v.param != params) continue;
         bool again = false;
-        for (const std::string &s : seen) if (s == v.name) again = true;
+        for (const Variable *s : shown)
+            if (s->name == v.name && s->offset == v.offset && s->global == v.global && s->symbol == v.symbol) again = true;
         if (again) continue;
-        seen.push_back(v.name);
+        shown.push_back(&v);
         line(v.name + " = " + valueOf(v));
     }
-    if (seen.empty()) line(params ? "No arguments." : "No locals.");
+    if (shown.empty()) line(params ? "No arguments." : "No locals.");
 }
 
 // x/NNxb ADDR - NN bytes from ADDR (a number, a register, &variable or a variable's name for its address),
@@ -664,7 +765,8 @@ void Session::cmdExamine(const std::string &verb, const std::string &arg) {
     if (!e.empty() && e[0] == '&') e = trim(e.substr(1));
     if (e.size() > 1 && e[0] == '(' && e[e.size() - 1] == ')') e = trim(e.substr(1, e.size() - 2));
     uint32_t addr = 0; bool isReg = false; int reg = -1;
-    if (const Variable *v = variableNamed(e)) { if (!addressOf(*v, addr)) { line("Cannot access memory."); return; } }
+    std::string ltype;
+    if (lvalueOf(e, ltype, addr)) { }   // a variable, a member or an element: from where it lives
     else if (!evaluate(e, addr, isReg, reg)) { line("No symbol \"" + e + "\" in current context."); return; }
     std::vector<uint8_t> b(static_cast<size_t>(count));
     if (!m_.read(addr, b.data(), b.size())) {

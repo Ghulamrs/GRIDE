@@ -91,3 +91,22 @@ A + B + C give Locals for scalar variables on the C6747 in about a week. D and E
   c90's `-g` output on the C6747. Ship the tools together.
 - Locals in nested blocks are listed flat for now (c90 tracks the block of each local; phase B can use it
   when two blocks reuse a name).
+
+## After the review (2026-10-16)
+
+Fable's review of the open cases; mended now:
+
+- Static locals under vm6747: `DW_OP_addr L.s.1` resolves through every symbol the assembly defines, not only
+  function labels (`DebugVm.cpp` addressOfFunction).
+- A name an inner block reuses: both variables listed, each with its own value; `print`, Watch and Set Variable
+  take the last-declared one, the inner block's (`Debug.cpp` cmdInfoVariables, variableNamed).
+- `p.x`, `a[i]`, `ptr->m`, `*ptr` and chains of them in print, whatis, `print &`, Watch, Set Variable and `x`
+  (`Debug.cpp` lvalueOf).
+
+Deferred:
+
+| Phase | Work | Why later |
+|---|---|---|
+| E | real DWARF `.debug_info` in the `.out`, `DW_AT_type` as DIE references | only TI's own tools / CCS would see it; GRIDE reads `.gride.dwtag` |
+| F | `DW_TAG_lexical_block` per block (c90/cpp11 know `Local::scope`), the debugger keeping each variable's pc range and showing only the blocks the stop is in | the stop-gap above covers the common case, a stop inside the inner block |
+| G | cpp11 -O1/-O2: a variable held in a register as `DW_OP_regN` (frame 0 only) | -O0 is the debug configuration; gdb shows these as `<optimized out>` too |

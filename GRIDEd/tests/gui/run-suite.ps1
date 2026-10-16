@@ -114,15 +114,26 @@ $debug = @(
         @('Locals', '(?s)a \| \{\{1, 2, 0\}, \{0, 1, 3\}, \{4, 0, 1\}\} \| real\[\]\[\].*i \| \S+ \| int'),
         @('Step Out', 'stopped at matrix\.shl:\d+'), @('Start Debugging', 'returned 0')) },
     # arrays, a 2-D array, structs within structs, a char array and a string pointer (phase D)
-    @{ Name = 'debug C90 data C6747'; Proj = 'cdata'; Target = 'TMS320C6747'; Bps = '{ "cdata/src/data.c": [22] }'; Open = 'cdata\src\data.c'; Steps = @(
-        @('Start Debugging', 'stopped at data\.c:22'),
+    # then, in tally(): a static local, and an inner block's i next to the function's own (Fable's #2, #5);
+    # in main: members, elements and pointers in Watch and Set Variable (#4)
+    @{ Name = 'debug C90 data C6747'; Proj = 'cdata'; Target = 'TMS320C6747'; Bps = '{ "cdata/src/data.c": [21, 35] }'; Open = 'cdata\src\data.c'; Steps = @(
+        @('Start Debugging', 'stopped at data\.c:21 in tally'),
+        @('Locals', '(?s)calls \| 1 \| int .*i \| 1 \| int .*i \| 2 \| int '),
+        @('Start Debugging', 'stopped at data\.c:35'),
         @('Locals', '(?s)primes \| \{2, 3, 5, 7, 11\} \|.*grid \| \{\{1, 2, 3\}, \{4, 5, 6\}\} \|.*p \| \{x = 3, y = -4\} \|.*b \| \{corner = \{\{x = 0, y = 0\}, \{x = 6, y = 2\}\}, label = "box", area = 12\.5\} \|.*name \| \(char \*\) 0x[0-9a-f]+ "cdata"'),
-        @('Start Debugging', 'returned 28')) },
+        @('Watch:p.x', 'p\.x \| 3 \|'),
+        @('Watch:primes[2]', 'primes\[2\] \| 5 \|'),
+        @('Watch:b.corner[1].y', 'b\.corner\[1\]\.y \| 2 \|'),
+        @('Watch:*name', "\*name \| 99 'c' \|"),
+        @('Watch:pp->y', 'pp->y \| -4 \|'),
+        @('Set:p.y = 9', 'p \| \{x = 3, y = 9\}'),
+        @('Start Debugging', 'returned 32')) },
     # Tools > Convert: greet.c to Shalimar with c2s, the result opened, "Converted to" in the Tools output
     @{ Name = 'convert C to Shalimar'; Proj = 'cdemo'; Target = 'Windows'; Bps = $null; Open = 'cdemo\src\greet.c'; Steps = @(
         ,@("Convert:$E2E\cdemo\src\greet.shl", '(?s)Converted to .*greet\.shl.*title: greet\.shl - .*written: True')) },   # the comma: one step, not flattened
-    @{ Name = 'debug C90 data Windows'; Proj = 'cdata'; Target = 'Windows'; Bps = '{ "cdata/src/data.c": [22] }'; Open = 'cdata\src\data.c'; Steps = @(
-        @('Start Debugging', 'stopped at data\.c:22'), @('Locals', '(?s)primes \|.*total \| 28 \|'), @('Start Debugging', 'returned 28')) }
+    @{ Name = 'debug C90 data Windows'; Proj = 'cdata'; Target = 'Windows'; Bps = '{ "cdata/src/data.c": [35] }'; Open = 'cdata\src\data.c'; Steps = @(
+        @('Start Debugging', 'stopped at data\.c:35'), @('Locals', '(?s)primes \|.*total \| 32 \|'), @('Watch:b.corner[1].y', 'b\.corner\[1\]\.y \| 2 \|'),
+        @('Start Debugging', 'returned 32')) }
 )
 # ---- the other debugger panes and commands, stopped in greet(): Call Stack, Registers, Memory, Watch,
 #      Up/Down the Stack, Set Variable (checked by what the program then prints), Run to Cursor ----

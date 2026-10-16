@@ -78,6 +78,10 @@ public:
     bool addressOfFunction(const std::string &name, uint32_t &addr) const override {
         for (std::map<uint32_t, std::string>::const_iterator f = functions_.begin(); f != functions_.end(); ++f)
             if (f->second == name) { addr = f->first; return true; }
+        // any other symbol the assembly defined - a static local's L.s.1, a global's data - for DW_OP_addr;
+        // breakpoints still land only on functions, which functionAt and isFunctionEntry keep to
+        for (std::map<uint32_t, std::string>::const_iterator n = prog_.names.begin(); n != prog_.names.end(); ++n)
+            if (n->second == name) { addr = n->first; return true; }
         return false;
     }
     bool isFunctionEntry(uint32_t pc) const override { return functions_.count(pc) != 0; }
