@@ -23,9 +23,23 @@ struct Variable {
     bool param = false, deref = false, global = false;
 };
 
+// A type as the compilers describe it with .dwtag (-g), by the name the variables' DW_AT_type give it:
+// a base type's size and encoding, a pointer, a C array (element and count), a struct or union with its
+// members, or Shalimar's runtime array - a pointer to {count, element size, data}.
+struct TypeInfo {
+    enum Kind { Base, Pointer, Array, Struct, Union, RuntimeArray } kind = Base;
+    std::string name, element, encoding;   // element: an array's or a pointer's; encoding: DW_ATE_signed, _float ...
+    int size = 0;
+    long count = 0;
+    struct Member { std::string name, type; int offset = 0; };
+    std::vector<Member> members;
+};
+
 // The .dwtag / .dwendtag lines, one to a line, read into each function's variables by its label
-// (DW_AT_low_pc). A line it does not understand is passed over.
+// (DW_AT_low_pc), and into the types by name. A line it does not understand is passed over.
 void readTags(const std::string &text, std::map<std::string, std::vector<Variable> > &byLabel);
+void readTags(const std::string &text, std::map<std::string, std::vector<Variable> > &byLabel,
+              std::map<std::string, TypeInfo> &types);
 
 // Where an instruction came from: a file as the compiler named it, a line, or no line at all (0).
 struct Position {
@@ -62,8 +76,12 @@ public:
     virtual std::string sourceLine(const std::string &file, int line) = 0;
     // -g: the variables of the function entered at entry, or null when the program names none.
     virtual const std::vector<Variable> *variablesAt(uint32_t entry) const { (void)entry; return nullptr; }
+    // -g: a type the compilers described, by name, or null.
+    virtual const TypeInfo *typeNamed(const std::string &name) const { (void)name; return nullptr; }
     // Memory as the program sees it; false where there is none.
     virtual bool read(uint32_t addr, uint8_t *buf, size_t n) const { (void)addr; (void)buf; (void)n; return false; }
+    // And written, for set variable; false where there is none.
+    virtual bool write(uint32_t addr, const uint8_t *buf, size_t n) { (void)addr; (void)buf; (void)n; return false; }
 };
 
 // Run the session: commands from stdin until quit or end of input. The exit status to return.

@@ -1189,8 +1189,53 @@ void Tms6747::emitVariables(const Function &fn) {
                  << ", DW_AT_name(\"" << l.name << "\"), DW_AT_type(\"" << l.type->describe() << "\"), ";
             if (!l.staticName.empty()) out_ << "DW_AT_location[DW_OP_addr " << l.staticName << "]\n";
             else out_ << "DW_AT_location[DW_OP_breg15 " << -(kSaveBytes + l.offset) << "]\n";
+            noteType(l.type);
         }
     out_ << "\t.dwendtag\n";
+}
+
+// A type and every type it is made of, each once: an array's element, a member's type, what a pointer points to.
+void Tms6747::noteType(const Type *t) {
+    if (t == nullptr || t->isFunction() || t->isVoid()) return;
+    for (const Type *seen : debugTypes_) if (seen == t) return;
+    debugTypes_.push_back(t);
+    if (t->isPointer() || t->isArray()) noteType(t->pointee());
+    if (t->isStructOrUnion()) for (const Member &m : t->members()) noteType(m.type);
+}
+
+// -g: the types, named as the variables' DW_AT_type names them, each closed by .dwendtag: a base type's size
+// and encoding, a pointer's size, an array's element and bound, a struct's or union's members at their
+// offsets (a bit-field is left out). The simulators' debugger prints a value from these.
+void Tms6747::emitTypes() {
+    if (lineSource() == nullptr) return;
+    std::ostringstream o;
+    for (const Type *t : debugTypes_) {
+        const std::string name = t->describe();
+        const int size = t->isComplete() ? t->size(target_) : 0;
+        if (t->isPointer()) {
+            o << "\t.dwtag\tDW_TAG_pointer_type, DW_AT_name(\"" << name << "\"), DW_AT_type(\"" << (t->pointee()->isFunction() ? std::string("void") : t->pointee()->describe())
+              << "\"), DW_AT_byte_size(" << size << ")\n";
+        } else if (t->isArray()) {
+            o << "\t.dwtag\tDW_TAG_array_type, DW_AT_name(\"" << name << "\"), DW_AT_type(\"" << t->pointee()->describe()
+              << "\"), DW_AT_upper_bound(" << (t->length() - 1) << "), DW_AT_byte_size(" << size << ")\n";
+        } else if (t->isStructOrUnion()) {
+            o << "\t.dwtag\t" << (t->kind() == Kind::Union ? "DW_TAG_union_type" : "DW_TAG_structure_type") << ", DW_AT_name(\"" << name
+              << "\"), DW_AT_byte_size(" << size << ")\n";
+            for (const Member &m : t->members())
+                if (!m.isBitField() && !m.name.empty())
+                    o << "\t.dwtag\tDW_TAG_member, DW_AT_name(\"" << m.name << "\"), DW_AT_type(\"" << m.type->describe()
+                      << "\"), DW_AT_data_member_location(" << m.offset << ")\n";
+        } else {
+            const char *enc = t->isFloating() ? "DW_ATE_float"
+                            : t->kind() == Kind::Char || t->kind() == Kind::SChar ? "DW_ATE_signed_char"
+                            : t->kind() == Kind::UChar ? "DW_ATE_unsigned_char"
+                            : (t->kind() == Kind::UShort || t->kind() == Kind::UInt || t->kind() == Kind::ULong || t->kind() == Kind::ULongLong) ? "DW_ATE_unsigned"
+                            : "DW_ATE_signed";
+            o << "\t.dwtag\tDW_TAG_base_type, DW_AT_name(\"" << name << "\"), DW_AT_byte_size(" << size << "), DW_AT_encoding(" << enc << ")\n";
+        }
+        o << "\t.dwendtag\n";
+    }
+    file_ += o.str();
 }
 
 void Tms6747::emitFunction(const Function &fn) {
@@ -1278,6 +1323,7 @@ void Tms6747::run(const Program &program) {
     file_ += out_.str();
     out_.str(std::string());
     for (const Function &fn : program.functions) emitFunction(fn);
+    emitTypes();
     // The personality routine the index entries name by number, which the
     // linker cannot otherwise see them need.
     if (!program.functions.empty())

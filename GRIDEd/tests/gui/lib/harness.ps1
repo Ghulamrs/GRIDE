@@ -9,7 +9,7 @@ function Write-Ws($startup, $config, $target, $bps) {
   $json = @"
 {
   "gride": "1.0", "type": "workspace", "name": "e2e",
-  "projects": [ {"path": "cdemo/cdemo.pro"}, {"path": "cppshapes/cppshapes.pro"}, {"path": "shlmatrix/shlmatrix.pro"} ],
+  "projects": [ {"path": "cdemo/cdemo.pro"}, {"path": "cppshapes/cppshapes.pro"}, {"path": "shlmatrix/shlmatrix.pro"}, {"path": "cdata/cdata.pro"} ],
   "startup": "$startup", "activeConfig": "$config", "activeTarget": "$target",
   "breakpoints": $b
 }

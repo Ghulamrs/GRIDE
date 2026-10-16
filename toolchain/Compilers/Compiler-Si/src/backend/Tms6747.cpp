@@ -54,6 +54,25 @@ void Tms6747Emitter::describeFunction(const DebugFunction &function) {
 // -g: the variables in TI's .dwtag spelling (GRIDEd docs\C6747-LOCALS-DESIGN.md), each named from A15 - TI's
 // DWARF register 15 - at its slot: A15 - (save area + every slot) + 8k. A by-reference parameter's slot holds
 // the variable's address. Parameters first, in order.
+// The type and what it is made of, as .dwtag after the function's block: int, real and char as base types
+// (an int in four bytes, a real in eight, a char in one), an array as the runtime's {count, element, data}
+// that the variable points to, its rows arrays of the same shape.
+static void typeTags(const Type *t, std::string &s, std::string &done) {
+    if (t == nullptr) return;
+    const std::string name = t->spelling();
+    if (done.find("|" + name + "|") != std::string::npos) return;
+    done += "|" + name + "|";
+    if (t->isArray()) {
+        s += "\t.dwtag\tDW_TAG_array_type, DW_AT_name(\"" + name + "\"), DW_AT_type(\"" + t->element()->spelling() +
+             "\"), DW_AT_GRIDE_runtime_array, DW_AT_byte_size(4)\n\t.dwendtag\n";
+        typeTags(t->element(), s, done);
+        return;
+    }
+    const char *size = t->kind() == Type::Kind::Real ? "8" : t->kind() == Type::Kind::Char ? "1" : "4";
+    const char *enc = t->kind() == Type::Kind::Real ? "DW_ATE_float" : t->kind() == Type::Kind::Char ? "DW_ATE_unsigned_char" : "DW_ATE_signed";
+    s += "\t.dwtag\tDW_TAG_base_type, DW_AT_name(\"" + name + "\"), DW_AT_byte_size(" + size + "), DW_AT_encoding(" + enc + ")\n\t.dwendtag\n";
+}
+
 static std::string variableTags(const DebugFunction &f, const std::string &label, int slots) {
     const int base = kSaveBytes + 8 * slots;
     std::string s = "\t.dwtag\tDW_TAG_subprogram, DW_AT_name(\"" + f.name + "\"), DW_AT_low_pc(" + label + ")\n";
@@ -65,7 +84,10 @@ static std::string variableTags(const DebugFunction &f, const std::string &label
                  "\"), DW_AT_location[DW_OP_breg15 " + std::to_string(8 * l.slot - base) +
                  (l.indirect ? ", DW_OP_deref" : "") + "]\n";
         }
-    return s + "\t.dwendtag\n";
+    s += "\t.dwendtag\n";
+    std::string done;
+    for (const DebugLocal &l : f.locals) typeTags(l.type, s, done);
+    return s;
 }
 
 void Tms6747Emitter::constant(const std::string &reg, int32_t value) {

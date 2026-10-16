@@ -36,6 +36,32 @@ function LocalsText {
     Start-Sleep -Milliseconds 800
     (ListViews | ForEach-Object { LV-Rows $_.H 4 } | Where-Object { $_ -match '\S' }) -join "`n"
 }
+# a debug pane shown from Debug > Windows: its list's rows, or its text view (Memory, Disassembly)
+function PaneRows($pane) { Menu 'Debug','Windows',$pane; LocalsText }
+function PaneText($pane) {
+    Menu 'Debug','Windows',$pane; Start-Sleep -Milliseconds 800
+    $out = OutBox
+    (Rich-Windows | Where-Object { $_.Vis -and $_.H -ne $out } | ForEach-Object { [W32]::Text($_.H) }) -join "`n"
+}
+function TypeKeys($k) { Start-Sleep -Milliseconds 400; [System.Windows.Forms.SendKeys]::SendWait($k); Start-Sleep -Milliseconds 900 }
+$DbgKeys['Run to Cursor'] = '^{F10}'
+# a step that is not a move: what to do, and the text its check reads
+function Act($what) {
+    $verb, $rest = $what -split ':', 2
+    switch ($verb) {
+        'Locals'    { return LocalsText }
+        'CallStack' { return PaneRows 'Call Stack' }
+        'Registers' { return PaneRows 'Registers' }
+        'Memory'    { return PaneText 'Memory' }
+        'Watch'     { Menu 'Debug','Watch Expression...'; TypeKeys "$rest{ENTER}"; return PaneRows 'Watch' }
+        'Up'        { Menu 'Debug','Up the Stack'; Start-Sleep -Milliseconds 600; return PaneRows 'Locals' }
+        'Down'      { Menu 'Debug','Down the Stack'; Start-Sleep -Milliseconds 600; return PaneRows 'Locals' }
+        'Set'       { Menu 'Debug','Set Variable...'; TypeKeys "$rest{ENTER}"; return PaneRows 'Locals' }
+        'GoTo'      { Focus-Gride; TypeKeys '^g'; TypeKeys "$rest{ENTER}"; return 'ok' }
+        'Output'    { return Get-Output 'Debug' }
+    }
+    return $null
+}
 
 # ---- builds: the whole workspace, both configurations, both targets ----
 foreach ($target in 'Windows', 'TMS320C6747') {
@@ -45,7 +71,7 @@ foreach ($target in 'Windows', 'TMS320C6747') {
         Fresh 'cdemo' $config $target $null $null
         Menu 'Build', 'Rebuild Workspace'
         $o = Wait-Out '\d+ succeeded, \d+ failed' 240
-        Check $name '3 projects built' $o '3 succeeded, 0 failed'
+        Check $name '4 projects built' $o '4 succeeded, 0 failed'
     }
 }
 
@@ -59,20 +85,48 @@ $debug = @(
     @{ Name = 'debug C++11 Windows'; Proj = 'cppshapes'; Target = 'Windows'; Bps = '{ "cppshapes/src/main.cpp": [9] }'; Open = 'cppshapes\src\main.cpp'; Steps = @(
         @('Start Debugging', 'stopped at main\.cpp:9'), @('Step Into', 'stopped at rect\.cpp:16'), @('Step Out', 'stopped at main\.cpp:9'), @('Start Debugging', 'returned 0')) },
     @{ Name = 'debug C++11 C6747'; Proj = 'cppshapes'; Target = 'TMS320C6747'; Bps = '{ "cppshapes/src/main.cpp": [9] }'; Open = 'cppshapes\src\main.cpp'; Steps = @(
-        @('Start Debugging', 'stopped at main\.cpp:9'), @('Locals', 'shapes \| \{\.\.\.\} \| class vector'), @('Step Over', 'stopped at main\.cpp:10'), @('Start Debugging', 'returned 0')) },
+        @('Start Debugging', 'stopped at main\.cpp:9'), @('Locals', 'shapes \| \{items_ = 0x[0-9a-f]+, size_ = 1, cap_ = \d+\} \| class vector'),
+        @('Step Over', 'stopped at main\.cpp:10'), @('Start Debugging', 'returned 0')) },
     @{ Name = 'debug Shalimar Windows'; Proj = 'shlmatrix'; Target = 'Windows'; Bps = '{ "shlmatrix/src/matrix.shl": [9] }'; Open = $null; Steps = @(
         @('Start Debugging', 'stopped at matrix\.shl:9'), @('Step Into', 'stopped at linalg\.shl:\d+ in mul'), @('Step Out', 'stopped at matrix\.shl:(9|10)'),
         @('Step Over', 'stopped at matrix\.shl:\d+'), @('Step Out', 'no source to show'), @('Start Debugging', 'returned 0')) },
     @{ Name = 'debug Shalimar C6747'; Proj = 'shlmatrix'; Target = 'TMS320C6747'; Bps = '{ "shlmatrix/src/matrix.shl": [9] }'; Open = $null; Steps = @(
-        @('Start Debugging', 'stopped at matrix\.shl:9'), @('Step Into', 'stopped at linalg\.shl:\d+'), @('Locals', '(?s)a \| \{\.\.\.\} \| real\[\]\[\].*i \| \S+ \| int'),
-        @('Step Out', 'stopped at matrix\.shl:\d+'), @('Start Debugging', 'returned 0')) }
+        @('Start Debugging', 'stopped at matrix\.shl:9'), @('Step Into', 'stopped at linalg\.shl:\d+'),
+        @('Locals', '(?s)a \| \{\{1, 2, 0\}, \{0, 1, 3\}, \{4, 0, 1\}\} \| real\[\]\[\].*i \| \S+ \| int'),
+        @('Step Out', 'stopped at matrix\.shl:\d+'), @('Start Debugging', 'returned 0')) },
+    # arrays, a 2-D array, structs within structs, a char array and a string pointer (phase D)
+    @{ Name = 'debug C90 data C6747'; Proj = 'cdata'; Target = 'TMS320C6747'; Bps = '{ "cdata/src/data.c": [22] }'; Open = 'cdata\src\data.c'; Steps = @(
+        @('Start Debugging', 'stopped at data\.c:22'),
+        @('Locals', '(?s)primes \| \{2, 3, 5, 7, 11\} \|.*grid \| \{\{1, 2, 3\}, \{4, 5, 6\}\} \|.*p \| \{x = 3, y = -4\} \|.*b \| \{corner = \{\{x = 0, y = 0\}, \{x = 6, y = 2\}\}, label = "box", area = 12\.5\} \|.*name \| \(char \*\) 0x[0-9a-f]+ "cdata"'),
+        @('Start Debugging', 'returned 28')) },
+    @{ Name = 'debug C90 data Windows'; Proj = 'cdata'; Target = 'Windows'; Bps = '{ "cdata/src/data.c": [22] }'; Open = 'cdata\src\data.c'; Steps = @(
+        @('Start Debugging', 'stopped at data\.c:22'), @('Locals', '(?s)primes \|.*total \| 28 \|'), @('Start Debugging', 'returned 28')) }
 )
+# ---- the other debugger panes and commands, stopped in greet(): Call Stack, Registers, Memory, Watch,
+#      Up/Down the Stack, Set Variable (checked by what the program then prints), Run to Cursor ----
+foreach ($target in 'Windows', 'TMS320C6747') {
+    $debug += @{ Name = "panes C90 $target"; Proj = 'cdemo'; Target = $target; Bps = '{ "cdemo/src/greet.c": [5] }'; Open = 'cdemo\src\greet.c'; Steps = @(
+        @('Start Debugging', 'stopped at greet\.c:5'),
+        @('CallStack', '(?s)greet \| greet\.c \| 5.*main \| main\.c \| 8'),
+        @('Registers', '(?m)^(A0|rax) \| '),
+        @('Memory', '(?m)^[0-9A-F]{8,16}  04 00 00 00 '),
+        @('Watch:n*2', 'n\*2 \| 8 \|'),
+        @('Up', '(?s)n \| 4 \|.*g \| '),
+        @('Down', 'sum \| 0 \|'),
+        @('Set:sum = 7', 'sum \| 7 \|'),
+        @('GoTo:7', 'ok'),
+        @('Run to Cursor', 'stopped at greet\.c:7'),
+        @('Locals', 'sum \| 17 \|'),
+        @('Start Debugging', 'returned 3'),
+        @('Output', 'greet\(4\) is 17')) }
+}
 foreach ($d in $debug) {
     if ($d.Name -notmatch $Only) { continue }
     Fresh $d.Proj 'Debug' $d.Target $d.Bps $d.Open
     Get-Output 'Debug' | Out-Null
     foreach ($s in $d.Steps) {
-        if ($s[0] -eq 'Locals') { Check $d.Name 'Locals' (LocalsText) $s[1]; continue }
+        $acted = Act $s[0]
+        if ($null -ne $acted) { Check $d.Name ($s[0] -replace ':.*$', '') $acted $s[1]; continue }
         $t = StepText $s[0]
         $box = Dialogs
         if ($box) { $t += "`n[message box] " + ($box -join ' '); Close-Dialogs }
