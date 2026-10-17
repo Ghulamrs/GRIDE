@@ -79,7 +79,7 @@ del "%TEMP%\ride-release-vspath.txt"
 if "%VSPATH%"=="" (echo could not find Visual Studio 2022 & exit /b 1)
 call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul
 pushd "%R%"
-msbuild RIDE.sln /p:Configuration=Release /p:Platform=x64 /p:OutDir=%R%\bin\ /v:minimal /m
+msbuild RIDE.sln /p:Configuration=Release /p:Platform=x64 "/p:OutDir=%R%\bin\\" /v:minimal /m
 set "RC=%errorlevel%"
 popd
 if not "%RC%"=="0" (echo BUILD FAILED & exit /b 1)

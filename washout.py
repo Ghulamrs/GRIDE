@@ -13,6 +13,7 @@ the tree as its README.md lays it out -
 
     GRIDEd\\      GRIDEd; GRIDE.sln builds GRIDE, cppparse and the eleven tools into GRIDEd\\x64\\<Config>
     GRIDE 2.0\\   GRIDE 2.0; its GRIDE.sln builds GRIDE and the same eleven tools into its own x64\\<Config>
+    GRIDE 1.0\\   RIDE 5.17 (the White outlook); its RIDE.sln builds RIDE and the same eleven tools (build.bat: bin\\)
     toolchain\\   the tools both solutions build, as ..\\toolchain\\...: Compilers\\ (c90, cpp11, shalimar, c2s),
                  TI\\ (asm6x, lnk6x, rts6x and its ar6x, sim6747, vm6747), Windows\\ (masm, link); MANIFEST.md,
                  copy-toolchain.py, msbuild\\Toolchain.targets

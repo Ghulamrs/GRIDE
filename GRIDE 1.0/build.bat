@@ -82,7 +82,7 @@ rem The window, which is C++/CLI and which the console build above never
 rem compiles. Run from here for the same reason the solution is: msbuild
 rem reaches PATH only after vcvars64.bat, which the top of this file has
 rem already found, so nothing else has to know where Visual Studio is.
-msbuild winforms\RIDEGui.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=%CD%\bin\ /v:minimal
+msbuild winforms\RIDEGui.vcxproj /p:Configuration=Release /p:Platform=x64 "/p:OutDir=%CD%\bin\\" /v:minimal
 if errorlevel 1 goto :fail
 echo built %PRODUCT%.exe (the window)
 exit /b 0
@@ -110,7 +110,7 @@ rem ..\toolchain\TI\VM6747 and ..\toolchain\Compilers\Converter-C2S - the compil
 rem shalimar, each its own repository since 2026-10-12, with vm6747 the emulator
 rem that runs the fourth target - so all of them are laid out beside each other
 rem on this machine, as tools/to-windows.sh lays them.
-msbuild %PRODUCT%.sln /p:Configuration=Release /p:Platform=x64 /p:OutDir=%CD%\bin\ /v:minimal /m
+msbuild %PRODUCT%.sln /p:Configuration=Release /p:Platform=x64 "/p:OutDir=%CD%\bin\\" /v:minimal /m
 if errorlevel 1 goto :fail
 echo built the solution
 goto :confirm

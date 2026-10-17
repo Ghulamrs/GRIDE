@@ -158,7 +158,7 @@ def main(argv):
     if os.path.abspath(dest).startswith(ROOT + os.sep) or dest == ROOT:
         print("washout: the copy cannot go inside the tree it washes"); return 2
     workspace = "--workspace" in argv
-    ride_name = RIDE_PLAN[0]                     # this tree's own folder name, RIDE-4.7 - never a version written here
+    ride_name = RIDE_PLAN[0]                     # this tree's own folder name, GRIDE 1.0 in GRIDE1 - never a version written here
     ride_dest = os.path.join(dest, ride_name) if workspace else dest
     if os.path.exists(dest) and os.listdir(dest):
         if "--force" not in argv:

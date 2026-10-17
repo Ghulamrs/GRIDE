@@ -1,12 +1,13 @@
 # GRIDEx2
 
-Two Visual Studio-style IDEs for RIDE's toolchain, sharing one copy of that toolchain:
+Three IDEs for RIDE's toolchain, sharing one copy of that toolchain:
 
 | Folder | What it is |
 |---|---|
 | `GRIDEd\` | GRIDEd - C++/CLI, .NET Framework 4.8, multi-file; `GRIDE.sln` builds GRIDE and the eleven tools into `x64\<Config>\` |
 | `GRIDE 2.0\` | GRIDE 2.0 - C++/CLI, .NET Framework 4.8, single translation unit; the same build into its own `x64\<Config>\` |
-| `toolchain\` | the eleven tools both solutions build (`..\toolchain\...`): c90, cpp11, shalimar, c2s (`Compilers\`), asm6x, lnk6x, rts6x, sim6747, vm6747 (`TI\`), masm, link (`Windows\`) |
+| `GRIDE 1.0\` | RIDE 5.17, the White outlook (*RIDE - The Simplest*), seal `ride-5.17.dat`; `RIDE.sln` builds RIDE (window and console) and the eleven tools from `..\toolchain` (`build.bat solution`, into `bin\`). RIDE's examples (`programs\`, `projects\`) and help (`help\`) are its own, as each IDE keeps its own. Not built in GRIDE1 yet; the installer's White option is still to be added on Windows. |
+| `toolchain\` | the eleven tools the three solutions build (`..\toolchain\...`): c90, cpp11, shalimar, c2s (`Compilers\`), asm6x, lnk6x, rts6x, sim6747, vm6747 (`TI\`), masm, link (`Windows\`) |
 
 The folders `My Documents\GRIDEd` and `My Documents\GRIDE` are copies of this tree's closed state, each with the toolchain
 inside (`toolchain\` instead of `..\toolchain\`). Build one of the two solutions at a time: their tool projects

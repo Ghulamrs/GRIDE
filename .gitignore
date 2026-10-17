@@ -21,15 +21,15 @@ Release/
 # a tool's IntDir, ar6x's own output; the MSI and its checks
 /toolchain/**/build/
 /installer/dist/
-# RIDE-4.7 (RIDE 5.17, the White outlook): what its builds and tests leave in the tree. Its own
-# .gitignore beside it already keeps out bin/, dist/, obj/, x64/, lib/ and the programs it builds.
-/RIDE-4.7/tests/out-*/
-/RIDE-4.7/tests/build/
-/RIDE-4.7/tests/gui
-/RIDE-4.7/tests/session
-/RIDE-4.7/tests/test
-/RIDE-4.7/tests/toolchain-check
-/RIDE-4.7/.claude/
+# GRIDE 1.0 (RIDE 5.17, the White outlook): what its builds and tests leave in the tree. Its own
+# .gitignore beside it already keeps out bin/, dist/, obj/, x64/, lib/, build/, *.log and the programs it
+# builds (tests/test, tests/session among them).
+/GRIDE 1.0/tests/out-*/
+/GRIDE 1.0/.claude/
 # its CCS reference projects carry Debug/ and Release/ folders of their own, which "Debug/" above would hide
-!/RIDE-4.7/docs/ccs-reference/**/Debug/
-!/RIDE-4.7/docs/ccs-reference/**/Release/
+!/GRIDE 1.0/docs/ccs-reference/**/Debug/
+!/GRIDE 1.0/docs/ccs-reference/**/Release/
+
+# Python's caches, wherever a script ran (washout.py, RIDE's tools/)
+__pycache__/
+*.pyc
