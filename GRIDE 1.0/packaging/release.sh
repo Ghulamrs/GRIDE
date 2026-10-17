@@ -9,6 +9,10 @@
 # at its own head like the rest; there is no submodule pin left to agree with (D16).
 # RELEASE_DIR (default ~/ride-release, outside iCloud's ~/Documents), JOBS (8 on a Mac, 2 on Linux).
 set -eu
+# GRIDE1: this is RIDE's own release, cloned from its repositories on GitHub (RIDE-4.7 among them) and sealed
+# by MASTER.SEAL, which GRIDE 1.0 does not carry. It does not apply inside GRIDE1; GRIDE1 ships through
+# installer/windows. RIDE_RELEASE_OUTSIDE_GRIDE1=1 runs it all the same.
+[ "${RIDE_RELEASE_OUTSIDE_GRIDE1:-}" = 1 ] || { echo "release.sh: RIDE's own release - it does not apply inside GRIDE1"; exit 2; }
 
 VER=${1:-5.17}
 BASE=${RELEASE_DIR:-$HOME/ride-release}

@@ -31,7 +31,7 @@ way; duplicating the words would be worse than including the header. Borrowing
 vocabulary is not sharing machinery.
 
 The protocol itself, and the debug-versus-release boundary it depends on, are
-in `../../../Compiler-S/docs/DEBUGGING.md`.
+in Compiler-S's `docs/DEBUGGING.md` (the Shalimar compiler's own repository, not in GRIDE1).
 
 ## Where this stands
 

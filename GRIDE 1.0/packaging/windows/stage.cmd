@@ -5,9 +5,9 @@ set "PRODUCT=RIDE"
 set SRC=%~1
 set CPP=%~2
 set STAGE=%~3
-rem The C compiler clone, for lib\ - c90's headers. Beside the C++ one unless named.
+rem The C compiler, for lib\ - c90's headers: GRIDE1's shared copy unless named.
 set CC=%~4
-if "%CC%"=="" set "CC=%CPP%\..\Compiler-Ci"
+if "%CC%"=="" set "CC=%SRC%\..\toolchain\Compilers\Compiler-Ci"
 rem The programs: %SRC%\bin unless a fifth argument names the solution's OutDir (the Installer project).
 set "BIN=%~5"
 if "%BIN%"=="" set "BIN=%SRC%\bin"

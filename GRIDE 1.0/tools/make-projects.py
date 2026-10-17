@@ -279,7 +279,7 @@ def projects():
             # the ordering workspace.mk states as `make ... all tms6747
             # CXX1=$(OUT)/cpp11.exe` and RIDE.sln as a project dependency.
             # The path is from *this* project's directory, not the editor's:
-            # "../Compilers/C++Optimize" from here would be Compiler-Si/C++Optimize,
+            # a path written from the editor's directory would land inside Compiler-Si,
             # and Xcode drops a reference it cannot follow without a word -
             # the dependency graph then says "shalimar.exe (no dependencies)".
             "depends": [("cpp11.exe",

@@ -47,8 +47,8 @@ SHM_SRC := src/shalimar/channel.cpp src/shalimar/session.cpp
 BRIDGE_SRC := winforms/bridge.cpp
 MAC_SRC := main.mm WindowController.mm CodeView.mm LineNumbers.mm
 
-# In build/macos, beside the terminal editor's build/obj, which git ignores (GRIDE1: nothing is
-# written outside GRIDE1; it was ../../build/RIDE-4.7).
+# In build/macos, beside the terminal editor's build/obj, which git ignores, so nothing is
+# written outside GRIDE1.
 BUILD ?= ../build/macos
 OBJDIR ?= $(BUILD)/mac-obj
 APP ?= $(BUILD)/RIDE.app

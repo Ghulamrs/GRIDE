@@ -57,7 +57,7 @@ one the compilers already give.
 
 **It was right about Shalimar, and for roughly the right reason.** The honest
 answer is that a Shalimar group is a whole program. The evidence is in
-`../Compiler-S/docs/LINKING.md` and checked by `Compiler-S/tests/linking.sh`;
+Compiler-S's `docs/LINKING.md` and checked by its `tests/linking.sh` (its own repository, not in GRIDE1);
 briefly, every unit exports the same three startup symbols whatever file it
 came from, the runtime archive owns `main`, and the language has no
 declarations for a call across a link to be checked against. The first two

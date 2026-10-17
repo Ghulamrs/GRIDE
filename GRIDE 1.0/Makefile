@@ -74,8 +74,8 @@ SHM_SRC := src/shalimar/channel.cpp src/shalimar/session.cpp
 
 # The objects go under obj/ rather than beside the sources they came from,
 # so that a listing of src/ is the code and nothing else.
-# Objects are built in build/obj, which git ignores (GRIDE1: nothing is written outside GRIDE1; it was
-# ../build/RIDE-4.7/obj beside the four projects). Nothing intermediate is ever written next
+# Objects are built in build/obj, which git ignores, so nothing is written outside GRIDE1. Nothing
+# intermediate is ever written next
 # to the sources, so `tar` on this repository carries source and nothing else,
 # and a clean is a directory removal that cannot reach a tracked file.
 #
@@ -104,7 +104,7 @@ EDITOR := $(BINDIR)/$(PRODUCT).exe
 # 162 session checks and said "0 failed" - while the full suite is 912 and 297.
 # 264 checks skipped, and the skipping is announced ("no shc named, so those
 # cases are not tried") but the total is not, so the headline reads like a pass.
-# That is the hazard in ../Compiler-C's verification notes wearing local clothes:
+# That is the hazard in Compiler-C's verification notes (its own repository, not in GRIDE1) wearing local clothes:
 # a green suite that tested less than the reader thinks.
 #
 # The absurd part was where the binaries were: BINDIR, the directory `confirm`

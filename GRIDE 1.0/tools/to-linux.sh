@@ -45,6 +45,9 @@
 #   ./tools/to-linux.sh              build the workspace and run every suite
 #   ./tools/to-linux.sh build        build and confirm only
 set -uo pipefail
+# GRIDE1: this relays RIDE and its sibling repositories to another machine. In GRIDE1 the Mac is only the git
+# bridge and each box works in its own clone of GRIDE1 (CLAUDE.md), so it does not apply here.
+echo "to-linux.sh: RIDE's relay to another machine - it does not apply inside GRIDE1"; exit 2
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 KEY="${ED1_LINUX_KEY:-$HOME/Documents/Claude/myMorningWalk.pem}"

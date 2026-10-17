@@ -34,7 +34,7 @@ if [ -z "${CPP:-}" ]; then
   done
 fi
 : "${CPP:?set CPP to the C++ clone that has include/ and lib/}"
-CC="${CC:-$CPP/../Compiler-Ci}"
+CC="${CC:-$ROOT/../toolchain/Compilers/Compiler-Ci}"
 
 echo "==========================================================================="
 echo " RIDE $VER build (Linux/macOS)"

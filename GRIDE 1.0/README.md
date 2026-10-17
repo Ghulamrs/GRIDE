@@ -511,7 +511,7 @@ move.
 ### No debug information for Shalimar, and a debugger anyway
 
 `shalimar` writes no debug information for any target, and that is settled rather
-than pending - see the Known limitations in `../Compiler-S/README.md`. The
+than pending - see the Known limitations in Compiler-S's `README.md` (the Shalimar compiler's own repository, not in GRIDE1). The
 Debug panel says so in words rather than showing an empty pane.
 
 What there is instead is not a consolation. The compiler already emits
@@ -714,7 +714,7 @@ group with C, because no compiler takes both. In a group of its own beside C,
 because of what a Shalimar object *is*: every unit exports the same three
 startup symbols whatever file it came from, the runtime archive owns `main`,
 and the language has no declarations for a call across a link to be checked
-against. `../Compiler-S/docs/LINKING.md` has it with the linker output and with
+against. Compiler-S's `docs/LINKING.md` (its own repository, not in GRIDE1) has it with the linker output and with
 what would have to change. A project that wants Shalimar beside C is a project
 that builds two programs.
 

@@ -31,11 +31,14 @@
 #   ./tools/to-windows.sh gui          also msbuild the window on its own
 #   ./tools/to-windows.sh solution     every program the editor drives, no suites
 set -uo pipefail
+# GRIDE1: this relays RIDE and its sibling repositories to another machine. In GRIDE1 the Mac is only the git
+# bridge and each box works in its own clone of GRIDE1 (CLAUDE.md), so it does not apply here.
+echo "to-windows.sh: RIDE's relay to another machine - it does not apply inside GRIDE1"; exit 2
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 BOX="${ED1_WINDOWS_BOX:-windows}"
 ROOT="${ED1_WINDOWS_ROOT:-C:\\Users\\GRA\\source}"
-DIR="$ROOT\\RIDE-4.7"
+DIR="$ROOT\\GRIDE 1.0"
 # The three compilers are repositories of their own beside VM6747 since
 # 2026-10-12, laid out on the box as they are here; VM6747 is the emulator itself.
 VM_ROOT="$ROOT\\TI\\VM6747"
