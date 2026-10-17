@@ -1438,6 +1438,13 @@ namespace Gride
             {
                 if (String::IsNullOrWhiteSpace(l)) continue;
                 String^ lp = l->Trim();
+                // RTS6x's libraries and TI's runtime belong to the TMS320C6747 alone: a project's list is shared by
+                // its targets, so on any other target they are left out of the link, said in the Output
+                if (!target->Emulated && IsC6747Library(lp))
+                {
+                    Out("[" + lp + " is the TMS320C6747's runtime - left out of this target's link]");
+                    continue;
+                }
                 if (runtime != nullptr && rl != nullptr && (rl->IsAlias(lp) || IsTiRuntimeName(lp))) { lp = runtime; runtimeNamed = true; }
                 else if (lp->IndexOf(L'\\') >= 0 || lp->IndexOf(L'/') >= 0 || File::Exists(Path::Combine(projectDir, lp)))
                     lp = PathUtil::Resolve(projectDir, lp);
@@ -1448,6 +1455,13 @@ namespace Gride
                                   linker->Arguments->IndexOf("$(Runtime)", StringComparison::OrdinalIgnoreCase) >= 0;
             if (runtime != nullptr && !runtimeNamed && !argsUseRuntime) libs->Add(runtime);
             return libs;
+        }
+
+        // RTS6x's own libraries by file name: rts6x, printf6x, shmrt6x and their debug variants
+        static bool IsC6747Library(String^ lib)
+        {
+            String^ n = Path::GetFileName(lib->Trim()->Trim(L'"'));
+            return System::Text::RegularExpressions::Regex::IsMatch(n, "^(rts6|printf6x|shmrt6x)", System::Text::RegularExpressions::RegexOptions::IgnoreCase);
         }
 
         // TI's names for the C runtime (toolchain.json's ccs.tiRuntime: libc.a, rts6740_elf_eh.lib, rts6740_elf.lib)

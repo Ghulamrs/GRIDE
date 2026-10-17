@@ -242,6 +242,7 @@ namespace Gride { namespace UI {
         bool HasWritableProject();
         bool HasSelectedFile();
         bool CanBuild();
+        bool CanEmulate();
         bool IsBuilding();
         bool IsDebugging();
         bool IsInBreak();

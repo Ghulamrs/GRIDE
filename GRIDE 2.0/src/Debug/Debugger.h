@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
 //  GRIDE 2.0 - the debugger (R09: RIDE's src/debugger.cpp through GRIDEd's
 //  Services\Debugger.h and GdbDebugger.h, ported into GRIDE's single

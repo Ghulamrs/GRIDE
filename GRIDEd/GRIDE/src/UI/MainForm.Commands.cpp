@@ -138,8 +138,8 @@ namespace Gride { namespace UI {
         c = Cmd("Debug.Start", "&Start Debugging", "F5", "debug", DO(DebugStart)); c->CanExecute = WHEN(CanStartDebug);
         c = Cmd("Debug.StartNoDebug", "Start &Without Debugging", "Ctrl+F5", "run", DO(DebugStartNoDebug)); c->CanExecute = WHEN(CanBuild);
         // RIDE's Build > Emulate on vm6747 and Build > Verify (tms6747), and the stop of a program running in the Output pane
-        c = Cmd("Debug.Emulate", "&Emulate on VM6747", nullptr, "run", DO(DebugEmulate)); c->CanExecute = WHEN(CanBuild);
-        c = Cmd("Debug.Verify", "&Verify (vm6747 against sim6747)", nullptr, nullptr, DO(DebugVerify)); c->CanExecute = WHEN(CanBuild);
+        c = Cmd("Debug.Emulate", "&Emulate on VM6747", nullptr, "run", DO(DebugEmulate)); c->CanExecute = WHEN(CanEmulate);
+        c = Cmd("Debug.Verify", "&Verify (vm6747 against sim6747)", nullptr, nullptr, DO(DebugVerify)); c->CanExecute = WHEN(CanEmulate);
         c = Cmd("Debug.StopProgram", "Stop &Program", nullptr, "stop", DO(StopProgram)); c->CanExecute = WHEN(IsRunning);
         c = Cmd("Debug.Stop", "S&top Debugging", "Shift+F5", "stop", DO(DebugStop)); c->CanExecute = WHEN(IsDebugging);
         c = Cmd("Debug.Restart", "&Restart", "Ctrl+Shift+F5", "restart", DO(DebugRestart)); c->CanExecute = WHEN(IsDebugging);
@@ -641,6 +641,8 @@ namespace Gride { namespace UI {
         if (workspace != nullptr) return workspace->Projects->Count > 0;
         return ActiveFileHasMain();
     }
+    // Emulate and Verify: vm6747 and sim6747 are for the TMS320C6747 target alone
+    bool MainForm::CanEmulate() { return CanBuild() && RideToolchain::IsEmulated(CurrentTarget()); }
     bool MainForm::IsBuilding() { return engine->IsBuilding || runner->IsRunning; }
     bool MainForm::IsRunning() { return runner->IsRunning; }
     bool MainForm::IsDebugging() { return debugger->IsActive; }

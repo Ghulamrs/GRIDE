@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
 //  GRIDE 2.0 - RIDE's shalimar::Session (R09: GRIDEd's ShalimarSession.h
 //  ported). A Shalimar program stops itself: the compiler calls shm_line before

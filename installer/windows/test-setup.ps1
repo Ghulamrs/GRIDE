@@ -42,6 +42,7 @@ foreach ($c in $Choices) {
   Check ((Test-Path "$dir\examples\cppparse\cppparse.sln") -and (Test-Path "$dir\examples\cppparse\cppparse\cppparse.vcxproj")) "examples\cppparse (the solution and its project)"
   $shl = @(Get-ChildItem "$dir\examples\shalimar" -Recurse -Filter *.shl -ErrorAction SilentlyContinue)
   Check ($shl.Count -eq 20 -and (Test-Path "$dir\examples\shalimar\classic\factorial\factorial.pro")) "examples\shalimar (20 Shalimar sources, the 7 RIDE examples and the 11 classic programs)"
+  Check ((Test-Path "$dir\examples\showcase\README.md") -and (Test-Path "$dir\examples\showcase\solve3-shalimar\solve3.shl") -and (Test-Path "$dir\examples\showcase\average-c90\src\rng.c") -and (Test-Path "$dir\examples\showcase\solve3-cpp11\src\Matrix.cpp")) "examples\showcase (solve3-shalimar, average-c90, solve3-cpp11)"
   Check (Test-Path "$dir\vcruntime140.dll") "the VC++ runtime beside GRIDE.exe"
   Check (-not (Test-Path (Join-Path $base $folders[$other]))) "$($folders[$other]) not installed"
   Check (Test-Path (Join-Path $menu $links[$c])) "Start menu: $($links[$c])"

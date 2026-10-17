@@ -8,7 +8,7 @@
 #
 # Input: each solution's Release build, as Visual Studio's Build Solution leaves it -
 # GRIDEd\x64\Release and GRIDE 2.0\x64\Release (GRIDE.exe, the ten programs, toolchain.json, docs\,
-# lib\) - and each IDE's samples\cppparse and samples\shalimar (installed under examples\). Build both first (one at a time). Left out: .pdb, .ilk,
+# lib\) - and each IDE's samples\cppparse, samples\shalimar and samples\showcase (installed under examples\). Build both first (one at a time). Left out: .pdb, .ilk,
 # .metagen. Added: Visual Studio 2022's VC++ runtime DLLs beside GRIDE.exe (app-local, as Microsoft
 # allows for Microsoft.VC143.CRT), so a machine without the VC++ Redistributable runs it.
 #
@@ -83,7 +83,7 @@ foreach ($ide in $ides) {
     foreach ($dll in Get-ChildItem -LiteralPath $CrtFolder -Filter *.dll) { Copy-Item -LiteralPath $dll.FullName -Destination $dest }
     # the samples, as each IDE's samples\<name> has them, without what building them leaves behind
     $exSkip = [regex]'[\\/](\.gride|\.vs|sandbox|x64|bin|obj|out)[\\/]'
-    foreach ($sample in "cppparse", "shalimar") {
+    foreach ($sample in "cppparse", "shalimar", "showcase") {
         $ex = Join-Path $root "$($ide.Source)\samples\$sample"
         if (-not (Test-Path -LiteralPath $ex)) { throw "$ex is missing - the Setup ships it" }
         Get-ChildItem -LiteralPath $ex -Recurse -File | Where-Object { -not $exSkip.IsMatch($_.FullName) } | ForEach-Object {

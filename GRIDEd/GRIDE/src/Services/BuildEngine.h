@@ -1136,7 +1136,8 @@ namespace Gride { namespace Services {
             mx->Set("DebugAssembler", tc->ResolveFor("debugAssembler", tc->DebugAssembler));
             mx->Set("DebugLinker", tc->ResolveFor("debugLinker", tc->DebugLinker));
             mx->Set("Runtime", tc->Resolve(tc->Runtime));
-            mx->Set("RuntimeDir", tc->ResolveRuntimeDir());
+            // RTS6x is the TMS320C6747's runtime alone: no other target is given its directory
+            mx->Set("RuntimeDir", RideToolchain::IsEmulated(cfg->TargetKind) ? tc->ResolveRuntimeDir() : String::Empty);
             mx->Set("Simulator", tc->ResolveFor("simulator", tc->Simulator));
             mx->Set("Emulator", tc->ResolveFor("emulator", tc->Emulator));
             mx->Set("Debugger", tc->ResolveFor("debugger", tc->Debugger));
@@ -1170,12 +1171,31 @@ namespace Gride { namespace Services {
             libDirs->AddRange(tc->LibDirs);
             mx->Set("LibDirFlags", MacroExpander::JoinFlags(tc->LibDirFlag, libDirs));
             // the project's libraries, then the shared ones every host link takes (RIDE's settings.json "libraries")
-            List<String^>^ libs = gcnew List<String^>(cfg->Libs);
+            List<String^>^ libs = gcnew List<String^>();
+            for each (String^ l in cfg->Libs)
+            {
+                // RTS6x's libraries (rts6x, printf6x, shmrt6x, TI's rts6740...) belong to the TMS320C6747 alone
+                if (!RideToolchain::IsEmulated(cfg->TargetKind) && IsC6747Library(l))
+                {
+                    Say("[" + l + " is the TMS320C6747's runtime - left out of the " + TargetInfo::Name(cfg->TargetKind) + " link]");
+                    continue;
+                }
+                libs->Add(l);
+            }
             if (!RideToolchain::IsEmulated(cfg->TargetKind))
                 for each (String^ l in settings->Env->SharedLibraries)
                     if (!String::IsNullOrWhiteSpace(l) && !libs->Contains(l->Trim())) libs->Add(Environment::ExpandEnvironmentVariables(l->Trim()));
             mx->Set("LibFlags", MacroExpander::JoinFlags(tc->LibFlag, libs));
             return mx;
+        }
+
+        // a library of the TMS320C6747's runtime, by its file name: RTS6x's rts6x / printf6x / shmrt6x (debug
+        // variants too) and TI's rts6740_elf... - never for a Windows, Linux or macOS link
+        static bool IsC6747Library(String^ lib)
+        {
+            if (String::IsNullOrWhiteSpace(lib)) return false;
+            String^ n = Path::GetFileName(lib->Trim()->Trim('"'));
+            return System::Text::RegularExpressions::Regex::IsMatch(n, "^(rts6|printf6x|shmrt6x)", System::Text::RegularExpressions::RegexOptions::IgnoreCase);
         }
 
         DateTime NewestHeader(GrideProject^ p)
