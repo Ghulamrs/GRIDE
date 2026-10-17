@@ -11,15 +11,15 @@
 // the equations. The answer is x = 5, y = 7, z = 13.
 #include <iomanip>
 #include <iostream>
-#include "check.h"      // and through it CMatrix.h and CVector.h - included once: cpp11 does not
-                        // yet skip a second inclusion of CMatrix.h cleanly (its multi-line assert)
+#include "check.h"      // and through it CMatrix.h and CVector.h - included once here: cpp11 1.8
+                        // does not skip a second inclusion of CMatrix.h cleanly (fixed in cpp11 1.10)
 
 int main()
 {
-    const Mat3 A(Vec3(1.0,  1.0,  1.0),          // each row a CVector<3>
-                 Vec3(2.0, -1.0,  1.0),
-                 Vec3(1.0,  2.0, -1.0));
-    const Vec3 b(25.0, 16.0, 6.0);
+    const Mat3 A = { {1.0,  1.0,  1.0},           // each row a CVector<3>, from its own
+                     {2.0, -1.0,  1.0},           // initializer_list constructor
+                     {1.0,  2.0, -1.0} };
+    const Vec3 b = {25.0, 16.0, 6.0};
     Vec3 x;
 
     std::cout << std::fixed << std::setprecision(7);
