@@ -84,28 +84,28 @@ pack() {  # pack <name> <directory> <what...>
         --exclude 'DerivedData' --exclude 'build' \
         -czf "$TMP/$name-src.tgz" "$@" ) || exit 2
 }
-pack c90   ../Compilers/Compiler-Ci   src lib tools tests examples Makefile README.md
-pack cpp11  ../Compilers/C++Optimize src include lib tools tests ide Makefile README.md
-pack shalimar   ../Compilers/Compiler-Si   src runtime tests examples Makefile README.md
-pack vm6747 ../TI/VM6747      src tests Makefile README.md
+pack c90   ../toolchain/Compilers/Compiler-Ci   src lib tools tests examples Makefile README.md
+pack cpp11  ../toolchain/Compilers/C++Optimize src include lib tools tests ide Makefile README.md
+pack shalimar   ../toolchain/Compilers/Compiler-Si   src runtime tests examples Makefile README.md
+pack vm6747 ../toolchain/TI/VM6747      src tests Makefile README.md
 # asm6x's run.sh rechecks the review's probes against the oracle's recorded objects
 # (2026-09-19): the three directories it reads travel, without the review's own outputs.
-pack asm6x  ../TI/ASM6x                src tests Makefile README.md \
+pack asm6x  ../toolchain/TI/ASM6x                src tests Makefile README.md \
     review-probes-2026-09-19/recheck.sh review-probes-2026-09-19/known.txt \
     review-probes-2026-09-19/edge review-probes-2026-09-19/linkcheck review-probes-2026-09-19/fresh \
     review-probes-2026-09-19/labeldiff
 # masm: the x86-64 assembler, ml64's objects checked in under tests/enc.
-pack masm   ../Windows/MASM                 src tests Makefile README.md
+pack masm   ../toolchain/Windows/MASM                 src tests Makefile README.md
 # link: the x86-64 linker, link.exe's images checked in under tests/ref - and
 # they are .exe files, which pack() drops, so this one is packed by hand.
-( cd ../Windows/LINK && tar --no-mac-metadata --exclude '* 2.*' --exclude 'build' \
+( cd ../toolchain/Windows/LINK && tar --no-mac-metadata --exclude '* 2.*' --exclude 'build' \
     -czf "$TMP/link-src.tgz" src tests Makefile README.md ) || exit 2
 # lnk6x: the C6000 linker, TI's lnk6x's .out images checked in under tests/ref.
-pack lnk6x  ../TI/LNK6x                src tests Makefile README.md
-pack c2s    ../Compilers/Converter-C2S        src tests Makefile README.md
+pack lnk6x  ../toolchain/TI/LNK6x                src tests Makefile README.md
+pack c2s    ../toolchain/Compilers/Converter-C2S        src tests Makefile README.md
 
 # Where they land: the shape workspace.mk assumes, the compilers, VM6747
-# and ../Compilers/Converter-C2S beside the editor's directory. A function and not an
+# and ../toolchain/Compilers/Converter-C2S beside the editor's directory. A function and not an
 # array, because the Mac's bash is 3.2 and has no associative arrays.
 there() {
     case "$1" in

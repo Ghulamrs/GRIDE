@@ -105,16 +105,16 @@
 		8B68C25AF35CDFA99E8A3949 /* src/utf8.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = src/utf8.h; sourceTree = "<group>"; };
 		A857117769BDD29CDE429084 /* src/workspace.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = src/workspace.h; sourceTree = "<group>"; };
 		9CEE2D93949406552792796F /* RIDE.exe */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = RIDE.exe; sourceTree = BUILT_PRODUCTS_DIR; };
-		3C45B3BFE8FECB84F00729DA /* c90.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = c90.exe.xcodeproj; path = "../Compilers/Compiler-Ci/ide/cc1.xcodeproj"; sourceTree = "<group>"; };
-		4A5CD1BEA6A1BB961F4947B9 /* cpp11.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = cpp11.exe.xcodeproj; path = "../Compilers/C++Optimize/ide/cxx1.xcodeproj"; sourceTree = "<group>"; };
-		DAA6962FD7E424BFF364E837 /* vm6747.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = vm6747.exe.xcodeproj; path = "../TI/VM6747/vm6747.xcodeproj"; sourceTree = "<group>"; };
-		8F025CDE2826AE5BDDA3562A /* asm6x.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = asm6x.exe.xcodeproj; path = "../TI/ASM6x/asm6x.xcodeproj"; sourceTree = "<group>"; };
-		C6FDAB869EEB7E10AE5FD082 /* masm.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = masm.exe.xcodeproj; path = "../Windows/MASM/masm.xcodeproj"; sourceTree = "<group>"; };
-		50D81AC569E0F891754877FB /* link.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = link.exe.xcodeproj; path = "../Windows/LINK/link.xcodeproj"; sourceTree = "<group>"; };
-		9D247B3447C62B7635D2921C /* lnk6x.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = lnk6x.exe.xcodeproj; path = "../TI/LNK6x/lnk6x.xcodeproj"; sourceTree = "<group>"; };
-		5D282113890EF8B08E9AEA66 /* sim6747.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = sim6747.exe.xcodeproj; path = "../TI/SIM6747/sim6747.xcodeproj"; sourceTree = "<group>"; };
-		20F47CFB1AFB49F45A779D94 /* shalimar.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = shalimar.exe.xcodeproj; path = "../Compilers/Compiler-Si/ide/shc.xcodeproj"; sourceTree = "<group>"; };
-		BC9013065FB079B5AABE7840 /* c2s.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = c2s.exe.xcodeproj; path = "../Compilers/Converter-C2S/c2s.xcodeproj"; sourceTree = "<group>"; };
+		3C45B3BFE8FECB84F00729DA /* c90.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = c90.exe.xcodeproj; path = "../toolchain/Compilers/Compiler-Ci/ide/cc1.xcodeproj"; sourceTree = "<group>"; };
+		4A5CD1BEA6A1BB961F4947B9 /* cpp11.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = cpp11.exe.xcodeproj; path = "../toolchain/Compilers/C++Optimize/ide/cxx1.xcodeproj"; sourceTree = "<group>"; };
+		DAA6962FD7E424BFF364E837 /* vm6747.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = vm6747.exe.xcodeproj; path = "../toolchain/TI/VM6747/vm6747.xcodeproj"; sourceTree = "<group>"; };
+		8F025CDE2826AE5BDDA3562A /* asm6x.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = asm6x.exe.xcodeproj; path = "../toolchain/TI/ASM6x/asm6x.xcodeproj"; sourceTree = "<group>"; };
+		C6FDAB869EEB7E10AE5FD082 /* masm.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = masm.exe.xcodeproj; path = "../toolchain/Windows/MASM/masm.xcodeproj"; sourceTree = "<group>"; };
+		50D81AC569E0F891754877FB /* link.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = link.exe.xcodeproj; path = "../toolchain/Windows/LINK/link.xcodeproj"; sourceTree = "<group>"; };
+		9D247B3447C62B7635D2921C /* lnk6x.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = lnk6x.exe.xcodeproj; path = "../toolchain/TI/LNK6x/lnk6x.xcodeproj"; sourceTree = "<group>"; };
+		5D282113890EF8B08E9AEA66 /* sim6747.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = sim6747.exe.xcodeproj; path = "../toolchain/TI/SIM6747/sim6747.xcodeproj"; sourceTree = "<group>"; };
+		20F47CFB1AFB49F45A779D94 /* shalimar.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = shalimar.exe.xcodeproj; path = "../toolchain/Compilers/Compiler-Si/ide/shc.xcodeproj"; sourceTree = "<group>"; };
+		BC9013065FB079B5AABE7840 /* c2s.exe.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = c2s.exe.xcodeproj; path = "../toolchain/Compilers/Converter-C2S/c2s.xcodeproj"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */

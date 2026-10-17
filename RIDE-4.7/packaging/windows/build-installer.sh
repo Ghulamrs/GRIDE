@@ -11,7 +11,7 @@
 #  Usage:   ./build-installer.sh [5.17]
 #  Env overrides (optional):
 #     CPP    the C++ compiler clone carrying include/ (C++) and lib/ (C) headers
-#            (default: first of <repo>/../Compilers/C++Optimize, <repo>/../Compiler-Cppi, <repo>/../C++)
+#            (default: <repo>/../toolchain/Compilers/C++Optimize, GRIDE1's shared copy)
 #     OUT    output directory for the stage tree and the tarball
 #            (default: <repo>/dist)
 #     PY     python interpreter (default: python3)
@@ -29,7 +29,7 @@ STAGE="$OUT/RIDE-$VER"
 
 # Locate the C++ clone that carries the shipped headers.
 if [ -z "${CPP:-}" ]; then
-  for c in "$ROOT/../Compilers/C++Optimize" "$ROOT/../Compiler-Cppi" "$ROOT/../C++" "$ROOT/../Compiler-Cpp"; do
+  for c in "$ROOT/../toolchain/Compilers/C++Optimize"; do
     [ -d "$c/include" ] && CPP="$c" && break
   done
 fi

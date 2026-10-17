@@ -74,14 +74,14 @@ SHM_SRC := src/shalimar/channel.cpp src/shalimar/session.cpp
 
 # The objects go under obj/ rather than beside the sources they came from,
 # so that a listing of src/ is the code and nothing else.
-# Objects are built OUTSIDE the checkout, in a build directory beside the four
-# projects: ../build/RIDE-4.7/obj. Nothing intermediate is ever written next
+# Objects are built in build/obj, which git ignores (GRIDE1: nothing is written outside GRIDE1; it was
+# ../build/RIDE-4.7/obj beside the four projects). Nothing intermediate is ever written next
 # to the sources, so `tar` on this repository carries source and nothing else,
 # and a clean is a directory removal that cannot reach a tracked file.
 #
 # Overridable, and `?=` on purpose: workspace.mk names one place for all four,
 # and a command line beats both.
-OBJDIR ?= ../build/RIDE-4.7/obj
+OBJDIR ?= build/obj
 OBJ := $(patsubst src/%.cpp,$(OBJDIR)/%.o,$(SRC) $(SHM_SRC))
 
 # Where the finished program goes. `.` is this directory, which is what every
@@ -289,8 +289,8 @@ PRODUCT_DIR ?= $(HOME)/$(PRODUCT_LOWER)
 # Where cxx1's headers are copied from for the product. The binary comes from
 # BINDIR like the others; the headers stay in the checkout,
 # Compilers/C++Optimize on every machine.
-CXX1_DIR ?= ../Compilers/C++Optimize
-CC1_DIR ?= ../Compilers/Compiler-Ci
+CXX1_DIR ?= ../toolchain/Compilers/C++Optimize
+CC1_DIR ?= ../toolchain/Compilers/Compiler-Ci
 
 # `confirm` and not `$(EDITOR)`, for the reason build.bat gives on its own
 # product rule: an editor without its compilers is not a product, it is half of

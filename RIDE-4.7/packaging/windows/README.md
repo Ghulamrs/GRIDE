@@ -18,9 +18,9 @@ shipped).
 
 ## How to build (on the box)
 
-1. Build the workspace so the binaries exist: `tools/to-windows.sh` (into
-   `C:\Users\GRA\source\RIDE\bin`; it carries `..\MASM`, `..\LINK` and
-   `..\LNK6x` too).
+1. Build the workspace so the binaries exist in `bin\`: `build.bat solution`, which builds `RIDE.sln` -
+   the editor and every tool it drives, from GRIDE1's shared `..\toolchain` (masm, link and lnk6x
+   included).
 2. Stage the install tree: `stage.cmd <RIDE> <C++Optimize> <stage40>`
    (sources from `bin\`; ships masm.exe and names it), then copy
    `EXPRESS-HELP-4.7.md` to the stage root as `EXPRESS-HELP.md`, and

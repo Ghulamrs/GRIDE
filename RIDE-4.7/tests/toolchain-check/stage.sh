@@ -4,7 +4,7 @@
 # progs/ with win.sh (Windows box, C:\meas0923\rc) or lin.sh (Linux box, ~/rc).
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
-RIDE=$HERE/../..; CASES=${CASES:-$RIDE/../Compilers/C++Optimize/tests/cases}
+RIDE=$HERE/../..; CASES=${CASES:-$RIDE/../toolchain/Compilers/C++Optimize/tests/cases}
 rm -rf "$HERE/progs"; mkdir -p "$HERE/progs"
 for f in c-demo/greet.c c-demo/main.c c-example/hello.c c-example/counter.c c-example/counter.h; do
     cp "$RIDE/projects/$f" "$HERE/progs/"

@@ -47,18 +47,18 @@ RIDE_PLAN = (os.path.basename(ROOT), ["Editor.xcodeproj", "RIDE.xcworkspace", "h
               "packaging/windows/Installer.vdproj", "packaging/windows/Installer.sln",
               "packaging/windows/make-setup.ps1"])
 WORKSPACE = [
-    ("../Compilers/Compiler-Ci", ["ide", "lib", "msvc/compat"], ["src"], ["Makefile"]),
-    ("../Compilers/C++Optimize", ["ide", "lib", "include", "msvc/compat"], ["src"], ["Makefile"]),
-    ("../Compilers/Compiler-Si", ["ide"], ["src", "runtime"], ["Makefile"]),
-    ("../TI/VM6747", ["vm6747.xcodeproj"], ["src"], ["vm6747.vcxproj", "Makefile"]),
-    ("../TI/SIM6747", ["sim6747.xcodeproj"], ["src"], ["sim6747.vcxproj", "Makefile"]),
-    ("../Compilers/Converter-C2S", ["c2s.xcodeproj"], ["src"], ["c2s.vcxproj", "Makefile"]),
-    ("../TI/ASM6x", ["asm6x.xcodeproj"], ["src"], ["asm6x.vcxproj", "Makefile"]),
-    ("../Windows/MASM", ["masm.xcodeproj"], ["src"], ["masm.vcxproj", "Makefile"]),
-    ("../Windows/LINK", ["link.xcodeproj"], ["src"], ["link.vcxproj", "Makefile"]),
-    ("../TI/LNK6x", ["lnk6x.xcodeproj"], ["src"], ["lnk6x.vcxproj", "Makefile"]),
+    ("../toolchain/Compilers/Compiler-Ci", ["ide", "lib", "msvc/compat"], ["src"], ["Makefile"]),
+    ("../toolchain/Compilers/C++Optimize", ["ide", "lib", "include", "msvc/compat"], ["src"], ["Makefile"]),
+    ("../toolchain/Compilers/Compiler-Si", ["ide"], ["src", "runtime"], ["Makefile"]),
+    ("../toolchain/TI/VM6747", ["vm6747.xcodeproj"], ["src"], ["vm6747.vcxproj", "Makefile"]),
+    ("../toolchain/TI/SIM6747", ["sim6747.xcodeproj"], ["src"], ["sim6747.vcxproj", "Makefile"]),
+    ("../toolchain/Compilers/Converter-C2S", ["c2s.xcodeproj"], ["src"], ["c2s.vcxproj", "Makefile"]),
+    ("../toolchain/TI/ASM6x", ["asm6x.xcodeproj"], ["src"], ["asm6x.vcxproj", "Makefile"]),
+    ("../toolchain/Windows/MASM", ["masm.xcodeproj"], ["src"], ["masm.vcxproj", "Makefile"]),
+    ("../toolchain/Windows/LINK", ["link.xcodeproj"], ["src"], ["link.vcxproj", "Makefile"]),
+    ("../toolchain/TI/LNK6x", ["lnk6x.xcodeproj"], ["src"], ["lnk6x.vcxproj", "Makefile"]),
     # The C6000 run-time (5.1): its sources, assembly included, and the ar6x that packs them.
-    ("../TI/RTS6x", [], ["src", "tools/ar6x"], ["rts6x.vcxproj", "Makefile", "build.cmd", "printf6x.members"]),
+    ("../toolchain/TI/RTS6x", [], ["src", "tools/ar6x"], ["rts6x.vcxproj", "Makefile", "build.cmd", "printf6x.members"]),
 ]
 
 # What a source directory keeps: source, and the project files kept beside it (macos/Window.xcodeproj).

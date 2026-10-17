@@ -2,7 +2,7 @@
 # core: the terminal editor is ../Makefile's, the Windows Forms window is
 # ../winforms/RIDEGui.vcxproj, and this is AppKit through Objective-C++.
 #
-#     make            build ../../build/RIDE-4.7/RIDE.app
+#     make            build ../build/macos/RIDE.app
 #     make run        build it and open it
 #     make clean
 #
@@ -47,9 +47,9 @@ SHM_SRC := src/shalimar/channel.cpp src/shalimar/session.cpp
 BRIDGE_SRC := winforms/bridge.cpp
 MAC_SRC := main.mm WindowController.mm CodeView.mm LineNumbers.mm
 
-# Outside the checkout, beside the terminal editor's objects, so that a
-# listing of the repository is source and nothing else.
-BUILD ?= ../../build/RIDE-4.7
+# In build/macos, beside the terminal editor's build/obj, which git ignores (GRIDE1: nothing is
+# written outside GRIDE1; it was ../../build/RIDE-4.7).
+BUILD ?= ../build/macos
 OBJDIR ?= $(BUILD)/mac-obj
 APP ?= $(BUILD)/RIDE.app
 

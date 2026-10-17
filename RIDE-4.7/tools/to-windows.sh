@@ -7,7 +7,7 @@
 # projects are siblings under C:\Users\GRA\source - RIDE (4.0's own
 # directory, so the sealed 3.5 tree in RIDE is left alone), VM6747,
 # Compiler-Ci, Compiler-Si, C++Optimize, ASM6x, MASM, LINK, LNK6x, Converter-C2S - which is the shape RIDE.sln assumes when
-# it names ..\Compilers\Compiler-Ci\ide\cc1.vcxproj and the rest.
+# it names ..\toolchain\Compilers\Compiler-Ci\ide\cc1.vcxproj and the rest.
 #
 # Three rules that each cost an hour before they were written down:
 #
@@ -21,7 +21,7 @@
 #     file on that side is a stale build with a green suite in front of it.
 #
 # cxx1 travels with the editor since 3.0. RIDE.sln builds it from
-# ..\Compilers\C++Optimize\ide\cxx1.vcxproj (the root copies moved to ide/ on 2026-09-30), written at
+# ..\toolchain\Compilers\C++Optimize\ide\cxx1.vcxproj (the root copies moved to ide/ on 2026-09-30), written at
 # the root of the C++ checkout here; the sources, headers, msvc\compat and
 # that project go over together, laid over the tree there - never wiping it,
 # since that directory also holds hand-run experiments that are not ours.
@@ -74,39 +74,39 @@ tar --no-mac-metadata \
 # ---- cxx1 ------------------------------------------------------------------
 # The parts its Visual Studio project compiles and includes, and nothing of
 # its own build tree.
-( cd ../Compilers/Compiler-Ci && tar --no-mac-metadata --exclude '* 2.*' --exclude 'obj' --exclude '*.exe' --exclude 'out-*' \
+( cd ../toolchain/Compilers/Compiler-Ci && tar --no-mac-metadata --exclude '* 2.*' --exclude 'obj' --exclude '*.exe' --exclude 'out-*' \
     -czf "$TMP/c90-src.tgz" src lib msvc tests examples Makefile ide README.md ) || exit 2
-( cd ../Compilers/C++Optimize && tar --no-mac-metadata --exclude '* 2.*' --exclude 'obj' --exclude '*.exe' --exclude 'out-*' \
+( cd ../toolchain/Compilers/C++Optimize && tar --no-mac-metadata --exclude '* 2.*' --exclude 'obj' --exclude '*.exe' --exclude 'out-*' \
     -czf "$TMP/cxx1-src.tgz" src include lib msvc tests Makefile ide README.md ) || exit 2
-( cd ../TI/VM6747 && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' \
+( cd ../toolchain/TI/VM6747 && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' \
     -czf "$TMP/vm6747-src.tgz" src msvc tests Makefile vm6747.vcxproj README.md ) || exit 2
-# asm6x: the C6000 assembler, beside this checkout as ../TI/ASM6x, its own repository.
-( cd ../TI/ASM6x && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'build' \
+# asm6x: the C6000 assembler, beside this checkout as ../toolchain/TI/ASM6x, its own repository.
+( cd ../toolchain/TI/ASM6x && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'build' \
     -czf "$TMP/asm6x-src.tgz" src tests Makefile asm6x.vcxproj README.md ) || exit 2
-# masm: the x86-64 assembler, beside this checkout as ../Windows/MASM, its own repository.
-( cd ../Windows/MASM && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'build' \
+# masm: the x86-64 assembler, beside this checkout as ../toolchain/Windows/MASM, its own repository.
+( cd ../toolchain/Windows/MASM && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'build' \
     -czf "$TMP/masm-src.tgz" src tests Makefile masm.vcxproj README.md ) || exit 2
-# link: the x86-64 linker, beside this checkout as ../Windows/LINK, its own repository.
+# link: the x86-64 linker, beside this checkout as ../toolchain/Windows/LINK, its own repository.
 # Not '*.exe' here: tests/ref holds the images link.exe made, which its bed is
 # held to, and they are .exe files. build/ is where its own product would be.
-( cd ../Windows/LINK && tar --no-mac-metadata --exclude '* 2.*' --exclude 'build' --exclude 'x64' \
+( cd ../toolchain/Windows/LINK && tar --no-mac-metadata --exclude '* 2.*' --exclude 'build' --exclude 'x64' \
     -czf "$TMP/link-src.tgz" src tests Makefile link.vcxproj README.md ) || exit 2
-# lnk6x: the C6000 linker, beside this checkout as ../TI/LNK6x, its own repository;
+# lnk6x: the C6000 linker, beside this checkout as ../toolchain/TI/LNK6x, its own repository;
 # tests/ref holds the .out images TI's lnk6x made, which its bed is held to.
-( cd ../TI/LNK6x && tar --no-mac-metadata --exclude '* 2.*' --exclude 'build' --exclude 'x64' \
+( cd ../toolchain/TI/LNK6x && tar --no-mac-metadata --exclude '* 2.*' --exclude 'build' --exclude 'x64' \
     -czf "$TMP/lnk6x-src.tgz" src tests Makefile lnk6x.vcxproj README.md ) || exit 2
-# sim6747: the C6747 simulator (5.0), beside this checkout as ../TI/SIM6747; RIDE.sln builds it.
-( cd ../TI/SIM6747 && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'build' --exclude 'oracle/ship' \
+# sim6747: the C6747 simulator (5.0), beside this checkout as ../toolchain/TI/SIM6747; RIDE.sln builds it.
+( cd ../toolchain/TI/SIM6747 && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'build' --exclude 'oracle/ship' \
     -czf "$TMP/sim6747-src.tgz" src tests msvc sim6747.vcxproj Makefile README.md ) || exit 2
-# rts6x: the C6747 runtime (5.1), beside this checkout as ../TI/RTS6x; RIDE.sln builds it with build.cmd.
-( cd ../TI/RTS6x && tar --no-mac-metadata --exclude '* 2.*' --exclude 'build' \
+# rts6x: the C6747 runtime (5.1), beside this checkout as ../toolchain/TI/RTS6x; RIDE.sln builds it with build.cmd.
+( cd ../toolchain/TI/RTS6x && tar --no-mac-metadata --exclude '* 2.*' --exclude 'build' \
     -czf "$TMP/rts6x-src.tgz" src tests tools docs Makefile build.cmd printf6x.members rts6x.vcxproj README.md ) || exit 2
-# c2s: the converter, beside this checkout as ../Compilers/Converter-C2S; RIDE.sln builds it, so a fresh root needs it.
-( cd ../Compilers/Converter-C2S && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'obj' \
+# c2s: the converter, beside this checkout as ../toolchain/Compilers/Converter-C2S; RIDE.sln builds it, so a fresh root needs it.
+( cd ../toolchain/Compilers/Converter-C2S && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'obj' \
     -czf "$TMP/c2s-src.tgz" src tests c2s.vcxproj Makefile README.md ) || exit 2
 # shalimar: what ide/shc.vcxproj compiles - src and the runtime it builds beside the
 # binary - and nothing built here; lib/ holds this machine's archives.
-( cd ../Compilers/Compiler-Si && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'lib' --exclude 'out-*' \
+( cd ../toolchain/Compilers/Compiler-Si && tar --no-mac-metadata --exclude '* 2.*' --exclude '*.exe' --exclude 'lib' --exclude 'out-*' \
     -czf "$TMP/shalimar-src.tgz" src runtime tests examples Makefile build.bat ide README.md ) || exit 2
 
 say "copying to $BOX:$ROOT"

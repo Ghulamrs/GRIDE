@@ -19,7 +19,6 @@ set SELF=%~dp0
 rem --- our compilers: beside this script's bin (installed: bin\ti\ -> bin\) ---
 set OURBIN=%SELF%..
 if not exist "%OURBIN%\c90.exe" set OURBIN=%SELF%..\bin
-if not exist "%OURBIN%\c90.exe" set OURBIN=C:\Users\GRA\source\RIDE\bin
 
 rem --- find TI CGT ---
 set CGT=

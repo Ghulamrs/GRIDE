@@ -17,7 +17,8 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 APPENDIX=help/appendix-a-shalimar-language.md
-SOURCE="${SHALIMAR_SPEC:-../Shalimar/SHALIMAR_LANGUAGE.md}"
+# GRIDE1: the Shalimar app is not inside GRIDE1, so there is no default; name it with SHALIMAR_SPEC.
+SOURCE="${SHALIMAR_SPEC:-}"
 
 [ -f "$APPENDIX" ] || { echo "no $APPENDIX"; exit 2; }
 

@@ -30,7 +30,7 @@ both windows speak - and none of the terminal's drawing. `../src` is not touched
 
 ```
 cd macos
-make            # ../../build/RIDE-4.7/RIDE.app
+make            # ../build/macos/RIDE.app
 make run        # build and open it
 ```
 
