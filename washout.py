@@ -5,8 +5,10 @@
     python washout.py PARENT --force      replace PARENT\\<tree> if it is already there
     python washout.py PARENT --zip        and pack it as PARENT\\<tree>.zip, <tree>\\ its one top folder
     python washout.py PARENT --tree DIR   wash the tree at DIR rather than the one this file is in
+    python washout.py PARENT --name NAME  call the copy NAME rather than <tree> (GRIDEx3, say)
 
-<tree> is the tree's own folder name, and every folder in the copy keeps its own: nothing is renamed.
+<tree> is the tree's own folder name, and every folder in the copy keeps its own: nothing is renamed but the
+copy's top folder, and only when --name asks.
 
 **Everything the projects are, and nothing they make** (2026-10-15; the shared-toolchain tree, 2026-10-16):
 the tree as its README.md lays it out -
@@ -165,10 +167,13 @@ def check(dest):
 
 
 def main(argv):
-    args, tree, i = [], ROOT, 0
+    args, tree, name, i = [], ROOT, None, 0
     while i < len(argv):
         if argv[i] == "--tree" and i + 1 < len(argv):
             tree, i = os.path.abspath(argv[i + 1]), i + 2
+            continue
+        if argv[i] == "--name" and i + 1 < len(argv):
+            name, i = argv[i + 1], i + 2
             continue
         if not argv[i].startswith("--"):
             args.append(argv[i])
@@ -176,7 +181,9 @@ def main(argv):
     if len(args) != 1 or not os.path.isdir(tree):
         print(__doc__)
         return 2
-    name = os.path.basename(tree.rstrip("\\/"))
+    if name is not None and (not name or name != os.path.basename(name) or name in (".", "..")):
+        print("washout: --name takes a folder name, not a path"); return 2
+    name = name or os.path.basename(tree.rstrip("\\/"))
     dest = os.path.join(os.path.abspath(args[0]), name)
     archive = dest + ".zip"
 
