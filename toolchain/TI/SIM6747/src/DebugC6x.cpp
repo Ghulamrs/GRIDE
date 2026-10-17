@@ -152,7 +152,9 @@ public:
         dbg::readTags(img_.dwTags, byLabel, types_);
         for (std::map<std::string, std::vector<dbg::Variable> >::const_iterator t = byLabel.begin(); t != byLabel.end(); ++t) {
             uint32_t at = 0;
-            if (addressOfFunction(t->first, at)) variables_[at] = t->second;
+            if (!addressOfFunction(t->first, at)) continue;
+            variables_[at] = t->second;
+            dbg::placeBlocks(variables_[at], [this](const std::string &n, uint32_t &a) { return addressOfFunction(n, a); });
         }
     }
     const dbg::TypeInfo *typeNamed(const std::string &name) const override {

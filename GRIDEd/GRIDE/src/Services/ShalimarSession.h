@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 //  ShalimarSession.h - RIDE's shalimar::Session for GRIDEd. A Shalimar program stops itself: the
 //  compiler calls shm_line before every statement, and a Debug build's runtime, started with the
 //  session's environment (SHM_DEBUG=1), talks on its standard error while the program prints on its

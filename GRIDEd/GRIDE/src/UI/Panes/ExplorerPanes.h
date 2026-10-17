@@ -56,7 +56,7 @@ namespace Gride { namespace UI {
             String^ e = Path::GetExtension(path)->ToLowerInvariant();
             if (e == ".c") return "filec";
             if (e == ".cpp" || e == ".cc" || e == ".cxx") return "filecpp";
-            if (e == ".shl") return "fileshl";
+            if (e == ".shl" || e == ".shm") return "fileshl";
             if (e == ".h" || e == ".hpp" || e == ".hh" || e == ".inc") return "fileh";
             if (e == ".asm" || e == ".s" || e == ".sa") return "fileasm";
             if (e == ".cmd" || e == ".ld") return "filecmd";
@@ -394,7 +394,7 @@ namespace Gride { namespace UI {
                     {
                         if (!File::Exists(f)) continue;
                         String^ ext = Path::GetExtension(f)->ToLowerInvariant();
-                        if (ext != ".c" && ext != ".cpp" && ext != ".h" && ext != ".hpp" && ext != ".shl" && ext != ".cc") continue;
+                        if (ext != ".c" && ext != ".cpp" && ext != ".h" && ext != ".hpp" && ext != ".shl" && ext != ".shm" && ext != ".cc") continue;
                         array<String^>^ lines;
                         try { lines = File::ReadAllLines(f); } catch (Exception^) { continue; }
                         for (int i = 0; i < lines->Length; i++)

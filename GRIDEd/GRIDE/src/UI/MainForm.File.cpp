@@ -38,7 +38,18 @@ namespace Gride { namespace UI {
             else if (ext == ".pro")
             {
                 if (!CloseWorkspace()) return;
-                SetWorkspace(Workspace::ForSingleProject(GrideProject::Load(path)));
+                // GRIDE 2.0's .pro for a Visual Studio project: its solution, with the compiler and arguments the .pro gives
+                String^ sln = GrideProject::GreySolution(path);
+                if (sln != nullptr)
+                {
+                    GrideProject^ g = GrideProject::Load(path);
+                    Workspace^ w = Workspace::ForSolution(VsSolution::Read(sln));
+                    for each (GrideProject^ p in w->Projects)
+                        if (String::Compare(p->Name, g->Name, true) == 0) { p->Toolchain = g->Toolchain; p->ProgramArgs = g->ProgramArgs; w->StartupName = p->Name; }
+                    w->ActiveConfig = JsonParser::ParseFile(path)->GetString("activeConfiguration", w->ActiveConfig);
+                    SetWorkspace(w);
+                }
+                else SetWorkspace(Workspace::ForSingleProject(GrideProject::Load(path)));
                 AddRecentWorkspace(path);
             }
             else if (CcsProjectReader::IsCcsProject(path) && (Directory::Exists(path) || ext == ".project" || ext == ".ccsproject" || ext == ".cproject"))
@@ -60,7 +71,8 @@ namespace Gride { namespace UI {
                 SetWorkspace(Workspace::ForSingleProject(VsProjectReader::Read(path, nullptr)));
                 AddRecentWorkspace(Path::GetFullPath(path));
             }
-            else if (File::Exists(path)) OpenDocument(path, 0);
+            else if (File::Exists(path)) { OpenDocument(path, 0); return; }
+            ShowStartupSource();
         }
         catch (Exception^ ex)
         {
@@ -68,11 +80,31 @@ namespace Gride { namespace UI {
         }
     }
 
+    // a workspace just opened shows its program: the startup project's file with main() in the editor
+    void MainForm::ShowStartupSource()
+    {
+        if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        for each (EditorDocument^ d in docs->Documents)
+            if (d->Project != nullptr) return;   // one of its files is on screen already
+        String^ file = nullptr; int line = 0;
+        if (FindEntryPoint(workspace->StartupProject, file, line) && File::Exists(file)) OpenDocument(file, line);
+    }
+
+    // the program Start / Start Without Debugging runs: the one whose file is in the editor, else the startup project
+    GrideProject^ MainForm::RunProject()
+    {
+        if (workspace == nullptr) return nullptr;
+        EditorDocument^ d = docs->Active;
+        if (d != nullptr && d->Project != nullptr && workspace->Projects->Contains(d->Project)) return d->Project;
+        return workspace->StartupProject;
+    }
+
     void MainForm::SetWorkspace(Workspace^ w)
     {
         workspace = w;
         if (w != nullptr)
         {
+            output->Clear("Build");   // the last workspace's build and run are not this one's
             for each (String^ err in w->LoadErrors) output->Append("Tools", "Workspace: " + err);
             if (w->LoadErrors->Count > 0) bottomArea->ShowPane(output);
             for each (EditorDocument^ d in docs->Documents)
@@ -559,13 +591,13 @@ namespace Gride { namespace UI {
         for each (String^ f in Directory::GetFiles(dir, "*.*", SearchOption::AllDirectories))
         {
             String^ e = Path::GetExtension(f)->ToLowerInvariant();
-            if (e != ".c" && e != ".h" && e != ".cpp" && e != ".hpp" && e != ".shl" && e != ".asm" && e != ".cmd") continue;
+            if (e != ".c" && e != ".h" && e != ".cpp" && e != ".hpp" && e != ".shl" && e != ".shm" && e != ".asm" && e != ".cmd") continue;
             String^ rel = PathUtil::MakeRelative(dir, f);
             if (rel->StartsWith("out/") || rel->StartsWith("obj/") || rel->StartsWith(".")) continue;
             String^ folder = Path::GetDirectoryName(rel->Replace(L'/', L'\\'))->Replace(L'\\', L'/');
             if (String::IsNullOrEmpty(folder)) folder = GrideProject::DefaultFolderFor(f);
             p->AddFile(f, folder);
-            if (e == ".c") c++; else if (e == ".cpp") cpp++; else if (e == ".shl") shl++;
+            if (e == ".c") c++; else if (e == ".cpp") cpp++; else if (e == ".shl" || e == ".shm") shl++;
         }
         p->Lang = cpp > c && cpp >= shl ? Language::Cpp11 : (shl > c ? Language::Shalimar : Language::C90);
         for each (Target t in p->Targets)

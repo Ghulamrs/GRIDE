@@ -300,9 +300,52 @@ namespace Gride { namespace Model {
         }
 
         // ---- load / save --------------------------------------------------------
+        // GRIDE 2.0's own .pro ("formatVersion" and no "gride"): read here, never written back
+        static bool IsGrey(JsonValue^ j) { return !j->Has("gride") && j->Has("formatVersion"); }
+
+        // the Visual Studio solution a GRIDE 2.0 .pro stands for ("visualStudio"), else null
+        static String^ GreySolution(String^ path)
+        {
+            JsonValue^ j = JsonParser::ParseFile(path);
+            if (!IsGrey(j)) return nullptr;
+            String^ sln = j->GetString("visualStudio", String::Empty);
+            return sln->Length > 0 ? PathUtil::MakeAbsolute(Path::GetDirectoryName(Path::GetFullPath(path)), sln) : nullptr;
+        }
+
+        static GrideProject^ FromGrey(String^ path, JsonValue^ j)
+        {
+            GrideProject^ p = gcnew GrideProject();
+            p->FilePath = Path::GetFullPath(path);
+            p->Name = j->GetString("name", Path::GetFileNameWithoutExtension(path));
+            p->Lang = LanguageInfo::Parse(j->GetString("language", "C90"));
+            p->Template = "Program";
+            p->Targets->Add(Target::Windows); p->Targets->Add(Target::C6747);
+            ProjectFolder^ f = gcnew ProjectFolder("Sources");
+            f->Files = j->GetStringList("sourceFiles");
+            p->Folders->Add(f);
+            JsonValue^ cfgs = j->Get("configurations");
+            bool listed = cfgs != nullptr && cfgs->IsArray && cfgs->Count > 0;
+            for each (Target t in p->Targets)
+            {
+                if (!listed) { p->Configurations->Add(gcnew BuildConfiguration("Debug", t)); p->Configurations->Add(gcnew BuildConfiguration("Release", t)); continue; }
+                for (int i = 0; i < cfgs->Count; i++)
+                {
+                    BuildConfiguration^ c = gcnew BuildConfiguration(cfgs->At(i)->GetString("name", "Debug"), t);
+                    c->Defines = cfgs->At(i)->GetStringList("defines");
+                    p->Configurations->Add(c);
+                }
+            }
+            p->Toolchain = j->GetString("toolchain", "auto");
+            if (j->Has("programArgs")) p->ProgramArgs = j->GetStringList("programArgs");
+            p->IsReadOnly = true;
+            p->IsDirty = false;
+            return p;
+        }
+
         static GrideProject^ Load(String^ path)
         {
             JsonValue^ j = JsonParser::ParseFile(path);
+            if (IsGrey(j)) return FromGrey(path, j);
             GrideProject^ p = gcnew GrideProject();
             p->FilePath = Path::GetFullPath(path);
             p->raw = j;

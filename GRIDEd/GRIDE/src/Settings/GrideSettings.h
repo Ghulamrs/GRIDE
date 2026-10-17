@@ -243,6 +243,7 @@ namespace Gride { namespace Settings {
             {
                 // Placeholder word list - edit it in Tools > Options > Languages > Shalimar
                 Extensions->Add(".shl");
+                Extensions->Add(".shm");          // RIDE's older programs (Documents\RIDE\programs)
                 Keywords->AddRange(c90kw);
                 Types->AddRange(c90ty);
                 break;
@@ -288,6 +289,10 @@ namespace Gride { namespace Settings {
         {
             if (o == nullptr) return;
             if (o->Has("ext")) Extensions = o->GetStringList("ext");
+            // Shalimar is .shl and RIDE's older .shm, both always: a list saved before .shm was known gains it
+            if (Lang == Language::Shalimar)
+                for each (String^ e in gcnew array<String^>{ ".shl", ".shm" })
+                    if (!OwnsExtension(e)) Extensions->Add(e);
             if (o->Has("keywords")) Keywords = o->GetStringList("keywords");
             if (o->Has("types")) Types = o->GetStringList("types");
             LineComment = o->GetString("lineComment", LineComment);

@@ -1,8 +1,8 @@
-# g2-check.ps1 - the checks GRIDE 2.0 (C:\Users\GRA\work1\GRIDE) shares with GRIDEd's suite, driven by its own
+# g2-check.ps1 - the checks GRIDE 2.0 (the repo's "GRIDE 2.0" folder) shares with GRIDEd's suite, driven by its own
 # keys (F8 start/continue, F7 step over, F6 step into, Debug > Step Out). One project per run:
 #   powershell -ExecutionPolicy Bypass -File g2-check.ps1 -Pro <project.pro> -Source <file to break in> -Line <n> [-Gride <exe>]
 param([Parameter(Mandatory)][string]$Pro, [Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][int]$Line,
-      [string]$Gride = 'C:\Users\GRA\work1\GRIDE\x64\Release\GRIDE.exe')
+      [string]$Gride = (Join-Path $PSScriptRoot '..\..\..\GRIDE 2.0\x64\Release\GRIDE.exe'))
 $global:GrideExe = $Gride
 $global:S = Join-Path $env:TEMP 'gride-gui-tests'
 . "$PSScriptRoot\lib\session.ps1"

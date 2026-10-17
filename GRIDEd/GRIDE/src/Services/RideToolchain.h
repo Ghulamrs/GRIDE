@@ -200,7 +200,7 @@ namespace Gride { namespace Services {
             if (lang == Language::Shalimar && t != RideTool::Shalimar)
                 return Name(t) + " does not compile Shalimar - choose the automatic compiler" + picks;
             if (lang == Language::Other)
-                return "nothing to compile: no extension names a language - .c, .cpp or .shl picks the compiler";
+                return "nothing to compile: no extension names a language - .c, .cpp or .shl (.shm) picks the compiler";
             if (lang != Language::C90 && lang != Language::Cpp11 && lang != Language::Shalimar)
                 return "nothing to compile: this is " + LanguageWord(lang) + ", not C or C++";
             ToolDefinition^ d = Definition(t);

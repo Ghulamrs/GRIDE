@@ -49,7 +49,7 @@ namespace Gride
     {
     public:
         literal String^ Name    = "GRIDE 2.0";
-        literal String^ Version = "2.0.0";
+        literal String^ Version = "1.0";       // the IDE's version; the "2.0" is part of its name
     };
 
     // Makes a literal a String^ (needed inside ?: where literals would decay to char*).

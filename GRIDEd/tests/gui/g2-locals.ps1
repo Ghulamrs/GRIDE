@@ -1,7 +1,7 @@
 # g2-locals.ps1 - GRIDE 2.0 on the TMS320C6747: rebuild a project, break at a line, F8, and print the Locals pane.
 #   powershell -ExecutionPolicy Bypass -File g2-locals.ps1 -Pro <project.pro> -Source <file> -Line <n>
 param([Parameter(Mandatory)][string]$Pro, [Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][int]$Line,
-      [string]$Gride = 'C:\Users\GRA\work1\GRIDE\x64\Release\GRIDE.exe')
+      [string]$Gride = (Join-Path $PSScriptRoot '..\..\..\GRIDE 2.0\x64\Release\GRIDE.exe'))
 $global:GrideExe = $Gride
 $global:S = Join-Path $env:TEMP 'gride-gui-tests'
 . "$PSScriptRoot\lib\session.ps1"

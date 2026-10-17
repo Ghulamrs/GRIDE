@@ -105,6 +105,7 @@ private:
     // -g: the selected frame's variables, where one lives, and its value as gdb prints it
     const std::vector<Variable> *frameVariables() const;
     const Variable *variableNamed(const std::string &name) const;
+    bool inScope(const Variable &v) const;
     bool addressOf(const Variable &v, uint32_t &addr) const;
     std::string valueOf(const Variable &v) const;
     std::string formatAt(const TypeInfo &t, uint32_t addr, int depth) const;
@@ -506,13 +507,21 @@ const std::vector<Variable> *Session::frameVariables() const {
     return m_.variablesAt(entry);
 }
 
+// A variable of an inner block is there only while the selected frame is inside the block's code: frame 0 at
+// its pc, an outer frame at the call it made (the return address less one, which is still the call's).
+bool Session::inScope(const Variable &v) const {
+    if (!v.scoped) return true;
+    uint32_t pc = framePc(frame_);
+    if (frame_ > 0 && pc > 0) pc -= 1;
+    return pc >= v.lo && pc < v.hi;
+}
+
 const Variable *Session::variableNamed(const std::string &name) const {
     const std::vector<Variable> *vs = frameVariables();
     if (vs == nullptr) return nullptr;
-    // the last one of that name: a block's own variable is declared after the one it hides, and a stop inside
-    // the block is where it is asked for (the tags carry no block ranges yet - docs\C6747-LOCALS-DESIGN.md, phase F)
+    // of the ones in scope, the last of that name: a block's own variable is declared after the one it hides
     const Variable *found = nullptr;
-    for (const Variable &v : *vs) if (v.name == name) found = &v;
+    for (const Variable &v : *vs) if (v.name == name && inScope(v)) found = &v;
     return found;
 }
 
@@ -734,15 +743,16 @@ std::string Session::valueOf(const Variable &v) const {
     return buf;
 }
 
-// info args / info locals: "name = value" a line, as gdb answers. A name an inner block reuses is listed twice,
-// each with its own value, as gdb lists them; the same variable named twice (two loops' i in one slot) once.
+// info args / info locals: "name = value" a line, as gdb answers. Only the blocks the stop is inside: a name an
+// inner block reuses is listed twice there, each with its own value, as gdb lists them; the same variable named
+// twice (two loops' i in one slot) once.
 void Session::cmdInfoVariables(bool params) {
     if (!alive_ || !started_) { line("No frame selected."); return; }
     const std::vector<Variable> *vs = frameVariables();
     if (vs == nullptr) { line("No symbol table info available."); return; }
     std::vector<const Variable *> shown;
     for (const Variable &v : *vs) {
-        if (v.param != params) continue;
+        if (v.param != params || !inScope(v)) continue;
         bool again = false;
         for (const Variable *s : shown)
             if (s->name == v.name && s->offset == v.offset && s->global == v.global && s->symbol == v.symbol) again = true;
@@ -897,13 +907,23 @@ void readTags(const std::string &text, std::map<std::string, std::vector<Variabl
               std::map<std::string, TypeInfo> &types) {
     std::string label;
     TypeInfo *open = nullptr;   // the struct or union whose members follow
+    // the lexical blocks open inside the function, innermost last: a variable belongs to the innermost
+    //   .dwtag DW_TAG_lexical_block, DW_AT_low_pc(L$sum$blk$b2), DW_AT_high_pc(L$sum$blk$e2)
+    std::vector<std::pair<std::string, std::string> > blocks;
     size_t from = 0;
     while (from < text.size()) {
         size_t nl = text.find('\n', from);
         std::string line = trim(text.substr(from, nl == std::string::npos ? std::string::npos : nl - from));
         from = nl == std::string::npos ? text.size() : nl + 1;
-        if (line.compare(0, 9, ".dwendtag") == 0) { label.clear(); open = nullptr; continue; }
+        if (line.compare(0, 9, ".dwendtag") == 0) {
+            if (!label.empty() && !blocks.empty()) { blocks.pop_back(); continue; }   // a block's end, not the function's
+            label.clear(); open = nullptr; continue;
+        }
         if (line.compare(0, 6, ".dwtag") != 0) continue;
+        if (line.find("DW_TAG_lexical_block") != std::string::npos) {
+            if (!label.empty()) blocks.push_back(std::make_pair(attribute(line, "DW_AT_low_pc("), attribute(line, "DW_AT_high_pc(")));
+            continue;
+        }
         const bool base = line.find("DW_TAG_base_type") != std::string::npos, ptr = line.find("DW_TAG_pointer_type") != std::string::npos,
                    arr = line.find("DW_TAG_array_type") != std::string::npos, str = line.find("DW_TAG_structure_type") != std::string::npos ||
                    line.find("DW_TAG_class_type") != std::string::npos, uni = line.find("DW_TAG_union_type") != std::string::npos;
@@ -932,6 +952,7 @@ void readTags(const std::string &text, std::map<std::string, std::vector<Variabl
         }
         if (line.find("DW_TAG_subprogram") != std::string::npos) {
             label = attribute(line, "DW_AT_low_pc(");
+            blocks.clear();
             if (!label.empty()) byLabel[label];
             continue;
         }
@@ -960,6 +981,7 @@ void readTags(const std::string &text, std::map<std::string, std::vector<Variabl
             v.global = !v.symbol.empty();
             if (!v.global) continue;
         } else continue;
+        if (!blocks.empty()) { v.blockLow = blocks.back().first; v.blockHigh = blocks.back().second; }
         byLabel[label].push_back(v);
     }
 }

@@ -634,7 +634,13 @@ namespace Gride { namespace UI {
     bool MainForm::HasProject() { return ContextProject() != nullptr; }
     bool MainForm::HasWritableProject() { GrideProject^ p = ContextProject(); return p != nullptr && !p->IsReadOnly; }
     bool MainForm::HasSelectedFile() { return explorer->SelectedFile != nullptr; }
-    bool MainForm::CanBuild() { return workspace != nullptr && workspace->Projects->Count > 0 && !engine->IsBuilding && !debugger->IsActive && !runner->IsRunning; }
+    // something to build: a workspace with a project in it, or - none open - the file in the editor with main() in it
+    bool MainForm::CanBuild()
+    {
+        if (engine->IsBuilding || debugger->IsActive || runner->IsRunning) return false;
+        if (workspace != nullptr) return workspace->Projects->Count > 0;
+        return ActiveFileHasMain();
+    }
     bool MainForm::IsBuilding() { return engine->IsBuilding || runner->IsRunning; }
     bool MainForm::IsRunning() { return runner->IsRunning; }
     bool MainForm::IsDebugging() { return debugger->IsActive; }

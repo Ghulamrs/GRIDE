@@ -17,6 +17,7 @@
 #include "../Build/ProgramRunner.h"
 #include "DebugPanes.h"
 #include "HelpFiles.h"
+#include "../Common/ToolVersions.h"
 
 using namespace System::Collections::Concurrent;
 using System::Threading::CancellationTokenSource;
@@ -411,28 +412,29 @@ namespace Gride
             pageBreakpoints = AddPanePage("Breakpoints", breakpointsPane);
             watchPane->UpdateFrom(nullptr);
 
-            // ---- splitters
-            splitRight = gcnew SplitContainer();
-            splitRight->Dock = DockStyle::Fill;
-            splitRight->Orientation = System::Windows::Forms::Orientation::Vertical;
-            splitRight->FixedPanel = System::Windows::Forms::FixedPanel::Panel2;
-            docs->Dock = DockStyle::Fill;
-            splitRight->Panel1->Controls->Add(docs);
-            splitRight->Panel2->Controls->Add(MakeToolWindow("Properties", props));
-
+            // ---- splitters: Solution Explorer | (editor over Output) | Properties - both side panes the full
+            // height, the Output under the editor only (as GRIDEd lays them out)
             splitCenter = gcnew SplitContainer();
             splitCenter->Dock = DockStyle::Fill;
             splitCenter->Orientation = System::Windows::Forms::Orientation::Horizontal;
             splitCenter->FixedPanel = System::Windows::Forms::FixedPanel::Panel2;
-            splitCenter->Panel1->Controls->Add(splitRight);
+            docs->Dock = DockStyle::Fill;
+            splitCenter->Panel1->Controls->Add(docs);
             splitCenter->Panel2->Controls->Add(bottomTabs);
+
+            splitRight = gcnew SplitContainer();
+            splitRight->Dock = DockStyle::Fill;
+            splitRight->Orientation = System::Windows::Forms::Orientation::Vertical;
+            splitRight->FixedPanel = System::Windows::Forms::FixedPanel::Panel2;
+            splitRight->Panel1->Controls->Add(splitCenter);
+            splitRight->Panel2->Controls->Add(MakeToolWindow("Properties", props));
 
             splitMain = gcnew SplitContainer();
             splitMain->Dock = DockStyle::Fill;
             splitMain->Orientation = System::Windows::Forms::Orientation::Vertical;
             splitMain->FixedPanel = System::Windows::Forms::FixedPanel::Panel1;
             splitMain->Panel1->Controls->Add(MakeToolWindow("Solution Explorer", tree));
-            splitMain->Panel2->Controls->Add(splitCenter);
+            splitMain->Panel2->Controls->Add(splitRight);
         }
 
         void BuildTreeMenu()
@@ -919,6 +921,7 @@ namespace Gride
                 return;
             }
             project = p;
+            ClearBuildOutput();                              // the last project's build and run are not this one's
             RememberProjectTime();
             settings->AddRecentProject(p->IsVs && p->Vs->StateFile->Length == 0 ? p->FilePath : full);     // a Visual Studio project by its project file (its solution is found again); one a .pro stands for by the .pro
             SaveSettings();
@@ -943,6 +946,28 @@ namespace Gride
                 SetStatus(String::Format("Imported CCS project '{0}' (read-only, {1} files)", project->Name, project->SourceFiles->Count));
             else
                 SetStatus(String::Format("Opened project '{0}'", project->Name));
+            ShowMainSource();
+        }
+
+        // the program on screen once its project opens: the source with main() in it, else the first source
+        void ShowMainSource()
+        {
+            if (project == nullptr || project->SourceFiles->Count == 0) return;
+            String^ first = nullptr;
+            for each (String^ rel in project->SourceFiles)
+            {
+                String^ f = project->ResolvePath(rel);
+                if (!File::Exists(f)) continue;
+                if (first == nullptr) first = f;
+                try
+                {
+                    if (System::Text::RegularExpressions::Regex::IsMatch(File::ReadAllText(f), "^\\s*((int|void)?\\s*|fun\\s*<[^>]*>\\s*=\\s*)main\\s*\\(",
+                                                                         System::Text::RegularExpressions::RegexOptions::Multiline))
+                    { OpenFile(f); return; }
+                }
+                catch (IOException^) { }
+            }
+            if (first != nullptr) OpenFile(first);
         }
 
         // RIDE's own state for a CCS project lives in the settings (ccs.projects), never in CCS's files: the
@@ -2977,15 +3002,33 @@ namespace Gride
 
         void OnAbout(Object^ sender, EventArgs^ e)
         {
-            Ui::Info(this, String::Format(
-                "{0}  (version {1})\n\n"
-                "IDE for the C90, C++11 and Shalimar compilers.\n"
-                "Targets: Windows (MASM/LINK), Linux, macOS, TMS6747 DSP (ASM6x/LNK6x/RTS6747/VM6747).\n"
-                "Reads Code Composer Studio 7.4 / 5.5 projects and Visual Studio solutions (read-only).\n"
-                "Debugs with RIDE's debuggers: sim6747 and vm6747, cdb (or lldb), a Shalimar program's own session.\n"
-                "Follows RIDE's conventions (the RIDE port, R01-R13); Help has RIDE 5.17's manual and Express Help.\n"
-                "Its example is cppparse, built with Visual Studio's cl and link.exe.\n\n"
-                "C++/CLI, .NET Framework 4.8, Windows Forms.", AppInfo::Name, AppInfo::Version));
+            // the same About as GRIDEd's: the IDE's version, then each tool's as the tool reports it (GrideAbout::ToolVersions)
+            Form^ f = gcnew Form();
+            f->Text = "About " + AppInfo::Name;
+            f->FormBorderStyle = System::Windows::Forms::FormBorderStyle::FixedDialog;
+            f->MaximizeBox = false; f->MinimizeBox = false; f->ShowInTaskbar = false;
+            f->StartPosition = FormStartPosition::CenterParent;
+            f->ClientSize = System::Drawing::Size(620, 470);
+            Label^ name = gcnew Label();
+            name->Text = AppInfo::Name;
+            name->Font = gcnew System::Drawing::Font("Segoe UI Semibold", 22.0f);
+            name->Location = Point(24, 16);
+            name->AutoSize = true;
+            f->Controls->Add(name);
+            Label^ info = gcnew Label();
+            info->Location = Point(26, 70);
+            info->Size = System::Drawing::Size(580, 350);
+            info->Font = gcnew System::Drawing::Font("Consolas", 9.5f);
+            Cursor = Cursors::WaitCursor;
+            info->Text = GrideAbout::ToolVersions::Text(AppDomain::CurrentDomain->BaseDirectory, IdeSettings::SettingsPath());
+            Cursor = Cursors::Default;
+            f->Controls->Add(info);
+            Button^ ok = gcnew Button();
+            ok->Text = "OK"; ok->DialogResult = System::Windows::Forms::DialogResult::OK;
+            ok->Location = Point(f->ClientSize.Width - 100, f->ClientSize.Height - 40); ok->Size = System::Drawing::Size(80, 28);
+            f->Controls->Add(ok);
+            f->AcceptButton = ok; f->CancelButton = ok;
+            f->ShowDialog(this);
         }
 
         // ============================================================ drag & drop, closing

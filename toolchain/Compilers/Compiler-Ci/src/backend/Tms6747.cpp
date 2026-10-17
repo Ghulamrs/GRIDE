@@ -1189,19 +1189,43 @@ static std::string debugName(const Type *t) {
 // -g: the function's parameters and locals in TI's .dwtag spelling, so sim6747 and vm6747 can show them
 // (docs\C6747-LOCALS-DESIGN.md). A frame variable is named from A15 - TI's DWARF register 15 - as
 // localAddr reaches it; a static one by its symbol. Parameters first, in order, as the CodeView path does.
+// A variable of an inner block goes inside that block's DW_TAG_lexical_block, which names the block's
+// code by its begin and end label (phase F): the debugger lists it only while the stop is inside.
 void Tms6747::emitVariables(const Function &fn) {
     if (lineSource() == nullptr) return;
     out_ << "\t.dwtag\tDW_TAG_subprogram, DW_AT_name(\"" << fn.name() << "\"), DW_AT_low_pc(" << fn.name() << ")\n";
+    emitScope(fn, 0);
+    out_ << "\t.dwendtag\n";
+}
+
+// a block's own variables (the function's, scope 0, parameters first), then each inner block that declares
+// something: as a lexical block when it has code of its own, else folded into this one
+void Tms6747::emitScope(const Function &fn, int scope) {
     for (int pass = 0; pass < 2; pass++)
         for (const Local &l : fn.locals()) {
-            if (l.isParam != (pass == 0) || l.name.empty()) continue;
+            if (l.scope != scope || l.isParam != (pass == 0) || l.name.empty()) continue;
             out_ << "\t.dwtag\t" << (l.isParam ? "DW_TAG_formal_parameter" : "DW_TAG_variable")
                  << ", DW_AT_name(\"" << l.name << "\"), DW_AT_type(\"" << debugName(l.type) << "\"), ";
             if (!l.staticName.empty()) out_ << "DW_AT_location[DW_OP_addr " << l.staticName << "]\n";
             else out_ << "DW_AT_location[DW_OP_breg15 " << -(kSaveBytes + l.offset) << "]\n";
             noteType(l.type);
         }
-    out_ << "\t.dwendtag\n";
+    const std::vector<DwarfBlock> &bs = blocks();
+    for (std::size_t b = 1; b < bs.size(); b++) {
+        if (bs[b].parent != scope || !declaresAnything(fn, static_cast<int>(b))) continue;
+        if (bs[b].begin.empty() || bs[b].end.empty()) { emitScope(fn, static_cast<int>(b)); continue; }
+        out_ << "\t.dwtag\tDW_TAG_lexical_block, DW_AT_low_pc(" << bs[b].begin << "), DW_AT_high_pc(" << bs[b].end << ")\n";
+        emitScope(fn, static_cast<int>(b));
+        out_ << "\t.dwendtag\n";
+    }
+}
+
+bool Tms6747::declaresAnything(const Function &fn, int scope) const {
+    for (const Local &l : fn.locals()) if (l.scope == scope && !l.name.empty()) return true;
+    const std::vector<DwarfBlock> &bs = blocks();
+    for (std::size_t b = 1; b < bs.size(); b++)
+        if (bs[b].parent == scope && declaresAnything(fn, static_cast<int>(b))) return true;
+    return false;
 }
 
 // A type and every type it is made of, each once: an array's element, a member's type, what a pointer points to.
@@ -1271,6 +1295,8 @@ void Tms6747::emitFunction(const Function &fn) {
         vaStart_ = (stackParamOffset(fn.params(), named) + 3) / 4 * 4;   // a word past a packed char
     }
 
+    // -g: each block's begin and end label, so its variables can be tagged with the code they live in
+    if (lineSource() != nullptr) resetBlocks(fn.blocks());
     // The body goes first, into its own text, because what it does decides the prologue: B3 saved for a call, A10/B10/A12/B12 for one past six arguments.
     fn.body().accept(*this);
     // Falling off the end returns 0 - main's C99 meaning, and what the other

@@ -108,5 +108,15 @@ Deferred:
 | Phase | Work | Why later |
 |---|---|---|
 | E | real DWARF `.debug_info` in the `.out`, `DW_AT_type` as DIE references | only TI's own tools / CCS would see it; GRIDE reads `.gride.dwtag` |
-| F | `DW_TAG_lexical_block` per block (c90/cpp11 know `Local::scope`), the debugger keeping each variable's pc range and showing only the blocks the stop is in | the stop-gap above covers the common case, a stop inside the inner block |
-| G | cpp11 -O1/-O2: a variable held in a register as `DW_OP_regN` (frame 0 only) | -O0 is the debug configuration; gdb shows these as `<optimized out>` too |
+| G | cpp11 -O1/-O2: a variable held in a register as `DW_OP_regN` (frame 0 only) | -O0 is the debug configuration; gdb shows these as `<optimized out>` too; cpp11 refuses -g with -O on the C6747 anyway |
+
+## Phase F - done (2026-10-17)
+
+c90 and cpp11 (`Tms6747.cpp` emitVariables / emitScope) write each inner block that declares something as
+`.dwtag DW_TAG_lexical_block, DW_AT_low_pc(L$fn$blk$bN), DW_AT_high_pc(L$fn$blk$eN)` ... `.dwendtag`, nested
+as the blocks are, from the Walker's block labels (`resetBlocks` before the body; cpp11 sets the caller's
+blocks aside while an inlined callee is walked). A block with no code of its own is folded into its parent.
+sim6747 and vm6747 (`Debug.cpp` readTags) give each variable its innermost block's labels, the machine
+places them (`placeBlocks`), and `info locals`, `print`, Watch and Set Variable take only the variables whose
+block holds the selected frame's pc (an outer frame's: its return address less one). A label that does not
+resolve leaves the variable listed for the whole function, as before. Shalimar has no nested blocks of locals.

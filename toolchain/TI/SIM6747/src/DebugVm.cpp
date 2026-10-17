@@ -36,7 +36,9 @@ public:
         dbg::readTags(prog_.dwTags, byLabel, types_);
         for (std::map<uint32_t, std::string>::const_iterator f = functions_.begin(); f != functions_.end(); ++f) {
             std::map<std::string, std::vector<dbg::Variable> >::const_iterator t = byLabel.find(f->second);
-            if (t != byLabel.end()) variables_[f->first] = t->second;
+            if (t == byLabel.end()) continue;
+            variables_[f->first] = t->second;
+            dbg::placeBlocks(variables_[f->first], [this](const std::string &n, uint32_t &a) { return addressOfFunction(n, a); });
         }
         for (std::map<uint32_t, Instr>::const_iterator i = prog_.code.begin(); i != prog_.code.end(); ++i)
             if (i->second.srcLine > 0) { lines_ = true; break; }

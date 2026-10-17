@@ -85,7 +85,7 @@ foreach ($target in 'Windows', 'TMS320C6747') {
     foreach ($config in 'Debug', 'Release') {
         $name = "build $config $target"
         if ($name -notmatch $Only) { continue }
-        Fresh 'cdemo' $config $target $null $null
+        Fresh 'cdemo' $config $target $null 'cdemo\src\main.c'   # a source open, the build seen against it
         Menu 'Build', 'Rebuild Workspace'
         $o = Wait-Out '\d+ succeeded, \d+ failed' 240
         Check $name '4 projects built' $o '4 succeeded, 0 failed'

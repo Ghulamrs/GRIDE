@@ -46,17 +46,19 @@ namespace Gride { namespace UI {
         return false;
     }
 
-    void MainForm::BuildWorkspace()   { StartBuild(BuildAction::Build, workspace->BuildOrder(), nullptr); }
-    void MainForm::RebuildWorkspace() { StartBuild(BuildAction::Rebuild, workspace->BuildOrder(), nullptr); }
-    void MainForm::CleanWorkspace()   { StartBuild(BuildAction::Clean, workspace->BuildOrder(), nullptr); }
+    void MainForm::BuildWorkspace()   { if (!EnsureProgram()) return; StartBuild(BuildAction::Build, workspace->BuildOrder(), nullptr); }
+    void MainForm::RebuildWorkspace() { if (!EnsureProgram()) return; StartBuild(BuildAction::Rebuild, workspace->BuildOrder(), nullptr); }
+    void MainForm::CleanWorkspace()   { if (!EnsureProgram()) return; StartBuild(BuildAction::Clean, workspace->BuildOrder(), nullptr); }
 
     void MainForm::BuildProject()
     {
+        if (!EnsureProgram()) return;
         GrideProject^ p = ContextProject();
         if (p != nullptr) StartBuild(BuildAction::Build, workspace->BuildOrderFor(p), nullptr);
     }
     void MainForm::RebuildProject()
     {
+        if (!EnsureProgram()) return;
         GrideProject^ p = ContextProject();
         List<GrideProject^>^ one = gcnew List<GrideProject^>();
         if (p == nullptr) return;
@@ -65,6 +67,7 @@ namespace Gride { namespace UI {
     }
     void MainForm::CleanProject()
     {
+        if (!EnsureProgram()) return;
         GrideProject^ p = ContextProject();
         List<GrideProject^>^ one = gcnew List<GrideProject^>();
         if (p == nullptr) return;
@@ -74,6 +77,7 @@ namespace Gride { namespace UI {
 
     void MainForm::CompileFile()
     {
+        if (!EnsureProgram()) return;
         String^ file = explorer->SelectedFile;
         EditorDocument^ d = docs->Active;
         if (file == nullptr && d != nullptr && !d->IsUntitled) file = d->FilePath;
@@ -87,6 +91,7 @@ namespace Gride { namespace UI {
 
     void MainForm::AssembleOnly()
     {
+        if (!EnsureProgram()) return;
         GrideProject^ p = ContextProject();
         if (p == nullptr) return;
         List<GrideProject^>^ one = gcnew List<GrideProject^>();
@@ -96,6 +101,7 @@ namespace Gride { namespace UI {
 
     void MainForm::LinkOnly()
     {
+        if (!EnsureProgram()) return;
         GrideProject^ p = ContextProject();
         if (p == nullptr) return;
         List<GrideProject^>^ one = gcnew List<GrideProject^>();
@@ -199,10 +205,10 @@ namespace Gride { namespace UI {
         AfterBuild next = afterBuild;
         afterBuild = AfterBuild::Nothing;
         if (!s->Ok) return;
-        if (workspace == nullptr || workspace->StartupProject == nullptr) return;   // closed during the build
+        if (workspace == nullptr || RunProject() == nullptr) return;   // closed during the build
         if (next == AfterBuild::Debug)
         {
-            GrideProject^ p = workspace->StartupProject;
+            GrideProject^ p = RunProject();
             LaunchDebugger(BuildEngine::ProgramPath(p, p->GetConfiguration(CurrentConfig(), CurrentTarget())));
         }
         else if (next == AfterBuild::Run || next == AfterBuild::Emulate || next == AfterBuild::Verify) RunChosen(next);
@@ -213,16 +219,18 @@ namespace Gride { namespace UI {
     // =========================================================================
     void MainForm::DebugStart()
     {
+        if (!EnsureProgram()) return;
         if (IsInBreak()) { debugger->Continue(); return; }
-        if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        if (workspace == nullptr || RunProject() == nullptr) return;
         afterBuild = AfterBuild::Debug;
-        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(workspace->StartupProject), nullptr))
+        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(RunProject()), nullptr))
             afterBuild = AfterBuild::Nothing;
     }
 
     void MainForm::DebugStartNoDebug()
     {
-        if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        if (!EnsureProgram()) return;
+        if (workspace == nullptr || RunProject() == nullptr) return;
         // a Run of a cross target is turned away before anything is built (RIDE's buildAndRun)
         if (!RideToolchain::RunsHere(RideTool::C90, CurrentTarget()))
         {
@@ -232,26 +240,28 @@ namespace Gride { namespace UI {
             return;
         }
         afterBuild = AfterBuild::Run;
-        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(workspace->StartupProject), nullptr))
+        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(RunProject()), nullptr))
             afterBuild = AfterBuild::Nothing;
     }
 
     // RIDE's Build > Emulate on vm6747 and Build > Verify: the same build a Run makes, with what runs the program changed
     void MainForm::DebugEmulate()
     {
-        if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        if (!EnsureProgram()) return;
+        if (workspace == nullptr || RunProject() == nullptr) return;
         if (!RideToolchain::IsEmulated(CurrentTarget())) { SetStatus("Emulate on vm6747 is for tms6747 - choose it under Target"); return; }
         afterBuild = AfterBuild::Emulate;
-        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(workspace->StartupProject), nullptr))
+        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(RunProject()), nullptr))
             afterBuild = AfterBuild::Nothing;
     }
 
     void MainForm::DebugVerify()
     {
-        if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        if (!EnsureProgram()) return;
+        if (workspace == nullptr || RunProject() == nullptr) return;
         if (!RideToolchain::IsEmulated(CurrentTarget())) { SetStatus("Verify is for tms6747 - choose it under Target"); return; }
         afterBuild = AfterBuild::Verify;
-        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(workspace->StartupProject), nullptr))
+        if (!StartBuild(BuildAction::Build, workspace->BuildOrderFor(RunProject()), nullptr))
             afterBuild = AfterBuild::Nothing;
     }
 
@@ -302,7 +312,7 @@ namespace Gride { namespace UI {
     {
         debugger->Stop();
         GrideProject^ p = nullptr;
-        if (workspace != nullptr) p = workspace->StartupProject;
+        if (workspace != nullptr) p = RunProject();
         if (p != nullptr) LaunchDebugger(BuildEngine::ProgramPath(p, p->GetConfiguration(CurrentConfig(), CurrentTarget())));
     }
 
@@ -431,6 +441,52 @@ namespace Gride { namespace UI {
         return false;
     }
 
+    // the file in the editor is a C90, C++11 or Shalimar source (.shl or .shm) with main() in it, as the editor
+    // holds it - an edit not yet saved counts
+    bool MainForm::ActiveFileHasMain()
+    {
+        EditorDocument^ d = docs->Active;
+        if (d == nullptr || d->IsUntitled) return false;
+        Language l = settings->DetectLanguage(d->FilePath, Language::Other);
+        if (l != Language::C90 && l != Language::Cpp11 && l != Language::Shalimar) return false;
+        String^ text = d->Editor->GetText();
+        return text != nullptr && Regex::IsMatch(text, "^\\s*((int|void)?\\s*|fun\\s*<[^>]*>\\s*=\\s*)main\\s*\\(", RegexOptions::Multiline);
+    }
+
+    // with no workspace open, the file in the editor with main() becomes a program of its own: a project of that one
+    // file, in a temporary workspace, never written - built and run beside the file (its out\ and obj\), as RIDE's
+    // Run File runs it. False, and nothing done, when there is neither a workspace nor such a file.
+    bool MainForm::EnsureProgram()
+    {
+        if (workspace != nullptr) return true;
+        if (!ActiveFileHasMain()) return false;
+        EditorDocument^ d = docs->Active;
+        if (d->IsDirty) docs->Save(d);
+        String^ file = Path::GetFullPath(d->FilePath);
+        String^ name = Path::GetFileNameWithoutExtension(file);
+        GrideProject^ p = gcnew GrideProject();
+        p->FilePath = Path::Combine(Path::GetDirectoryName(file), name + ".pro");
+        p->Name = name;
+        p->Lang = settings->DetectLanguage(file, Language::C90);
+        p->Template = "Program";
+        p->Targets->Add(Target::Windows);
+        p->Targets->Add(Target::C6747);
+        for each (Target t in p->Targets)
+        {
+            p->Configurations->Add(gcnew BuildConfiguration("Debug", t));
+            p->Configurations->Add(gcnew BuildConfiguration("Release", t));
+        }
+        p->AddFile(file, GrideProject::DefaultFolderFor(file));
+        p->IsDirty = false;
+        p->IsReadOnly = true;          // the program's own .pro is never written
+        Target target = CurrentTarget();
+        Workspace^ w = Workspace::ForSingleProject(p);
+        if (p->Targets->Contains(target)) w->ActiveTarget = target;
+        SetWorkspace(w);
+        output->Append("Build", "a program of its own: " + Path::GetFileName(file) + " (no project open) is built as " + name);
+        return true;
+    }
+
     // the engine the window talks to: the events of the one before are let go
     void MainForm::AttachDebugger(DebugEngine^ engine)
     {
@@ -470,7 +526,7 @@ namespace Gride { namespace UI {
         String^ file = nullptr;
         int line = 1;
         GrideProject^ p = nullptr;
-        if (workspace != nullptr) p = workspace->StartupProject;
+        if (workspace != nullptr) p = RunProject();
         if (!FindEntryPoint(p, file, line))
         {
             MessageBox::Show(this, "No main() found and no file is open.", "Debug", MessageBoxButtons::OK, MessageBoxIcon::Warning);
@@ -537,8 +593,8 @@ namespace Gride { namespace UI {
     // the assembly when the project says emulateOnly), Emulate always the emulator, Verify both
     void MainForm::RunChosen(AfterBuild how)
     {
-        if (workspace == nullptr || workspace->StartupProject == nullptr || runner->IsRunning) return;
-        GrideProject^ p = workspace->StartupProject;
+        if (workspace == nullptr || RunProject() == nullptr || runner->IsRunning) return;
+        GrideProject^ p = RunProject();
         Target t = CurrentTarget();
         BuildConfiguration^ cfg = p->GetConfiguration(CurrentConfig(), t);
         String^ program = BuildEngine::ProgramPath(p, cfg);

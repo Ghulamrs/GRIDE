@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 //  Debugger.h - debugger abstraction + placeholder implementation
 //
 //  DebugEngine        abstract base the IDE talks to (Debug menu, panes)

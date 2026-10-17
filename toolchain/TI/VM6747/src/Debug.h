@@ -21,7 +21,22 @@ struct Variable {
     std::string name, type, symbol;
     int offset = 0;
     bool param = false, deref = false, global = false;
+    // a variable of an inner block (DW_TAG_lexical_block): the block's begin and end labels, and once the
+    // machine has placed them, the code [lo, hi) it is listed for; unscoped, the whole function
+    std::string blockLow, blockHigh;
+    uint32_t lo = 0, hi = 0;
+    bool scoped = false;
 };
+
+// Each inner-block variable's labels made addresses by the machine's own lookup; one that does not
+// resolve stays unscoped, listed for the whole function as before.
+template <class Lookup> void placeBlocks(std::vector<Variable> &vs, Lookup addressOf) {
+    for (Variable &v : vs) {
+        if (v.blockLow.empty() || v.blockHigh.empty()) continue;
+        uint32_t lo = 0, hi = 0;
+        if (addressOf(v.blockLow, lo) && addressOf(v.blockHigh, hi) && lo < hi) { v.lo = lo; v.hi = hi; v.scoped = true; }
+    }
+}
 
 // A type as the compilers describe it with .dwtag (-g), by the name the variables' DW_AT_type give it:
 // a base type's size and encoding, a pointer, a C array (element and count), a struct or union with its
