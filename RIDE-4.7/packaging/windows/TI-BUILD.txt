@@ -1,0 +1,35 @@
+Real TMS320C674x build (.out and .hex)
+======================================
+
+RIDE runs tms6747 programs on the built-in vm6747 emulator - no TI tools
+needed. Since 3.5 (2026-09-19) RIDE also assembles tms6747 code itself, with
+its own asm6x beside the compilers, and links a real .out from the editor
+when settings.json names a TI Code Generation Tools install: "ti" is the CGT
+folder and "tilib" the folder holding rts6740_elf_eh.lib (the EH runtime
+mklib builds). Since 4.0 a "tilinker" may name a linker of the project's own
+(LNK6x - bin\lnk6x.exe, shipped with 4.0) to use in place of TI's lnk6x,
+still against TI's runtime; and a "linker" the same for x86_64-windows (LINK
+- bin\link.exe, shipped with 4.0) in place of Microsoft's link.exe. The
+installed settings.json names both; Tools changes them. When one fails a
+build and the compilers found no fault in the source, RIDE asks whether to
+use the vendor's tool for that build ("askNative": true; false never asks) -
+today on every real link, since neither yet links a whole program against
+its vendor's runtime, and each says so and stops rather than guess. To produce a .out and an Intel .hex from the command line
+instead, use ti-build, which uses a CGT install already on this machine
+(none of TI's tools are shipped with RIDE):
+
+    bin\ti\ti-build.cmd  path\to\program.c        (or .cpp, or .shl)
+
+It finds the CGT via, in order:
+  1. the RIDE_TI_CGT environment variable (the CGT folder),
+  2. cl6x on PATH,
+  3. C:\ti\ccs*\tools\compiler\ti-cgt-c6000_*.
+
+If none is present, install the free "C6000 Code Generation Tools" from TI.
+The first run builds the exception-handling runtime once, into
+%LOCALAPPDATA%\RIDE\tilib (via the CGT's own mklib; needs a POSIX sh such
+as the one Git for Windows provides, on PATH).
+
+Output: program.out (ELF for the C674x) and program.hex (Intel hex), beside the
+source. Our compilers' codegen differs from cl6x's, but the objects are ABI-
+compatible with cl6x and TI's runtime (verified word-for-word).

@@ -1,0 +1,18 @@
+{
+  "include": "include",
+  "lib": "lib",
+  "vcvars": "",
+  "assembler": "bin/masm.exe",
+  "linker": "bin/link.exe",
+  "ti": "",
+  "tilib": "",
+  "tilinker": "bin/lnk6x.exe",
+  "askNative": true,
+  "compiler": "auto",
+  "indent": 4,
+  "tabs": false,
+  "font": "",
+  "includes": [],
+  "libraries": [],
+  "ccs": { "enabled": true, "root": "" }
+}

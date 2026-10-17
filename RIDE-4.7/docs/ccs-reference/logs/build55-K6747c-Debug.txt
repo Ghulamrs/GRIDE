@@ -1,0 +1,38 @@
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+CCS headless build starting... [Wed Sep 30 22:10:42 PKT 2026] 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+================================================================================
+Pre processing...
+
+
+================================================================================
+Building...
+
+
+**** Build of configuration Debug for project K6747c ****
+
+"C:\\ti\\ccsv5\\utils\\bin\\gmake" -k all 
+'Building file: ../main.c'
+'Invoking: C6000 Compiler'
+"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/bin/cl6x" -mv6740 --abi=eabi -g --include_path="C:/ti/ccsv5/tools/compiler/c6000_7.4.4/include" --include_path="C:/ti/ccsref/ws55/K6747c/inc" --define=c6747 --display_error_number --diag_warning=225 --diag_wrap=off --preproc_with_compile --preproc_dependency="main.pp"  "../main.c"
+'Finished building: ../main.c'
+' '
+'Building file: C:/ti/ccsref/src/util.c'
+'Invoking: C6000 Compiler'
+"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/bin/cl6x" -mv6740 --abi=eabi -g --include_path="C:/ti/ccsv5/tools/compiler/c6000_7.4.4/include" --include_path="C:/ti/ccsref/ws55/K6747c/inc" --define=c6747 --display_error_number --diag_warning=225 --diag_wrap=off --preproc_with_compile --preproc_dependency="util.pp"  "C:/ti/ccsref/src/util.c"
+'Finished building: C:/ti/ccsref/src/util.c'
+' '
+'Building target: K6747c.out'
+'Invoking: C6000 Linker'
+"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/bin/cl6x" -mv6740 --abi=eabi -g --define=c6747 --display_error_number --diag_warning=225 --diag_wrap=off -z --stack_size=0x800 -m"K6747c.map" --heap_size=0x800 -i"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/lib" -i"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/include" --reread_libs --warn_sections --display_error_number --diag_wrap=off --xml_link_info="K6747c_linkInfo.xml" --rom_model -o "K6747c.out"  "./util.obj" "./main.obj" "../C6747.cmd" -l"libc.a" 
+<Linking>
+'Finished building target: K6747c.out'
+' '
+
+**** Build Finished ****
+
+
+================================================================================
+CCS headless build complete!

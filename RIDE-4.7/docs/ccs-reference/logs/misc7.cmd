@@ -1,0 +1,4 @@
+@echo off
+cd /d C:\ti\ccsref
+set E=C:\ti\ccsv7\eclipse\eclipsec.exe -noSplash -data C:\ti\ccsref\ws7
+%E% -application com.ti.ccstudio.apps.createProject -ccs.name P7misc -ccs.device TMS320C67XX.TMS320C6747 -ccs.cgtVersion 8.2.2 -ccs.outputFormat ELF -ccs.template com.ti.common.project.core.emptyProjectTemplate -ccs.configurations Debug Release -ccs.copyFile C:\ti\ccsref\src\main.c -ccs.copyFile C:\ti\ccsref\src\extra.c -ccs.copyFile C:\ti\ccsref\src\util.c @dir lib -ccs.copyFile C:\ti\ccsref\src\inc\config.h @dir inc -ccs.setCompilerOptions "--include_path=${PROJECT_ROOT}/inc" -ccs.setCompilerOptions "-O3 --define=PERFILE=1" @files lib/util.c @configurations Debug -ccs.defineBuildVariable MYLIBDIR C:/ti/c6747-lib @scope project -ccs.setLinkerOptions "-i ${MYLIBDIR}" -ccs.setPostBuildStep "echo post-build ${BuildArtifactFileName}" -ccs.overwrite full > createmisc7.txt 2>&1

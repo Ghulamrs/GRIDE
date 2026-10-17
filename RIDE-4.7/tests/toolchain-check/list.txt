@@ -1,0 +1,9 @@
+demo c greet.c main.c
+example c hello.c counter.c
+projectile c projectile.c
+gcd shl gcd.shl
+primes shl primes.shl
+rotmat shl rotmat.shl
+smart cpp smart.cpp
+class cpp class.cpp
+lambda cpp lambda.cpp

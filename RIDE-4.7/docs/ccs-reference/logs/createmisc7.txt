@@ -1,0 +1,10 @@
+
+--------------------------------------------------------------------------------
+Creating project 'P7misc'...
+
+    NOTE: Output-type not specified - defaulting to 'executable'.
+    NOTE: Device endianness not specified - defaulting to 'little'.
+    NOTE: Linker command file not specified - defaulting to 'C6747.cmd'.
+    NOTE: Runtime support library not specified - defaulting to 'libc.a'.
+
+Done!

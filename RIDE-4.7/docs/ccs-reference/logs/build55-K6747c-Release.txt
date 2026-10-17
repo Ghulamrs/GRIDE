@@ -1,0 +1,38 @@
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+CCS headless build starting... [Wed Sep 30 22:10:45 PKT 2026] 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+================================================================================
+Pre processing...
+
+
+================================================================================
+Building...
+
+
+**** Build of configuration Release for project K6747c ****
+
+"C:\\ti\\ccsv5\\utils\\bin\\gmake" -k all 
+'Building file: ../main.c'
+'Invoking: C6000 Compiler'
+"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/bin/cl6x" -mv6740 --abi=eabi -O2 --symdebug:none --include_path="C:/ti/ccsv5/tools/compiler/c6000_7.4.4/include" --include_path="C:/ti/ccsref/ws55/K6747c/inc" --define=c6747 --define=NDEBUG --define=LEVEL=2 --undefine=OLDAPI --display_error_number --diag_warning=225 --diag_wrap=off --no_compress --opt_for_speed=5 --preproc_with_compile --preproc_dependency="main.pp"  "../main.c"
+'Finished building: ../main.c'
+' '
+'Building file: C:/ti/ccsref/src/util.c'
+'Invoking: C6000 Compiler'
+"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/bin/cl6x" -mv6740 --abi=eabi -O2 --symdebug:none --include_path="C:/ti/ccsv5/tools/compiler/c6000_7.4.4/include" --include_path="C:/ti/ccsref/ws55/K6747c/inc" --define=c6747 --define=NDEBUG --define=LEVEL=2 --undefine=OLDAPI --display_error_number --diag_warning=225 --diag_wrap=off --no_compress --opt_for_speed=5 --preproc_with_compile --preproc_dependency="util.pp"  "C:/ti/ccsref/src/util.c"
+'Finished building: C:/ti/ccsref/src/util.c'
+' '
+'Building target: K6747c.out'
+'Invoking: C6000 Linker'
+"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/bin/cl6x" -mv6740 --abi=eabi -O2 --symdebug:none --define=c6747 --define=NDEBUG --define=LEVEL=2 --undefine=OLDAPI --display_error_number --diag_warning=225 --diag_wrap=off --no_compress --opt_for_speed=5 -z --stack_size=0x1000 -m"K6747c.map" --heap_size=0x800 -i"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/lib" -i"C:/ti/ccsv5/tools/compiler/c6000_7.4.4/include" -i"C:/ti/c6747-lib" --reread_libs --warn_sections --display_error_number --diag_wrap=off --xml_link_info="K6747c_linkInfo.xml" --rom_model -o "K6747c.out"  "./util.obj" "./main.obj" "../C6747.cmd" -l"libc.a" -l"rts6740_elf_eh.lib" 
+<Linking>
+'Finished building target: K6747c.out'
+' '
+
+**** Build Finished ****
+
+
+================================================================================
+CCS headless build complete!

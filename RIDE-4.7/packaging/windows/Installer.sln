@@ -1,0 +1,18 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "Installer", "Installer.vdproj", "{D1BE3776-5696-0ED0-4F15-64DA21D80C8D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Default = Debug|Default
+		Release|Default = Release|Default
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D1BE3776-5696-0ED0-4F15-64DA21D80C8D}.Debug|Default.ActiveCfg = Debug
+		{D1BE3776-5696-0ED0-4F15-64DA21D80C8D}.Release|Default.ActiveCfg = Release
+		{D1BE3776-5696-0ED0-4F15-64DA21D80C8D}.Release|Default.Build.0 = Release
+	EndGlobalSection
+EndGlobal

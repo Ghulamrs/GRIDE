@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""The master seal: every project's seal, listed and combined into one.
+
+    tools/master-seal write    write MASTER.SEAL from each project's seal file
+    tools/master-seal check    check every project's seal, then MASTER.SEAL itself
+    tools/master-seal artefacts <bindir> [--release text]
+                               add (or replace) MASTER.SEAL's table of shipped artefacts: the SHA-256
+                               and size of every executable and library under <bindir> (D13)
+    tools/master-seal html [page]
+                               rewrite the seal rows of docs/ride-architecture.html from MASTER.SEAL (A7)
+
+RIDE is the product, so MASTER.SEAL lives here and names the trees workspace.mk
+builds from, at the paths it builds them from. Each project's own tools/seal is
+run first, so a project whose sources have moved is reported before its seal
+is trusted. The master seal is a CRC32 over the project seals in this order.
+
+The seal is of sources, by rule; the artefact table beside it says what one release
+built from them, by SHA-256, and neither check nor verify_seals.py reads it.
+"""
+import binascii
+import datetime
+import hashlib
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
+NAME = "MASTER.SEAL"
+
+# (the program, the project directory beside RIDE, its seal file) - workspace.mk's order.
+PROJECTS = [
+    ("RIDE", ".", "ride-5.17.dat"),
+    ("c90", "../Compilers/Compiler-Ci", "c90-1.4.dat"),
+    ("cpp11", "../Compilers/C++Optimize", "cxx1-1.11.dat"),
+    ("shalimar", "../Compilers/Compiler-Si", "shalimar-1.4.dat"),
+    ("c2s", "../Compilers/Converter-C2S", "c2s-1.2.dat"),
+    ("vm6747", "../TI/VM6747", "vm6747-1.4.dat"),
+    ("asm6x", "../TI/ASM6x", "asm6x-1.5.dat"),
+    ("masm", "../Windows/MASM", "masm-1.0.dat"),
+    ("link", "../Windows/LINK", "link-1.1.dat"),
+    ("lnk6x", "../TI/LNK6x", "lnk6x-1.3.dat"),
+    ("sim6747", "../TI/SIM6747", "sim6747-1.5.dat"),
+    ("rts6x", "../TI/RTS6x", "rts6x-1.2.dat"),
+]
+
+
+def header(path):
+    """The file count and seal from a project seal's fourth line: 'CRC32 ... - N files, seal XXXXXXXX'."""
+    with open(path) as fh:
+        for line in fh:
+            if " files, seal " in line:
+                tail = line.rsplit("- ", 1)[1].split()
+                return int(tail[0]), tail[3]
+    raise SystemExit("%s: no seal line in it" % path)
+
+
+def rows():
+    out = []
+    for prog, where, dat in PROJECTS:
+        path = os.path.normpath(os.path.join(ROOT, where, dat))
+        count, seal = header(path)
+        with open(path, "rb") as fh:
+            whole = binascii.crc32(fh.read()) & 0xFFFFFFFF
+        out.append((prog, os.path.relpath(path, ROOT).replace(os.sep, "/"), count, seal, whole))
+    return out
+
+
+def combined(rs):
+    return binascii.crc32("".join("%s %s" % (p, s) for p, _, _, s, _ in rs).encode()) & 0xFFFFFFFF
+
+
+# Where the artefact table begins; everything from this line on is kept by write and replaced by artefacts.
+ARTEFACTS = "=" * 72 + "\n"
+
+
+def artefact_section():
+    """The artefact table as it stands in MASTER.SEAL, or "" when it has none."""
+    path = os.path.join(ROOT, NAME)
+    if not os.path.exists(path):
+        return ""
+    text = open(path, encoding="utf-8").read()
+    at = text.find(ARTEFACTS)
+    return text[at:] if at >= 0 else ""
+
+
+def write():
+    rs = rows()
+    total = combined(rs)
+    today = datetime.date.today().strftime("%d-%m-%Y")
+    kept = artefact_section()
+    with open(os.path.join(ROOT, NAME), "w", encoding="utf-8") as fh:
+        fh.write("©2026 G. R. Akhtar - RIDE 5.17 and the programs it drives\n")
+        fh.write("Master seal: each project's seal, listed and combined into one\n")
+        fh.write("Written by tools/master-seal; check it with `tools/master-seal check`.\n")
+        fh.write("%d projects, %d files, master seal %08X\n"
+                 % (len(rs), sum(r[2] for r in rs), total))
+        fh.write("-" * 72 + "\n")
+        fh.write("%-9s %-8s %-8s %6s  %s\n" % ("program", "seal", "file CRC", "files", "seal file"))
+        for prog, rel, count, seal, whole in rs:
+            fh.write("%-9s %-8s %08X %6d  %s\n" % (prog, seal, whole, count, rel))
+        fh.write("-" * 72 + "\n")
+        fh.write("Master seal %08X\n" % total)
+        fh.write("Sealed on %s\n" % today)
+        fh.write(kept)
+    print("wrote %s: %d projects, master seal %08X%s" % (NAME, len(rs), total,
+                                                        ", artefact table kept" if kept else ""))
+    return 0
+
+
+def shipped(bindir):
+    """Every executable and library under bindir, recursively: (path relative to it, size, SHA-256)."""
+    kinds = (".exe", ".dll", ".lib", ".a", ".so", ".dylib", ".out")
+    found = []
+    for top, dirs, files in os.walk(bindir, followlinks=True):
+        dirs.sort()
+        for f in sorted(files):
+            p = os.path.join(top, f)
+            ext = os.path.splitext(f)[1].lower()
+            if ext in kinds or (ext == "" and os.access(p, os.X_OK)):
+                data = open(p, "rb").read()
+                found.append((os.path.relpath(p, bindir).replace(os.sep, "/"), len(data),
+                              hashlib.sha256(data).hexdigest()))
+    return found
+
+
+def master_value():
+    for line in open(os.path.join(ROOT, NAME), encoding="utf-8"):
+        if line.startswith("Master seal "):
+            return line.split()[2]
+    raise SystemExit("%s: no master seal line" % NAME)
+
+
+def artefacts(bindir, release):
+    files = shipped(bindir)
+    if not files:
+        print("master-seal artefacts: nothing executable under %s" % bindir)
+        return 1
+    path = os.path.join(ROOT, NAME)
+    master = master_value()
+    text = open(path, encoding="utf-8").read()
+    at = text.find(ARTEFACTS)
+    if at >= 0:
+        text = text[:at]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.write(ARTEFACTS)
+        fh.write("Shipped artefacts: the SHA-256 of what one release packaged, from master seal %s\n" % master)
+        fh.write("%s\n" % (release or "a release built on %s" % datetime.date.today().strftime("%d-%m-%Y")))
+        fh.write("%d files, %d bytes; the source seal above is unchanged by this table\n"
+                 % (len(files), sum(n for _, n, _ in files)))
+        fh.write("-" * 72 + "\n")
+        for rel, n, digest in files:
+            fh.write("%s %10d  %s\n" % (digest, n, rel))
+    print("%s: %d shipped artefacts from %s" % (NAME, len(files), bindir))
+    return 0
+
+
+# The row colours of the architecture page, by program.
+ROW = {"RIDE": "ride", "c90": "lang-c", "cpp11": "lang-cpp", "shalimar": "lang-shl", "c2s": "ride",
+       "masm": "t-win", "link": "t-win"}
+
+
+def html(page):
+    rs = rows()
+    total = combined(rs)
+    sealed = None
+    for line in open(os.path.join(ROOT, NAME), encoding="utf-8"):
+        if line.startswith("Sealed on "):
+            sealed = line.split()[2]
+    text = open(page, encoding="utf-8").read()
+    begin, end = "<!-- seals: generated by tools/master-seal --html -->", "<!-- end seals -->"
+    a, b = text.find(begin), text.find(end)
+    if a < 0 or b < a:
+        print("master-seal html: %s has no seal markers" % page)
+        return 1
+    out = [begin, "  <table>", "    <tr><th>program</th><th>source</th><th>seal file</th><th>seal</th></tr>"]
+    for (prog, where, dat), (_, _, _, seal, _) in zip(PROJECTS, rs):
+        source = "RIDE-4.7" if where == "." else where.replace("../", "")
+        out.append('    <tr class="%s"><td class="cell">%s</td><td class="mono">%s</td><td class="mono">%s</td>'
+                   '<td class="mono">%s</td></tr>' % (ROW.get(prog, "t-c6x"), prog, source, dat, seal))
+    out += ["  </table>", "  " + end]
+    text = text[:a] + "\n".join(out) + text[b + len(end):]
+    text = re.sub(r"master seal [0-9A-F]{8}, sealed \d\d-\d\d-\d{4}",
+                  "master seal %08X, sealed %s" % (total, sealed), text)
+    text = re.sub(r"<code>MASTER.SEAL</code> of \d\d-\d\d-\d{4} \(master seal [0-9A-F]{8}\)",
+                  "<code>MASTER.SEAL</code> of %s (master seal %08X)" % (sealed, total), text)
+    with open(page, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    print("%s: %d seal rows from %s, master seal %08X" % (page, len(rs), NAME, total))
+    return 0
+
+
+def check():
+    bad = 0
+    for prog, where, dat in PROJECTS:
+        tool = os.path.join(ROOT, where, "tools", "seal")
+        r = subprocess.run([sys.executable, tool, "check"], cwd=os.path.join(ROOT, where),
+                           stdout=subprocess.PIPE, universal_newlines=True)
+        print("  %-9s %s" % (prog, r.stdout.strip().splitlines()[-1]))
+        bad += r.returncode != 0
+    recorded = {}
+    for line in open(os.path.join(ROOT, NAME)):
+        parts = line.split()
+        if len(parts) == 5 and len(parts[1]) == 8 and parts[4].endswith(".dat"):
+            recorded[parts[0]] = (parts[1], parts[2])
+    for prog, rel, count, seal, whole in rows():
+        if recorded.get(prog) != (seal, "%08X" % whole):
+            print("  %s: MASTER.SEAL does not match %s" % (prog, rel)); bad += 1
+    print("master seal: %d projects, %d differ" % (len(PROJECTS), bad))
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    what = sys.argv[1] if len(sys.argv) > 1 else "check"
+    if what == "write":
+        sys.exit(write())
+    if what == "check":
+        sys.exit(check())
+    if what == "artefacts" and len(sys.argv) > 2:
+        release = sys.argv[sys.argv.index("--release") + 1] if "--release" in sys.argv[3:-1] else ""
+        sys.exit(artefacts(sys.argv[2], release))
+    if what in ("html", "--html"):
+        sys.exit(html(sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "docs", "ride-architecture.html")))
+    print(__doc__)
+    sys.exit(2)

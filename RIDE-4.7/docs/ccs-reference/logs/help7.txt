@@ -1,0 +1,233 @@
+Usage:
+	eclipsec -noSplash -data "<workspace_dir>"
+		-application com.ti.ccstudio.apps.createProject
+		(-ccs.projectSpec <file> | -ccs.name <name> -ccs.device <id>) [<options>]
+
+where options include:
+	-ccs.projectSpec "<file>"
+		The project-spec defining the project(s) to be created.
+		See the <ccs-install-root>/ccs/eclipse/plugins/com.ti.ccstudio.project.templates/schema/projectSpec.xsd file for details.
+	
+	-ccs.name <name>
+		The name of the new project.
+	
+	-ccs.location "<dir>"
+		The filesystem location of the project, if it is
+		to be created outside of workspace (optional).
+	
+	-ccs.outputType (executable | staticLibrary)
+		The output-type (optional).
+		Defaults to 'executable'.
+	
+	-ccs.device <id>
+		The device-variant ID.
+		A list of all available device-variant IDs will be
+		printed if this argument is missing or not recognized.
+	
+	-ccs.endianness <name>
+		The device endianness (optional).
+		Defaults to device-specific setting, if defined.
+		A list of all applicable endianness types will be
+		printed if this argument is not recognized.
+	
+	-ccs.toolChain (TI | GNU)
+		Compiler tool-chain (optional).
+		Defaults to 'TI'.
+	
+	-ccs.cgtVersion <version>
+		Compiler version (optional).
+		Defaults to highest applicable version.
+	
+	-ccs.outputFormat (COFF | ELF)
+		The output-format (optional).
+		Defaults to device-specific setting, if defined, or 'COFF'.
+	
+	-ccs.products "[<id>[:<version>];]+"
+		List of products to enable (optional).
+	
+	-ccs.cmd "<file>"
+		Linker command file to be physically copied into the project (optional).
+		Defaults to device-specific setting, if defined.
+	
+	-ccs.rts "<file>"
+		Runtime support library (optional).
+		Defaults to device-specific setting, if defined.
+	
+	-ccs.configurations <name1>[ <name2>]*
+		Space-separated list of build-configurations to create (optional).
+		Defaults to 'Debug Release'.
+	
+	-ccs.defaultConfiguration <name>
+		Name of one build-configuration which would be made active each time this project is imported into workspace.
+	
+	-ccs.references <name1>[ <name2>]*
+		Space-separated list of project-references to add to created project (optional).
+	
+	-ccs.artifactName <name>
+		Name of the build-artifact (optional).
+		Defaults to the name of the project.
+	
+	-ccs.artifactExtension <ext>
+		Extension of the build-artifact (optional).
+		Defaults to 'out' or 'lib', depending on '-ccs.outputType'.
+	
+	-ccs.listBuildOptions
+		Prints a list of all applicable build-options (optional).
+		Does not actually create the project.
+	
+	-ccs.setCompilerOptions "<options>" [@prepend] [@files ["<path>" ]+] [@folders ["<path>" ]+] [@configurations [<name> ]+]
+		Space-separated list of build-options to set on the created project's compiler tool (optional)
+		(use backslash '\' to escape all double-quotes in <options>).
+		Optionally, force the value for any list-type options to be prepended to current value.
+		Optionally, specify lists of files/folders (project-relative paths) to set these options on.
+		Optionally, specify a list of build-configurations in which these options are to be set.
+	
+	-ccs.setLinkerOptions "<options>" [@prepend] [@configurations [<name> ]+]
+		Similar to -ccs.setCompilerOptions
+	
+	-ccs.setHexOptions "<options>" [@prepend] [@configurations [<name> ]+]
+		Similar to -ccs.setCompilerOptions. Hex tool needs to be separately enabled using -ccs.enableHexTool.
+	
+	-ccs.setPinMuxOptions "<options>" [@prepend] [@configurations [<name> ]+]
+		Similar to -ccs.setCompilerOptions. PinMux tool needs to be separately enabled using -ccs.enablePinMuxTool.
+	
+	-ccs.enableHexTool
+		Enable the Hex tool with its default build-options (optional).
+		Defaults to 'false'.
+	
+	-ccs.enablePinMuxTool
+		Enable the PinMux tool with its default build-options (optional).
+		Defaults to 'false'.
+	
+	-ccs.setPreBuildStep "<command>" [@configurations [<name> ]+]
+		Command to be used as a pre-build step (optional)
+		(use backslash '\' to escape all double-quotes in <command>).
+		Optionally, specify a list of build-configurations in which this build-step is to be set.
+	
+	-ccs.setPostBuildStep "<command>" [@configurations [<name> ]+]
+		Command to be used as a post-build step (optional)
+		(use backslash '\' to escape all double-quotes in <command>).
+		Optionally, specify a list of build-configurations in which this build-step is to be set.
+	
+	-ccs.copyFile "<file>" [@dir "<dir>"] [@configurations [<name> ]+]
+		Copies the given file/directory into the project upon creation (optional).
+		Optionally, specify a project-relative directory as the file's destination.
+		Optionally, specify a list of build-configurations in which this file is to be used.
+	
+	-ccs.linkFile "<file>" [@dir "<dir>" [@virtual]] [@configurations [<name> ]+]
+		Links the given file/directory into the project upon creation (optional).
+		Optionally, specify a project-relative directory as the file's destination.
+		Optionally, specify whether the destination directory should be created as virtual.
+		Optionally, specify a list of build-configurations in which this file is to be used.
+	
+	-ccs.definePathVariable <name> <value> [@scope (global|project)]
+		Defines the given path-variable for resolving portable linked file paths (optional)
+		(also defines a global build-macro with the same name and value).
+		Optionally, specify the scope (defaults to 'global').
+	
+	-ccs.defineBuildVariable <name> <value> [@type (string|dir|file)] [@scope (global|project|configuration)] [@configurations [<name> ]+]
+		Defines the given build-variable (optional).
+		Optionally, specify the type (defaults to 'string').
+		Optionally, specify the scope (defaults to 'global').
+		Optionally, specify a list of build-configurations in which this build-variable is to be defined
+		(applies only when scope is 'configuration').
+	
+	-ccs.autoGenerateMakefiles (true|false)
+		Turns automatic makefile-generation on/off (optional).
+		Defaults to 'true'.
+	
+	-ccs.buildLocation "<path>"
+		Absolute or project-relative path to folder to be used as the build-directory (optional).
+		Applies only when the '-ccs.autoGenerateMakefiles' flag is set to 'false'.
+		Defaults to project root-directory.
+	
+	-ccs.buildCommand "<path>"
+		Absolute path to an alternative build utility (optional).
+		Defaults to the gmake utility that is shipped with CCS.
+	
+	-ccs.buildCommandFlags "<flags>"
+		List of flags to override the default build-command flags (optional).
+	
+	-ccs.buildTarget <name>
+		Name of the target to run during an incremental build (optional).
+		Defaults to 'all'.
+	
+	-ccs.cleanTarget <name>
+		Name of the target to run during a clean build (optional).
+		Defaults to 'clean'.
+	
+	-ccs.template <id>
+		ID of the project-template to use when generating the new project (optional).
+		A list of all applicable template IDs will be
+		printed if this argument is not recognized.
+	
+	-ccs.ignoreDefaultDeviceSettings
+		Iff 'true' ignores any default settings specified by the selected device.
+	
+	-ccs.ignoreDefaultCCSSettings
+		Iff 'true' ignores any non-essential default settings made by CCS.
+	
+	-ccs.overwrite (full | keep)
+		Forces overwrite of existing file-system resources (optional).
+		A 'full' overwrite would delete and recreate the entire existing project folder.
+		A 'keep' overwrite would keep all existing filesystem project contents
+		(applies only when workspace project does not exist).
+	
+	-ccs.autoBuild
+		Performs an incremental build on the imported/created project (optional).
+	
+	-ccs.kind <id>
+		The project kind ID (optional).
+		[Deprecated] - use -ccs.outputType
+	
+	-ccs.listBuildOptionIDs
+		Prints a list of all applicable build-option IDs (optional).
+		Does not actually create the project.
+		[Deprecated] - use -ccs.listBuildOptions
+	
+	-ccs.setBuildOption <id> "<value>" [@prepend] [@configurations <name1>[ <name2>]*]
+		Sets the given build-option on the created project (optional).
+		(use the wildcard '*' to match multiple characters in <id> and enum <value>'s).
+		Optionally, force the value for any list-type options to be prepended to current value.
+		Optionally, specify a list of build-configurations in which this option is to be set.
+		[Deprecated] - use -ccs.setCompilerOptions/-ccs.setLinkerOptions
+
+	-ccs.args <file>
+		File containing any extra arguments (optional).
+		
+	-ccs.help
+		Print this help message.
+
+DSP/BIOSv5.x support:
+	-bios.version <version>
+		DSP/BIOSv5.x tools version.
+	
+RTSC support:
+	-rtsc.enableRtsc
+		Enable RTSC support.
+	
+	-rtsc.xdcVersion <version>
+		XDCtools version (optional).
+		Defaults to highest available version, when '-rtsc.enableRtsc' is specified.
+	
+	-rtsc.target <id>
+		RTSC target (optional).
+		Will be auto-set by default.
+	
+	-rtsc.platform <id>
+		RTSC platform (optional).
+		Will be left blank by default.
+	
+	-rtsc.buildProfile <profile>
+		RTSC build-profile (optional).
+		Defaults to 'whole_program'.
+	
+	-rtsc.products "[<id>[:<version>];]+"
+		List of RTSC products to enable (optional). [Deprecated] - use the '-ccs.products' flag instead.
+	
+	-rtsc.setConfiguroOptions "<options>"
+		Space-separated list of options to set on the created project's Configuro tool (optional)
+		(use backslash '\' to escape all double-quotes in <options>).
+	
+	-rtsc.configurationOnly
+		Generate a reusable RTSC Configuration project (optional).

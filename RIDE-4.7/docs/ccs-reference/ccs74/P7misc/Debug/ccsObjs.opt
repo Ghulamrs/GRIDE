@@ -1,0 +1,1 @@
+"./main.obj" "./lib/util.obj" "../C6747.cmd" -llibc.a 

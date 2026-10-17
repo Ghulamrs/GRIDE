@@ -1,0 +1,8 @@
+
+--------------------------------------------------------------------------------
+Creating project 'K6747cpp'...
+
+    NOTE: Output-type not specified - defaulting to 'executable'.
+    NOTE: Device endianness not specified - defaulting to 'little'.
+
+Done!

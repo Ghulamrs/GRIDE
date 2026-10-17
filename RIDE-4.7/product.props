@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The product's name, once, for the Visual Studio projects: the window is
+     $(PRODUCT).exe and the console $(PRODUCT)Console.exe. The Makefile's
+     PRODUCT, src/product.h and packaging/windows/make-setup.ps1 spell it the same. -->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PRODUCT>RIDE</PRODUCT>
+  </PropertyGroup>
+</Project>

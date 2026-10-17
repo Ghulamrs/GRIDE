@@ -1,0 +1,1613 @@
+# RIDE
+
+An editor for three languages of our own: **C** through c90,
+**C++** through cpp11, and **Shalimar** through shalimar
+- with the machine's own C and C++ compiler, `cl` on Windows and `c++`
+elsewhere, one key away for the first two. It runs on Windows, which is what
+it is for, and on a Mac and a Linux box, which are where it is written and
+checked.
+
+Two programs over one core: **`RIDE`**, which is a terminal editor, and
+**`RIDEGui`**, which is the same editor in a window. Those are the names of the
+binaries and of nothing else - every rule they share lives in `src/`, and the
+name above is what the pair of them is called.
+
+> Called CC1 Studio Workbench until 2026-08-22, when the third language
+> arrived and the old name stopped describing it.
+
+It is not [CC1 Studio](../CC1Studio), which is a different thing for the same
+compiler: that one is an extension that teaches VS Code about c90, and this one
+is an editor of our own.
+
+```
+ File   Edit   Project   Build   Debug   Target   Tools   Help
+ factorial.c  broken.c
++------------------------+---------------------------------------+
+| + include              |   1 int factorial(int n)              |
+| - src                  |   2 {                                 |
+|     broken.c           |   3     if (n < 2)                    |
+|     factorial.c        |   4         return 1;                 |
+|   README               |   5 }                                 |
++------------------------+---------------------------------------+
+| Console  Debug  Assembly                             6 lines   |
+| $ c90 -S src/broken.c -arch x86_64-windows                     |
+| src/broken.c:3:13: error: expected an expression               |
+|         int x = ;                                              |
+|                 ^                                              |
++----------------------------------------------------------------+
+| broken.c  5 lines        x86_64-windows  3/5  col 13   [text]   |
+| 3:13: error: expected an expression                             |
++----------------------------------------------------------------+
+```
+
+## What it does
+
+**It lays C out as you type it.** This is the part worth having. Type a function
+with no leading space anywhere and it arrives indented: bodies in a step, a
+closing brace under the line that opened its group, an unbraced `if` indenting
+exactly one statement, `case` labels in their switch's own column, `#` at the
+left margin. Braces inside strings, character constants, `//` and `/* */` are
+text and are not counted. Tab in the leading space puts the line where it
+belongs rather than adding a step; Ctrl-F does the whole file.
+
+**Re-indent takes a selection.** Edit ▸ Re-indent, or `Ctrl-A`, lays out what is
+selected and leaves every other line exactly as it was; with nothing selected it
+lays out the file. Either way the *whole* file is measured first, because how
+far a line is indented is a property of everything above it - how deep the
+braces are, whether a comment is open - so laying out a fragment on its own
+would start at column zero and be wrong from its first line. The selection
+decides which lines are written back, not what is measured.
+
+The rules come from Shalimar's indenter, which had already settled them, with
+four things added that C has and that language did not: escapes inside literals,
+block comments that outlive their line, the preprocessor, and switch labels.
+
+**It builds, and lands on the error.** Ctrl-B saves and runs `c90 -S`. c90 stops
+at the first error - `Source::fail` is `[[noreturn]]` - so this is a fix-one,
+build-again rhythm rather than a list of twelve problems, and the editor is
+built for that rhythm. The caret goes to the line and column c90 named, and
+c90's own words, caret line and all, are in the console.
+
+**It runs what it built.** F5, or Run in the Build menu, saves the file and
+hands it to the compiler with neither `-S` nor `-c` - so c90 compiles, assembles
+and links it, and cl does the same without `/c` - and then starts the program
+and puts everything it prints in the console, under everything the compiler
+said. What it returned is shown as a number rather than as success or failure,
+because only the program knows which its number meant: `[program returned 3]`.
+Its input is emptied rather than left as the editor's own, so a program that
+reads does not eat the keyboard.
+
+Only for the target this machine is. Everything else is turned away before
+anything is built, with the target to switch to named - the assembler and linker
+c90 hands off to are the host's, so a cross build stops at the assembly and
+there is nothing to start. cl is never in that position: it builds for the
+machine it was installed on.
+
+**It stops the program on a line and walks through it.** F9 puts a breakpoint
+on the line the caret is on - a `*` in the gutter, and no compiler needed to put
+it there. A breakpoint belongs to the file rather than to the tab, so it
+survives the file being closed and opened again, and follows the file when it is
+renamed. F8 builds with `-g`, starts the debugger, sets every breakpoint it has
+been given and runs; when the program stops, the caret goes to the line, a `>`
+marks it, and the Debug tab says where it is and what is in scope. **On tms6747
+the debugger is the emulator** (since 2026-10-13): cpp11 `-g` writes cl6x's `.dwpsn`
+source positions and `vm6747 --debug` speaks gdb's words over them, so F8, F6, F7,
+the stack and the registers (`$A4` in a watch) work as they do under gdb, and the
+locals pane stays empty - the assembly carries no variables. `RIDE_DEBUG_SIM6747=1`
+asks for `sim6747 --run --debug` on the linked `.out` beside the `.s` instead, which
+stops on a line only where the image carries a `.debug_line` (cl6x's do; ASM6x and
+LNK6x do not write one yet). c90 writes no positions for tms6747 yet, so a C project
+there still has nothing to stop in.
+
+```
+stopped at stepped.c:11 in main
+
+  total = 0   [int]
+  i = 1   [int]
+```
+
+F6 steps into a call, F7 over one, F8 carries on, and the Debug menu has those
+and step-out. Those variables are c90's own DWARF, read back by the machine's
+own debugger.
+
+**And it says how the program got there.** Stepping into a call, the Debug tab
+puts the stack under the variables - who is waiting, and on which line:
+
+```
+stopped at stepped.c:3 in twice
+
+  n = 1   [int]
+
+called from
+  main   stepped.c:11
+```
+
+**And a frame is a place to go to.** Double-click one in the window, or press
+enter on it - `Ctrl-W` twice puts the cursor in the panel in the terminal, and
+the line it is standing on is the panel's top line. The caret goes to the line
+that is waiting for the call to come back, opening that file if the call came
+from another one, and the variables become that frame's:
+
+```
+stopped at stepped.c:3 in twice
+
+the variables are main's, at stepped.c:11
+
+  total = 0   [int]
+  i = 1   [int]
+
+called from
+> main   stepped.c:11
+```
+
+`total` and `i` are main's and are not in scope in `twice` at all. All three
+debuggers keep a current frame and answer with its variables, so this is
+`frame select` to lldb, `frame` to gdb and `.frame` to cdb, and the reading
+after it is unchanged. The line above the list says whose they are, because
+`stopped at stepped.c:3 in twice` is still true and would otherwise be standing
+over another function's locals.
+
+`Ctrl-Up` and `Ctrl-Down` walk the same stack from the text, without going near
+the panel - one frame towards what called this, one frame back down - which is
+where you are when the question occurs to you. They are in the Debug menu with
+the steps. The two ends say so rather than doing nothing: nothing called main,
+and there is nothing below where the program stopped.
+
+The way back is also the top line: it names the frame the program stopped in,
+and pressing enter on it goes there. Any step goes back too - every stop starts
+at the frame it stopped in.
+
+**An expression can be watched, and follows the stepping.** Debug ▸ Watch
+expression asks for one, and it is answered again at every stop and after every
+change of frame, without being asked for a second time:
+
+```
+stopped at stepped.c:11 in main
+
+  total = 2   [int]
+  i = 2   [int]
+
+watching
+  total + i = 4
+  twice(4) = 8
+  nosuch = [use of undeclared identifier 'nosuch']
+```
+
+`expression` to lldb, `print` to gdb, `??` to cdb, and the answer read out of
+`(int) $0 = 4`, `$1 = 4` and `int 0n4` - the `$` is what tells lldb's answer
+from its echo of the command that asked for it. One it cannot answer keeps its
+place with the reason in brackets, so the block never has an expression with
+nothing after it; step into a function where the name is out of scope and that
+is what it says.
+
+The list belongs to the core beside the debugger rather than to either front
+end, and reading it again is done by the moves themselves - a watch that only
+some of the ways of moving refreshed would be worse than no watch at all. They
+outlive a debugging session, as a breakpoint does. Enter on one changes it, and
+an empty answer drops it.
+
+**And a variable can be written back.** Enter on one in the Debug tab, or a
+double-click in the window, asks for a value in the box that asks for
+filenames, and it goes into whichever frame is being looked at - so a caller's
+variable is set as easily as this one's. `expression` to lldb, `set variable`
+to gdb, `??` to cdb.
+
+What it reads back afterwards is what is in there rather than what was typed:
+a debugger asked for `3.7` in an `int` stores 3, and the tab should say 3. A
+value one of them will not take is refused in its own words - `No symbol "x" in
+current context` names the mistake better than anything this could invent.
+
+That it reaches the program rather than only the pane is what the tests check:
+`stepped.c` returns 2 + 4 + 6, and with `total` set to 100 at the first
+breakpoint it returns 112.
+
+**The gutter marks the frame's line too**, so the answer is in the code and not
+only in the panel: `:` in the terminal where `>` marks the stop and `*` a
+breakpoint, and in the window the same arrow drawn as an outline rather than
+filled in - the program is not standing there, you are only looking at it. A
+dash was tried first and reads as a minus sign against a two-digit number.
+
+It outranks the breakpoint on the same line, which is usually exactly where a
+caller is waiting: the two marks are about now, and a breakpoint is about every
+run of the program.
+
+The program has not moved through any of this. The arrow in the gutter still
+marks the line it is standing on: looking at a frame is not stepping.
+
+The stack stops at `main`. Below main is the code that started the program,
+which was not compiled here and has no source to go to - the same place a step
+off the end of main arrives in. lldb shows one frame of it and gdb three, and
+three lines of somebody else's libc above the answer are three lines to read
+past at every stop. A program standing in main has a stack of one and the tab
+says nothing about it, since a `called from` with nothing under it is noise.
+
+It drives that debugger rather than being one - lldb on a Mac, gdb on the Linux
+box, cdb on Windows - all three spoken through `src/debugger.cpp`, which is the
+one place their vocabularies differ.
+
+Which of them applies is a question about the compiler, the target and the
+configuration, not about the machine. On Windows a Debug build of c90 or cpp11
+is given `-masm=gnu`: the compiler writes CodeView into the GNU spelling,
+clang's assembler keeps it, Microsoft's `link.exe /DEBUG` writes the `.pdb`,
+and cdb reads it (M10, 5.1) - the same cdb that reads a `cl` build's. A
+Release build is the MASM spelling through RIDE's own `masm` and `link`, which
+carries no line table, and cannot be stopped on a line; the editor says why.
+`debuggerFor(kind, arch)` asks that question; `noDebuggerBecause` gives the
+answer that applies rather than a general one.
+
+cdb comes with the Windows SDK's debugging tools and is not installed by
+default; when it is missing the editor says that too, and names it.
+
+**The line the program is standing on wears a bar** across the whole width of
+the edit view, light blue, with an arrow beside it in the gutter. It is in two
+halves and has to be: a RichTextBox colours the background of *characters*, so
+that half stops where the code stops, and a panel of our own fills the rest of
+the line out to the edge. Three tidier answers were tried first and none of them
+draws - the notes are above `PaintRow` and `MakeStopBar`, so nobody spends the
+afternoon again.
+
+Both front ends have it, from that same core: the window has a Debug menu with
+the same keys, a red dot in its gutter where a breakpoint is, an arrow where
+the program is standing and an outline of one on the frame being looked at, and
+the same words in its Debug tab.
+
+There used to be an awkwardness here worth stating plainly, and it is half
+gone. The window only runs on Windows, and until 5.1 Windows was where none
+of the three debuggers could read what c90 writes - F8 there answered "no
+debugger here" and set breakpoints against the day there was one; since M10 a
+Debug build carries CodeView and cdb stops it. **For Shalimar it stops** on
+every release: a Shalimar program carries its own session, needs nothing
+installed, and works on all four targets including this one, so the window
+stopped on a line of source on the machine where that had never been possible.
+
+Which of the two halves a program goes to is `dbg_stopsItself` and is asked
+**before** `dbg_for`, in the core, by both front ends. That order is the whole
+of it: `dbg_for` answers "none" for shalimar and is right to, and a front end
+reading that as a refusal refuses the one language that needs nothing to be
+installed. The window read it that way for a day and a half.
+
+That is why `tests/test.cpp` links `winforms/bridge.cpp` and drives the
+window's own seam - `ed1_build_program`, `ed1_debugger_start`, the stop and the
+locals - on the machines that do have a debugger. Everything the window asks
+the core to do is checked there; what is left untested is the Windows Forms
+glue around it, and nothing else.
+
+Two things about driving lldb are worth writing down, because both cost an hour
+and neither is guessable. It must be put in synchronous mode with `script
+lldb.debugger.SetAsync(False)`, or over a pipe it forwards each command to the
+program instead of running it, and every answer after `run` is an echo. And the
+marker used to know an answer is complete has to be printed in two halves -
+`print("<<RIDE" + "-done>>")` - because lldb echoes the command that contains it,
+so a marker written whole appears before the answer rather than after it, and
+every reply read that way is the one before the one asked for.
+
+**It shows the assembly for any of the four targets.** Ctrl-T, or the Target
+menu. Two of the three host targets reach `-S` and no further on any given
+machine, since the assembler is the host's - which is exactly what the assembly
+tab is for; `tms6747` builds and runs everywhere, its tools being its own. A
+project that does not name a target gets this machine's, rather than the
+`x86_64-windows` it used to get wherever it was opened.
+
+**It colours what it shows, per language.** Keywords, types, strings, character
+constants, comments, numbers and the preprocessor, chosen from the file's
+suffix: `.c` and `.h` as C, `.cpp` and its family as C++, `.s` and `.asm` as
+assembly - which means the assembly tab is coloured too, with c90's directives,
+labels and mnemonics told apart. A keyword inside a string stays a string, an
+escaped quote ends nothing, and a block comment opened above the top of the
+screen still colours what is on it. Sixteen-colour codes throughout, because
+those are the ones a Windows console renders in virtual-terminal mode.
+
+**Selecting, cutting and pasting.** Shift with the arrows, Home, End or the
+page keys extends a selection from where the caret was; moving without shift
+lets it go. `Ctrl-C`, `Ctrl-X` and `Ctrl-V` copy, cut and paste, and with
+nothing selected the first two take the whole line, which is what is nearly
+always wanted. Typing or backspacing over a selection replaces it, and a cut is
+one undo step. The clipboard is the editor's own, not the machine's.
+
+**Text that is not ASCII.** The buffer stays bytes throughout, so a file opened
+and saved comes back byte for byte whatever is in it - but the caret moves by
+*characters*, never landing inside one, and backspace removes a whole letter
+rather than its last byte. Screen columns are counted properly too: an Urdu or
+accented letter is one column though it is two bytes, a Chinese character is
+two columns though it is three bytes, and a mark drawn on top of another letter
+is none. Tab stops line up on columns rather than bytes for the same reason.
+
+**Undo and redo**, on `Ctrl-Z` and `Ctrl-Y`. A run of typing is one step, so
+undoing gives a word back rather than one letter at a time; a newline, a
+re-layout and a replace are each a step of their own. Moving the caret ends the
+run, which is what stops a whole session collapsing into a single undo. The
+caret goes back to where it was, not just the text.
+
+The `*` that marks a modified file follows undo properly: undoing back to the
+point the file was written at clears it, because the text and the disk agree
+again. That is done by remembering how deep the history stood when the file was
+saved rather than by comparing the whole text - and when the saved point falls
+off the end of the capped history it says modified, which is the safe way to be
+wrong.
+
+It works by keeping snapshots rather than by inverting each operation. A source
+file is a few thousand short strings, the history is capped at a hundred steps,
+and the simple version is the one that cannot be subtly wrong - which for undo
+matters more than for anything else here.
+
+**Find and replace.** `Ctrl-F` asks, `Ctrl-G` moves on to the next, `Ctrl-R`
+replaces. Searching wraps round the end of the file and stops when it arrives
+back where it began. Replace changes every occurrence and says how many - and
+`Ctrl-Z` puts them all back in one step.
+
+**Debug or release**, on `Ctrl-D` or in the Build menu, remembered in the
+project file. What each compiler can do about it differs, and the editor says
+which rather than pretending they are the same:
+
+| | debug | release |
+|---|---|---|
+| `cl` | `/Od /D_DEBUG` | `/O2 /DNDEBUG` |
+| `c90`, `cpp11` on `x86_64-linux`, `arm64-darwin`, `x86_64-windows` | `-g -D_DEBUG=1` | `-O2 -DNDEBUG=1` |
+| `c90`, `cpp11` on `tms6747` | `-D_DEBUG=1` | `-O2 -DNDEBUG=1` |
+
+The release flags are the compilers' own (`options.h` has the defaults, and
+Project > Compiler Options changes them): cpp11 optimises every target, c90 the
+x86-64 ones. Debug is more than the define: c90 and cpp11 write DWARF for
+`x86_64-linux` and `arm64-darwin` - line tables, types, objects and lexical
+blocks, read by both `gdb` and `lldb` - and CodeView for `x86_64-windows`
+through the GNU spelling and clang's assembler (5.1), read by cdb from the
+`.pdb` that `link.exe /DEBUG` writes. The MASM spelling, which a Release build
+uses through RIDE's own `masm`, carries no line table, which is why the two
+configurations go through different assemblers on that target. `tms6747` has no
+line table and no debugger, so it gets the define alone.
+
+**Line numbers down the left**, in the manner of Shalimar's, with the caret's
+own line picked out. `Ctrl-L` turns them off.
+
+**The panes are drawn in a box.** The project pane, the text and the panel each
+have their own part of one frame, with the line between the panes running from
+the top down to whichever line closes it - the panel's line when the panel is
+open, and the bottom of the window when it is shut, where it ends in a tee
+either way. The names go into the lines rather than onto rows of their own: the
+files you have open are laid into the top line over the text they belong to,
+and Console, Debug and Assembly into the line above the panel, with how much
+there is to read at its right-hand end. That is two rows of names in one row of
+line, and rows are what a terminal has least of.
+
+**If your console draws them badly, `--plain` frames it with `-`, `|` and `+`
+instead**, and Edit ▸ Plain frame switches between the two and remembers which
+you chose in `~/.ride/state.json`. That is not a matter of taste: a font that has
+the plain line but not the junctions makes the console fetch `┬` from a second
+face, whose crossbar sits at a different height, and the frame appears to break
+at every join. Nothing in the program can mend that, so this is the way round
+it.
+
+The characters are the box-drawing ones, written as UTF-8 - which is what the
+editor writes anyway, since it has always handled files by the character rather
+than by the byte. On Windows the console is put into UTF-8 for as long as the
+editor is running and put back afterwards; a console left on the machine's own
+code page would show those three bytes as three characters of something else.
+
+**The menu and the questions are boxed too.** A menu hangs from its title in a
+box of its own, and a question - find, replace, save as, the name of a new file
+- is asked in a box in the middle of the text rather than on the message line,
+which is also where the editor answers back. A question and the answer to the
+last one sharing a row is how you end up reading neither.
+
+**It does not flicker.** The screen is written a row at a time, and a row that
+has not changed since the last time is not written again: a keystroke rewrites
+the line it changed and the status bar, not the whole screen. On a 24 by 80
+terminal that is a sixth of the bytes for the same typing, and the difference
+is larger the bigger the window - which is what the flicker was made of, over
+ssh most of all. The frame is written between the two halves of the
+"show me this all at once" pair as well, for the terminals that understand it.
+
+**Tabs for the files you have open.** Opening from the project pane adds one;
+F2 and F3 move between them. Each tab remembers its own caret and its own
+scroll, so coming back to a file puts you where you were rather than at the top.
+
+**The file chooses its own compiler.** C goes to c90, C++ to cpp11 and
+Shalimar to shalimar. That is the whole routing rule, and it is the default - the
+status bar shows what will actually run, with a `*` when the file is what
+picked it. `Ctrl-K` cycles through automatic, c90, cpp11, shalimar, cl and the
+host's C++ compiler when you want to say so yourself; a choice made by hand is
+kept rather than quietly overridden, and a file the chosen compiler cannot
+take is turned away with a reason instead of a wall of somebody else's parse
+errors.
+
+> C++ went to cl - to the machine's own C++ compiler - until 3.0, there being
+> nothing else that read it. cpp11 is that now, and the host's compiler is
+> what a group asks for by name, which is where the host's C compiler has
+> always stood.
+
+Each compiler is also *told* which language it is being handed - `/TC` or
+`/TP /EHsc /std:c++14` - rather than left to infer it from the suffix. C++14
+because that is what this arena holds itself to: c90 is written in it, so the
+editor is built in it, and C++ compiled here is compiled as it.
+
+**cl is found without a Developer Command Prompt.** RIDE asks Visual Studio
+where it lives - any version or edition `vswhere` knows, then the places the
+installer puts them, then a `vcvars64.bat` named once under *Tools ▸ Locate
+vcvars64.bat...* - runs `vcvars64` once, and keeps the environment for the
+rest of the session. Started from an ordinary console with `cl` nowhere on
+PATH, it still builds C++. With `cl` in use the target chooser goes quiet, because cl
+builds for the host it was installed as and a menu offering a choice that does
+nothing would be the status bar telling a lie.
+
+Both diagnostic spellings are read without being told which to expect:
+
+```
+file:line:col: error: message         c90, and gcc and clang with it
+file(line,col): error C2059: message  cl, and ml64
+```
+
+so pointing it at a third compiler that speaks either one needs no new code. A
+`cl` run wants a Developer Command Prompt - that is where `cl.exe` is on PATH -
+and cl's own listing is MASM, which the assembly tab already colours.
+
+## The three languages
+
+| Language | Suffix | Compiler | Targets | Debug information |
+| --- | --- | --- | --- | --- |
+| C | `.c` `.h` | c90, or the host's | four | DWARF on two of them, CodeView on Windows, none on tms6747 |
+| C++ | `.cpp` `.hpp` … | cpp11, or the host's | four | DWARF on two of them, CodeView on Windows, none on tms6747 |
+| Shalimar | `.shl` | shalimar | four | none, by decision |
+
+The host's compiler - `cl` on Windows, `clang++` on a Mac, `g++` on the Linux
+box - builds for its own machine only and carries CodeView or DWARF always.
+
+**The suffix decides, and the Language menu overrides it.** That is for the
+file whose name says the wrong thing or nothing at all - a `.txt` holding a
+program, a header with C++ in it, a Shalimar program the phone app saved as
+`.shm`. Choosing a language sets the colouring, the layout rules and, through
+Tools ▸ By language, the compiler: one choice rather than three.
+
+**Shalimar is `.shl`, and only `.shl`.** It answered to `.shm` as well until
+2026-08-23 - that is what the phone app writes, and every program it ships is
+one - and the second suffix was dropped because `.shm` is not accepted
+everywhere a Shalimar file has to go. One name that travels beats two that do
+not. An app-written `.shm` opens as plain text; the Language menu reads it as
+Shalimar without renaming it, and renaming it to `.shl` is the permanent
+answer. **Language ▸ Convert writes `.shl` for the same reason** - it wrote
+`.shm` until 2026-08-27, so the file the editor had just made opened as plain
+text in it, with no colouring and `c90` behind Build.
+
+### Shalimar is not C with fewer rules
+
+It is simpler in most places - one kind of comment, one kind of literal with
+no escapes in it, no preprocessor, no character literal at all. But two of its
+marks would be read wrongly by a C scanner, and the first of them silently:
+
+```
+n : n + 1        an assignment in Shalimar, a goto label in C
+```
+
+A label is laid out in its function's own column, so a Shalimar program
+indented by the C rules walks left one statement at a time. `IndentDialect`
+in `src/indent.h` is what keeps them apart, and `tests/test.cpp` holds the
+program that shows the difference.
+
+### A Shalimar project is one program, and says which
+
+This is the part that is not like C, and the difference belongs to the
+language rather than to the editor. Shalimar has **no include, no import and
+no way to name another file**, and `shalimar` takes one program at a time. So
+several `.shl` in a group are several programs, not the parts of one - which
+is the ordinary shape for it: the app ships twelve examples and each is its
+own program.
+
+The project therefore names which one it builds:
+
+```json
+"build": { "target": "hello", "groups": ["Sources"] },
+"groups": { "Sources": ["src/other.shl", "src/hello.shl"] }
+```
+
+With one source in the group there is nothing to decide. With more, the one
+whose name matches the target's is the program; **with none matching, the
+build is refused and says how many it was choosing between.** Taking whichever
+came first would build a different program from the one the target names and
+say nothing about it.
+
+Shalimar beside C or C++ in one target is refused the same way C beside C++
+already was, and the message names which two so the reader knows which file to
+move.
+
+### No debug information for Shalimar, and a debugger anyway
+
+`shalimar` writes no debug information for any target, and that is settled rather
+than pending - see the Known limitations in `../Compiler-S/README.md`. The
+Debug panel says so in words rather than showing an empty pane.
+
+What there is instead is not a consolation. The compiler already emits
+`shm_line(unit, line)` before every statement so that a runtime error can name
+where it happened, and a debug build offers that same position to a session
+inside the program - so **a Shalimar program stops itself**, in both front
+ends, with no debugger anywhere near it. `src/shalimar/` holds all of it and
+`src/debugger.cpp` has nothing to say to any of it.
+
+The one thing it cannot do is read a variable: no table of a function's names
+against its frame slots is emitted, so there is nothing to read one from. The
+Debug tab says which kind of empty that is - "a Shalimar program says where it
+is, not what is in it" - rather than showing a blank list, and the three menu
+items that need a stack or a variable are drawn faint while one is stopped.
+Both halves of the editor get those words from `src/shalimar/session.cpp`, so
+neither can drift into saying something else.
+
+## The project
+
+A project is one file - `prime.pro`, named after what it builds - and there does
+not have to be one. Without
+it the pane on the left shows the files you have open, and nothing at all when
+none are. It used to list the directory instead, which looked the same as a
+project and left a closed file's name sitting in it.
+
+```json
+{
+  "name": "RIDE",
+  "toolchain": "auto",
+  "config": "debug",
+  "arch": "x86_64-windows",
+  "indent": 4,
+  "tabs": false,
+  "groups": {
+    "Rules": ["src/indent.cpp", "src/syntax.cpp"],
+    "Legacy": { "files": ["src/old.c"], "toolchain": "c++" },
+    "Samples": ["programs/hello.c", "programs/smart.cpp"]
+  }
+}
+```
+
+Seven keys, flat except the groups, and every one has a default - so `{}` is a
+valid project file.
+
+**A group is a list of files, or an object that also names a compiler.** The
+plain list is not deprecated and is what a group with nothing to say is written
+back as, so adding a file to a project written before any of this leaves the
+file looking the way its author left it. The words are `c90`, `cl` (or `msvc`),
+`shalimar`, `c++`, and `auto`. Comments with `//` are allowed, because a file people edit
+by hand is a file people leave notes in.
+
+Two things are deliberately *not* in it. Where c90 and cl live is a fact about
+a machine rather than about a project, and a path written into a shared file is
+a path that is wrong on the other machine - those come from `--c90`, `--cl`,
+`--cxx`, `$C90`, `$CXX`, the directory the editor itself is installed in, or
+PATH. That is also why `"toolchain": "c++"` means *this machine's C++
+compiler* rather than g++ specifically: which one that is - cl, clang++, g++ -
+is a fact about a machine, and the project file does not get to have an opinion
+about it. And the indent settings are a number and a flag rather than a
+nested object, because an object with two members in it is a nest for no gain.
+
+A group is the project's own arrangement, not a directory: moving a file
+between groups changes two lists and nothing on disk. The Project menu makes
+files, renames them, moves them between groups and deletes them - the last one
+asks you to type `yes`, because it is the only thing here that cannot be
+undone.
+
+**The structure is limited to two levels**, and that is a rule the project
+keeps rather than a habit anyone is asked to remember: a file sits in the root
+or in one directory under it, and never deeper. As many directories as you like
+may sit side by side - `src`, `tests`, `examples`, `docs` and any others - but
+none of them holds another. A structure nobody has to explore is one anyone can
+read at a glance.
+
+Settings in the project are what this project always does; anything named on
+the command line is applied after it and wins, which is what today needs.
+
+### Building the file, and building the project
+
+These are two commands and neither guesses which you meant.
+
+**`Ctrl-B` compiles the file in the edit view, and `F5` runs it.** Neither asks
+the project anything. A project does not have to be open, does not have to be
+shut, and does not have to hold the file - open something from anywhere with
+`File > Open` and `Ctrl-B` compiles that. This is the fix-one, build-again
+rhythm the editor is built around, and nothing below changes it.
+
+**`F4` builds the project, and `Run project` on the Build menu builds and runs
+it.** These read the file list and never the edit view. What they build is what
+the project says it builds:
+
+```json
+"build": { "target": "sums", "groups": ["Sources"] }
+```
+
+The program is named by `target` and made from every `.c` or `.cpp` in the
+groups named - headers and anything else are passed over, and groups that are
+not named are not built, which is what keeps a project's own tests and examples
+out of its program. Say nothing and nothing is built: that is not an error and
+it is what every project written before this says. The program is left beside
+the project file, so it is still there when the editor is not.
+
+Where one compiler makes the whole of it, it does the linking too - `c90 a.c
+b.c -o prog`, since several inputs link together, and cl the same when it is
+not given `/c`.
+
+**On tms6747 a Run is the TI program on sim6747.** `F5` and `Run project`
+compile each source with `-S`, assemble with RIDE's `asm6x`, link with RIDE's
+`lnk6x` against RTS6x into `<program>.out`, and run that on `sim6747` - so the
+assembler, the linker and the runtime are on every run's path. A build that
+makes no `.out` fails and says why, unless the project's `.pro` says
+`"emulateOnly": true`. `Build > Emulate on vm6747` (`--emulate` on the console)
+runs the assembly on the emulator and links nothing; `Build > Verify` runs both
+and compares them. The C6000 sources of a group compile at once on RIDE's own
+pool, one `-S` command per source, each one's output written in source order.
+
+### Input, and Stop
+
+**A program run from a window reads what you type under its Output, and Stop
+ends it.** Until 4.5 every run had the null device for its input, so `scanf`
+saw end of file at once and a program that asked for a number carried on with
+whatever was in the variable - and a program that never ended wedged the
+window, since there was nothing to press. The fix is in the core and the
+bridge, so both windows have it the same way.
+
+`ride_run_start` and `ride_run_built_start` (`winforms/bridge.h`) run the
+program on a worker thread and hand its output to the window as it comes, a
+call per piece, marked as standard output, standard error, or what the build
+said before it; `ride_running_send` passes bytes to its input,
+`ride_running_close_input` is end of file (Ctrl-D on a Mac, Ctrl-Z on
+Windows), and `ride_running_stop` kills the program and everything it started
+- its process group on macOS and Linux, a job object on Windows.
+
+**What the program sees is a terminal on every system.** On macOS and Linux its
+input and output are a pseudo-terminal, and on Windows a pseudo-console
+(`CreatePseudoConsole`, Windows 10 1809 and later): either way its C library
+writes a line at a time and flushes a prompt before it reads, exactly as at a
+shell, and the terminal echoes what is sent - so the window shows the input
+once, from the program's side, and does not echo it itself. Two differences
+remain. A console has one output, so on Windows the program's standard error
+arrives with its standard output; on macOS and Linux it is a pipe of its own and
+comes marked as such. And a pseudo-console writes escape sequences - the window
+title, cursor moves, colours - which the core takes out before the window sees
+the bytes, a cursor sent down a row becoming a newline. On a Windows too old for
+a pseudo-console the program has pipes: no echo, stderr apart, and a prompt with
+no `fflush` shows after it is answered. A terminal's line is at most a thousand
+bytes or so on macOS, its own limit and not the editor's.
+
+**Stop reaches builds too.** `ride_cancel_builds` kills every compiler, linker
+and converter the core is running, on any thread; the build it belonged to
+fails with `[stopped]` at the end of its output and runs nothing more. A
+compiler that hangs no longer holds the window. Every command a build runs goes
+through `runCaptured`, which since 4.5 starts it on `Process` rather than
+through `popen` - the only way to have a process to kill - with the null
+device for its input, as before, and its two streams as one.
+
+The terminal editor keeps its own run, which waits for the program and gives
+it no input: it has one screen, and the program's output goes into it.
+
+### A compiler per group
+
+**A target can hold C and C++ together.** Each group compiles to objects with
+its own compiler and the editor links them, because no compiler here takes an
+object as an input - hand c90 a `.o` and it reads it as C and complains about a
+stray byte on line 1.
+
+```
+$ c90, clang++ and cpp11 3 sources -o three
+    src/main.c
+    src/legacy.c
+    engine/engine.cpp
+$ Sources (c90)
+$ Legacy (clang++)
+$ Engine (cpp11)
+$ linking with clang++
+[built /home/you/three/three]
+```
+
+**C and C++ have the same decision in them, and Shalimar has none.** C goes
+to c90 and C++ to cpp11 - the compilers this editor was written for, and the
+defaults - and each can go instead to the machine's own compiler, cl on
+Windows and clang++ or g++ elsewhere, when a group says so. Shalimar goes to
+shalimar, which is the only thing that reads it. Until 3.0 C was the only language
+with a decision in it, C++ having nothing but the host's compiler to go to;
+what changed is that C++ now has the pair C always had.
+
+So a group naming its compiler is a group of C or C++ saying it wants the
+host's - which is why `Legacy` above is the only group in that project with a
+`"toolchain"` in it, and why `Engine`, which is happy with cpp11, needs none.
+
+A group under `auto` holding both languages is **split**, one part per
+language, rather than refused. "A C and C++ project together" is the point, and
+making somebody split the group by hand first would be a worse answer than the
+one the compilers already give. A group that *does* name a compiler is one part
+and that compiler takes all of it - which is the only way to make cl compile C
+as C++ on purpose.
+
+**Shalimar is refused, and it is the one refusal that did not go away.** In a
+group with C, because no compiler takes both. In a group of its own beside C,
+because of what a Shalimar object *is*: every unit exports the same three
+startup symbols whatever file it came from, the runtime archive owns `main`,
+and the language has no declarations for a call across a link to be checked
+against. `../Compiler-S/docs/LINKING.md` has it with the linker output and with
+what would have to change. A project that wants Shalimar beside C is a project
+that builds two programs.
+
+**Debug information does not mix.** cl writes CodeView, c90 and cpp11 write
+DWARF on two targets and CodeView on Windows, and shalimar writes none anywhere by decision. So
+the debugger is the first one any part has, and the groups it will not be able
+to stop in are named in the console before the build starts rather than
+discovered by pressing F8.
+
+**An error in a file nothing has opened opens it.** c90 stops at the first one,
+and in a build of six files it is usually not the file you were looking at, so
+the editor opens the one it named before putting the caret on the line and
+column.
+
+**And the debugger takes the project too.** `F8` puts the file in front of you
+under a debugger, as it always has; **Debug ▸ Debug project** puts the program
+the project builds under one, compiled from all its sources with `-g`. After
+that the two are the same thing: F9 sets a breakpoint in whichever file you are
+looking at, F7 and F6 step, and the panel shows where it stopped and what is in
+scope. A breakpoint in a file that has no `main` in it is the case worth trying
+- one program, several sources, and the line has to be found in the right one.
+
+The project's program stays where it was built when the debugger stops, because
+it is the project's; a single file's is a temporary thing the editor made and
+clears away.
+
+**One flat list cannot say "these files on Linux, those on Windows".** This
+project's own sources are the example - `terminal.cpp` and `terminal_win.cpp`
+are never built together - so a project that differs by platform wants a group
+per platform and a `build` entry naming the one you are on. That is a real
+limit of a list of names, and it is why this repository does not have a `build`
+entry of its own.
+
+## The panel
+
+Three tabs:
+
+* **Console** - the command, everything c90 said, and the error. Enter goes to
+  the line it named.
+* **Debug** - what the build produced, read back out of its own assembly, and a
+  line above it saying what debug information this target actually has. This is
+  not a debugger and does not pretend to be: c90 does write DWARF for two of the
+  four targets now, but a debugger needs a program to run and nothing here is
+  assembled, linked or run - the build stops at `-S`. What there always is, is
+  the assembly: which functions came out and how much stack each takes, what is
+  exported, what is called but not defined, and what strings ended up in the
+  binary. That is what you look at when nothing is running. Both front ends ask
+  the core for those words rather than writing them out, which is how the window
+  came to be saying there was no debug information a day after there was.
+
+  It reads both spellings, since c90 writes GNU on two targets and MASM on the
+  third and cl writes MASM always - including a string MASM broke across two
+  `DB` lines, and the arm64 frame size that is put in a register before it is
+  subtracted. C++ names are decorated in a listing, so on Windows
+  `src/demangle_win.cpp` reads them back with `UnDecorateSymbolName`:
+  `?value@Counter@demo@@QEBAHXZ` shows as `demo::Counter::value(void)const`.
+  One file, compiled into both front ends.
+* **Assembly** - what `-S` produced.
+
+**A line longer than the panel wraps rather than being cut.** A compiler's line
+runs past ninety columns - c2s's questions about a preprocessor directive are
+the longest - and the panel is fifty-odd beside an open project pane. Until
+2026-08-27 everything past the border was unreachable: no key scrolls sideways
+in there, so the half of a diagnostic that said *what* to fix could not be read.
+One line is now one or more rows (`rowsForLine`), which every other calculation
+about the panel has to know. About asks for the room it needs
+(`Editor::fitPanelTo`) rather than assuming a seven-row panel: where the
+compilers' row took two rows, "Islamabad, Pakistan" dropped off the bottom of a
+block nobody thinks to scroll. The Windows suite caught that and the Mac's did
+not - the row fits in eighty columns and not in what cmd gives an ssh session -
+which is the argument for asking rather than assuming a height.
+
+## Trying it
+
+```
+RIDE programs/smart.cpp
+```
+
+`programs/smart.cpp` is the one to open first. It is a small owning class - one
+object, deleted once, moved rather than copied, copying refused by the compiler
+rather than by the destructor - and something that exercises it and prints what
+it is doing. It is C++ on purpose: c90 compiles C, so this is the file that
+goes to cpp11. Ctrl-B fills the assembly tab with cpp11's listing, and Ctrl-T
+changes which of the three architectures it is for; Ctrl-K over to cl, or to
+clang++ or g++ off Windows, gives the same file under the machine's own
+compiler for comparison.
+
+The samples are written in the C++ every one of those reads. cpp11 takes a
+subset of C++11 on purpose, so `smart.cpp` spells its refused copy the older
+way - private, declared, never defined - and `table.h` names its bound with an
+enumerator rather than a `static const int`; both say so where they do it.
+
+`projects/c-example/hello.c` is the C one, for c90, where Ctrl-T does the same.
+
+Handing C++ to c90, or C to cpp11, is caught before it is run: the editor says
+so and points at Ctrl-K, rather than letting the wrong compiler fail somewhere
+inside the first class with a diagnostic that explains nothing.
+
+## The three variants
+
+Three things are built from this repository, and every one of them has its own
+source kept here. Nothing that has been built is left without the code that
+builds it.
+
+| | what it is | built from | built by |
+| --- | --- | --- | --- |
+| **RIDE** | the console editor on Linux and macOS | `src/*.cpp` with `src/terminal.cpp` | `make` |
+| **WinConsole** | the console editor on Windows | the same `src/*.cpp` with `src/terminal_win.cpp` | `build.bat` |
+| **RIDEGui** | the C++/CLI window, WinForms | `winforms/*.cpp` and the core files named in `winforms/RIDEGui.vcxproj` | `msbuild winforms\RIDEGui.vcxproj` |
+| **RIDE.app** | the AppKit window on macOS, Objective-C++ | `macos/*.mm`, `winforms/bridge.cpp` and the same core files | `make -C macos`, or `macos/Window.xcodeproj` |
+
+**The two consoles are one front end and two terminals.** `src/editor.cpp` draws
+the screen for both; `src/terminal.cpp` and `src/terminal_win.cpp` are the halves
+that differ, and only they know anything about the machine. That is why the box
+the panes are drawn in arrived on Windows the day it arrived on Linux - it is
+not two pieces of work and there is no version of it that is only on one of
+them. The binary takes its name from the command it was started as, so the
+usage line names the program it was started as, which is `RIDE` on all three.
+
+**The window shares the core and nothing else.** `RIDEGui.vcxproj` compiles
+`bridge.cpp`, `Program.cpp` and `MainForm.h` together with `buffer`, `indent`,
+`syntax`, `find`, `utf8`, `json`, `project`, `workspace`, `symbols`, `compile`,
+`toolchain`, `path`, `process`, `debugger`, `settings` and `about` - and not
+`editor.cpp`, `menu.cpp`, `tree.cpp` or either terminal, because a window has
+its own menu bar, its own tree and no terminal at all. So the console's looks
+and the window's looks are independent by construction: neither can take the
+other with it.
+
+**If the two consoles ever have to differ**, the place they part is
+`src/editor.cpp`, and the way to do it is the way the rest of the project does
+it: put the difference behind the seam that already separates them, not a
+second copy of the editor. Two editors that behave nearly the same are worse
+than one editor with two terminals - the same reason the window shares the core
+rather than reimplementing it.
+
+### As a macOS window
+
+```
+make -C macos run
+```
+
+The same shape as the Windows window - the project down the left, the file in
+the middle, a panel across the bottom quarter, a one-line status bar under
+everything - built with AppKit in Objective-C++ (`.mm`) and consuming the core
+through `winforms/bridge.h`, the C interface the Windows window already speaks.
+Its menus are File, Edit, View, Project, Build, Target, Option and Help, and its
+panel's three tabs are Errors (every diagnostic the build printed, read with
+the core's own parser), Progress (each step, timed) and Output. Builds run off
+the main thread. The debugger is not in it yet. `macos/README.md` has the rest.
+
+The Windows window is not that window with another toolkit, and the two are
+not to be compared as equals: its panel is Console, Debug and Assembly, with
+no per-diagnostic list - Enter on a Console line goes to the place it names
+instead - and its builds run on a worker while the rest of the window waits for
+it, as "One thing at a time" below says.
+
+### The seam
+
+`winforms/bridge.h` is the whole of what either window knows about the core,
+and it is C so that C++/CLI and Objective-C++ can both call it. What it
+promises, written down because a window that guesses gets it wrong on the
+other thread:
+
+- **A `const char*` it answers is its own**, and good until the next call that
+  answers one on the same object - a project's `answer`, a debugger's lines -
+  or, for a call that takes no object, the next such call, since those share
+  one string. Copy it before calling again. A `char*` it hands over is the
+  caller's, freed with `ride_free`.
+- **One thread at a time per `RIDEProject`.** A build reads the project on the
+  thread it runs on; a window that builds off its main thread must not load,
+  close or change the project while one runs. `ride_run_start` reads it on the
+  calling thread and not again.
+- **Errors come back three ways**: a buffer the caller passes
+  (`ride_project_load`, `_allows`, `_save_as`, cut on a character boundary),
+  `ride_outcome_message` after a project operation, and a result's own
+  accessors (`ride_build_error_*`, `ride_ran_error_*`, `ride_running_error_*`).
+  A 0 from a `ride_remember_*` or `ride_set_*` means the settings file could
+  not be written, and there is nothing more to say.
+- **Side effects that are not in a name**: `ride_program_free` deletes the
+  program it built; `ride_project_set_arch`, `_set_toolchain`,
+  `_set_includes` and `_set_libraries` write the `.pro` at once;
+  `ride_project_target_ready` is the first half of every `ride_project_target_*`
+  answer and is re-run inside `ride_build_target` and `ride_project_debug_plan`.
+- **Every accessor takes NULL** and answers 0 or `""`, so a build that returned
+  nothing reads as one that failed.
+- **Threads**: the `RIDEOutput` callback and the `ride_ask_native` question
+  come on whichever thread is building or running; a window marshals both to
+  its own. `ride_ask_native` takes no user pointer - a window reaches itself
+  through the one it has.
+
+The Mac window reads diagnostics through `ride_parse_diagnostic` and the
+compilers' names through `ride_compiler_name`, so neither window includes a
+core header; `tests/test.cpp` checks both answers against the core's own.
+
+## The manual
+
+[`help/`](help/README.md) — ten pages about the editor, one about each language
+it drives, and the Shalimar specification as Appendix A. `Help ▸ Contents` in
+the editor lists the same pages with a line each; `F1` shows the keys.
+
+Appendix A is a verbatim copy of the document that lives in the Shalimar app's
+own repository, carried here because this is a separate repository and a reader
+has no `../Shalimar` to follow. That copy wins; `tools/check-help.sh` diffs the
+two and says when they have drifted, and `tests/test.cpp` checks that every
+page `Help ▸ Contents` names is a file that exists and every file is a page it
+names.
+
+## Building and checking
+
+On a Mac or on Linux:
+
+```
+make
+make check CC1=$HOME/Documents/Claude/Compiler-C/cc1 SHC=$HOME/Documents/Claude/Compiler-S/shc
+```
+
+Object files go to `src/obj`, so a listing of `src` is the code and nothing
+else.
+
+**Spell those paths with `$HOME`, never `~`.** zsh leaves a tilde alone in
+`make check CC1=~/...` - it is an argument, not an assignment - and make hands
+the literal `~/...` to the test process, where nothing expands it. The tell is
+a build failing with a compiler that works perfectly when you run it by hand.
+
+### What the build learned on each machine
+
+These were comments in `src/` and `tests/` until 2026-09-26, when every comment
+group in the editor's source was brought under the house cap of three lines
+(`tools/comment-lines` in the compiler repository is the oracle). Each is a
+measured behaviour of a platform rather than a design of ours, each cost a
+session to find, and the line beside the code now says the rule while this says
+why.
+
+**Nothing a build runs may read the editor's own input.** A child that inherits
+stdin consumes the keystrokes the editor has not read yet. On Windows, `cmd`
+running `vcvars64.bat` to hand back its environment read stdin to the end while
+the editor drained the answer, so the editor's next read saw end of file and it
+quit - every key pressed after the first build was silently the last one. The
+redirect is `( ... ) < NUL` on a parenthesised block, not on the command: in a
+`&&` chain cmd binds `< NUL` to the one command it follows, and the obvious
+spelling left the `call` still reading. The run step always had this; the build
+step did not, and only the build step is a child that might.
+
+**An unwritable directory is refused before any compiler runs.** RIDE 4.0's
+installer started the editor in its own `examples\` under Program Files, where a
+normal user may read and not write, and the build died in the linker with
+`LNK1104: cannot open file ...demo.exe` under a hint about `vcvars64.bat`,
+neither of which was the matter. A directory is writable if a file can be made
+in it; the read-only attribute `_access` answers with is not what UAC withholds.
+
+**On a Mac the DWARF stays in the objects, and a link of objects gets no
+`.dSYM`.** The linker leaves debug information where the compiler wrote it and
+puts a map to those files in the program; lldb follows the map. The driver runs
+`dsymutil` to gather it into a bundle only when it compiled the sources itself.
+A project of two compilers is a link of objects, and the objects are removed
+after the link - so `buildParts` asks for the bundle itself, before the objects
+go, or a breakpoint in such a project stops nowhere and says nothing about why.
+A one-compiler project never saw it because its compiler links the sources
+itself. The `.dSYM` is a directory, which `std::remove` does not take: until
+`path::removeTree` the temporary directory filled with `ride-run-<pid>.dSYM`
+bundles, one per F8, and a quit in the middle of a session left another pair.
+
+**A program is asked for by the name given, and only then with `.exe`.** The
+programs are `c90.exe`, `cpp11.exe`, `shalimar.exe` and `RIDE.exe` on every
+machine, so appending on Windows turned an honest "cc1.exe" into a search for
+`cc1.exe.exe`. The editor survived that by asking twice and About did not,
+reporting all three compilers absent while standing in the directory with them.
+The fallback stays for a bare name, which is what a caller that has never had to
+think about Windows writes.
+
+**cl's `/Fo` wants a separator on the end of a directory**, and on the machine
+where `/Fo` means anything that separator is a backslash sitting immediately
+before a closing quote, where it escapes it. cl then answers `D8003: missing
+source filename`, which reads as a command with no file in it rather than a
+command with a quote in the wrong place. It cost an afternoon on the Windows box;
+`aDirectoryInAQuotedArgument` in `tests/test.cpp` is one check.
+
+**`cmd /c` strips the first and last quote** when a command holds more than two
+quote characters, so `"shc.exe" "in.shl" -o "out.exe"` reaches the shell as
+garbage and runs nothing; an extra pair round the whole command is what cmd then
+eats, leaving the real ones alone (`shellCommand` in the suite, `runCaptured` in
+`src/compile.cpp`). `/dev/null` is not a path there - cmd has `NUL` - and a
+redirect to it fails the whole command, which one case reported as "shc did not
+build it" on the machine where shc had only just been made to exist. And
+`findstr` is not `cat`: it holds its output until it exits, so a marker piped
+through it never comes back, and the wait for it hung the whole suite on that
+box.
+
+**About asks the compilers rather than listing their versions.** Their numbers
+written into the editor would be a second copy and the stale one - the editor
+does not build them and cannot know when one moved - and the question a reader
+of that box has is not "what was this built against" but "what is it driving
+now". A copy standing beside a compiler from another release is exactly the case
+worth seeing, and a missing compiler is a row that says so rather than a row
+that is not there. Three answers shared one row until 3.0, when cxx1's
+`--version` banner - longer than a column - made it one compiler per row, with
+the panel growing to fit.
+
+**Release asks cxx1 for its own `-O2`.** The line passed `-O2` for a long time
+while cxx1 had no optimiser and no `-O` flag at all: it refused the switch
+("unknown option -O2") and every Release C++ build failed, unseen because the
+editor defaults to Debug. cxx1 implements `-O1` and `-O2` on its instruction IR
+now - lea fusion, copy propagation, a register and liveness model; on Compiler++'s
+sixteen units it takes `.text` from +54.6% over cl `/O2` to +20.6%. `-O2` is
+`-O1` today, the favour-space/favour-speed split not being written. Until
+2026-09-26 `-O2` went to the host's `c++` alone, so a Release build with c90 or
+cpp11 was never optimised; both take their own `-O2` now.
+
+**lldb steps nowhere, twice.** On the project the session suite builds, one
+`next` from a breakpoint in `sum.c` does not change the line - the addresses
+climb, and by the third the arguments are rubbish because the frame is coming
+apart - and only the fourth arrives in `main`; gdb on the same DWARF from the
+same compiler answers the first `next` with `main () at main.c:8`.
+`dbg_wentNowhere` is what makes F7 arrive in one press on a Mac as it does on the
+Linux box, and recursion is the case it must not get wrong: `fact` stepping into
+itself is the same file, line and function and a real arrival, and only the
+address - going back to the callee's prologue rather than forward - says so. The
+transcripts are kept verbatim in `tests/test.cpp`, and so is the fact that lldb
+lists locals as declared where gdb lists the innermost block first.
+
+**The session suite drives menus by counting**, so an item added to a menu moves
+every check below it and a column added moves every column to its right. Each
+walk carries the count in the one place that makes it, and three counts have
+moved already - the Project menu twice on 2026-08-24, the Help column when
+Language joined the bar. The menu opens on File every time since the audit of
+2026-09-19; until then it reopened on the column it was left on, which once cost
+an hour of believing the panel was broken.
+
+### All five programs at once
+
+The editor drives three compilers and a converter, and a change to one usually
+comes with a change to the editor. There is one thing to open on each machine
+that builds all five, with the editor built *after* the four it drives:
+
+```
+RIDE.xcworkspace                    macOS - RIDE, c90, cpp11, shalimar, c2s
+RIDE.sln                            Visual Studio 2022 - the same, plus the window
+make -f workspace.mk                   Linux - the same, since make is what Linux has
+make -f workspace.mk check             and every suite, all five projects
+```
+
+**The project files are generated by `tools/make-projects.py` from the
+repositories' own Makefiles**, and `--check` says whether they still match. A
+hand-kept project drifts, and a build tool quietly leaving a file out is not an
+error - just a smaller program - so nothing says so. That happened twice here
+in one day before the check existed.
+
+**Three are checked instead of written.** cc1's and cxx1's are the compilers'
+own, `Compiler-Ci/ide/` and `C++Optimize/ide/`, written by each
+one's `ide/generate.py` and asked with its `--check`; the solution and the
+workspace open them, and read cxx1's and cc1's GUIDs out of them so the two
+cannot disagree. `winforms/RIDEGui.vcxproj` is C++/CLI: one
+file is compiled managed and every other file must be compiled native, and
+those per-file settings are the project's whole reason for existing - a
+generator that got one wrong would produce a binary that corrupts its heap
+before `main`.
+
+What can be compared is what they compile, and that is the part that drifts.
+`--check` now reads both source lists and holds them against the Makefiles.
+That gap was real rather than theoretical: the window's project sat outside
+every check while the script's own comment claimed it counted c90's sources
+"below", which nothing did. Wiring the Shalimar session into the window needed
+two files added to it by hand, and nothing would have said so if they had been
+forgotten - except a link error, on the one machine that builds the window.
+
+Which files the window compiles is `CORE_SRC` in the Makefile: the half of the
+editor both front ends share. That split was asserted in this README long
+before the build knew about it; now `SRC` is `CORE_SRC` plus `TERMINAL_SRC`,
+and `--check` refuses to run at all if `SRC` is made of variables this script
+has not been taught - which is how the second of those two drifts happened.
+
+The repositories are expected in the grouped layout beside this checkout -
+`Compilers/`, `TI/` and `Windows/` - on every machine. That is the only
+assumption any of this makes, and `workspace.mk` takes `CC1_DIR`, `CXX1_DIR`,
+`SHC_DIR` and `C2S_DIR` for a machine where they are elsewhere. cpp11 is built
+from `Compilers/C++Optimize`; its project files are its own, in its `ide/`,
+and `RIDE.sln` and the workspace name them there.
+
+### The other two machines
+
+Both scripts relay this working tree and build it from clean there. The Windows
+box has no git at all; the Linux box does, and has a clone of its own at
+`~/CC1StudioWorkbench` under the old repository name - but a clone can only
+have what has been pushed, and these exist to check what is in front of you
+before it is committed. Each script builds in a directory of its own and leaves
+that clone alone.
+
+```
+./tools/to-linux.sh              build with g++ and run both suites
+./tools/to-windows.sh            build with cl and run both suites
+./tools/to-windows.sh gui        msbuild the window, which build.bat never does
+```
+
+All three are worth having and each says something the others cannot.
+
+**Linux** is the only one that can say whether the sources are ISO C++14:
+Apple's libc++ hands you C++17 names under `-std=c++14`, so a C++17-ism
+compiles clean on a Mac and passes the host suite. It is also where a C++ group
+goes to **g++**, a routing nowhere else can check - and it caught a `size_t`
+that libc++ drags in through `<vector>` and libstdc++ does not, on the day the
+script was written.
+
+**Windows** is the only machine with cl, and therefore the only one where a
+target of C and C++ meets *that* linker. MSVC at `/W4 /WX` has caught two
+shadowed variables clang accepted. It does Shalimar too, since 2026-08-22:
+`shc.exe` is built there by `Compiler-S/build.bat`, put there by that project's
+`tests/build-windows.sh`. Before that, every Shalimar case on this box skipped
+itself for want of a compiler.
+
+Both scripts copy the **build scripts and the tests** as well as the sources,
+and both exclude what was built here. A stale `build.bat` and a stale
+`test.cpp` have each reported an old, smaller suite that looked green; and the
+first run of the Linux relay carried the Mac's own `.o` files over, where make
+found them newer than the sources and the link failed with "file format not
+recognized" - which reads as a broken box and is nothing of the kind.
+
+### As a Windows Forms application
+
+```
+winforms\RIDEGui.vcxproj
+```
+
+An ordinary macOS-style menu-and-panes window: the project down the left, the
+file in the middle, Console, Debug and Assembly across the bottom. It is C++/CLI
+and it **consumes the native core directly** - the same indent.cpp, syntax.cpp,
+project.cpp and compile.cpp the terminal editor uses, compiled into the same
+binary as native code. Nothing is duplicated: laying a file out, colouring it,
+reading the project file and choosing between c90 and cl are all the same code running.
+
+**File ▸ New** gives a blank buffer with no name, as the terminal's does, and
+`Ctrl+PageDown` / `Ctrl+PageUp` move between the open files rather than the
+terminal's `F2` and `F3`, which are Rename and Find next here. That is one of
+ten places the two disagree about a key on purpose, and they are all in the
+table below.
+
+**Tools ▸ Font...** changes the face code is drawn in - Courier New, Cascadia,
+whatever this machine has - fixed-pitch only, since the gutter's numbers are
+laid out on every character being the same width. It applies to every tab at
+once, because a file does not have a typeface: the person reading it does. And
+it is remembered in `~/.ride/state.json`, beside the last project and the frame
+style, for the same reason those are there. A font is not a property of a
+project at all: it belongs to the person reading, and often only to the hour -
+a face that is comfortable in the morning is not the one wanted at the end of a
+long day. Putting it in a project file would push one person's eyes onto everyone
+who opens that project. A name that machine does not have is
+quietly the default rather than a complaint at startup.
+
+**View hides what you are not using**: `Ctrl+P` the project pane, `Ctrl+E` the
+bottom panel — the terminal's own keys for both — and **Show line numbers** on
+the menu, which has no key because `Ctrl+L` is Re-indent here. Line numbers take
+the whole gutter with them, breakpoint dots and the stopped-at arrow included,
+which is what `Ctrl-L` does in the terminal too. The menu ticks say which of the
+three are showing; without them nobody would learn they can be turned off.
+
+The terminal's other keys are here too: `Ctrl+Q` leaves, `Ctrl+D` swaps debug
+and release, `Ctrl+K` goes round the compilers and `Ctrl+T` round the targets.
+Those last three belong to no single menu item — they move *between* items — so
+they are caught before the menus see them and shown on every item they move
+between, which is what the terminal's own menu does with `Ctrl-D`. A key bound
+twice would go to whichever menu was built first and leave the other advertising
+a key that does nothing; that is what once happened to `F7` and Step over.
+
+**Colouring does not disturb undo.** The window colours by applying formatting
+to its text box, and Rich Edit records formatting in its undo buffer exactly as
+it records typing — so `Ctrl+Z` on a file nobody had touched used to undo a
+*colour*, jump the caret to it and put a star on the tab. The recording is
+suspended around each colouring pass now (`ed1_undo_suspend` / `ed1_undo_resume`,
+which ask Rich Edit's own `ITextDocument` and do nothing anywhere else). Undo
+undoes your typing, and says `nothing to undo` when there is none.
+
+**Enter on the Console goes to the place the line under the caret names** -
+`file:line:col` as c90, cpp11 and gcc write it, `file(line,col)` as cl and link
+do - and double-click does the same, since a console is a thing people click
+at. A line that names no place goes to the build's own error, the one the
+window already jumped to when the build failed; that one is forgotten when the
+next build starts, or when its file is closed, so it never takes you to
+something an earlier build said. An error in a header is an error in the
+header: it opens, rather than landing on the same line number of the file you
+built. `Ctrl+1`,
+`Ctrl+2` and `Ctrl+3` now give the panel the keyboard as well as showing it —
+without that, Enter on the console would be a key nobody could press.
+
+**The status bar says what the next build will use** — the language, debug or
+release, the compiler that will actually run with a `*` when the file chose it
+rather than the menu, and the target when it means anything. `C  debug  c90*
+x86_64-windows`. It is the terminal's own line, through the same four core
+functions, so the two cannot drift into different words for the same state; the
+target is left out for cl, which builds for the host it was installed as, since
+showing a choice that changes nothing would be the status bar telling a lie.
+
+The menu ticks answer the same question where the choice is made. This answers
+it without opening anything.
+
+**The Language menu is the file's, not the window's.** Choosing Shalimar for
+`notes.txt` colours, lays out and builds that tab as Shalimar; `main.c` in the
+tab beside it stays C. And a project that names no compiler is built **By
+language**, as its `.pro` says - the Tools menu writes AUTO there when you
+choose that, and the window no longer reads it back as the installation's
+default the next time a tab opens.
+
+### One thing at a time
+
+**Compile, Build project, Convert and every debugger step run on a worker
+thread**, and the window keeps drawing while they do. **Run and Run project**
+start the program through `ride_run_start` and let go: what it prints comes onto
+the Console as it prints it, and a line under the Console - `input` - is its
+keyboard. Enter sends the line, `Ctrl+Z` in that line ends its input (the
+Windows console's end of file), and the pseudo-console echoes what was sent, so
+the window does not. An error in the build before it runs is taken to the file
+it names, a header included. What the
+worker holds - the project, the debugger, the settings the build reads - is
+not touched from the window until it is done, and that is enforced rather than
+hoped for: every menu item that reaches the core is greyed while it works, its
+key says `still working`, and the pane and the title are refreshed from the
+project only afterwards. Editing, finding, the View and Help menus and the
+Language menu stay live, since none of them reaches what the worker has.
+
+**Build ▸ Stop** (`Ctrl+Break`, Visual Studio's key) ends what is running: a
+program through its own `ride_running_stop`, a build through the core's
+`ride_cancel_builds`, and the debugger - which has no stop of its own - by
+ending the processes the window started and theirs, by process tree, the hidden
+console's `conhost` excepted. Each comes back as usual, and the Console says
+`[stopped]`. **Debug ▸ Stop debugging** does the last of these to a program
+running under the debugger, which is how a program in an endless loop is
+stopped without Task Manager. Closing the window while
+something runs asks first, stops it, and closes once the worker is back;
+nothing the worker holds is freed under it.
+
+The Console is appended to rather than rewritten, and a tool's `\r\n` is kept
+as one line ending rather than doubled into a blank line between every line.
+
+### Saving writes the file as it was found
+
+**A build saves the file in front only when it has changed**, and every save
+writes the file the way it was read: its encoding (UTF-8, UTF-8 with its
+byte-order mark, UTF-16 either way round, or this machine's ANSI code page for
+a file that is not UTF-8), and its line ending (`\r\n` or `\n`, from the
+first line break in it). A Windows-1252 file with CRLF line endings is still
+one after F5, and `git status` says nothing happened. A character the file's
+own code page has no place for - a Chinese comment typed into a Latin-1 file -
+makes it UTF-8, and the status bar says so. A file with a NUL byte in it is not
+opened: the box would cut it there and a save would write it back cut.
+
+A save goes to `name.ride-save` beside the file and then takes its place
+(`File.Replace`), so a disk that fills or a share that drops half way leaves
+the original as it was.
+
+**Replace and Re-indent are one step `Ctrl+Z` takes back.** They used to
+assign the box's whole text, which in Rich Edit empties the undo history -
+measured on the box: `CanUndo` is false straight after it - while the status
+bar said `Ctrl-Z puts them back`. They replace the text through the selection
+now, and Re-indent over a selection replaces only the lines chosen.
+
+**Paste is text only.** `Ctrl+V`, the right-click menu and `Shift+Insert` all
+take the clipboard's Unicode text; Word's fonts and a web page's pictures stay
+behind. **Tab** over several lines moves them in a level and **Shift+Tab** out
+one, as one undo step; on a single line Tab still lays the line out when the
+caret is in its leading space, and otherwise inserts spaces to the next stop.
+
+### Where the keys differ, and why
+
+Most keys are the same in both. These ten are not. Most are decisions; two are
+limits, where a terminal cannot express the key at all. Both kinds are worth
+writing down: an undocumented difference is indistinguishable from a mistake to
+whoever compares the two next.
+
+| | terminal | window | why |
+|---|---|---|---|
+| previous / next open file | `F2` / `F3` | `Ctrl+PageUp` / `Ctrl+PageDown` | `F2` is Rename here and `F3` is Find next |
+| Select all | menu only | `Ctrl+A` | the Windows convention, and the first domino |
+| Re-indent | `Ctrl-A` | `Ctrl+L` | `Ctrl+A` had gone to Select all |
+| line numbers | `Ctrl-L` | menu only | `Ctrl+L` had gone to Re-indent |
+| Find next | `Ctrl-G` | `F3` | the Windows convention |
+| Find previous | menu only | `Shift+F3` | follows `F3`; `Ctrl-G` has no shifted form to pair with |
+| Replace | `Ctrl-R` | `Ctrl+H` | the Windows convention |
+| close the open file | menu only | `Ctrl+W` | the Windows convention |
+| move between panes | `Ctrl-W`, cycling | `Ctrl+0` … `Ctrl+4`, picking one | `Ctrl+W` had gone to Close |
+| Console / Debug / Assembly | menu only | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | a terminal has no code for a control-digit |
+
+**Two of these are limits rather than choices**, and it is the terminal that is
+limited: it receives `Ctrl-1` as the digit, and `Ctrl-G` with or without shift
+as the same byte. So the panel keys and a backwards-find key cannot be given to
+it however much one might want to — its answer is the menu. They are in the
+table so that a later comparison does not chase them as gaps.
+
+**`Ctrl+W` is the one to be careful with**, and the only difference here that
+can surprise you rather than merely fail: in the terminal it moves to the next
+pane, and in the window it closes the file you are looking at. It does ask
+before throwing away unsaved work — but it is still a file gone where you meant
+to change focus.
+
+**Three of those rows are one decision, not three.** Taking `Ctrl+A` for Select
+all in a Windows program pushes Re-indent onto `Ctrl+L`, and that pushes line
+numbers off a key altogether. Nobody chose to leave line numbers without a
+shortcut; it is what was left after two conventions were honoured. The terminal
+has the opposite problem and the opposite answer: it has no `Ctrl+A` to spare
+for Select all, because `Ctrl-A` is the key its own users learned for laying
+code out.
+
+**Everything else the window adds is a gap being closed, not a divergence** —
+`Ctrl+Q`, `Ctrl+D`, `Ctrl+K` and `Ctrl+T` are the terminal's keys, doing the
+terminal's things.
+
+**Help ▸ Contents** opens `help\manual.html` in the browser, from the
+installation or the tree the window was built in.
+
+**Help ▸ Keys** — `F1`, the same key as the terminal's — lists what is bound,
+**read off the menu bar when you ask for it** rather than kept as a second list
+somewhere. Rebind something and the table says so the same afternoon; there is
+nothing to forget to update. It cannot be the terminal's table anyway, for the
+ten reasons above. Only `Tab` is written by hand there, since it belongs to
+the text box rather than to a menu.
+
+**The project operations** are on the Project menu: new project, save project,
+add this file, new file, rename, move to group and delete, and only there: the
+window's File menu is New, Open, Save, Save as and Close, for a file on its own
+(the user's decision of 03-10-2026, after an audit had put new file and new
+project on File as well). None of them is
+written twice - `src/workspace.cpp` holds what changing a project actually
+involves (check the rule, do the disk work, keep the list in step, write the
+project back), and both front ends call it. The terminal asks its questions on
+the message line and the window asks them in a dialog; what happens after the
+answer is the same code. Deleting asks plainly, with No already chosen.
+
+**Where a new file or project goes is said before it is made**, in the dialog
+that asks for the name, and the directory the project is in stays on the status
+line. A new project asks for that directory rather than using whichever one the
+editor happened to be started in - which is not a thing anybody can see.
+
+**Leaving asks about every open file, not the one in front.** `Ctrl-Q` and File
+▸ Quit both name the first file with changes in it and say how many others
+there are; pressing `Ctrl-Q` again leaves anyway, and anything else typed in
+between takes the offer back. The file you are looking at is rarely the one you
+forgot to save, which is what made checking only that one worse than useless.
+
+**The project pane can be used without a mouse.** `Ctrl-0` puts the keyboard in
+it, the arrows move, Enter opens what is picked - or folds a group heading, which
+has no file behind it - and `Ctrl-4` goes back to the text. Before this the pane
+answered a double-click and nothing else: Tab belongs to the text box, which
+lays a line out with it, so there was no way in at all.
+
+**A file has one tab however you reach it.** The pane hands out paths written
+with forward slashes, because that is how the project file writes them, while
+the command line and the open dialog give backslashes - so opening from the pane
+a file that was already open used to open it a second time, showing what was on
+disk. That reads as your changes having been thrown away, which is why it counts
+as more than untidiness. Paths are compared as one canonical name now.
+
+**Nothing unsaved is thrown away without being asked about.** Closing a tab
+whose file has changes in it, and closing the window with any such tab open,
+both ask - Save, Don't save, Cancel - and Cancel leaves everything where it
+was. A tab wears a `*` while it has changes, so the question names something
+you can already see. The terminal half refuses instead of asking, because its
+whole answer has to fit on the message line; the window has room to ask
+properly.
+
+**Tabs for the files you have open**, one text box each, so every tab keeps its
+own caret, scroll position and undo history. Opening a file already open brings
+its tab forward rather than opening it twice, and an untouched unnamed tab is
+reused rather than left behind. **Line numbers** are painted down the left, with
+the caret's own line picked out; the gutter widens for the last line and does
+not shrink back as you scroll. The gutter is double-buffered, since it is
+repainted on every keystroke and a plain panel clears itself first - which is
+seen as a blink.
+
+**While you type, only the line you are typing on is coloured**, and a quarter of
+a second after you stop, the screen is coloured properly. Colouring the visible
+window freezes the box and repaints all of it, which is right when a file
+arrives or the view moves and is far too much for one keystroke - it showed as
+the line numbers juddering, because the whole text area was being redrawn per
+character. The state the lexer is in at the start of the line being typed on is
+remembered, so typing does not re-read the file above it for every keystroke.
+
+**Colouring is done to what is on the screen**, and a screenful either side of
+it. The lexer still runs from the top of the file, because a comment opened on
+line 3 colours line 900, but that part is native and costs nothing worth
+counting; what costs is the box, where every coloured run is a selection. While
+it happens the box is frozen with `WM_SETREDRAW` and its scroll position is put
+back with `EM_GETSCROLLPOS` / `EM_SETSCROLLPOS` afterwards - a selection scrolls
+itself into view, so without that, opening a parser walks visibly down to its
+last line. What that buys is colour as you type, on a file of any size.
+
+**The panes are settled once the window has a size**, not while it is being
+built: a `SplitContainer` that is not in a window yet is 150 by 100, and both a
+splitter distance and a panel minimum are checked against the size it has at
+that moment. A distance is refused quietly there, leaving each pane at half -
+a third of the width for short filenames, half the height for a dozen lines of
+output - and a minimum is refused loudly, with an exception that stops the
+window appearing at all. `Arrange` sets both, on the same rule the terminal
+front end follows: the project pane and the output panel take what they need,
+about a quarter of the height for the output, and the code takes everything
+else, including everything the window gains when it is made larger.
+
+It edits the way the terminal one does. A newline takes the indentation its
+place asks for, a typed `}` `#` or `:` puts its own line where it belongs, and
+Tab in the leading space lays the line out rather than adding a step. Find,
+find-next, find-previous and replace call the same `find.cpp`. Undo, redo, cut,
+copy, paste and select-all are the text box's own - it keeps the history the
+typing went into, and there is no sense in keeping a second one beside it.
+
+Typed flat into the window, `int twice(int n) {` and four lines after it come
+back laid out, with the closing brace snapping to column 0 as it is typed.
+
+`winforms/show.ps1` starts it, optionally builds, and saves a picture of the
+window - which is how this front end has been looked at throughout, since it is
+written on a Mac and only runs on Windows:
+
+```
+.\show.ps1 -Project C:\Users\me\Editor -Files programs\smart.cpp -Build
+```
+
+It photographs the editor's own window with `PrintWindow` rather than grabbing
+the screen, so it gets the window even when something is in front of it and
+captures nothing else that happens to be on the desktop. A window needs a
+desktop and an ssh session has none, so from a remote shell it must be run in
+the logged-on session - the script's own header gives the `schtasks /it`
+incantation for that.
+
+The managed form talks to it through `winforms/bridge.h`, which names no C++
+type at all - opaque handles and char pointers, nothing else. That is not
+fastidiousness; three separate things about mixed native/managed binaries have
+to be respected, and each one was found the hard way:
+
+* A translation unit that includes `<fstream>` gets iostreams' static
+  initialisation, and linking it corrupts the heap **before main runs**. The
+  core uses stdio now.
+* A function-local `static` with a destructor registers an `atexit` handler the
+  first time it is reached, and that corrupts the heap too. The three in the
+  core are made once and never destroyed.
+* The managed side must not instantiate the STL the native side instantiates.
+* A global or `static` of a managed type is refused outright - `C3145` - since
+  there would be nothing rooting it for the collector. A `static` member
+  function returning it does the same job and is allowed.
+
+The second of those was found by giving the program its own debugger: there was
+no debugger on that machine at the time, so `bridge.cpp` installs a vectored
+exception handler
+that walks and symbolises its own stack into `RIDEGui-fault.log` (in `%TEMP%`
+since 2026-09-16, beside the window's own `RIDEGui.log`). It printed
+`Json::get -> atexit -> register_onexit_function -> RtlSizeHeap` and named the
+line.
+
+The rule holds for **globals** as much as for function-local statics, and it has
+been found three times. On the day the window was built, `Json::get`. On
+2026-09-11 `ride_group_for_file` arrived with a plain `static std::string
+answer`, and File > New took a name and died in `_onexit`; every string the
+bridge hands back goes through `scratch()` since, made once with `new` and never
+destroyed. On 2026-09-18 three `std::string` globals in `settings.cpp` -
+`pretended` and the two overrides `--assembler` and `--linker` set for one run -
+registered themselves with `atexit` during start-up, and the window died on every
+start with `STATUS_HEAP_CORRUPTION` under `register_onexit_function` until they
+were found on the 19th. They are pointers now; the debugger's marker strings and
+the C6000 linker command file are functions for the same reason. Two guards hold
+it: `theWindowsRuleAboutStatics` in `tests/test.cpp` scans exactly the files
+`RIDEGui.vcxproj` compiles for the shape, read out of that file rather than
+listed twice; and `RIDEGui --version`, which answers and exits before any window,
+is the smoke test `build.bat` runs over ssh where there is no desktop - the death
+is before `main`, so reaching that line and leaving is the whole test.
+
+### In Xcode
+
+```
+open Editor.xcodeproj
+```
+
+An ordinary macOS command line tool target, compiled by clang++ - `Editor.xcodeproj`
+holds nothing but a target, two configurations and the same files `src` already
+had. Debug and Release both build, and the binary Xcode produces was put
+through the whole session harness rather than merely run once: 70 checks, the
+same as make's.
+
+The project file is **generated**, by `make xcodeproj`, and its source list is
+read out of the Makefile. A hand-kept project drifts - someone adds a file to
+the Makefile, forgets the other one, and Xcode quietly builds yesterday's
+editor. There is one source list and it is the Makefile's.
+
+One thing to know before reaching for the Run button: RIDE is a terminal
+program, and Xcode's console is a pipe rather than a terminal. Started from
+there it cannot put the terminal into raw mode and will print escape sequences
+instead of drawing. Build and debug it in Xcode; run it in Terminal, and attach
+from Xcode if you want breakpoints while it is running.
+
+On Windows, where there is no make:
+
+```
+build
+build check
+```
+
+`check` runs both halves. `tests/test.cpp` checks the pieces that never see a
+terminal. `tests/session.cpp` drives the editor itself - it types into it,
+walks its menus, and then looks at what landed on the screen and on the disk:
+that a function typed flat comes back laid out, that keywords are coloured,
+that New file makes a file and puts it in the project, that a path two
+directories deep is refused, that Rename moves it and the project follows, that
+Delete answered with anything but `yes` keeps the file, and that undo takes back a run of
+typing and redo returns it, that the modified marker comes back when you undo
+past a save and goes when you redo to it, that a selection can be copied,
+cut, pasted and typed over, that a file of Urdu and accented text survives
+being saved and that backspace takes a whole letter out of it, that find lands the caret on the right line and
+Ctrl-G moves on, that replace changes the text and quitting
+without saving leaves the file alone, and that a build lands the caret on the
+line the compiler named and that its two configurations produce different
+code. One program for both machines, rather
+than a shell script and a PowerShell script that would drift apart.
+
+Set `CC1` to run the c90 build cases; the cl ones need nothing, since the
+editor finds Visual Studio itself.
+
+`build.bat` finds Visual Studio 2022 itself. The search is pinned to `[17.0,18.0)`
+on purpose - a bare `vswhere -latest` reaches past 2022 to any newer Visual
+Studio on the machine, which is not the toolset this is built with. Both builds
+are warnings-as-errors: `-Wall -Wextra -Werror -pedantic` for clang and gcc,
+`/W4 /WX` for MSVC. MSVC found a shadowed variable that clang did not, which is
+the argument for building both.
+
+## Why it is laid out the way it is
+
+Only `terminal_win.cpp` is Windows-specific, and it is a hundred lines. Windows
+10 and later speak the same escape sequences as a Unix terminal once
+`ENABLE_VIRTUAL_TERMINAL_PROCESSING` and `ENABLE_VIRTUAL_TERMINAL_INPUT` are
+set, so the drawing, the status bar and the key decoding are one piece of code
+on both machines. The key decoding in particular lives in `terminal_common.cpp`
+rather than in each platform file: two copies of that drifting apart is the
+house bug, and this is the one place it was easy to prevent.
+
+**This is C++14, and `src/path.cpp` is what that costs.** c90 is written in
+C++14, so the editor that drives it is too - one standard across the arena,
+enforced by all three toolchains rather than agreed and forgotten. The only
+thing in here that wanted C++17 was `<filesystem>`, and what was actually used
+of it was small: joining and splitting paths, making one absolute or relative
+to another, listing a directory, and four operations on files. So it is written
+out, `opendir` on one machine and `FindFirstFile` on the other, in one file
+behind one set of functions - a single place the two spellings can drift apart,
+small enough to read, and with 35 cases of its own. Everything works in forward
+slashes and hands them back, which is what the project file already wanted.
+
+`buffer`, `indent`, `menu` and `tree` touch no screen and no OS. `indent`, `syntax`, `json`, `project`, `path` and
+the diagnostic parser are the pieces with a contract, and `tests/test.cpp`
+checks them - 332 cases, including that a Windows path's drive letter is not
+mistaken for a `line:col` separator, that a brace inside a string is not
+counted, and that `class` is a keyword in C++ and nothing in particular in C,
+and that cl's `bad.c(3,13)` is read as well as c90's `bad.c:3:13`. They run on
+both machines.
+
+One bug in here could only have been found by running it on Windows: `_popen`
+hands its string to `cmd /c`, and cmd removes the first and last quote when a
+command has both a quoted program and quoted arguments - which every command
+here does, since paths hold spaces. The fix is an extra pair around the whole
+thing for cmd to eat. Until then the compiler was never reached, and cmd said
+"The filename, directory name, or volume label syntax is incorrect" instead.
+
+## Usage
+
+```
+RIDE [file] [--project dir] [--toolchain auto|c90|cpp11|msvc|shalimar|c++]
+    [--config debug|release] [--c90 path] [--cpp11 path] [--cl path]
+    [--shalimar path] [--cxx path] [--c2s path]
+    [--width n] [--tabs] [--case-indent] [--plain]
+```
+
+`--c90`, `--cpp11` and `--shalimar` name the compilers; `$C90`, `$CPP11` and `$SHALIMAR`
+do the same. Told none of them, both front ends look for each **beside the
+editor** before asking PATH - `make product` and `build.bat product` put the
+editor and everything it drives in one directory, cpp11's headers included,
+and that directory should work whatever directory you started the editor in.
+A compiler shipped with a copy of the editor is the one that copy is meant to
+run, so it is preferred to whatever PATH would have answered. Indentation is
+four spaces because that is what c90's own sources use, and they contain no
+tab at all.
+
+| key | |
+|---|---|
+| `F10` | the menu |
+| `Ctrl-B` | build the file in the edit view |
+| `F5` | build that file and run it |
+| `F4` | build the project's program |
+| `F9` | breakpoint on this line |
+| `F8` | start debugging, or carry on |
+| `F7` / `F6` | step over / step into |
+| `Ctrl-F` / `Ctrl-G` | find / find the next |
+| `Ctrl-R` | replace |
+| shift + arrows | select |
+| `Ctrl-C` / `Ctrl-X` / `Ctrl-V` | copy / cut / paste |
+| `Ctrl-Z` / `Ctrl-Y` | undo / redo |
+| `Ctrl-A` | re-indent: the selection, or the whole file when nothing is selected |
+| `Tab` | lay this line out, in the leading space |
+| `Ctrl-D` | debug or release |
+| `F2` / `F3` | previous / next open file |
+| `Ctrl-L` | line numbers |
+| `Ctrl-K` | c90 or cl |
+| `Ctrl-T` | next target (c90 only) |
+| `Ctrl-W` | next pane |
+| `Ctrl-P` / `Ctrl-E` | project pane / bottom panel |
+| `Ctrl-S` / `Ctrl-Q` | save / leave - twice when any open file has changes |
+| `F1` | the keys, in the console |

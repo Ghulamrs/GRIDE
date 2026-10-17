@@ -1,0 +1,10 @@
+How the two binaries in ../libs were made - by each platform's own compiler,
+not by this project's, which is the point: they are third-party objects.
+
+macOS (arm64, runs on macOS 12 and later):
+    clang -c -O2 -mmacosx-version-min=12.0 -I../include mathx.c -o mathx.o
+    ar rcs ../libs/arm64-darwin/libmathx.a mathx.o
+
+Windows (x64, Visual Studio's cl and lib, static C runtime as RIDE links):
+    cl /nologo /c /O2 /MT /I..\include mathx.c
+    lib /nologo /out:..\libs\x86_64-windows\mathx.lib mathx.obj

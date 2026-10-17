@@ -1,0 +1,23 @@
+
+--------------------------------------------------------------------------------
+Creating project 'Probe'...
+
+    NOTE: Output-type not specified - defaulting to 'executable'.
+    NOTE: Device endianness not specified - defaulting to 'little'.
+    NOTE: Compiler version not specified - defaulting to '7.4.4'.
+    NOTE: Output-format not specified - defaulting to 'COFF'.
+    NOTE: Linker command file not specified - defaulting to 'C6747.cmd'.
+    NOTE: Runtime support library not specified - defaulting to 'libc.a'.
+
+  !ERROR: The project-template 'bogus' is not applicable to the selected project settings.
+    NOTE: Refer to the following list of applicable template-IDs (the display-names in square brakets are for reference only):
+
+	Empty Projects
+		com.ti.common.project.core.emptyProjectTemplate [Empty Project]
+		com.ti.common.project.core.emptyProjectWithMainTemplate [Empty Project (with main.c)]
+		com.ti.ccstudio.project.templates.emptyAssemblyOnly [Empty Assembly-only Project]
+		org.eclipse.rtsc.project.templates.EmptyBios5Application [Empty DSP/BIOS v5.x Project]
+	Basic Examples
+		com.ti.ccstudio.project.templates.helloWorld [Hello World]
+
+Job found still running after platform shutdown.  Jobs should be canceled by the plugin that scheduled them during shutdown: com.ti.ccstudio.devicemodel.DeviceModelLoader$InitializationJob$3

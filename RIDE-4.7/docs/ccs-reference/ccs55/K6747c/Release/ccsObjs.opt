@@ -1,0 +1,1 @@
+"./util.obj" "./main.obj" "../C6747.cmd" -l"libc.a" -l"rts6740_elf_eh.lib" 

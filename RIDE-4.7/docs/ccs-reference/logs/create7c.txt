@@ -1,0 +1,9 @@
+
+--------------------------------------------------------------------------------
+Creating project 'K6747c'...
+
+    NOTE: Output-type not specified - defaulting to 'executable'.
+    NOTE: Device endianness not specified - defaulting to 'little'.
+    NOTE: Runtime support library not specified - defaulting to 'libc.a'.
+
+Done!

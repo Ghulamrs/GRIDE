@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RIDE Architecture</title>
+<style>
+:root {
+  --bg: #f6f7fb; --panel: #ffffff; --ink: #1d2433; --muted: #5b6475; --line: #d7dbe6;
+  --c: #2563eb; --c-soft: #dbe7ff;        /* C, c90 */
+  --cpp: #9333ea; --cpp-soft: #efe2ff;    /* C++, cpp11 */
+  --shl: #0d9488; --shl-soft: #d6f5f1;    /* Shalimar */
+  --lnx: #ea580c; --lnx-soft: #ffe8d9;    /* x86_64-linux */
+  --win: #0284c7; --win-soft: #dcf1fc;    /* x86_64-windows */
+  --mac: #475569; --mac-soft: #e7ebf0;    /* arm64-darwin */
+  --c6x: #dc2626; --c6x-soft: #fde2e2;    /* tms6747 */
+  --ride: #ca8a04; --ride-soft: #fdf3d3;  /* RIDE */
+  --ours: #16a34a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f131b; --panel: #171c27; --ink: #e6e9f0; --muted: #9aa3b5; --line: #2b3343;
+    --c-soft: #16264a; --cpp-soft: #2a1a44; --shl-soft: #0f3330; --lnx-soft: #3a2110;
+    --win-soft: #0e2c3d; --mac-soft: #232b37; --c6x-soft: #3b1515; --ride-soft: #3a2f0c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f131b; --panel: #171c27; --ink: #e6e9f0; --muted: #9aa3b5; --line: #2b3343;
+  --c-soft: #16264a; --cpp-soft: #2a1a44; --shl-soft: #0f3330; --lnx-soft: #3a2110;
+  --win-soft: #0e2c3d; --mac-soft: #232b37; --c6x-soft: #3b1515; --ride-soft: #3a2f0c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 26px; margin: 0 0 4px; }
+h2 { font-size: 18px; margin: 34px 0 10px; }
+.sub { color: var(--muted); margin: 0 0 18px; }
+code, .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12.5px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 22px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--line); font-size: 12.5px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* the flow */
+.stage { display: grid; gap: 10px; }
+.label { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  margin: 0 0 6px 2px; font-weight: 600; }
+.box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+  border-top: 5px solid var(--accent, var(--line)); }
+.box.soft { background: var(--soft, var(--panel)); }
+.box h3 { margin: 0 0 4px; font-size: 16px; }
+.box .path { color: var(--muted); }
+.box ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+.ours::after { content: " ours"; color: var(--ours); font-size: 11px; font-weight: 700; margin-left: 4px; }
+.arrow { text-align: center; color: var(--muted); font-size: 20px; line-height: 1; margin: 6px 0; }
+.arrow small { display: block; font-size: 11.5px; }
+.ride { --accent: var(--ride); --soft: var(--ride-soft); }
+.lang-c { --accent: var(--c); --soft: var(--c-soft); }
+.lang-cpp { --accent: var(--cpp); --soft: var(--cpp-soft); }
+.lang-shl { --accent: var(--shl); --soft: var(--shl-soft); }
+.t-lnx { --accent: var(--lnx); --soft: var(--lnx-soft); }
+.t-win { --accent: var(--win); --soft: var(--win-soft); }
+.t-mac { --accent: var(--mac); --soft: var(--mac-soft); }
+.t-c6x { --accent: var(--c6x); --soft: var(--c6x-soft); }
+.cols3 { grid-template-columns: repeat(3, 1fr); }
+.cols4 { grid-template-columns: repeat(4, 1fr); }
+.side { display: grid; grid-template-columns: 1fr 260px; gap: 12px; align-items: start; }
+
+/* the backend matrix */
+table { border-collapse: collapse; width: 100%; background: var(--panel); border-radius: 12px;
+  overflow: hidden; border: 1px solid var(--line); font-size: 13px; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--bg); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+td.cell { border-left: 4px solid var(--accent); }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 6px; background: var(--soft);
+  border: 1px solid var(--accent); font-size: 12px; margin: 1px 2px 1px 0; }
+.wrap { overflow-x: auto; }
+
+/* the tree */
+pre.tree { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+  overflow-x: auto; font-size: 12.5px; line-height: 1.5; margin: 0; }
+.tree .k { font-weight: 700; }
+.tree .c { color: var(--c); } .tree .p { color: var(--cpp); } .tree .s { color: var(--shl); }
+.tree .r { color: var(--ride); } .tree .x { color: var(--c6x); } .tree .w { color: var(--win); }
+.tree .m { color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+footer { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
+
+@media (max-width: 860px) {
+  .cols3, .cols4, .grid2, .side { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>RIDE 5.17 - compilers, tools and targets</h1>
+  <p class="sub">Three languages, four targets, twelve sealed programs. The seals below are read from
+    <code>RIDE-4.7/MASTER.SEAL</code>, which <code>tools/master-seal</code> writes at each release; a green
+    <span style="color:var(--ours);font-weight:700">ours</span> marks a program written in this workspace.
+    The checkout is called <code>RIDE-4.7</code> for a historical reason only - the directory kept the name of the
+    release it was made for - and holds RIDE 5.17 (<code>src/about.cpp</code>, <code>ride-5.17.dat</code>).</p>
+
+  <div class="legend">
+    <span class="chip"><span class="dot" style="background:var(--c)"></span>C - c90</span>
+    <span class="chip"><span class="dot" style="background:var(--cpp)"></span>C++ - cpp11</span>
+    <span class="chip"><span class="dot" style="background:var(--shl)"></span>Shalimar</span>
+    <span class="chip"><span class="dot" style="background:var(--lnx)"></span>x86_64-linux</span>
+    <span class="chip"><span class="dot" style="background:var(--win)"></span>x86_64-windows</span>
+    <span class="chip"><span class="dot" style="background:var(--mac)"></span>arm64-darwin</span>
+    <span class="chip"><span class="dot" style="background:var(--c6x)"></span>tms6747 (TI C6747)</span>
+  </div>
+
+  <!-- 1. the IDE -->
+  <div class="label">1 · The IDE</div>
+  <div class="side">
+    <div class="box soft ride">
+      <h3 class="ours">RIDE 5.17</h3>
+      <div class="mono path">RIDE-4.7/src · winforms/ (Windows) · macos/ (macOS) · seal ride-5.17.dat</div>
+      <ul>
+        <li>Editor, projects, CCS project import (<code>src/ccs</code>), terminal, debugger</li>
+        <li><code>src/compile.cpp</code> + <code>src/toolchain.cpp</code>: choose the compiler, assembler, linker and runtime for each build - by target <em>and by configuration</em></li>
+        <li>Release and Debug configurations; Run (F5), Build project (F4), Run on Simulator, Verify, Debug project</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3 class="ours">c2s</h3>
+      <div class="mono path">Converter-C2S/src · c2s-1.2</div>
+      <ul><li>C89 ⇄ Shalimar source converter, run from RIDE's Convert menu</li></ul>
+    </div>
+  </div>
+  <div class="arrow">▼<small>source file: .c · .cpp · .shl</small></div>
+
+  <!-- 2. front ends -->
+  <div class="label">2 · Three compilers (each its own front end and its own backend)</div>
+  <div class="stage cols3">
+    <div class="box soft lang-c">
+      <h3 class="ours">c90</h3>
+      <div class="mono path">Compiler-Ci · c90-1.2</div>
+      <ul>
+        <li>src/: Preprocessor, Lexer, Parser, Type, Source, Driver</li>
+        <li>src/backend/: Walker, Optimizer, Dwarf, Spelling, Masm, and the four targets X86_64Linux, X86_64Windows, Arm64Darwin, Tms6747</li>
+      </ul>
+    </div>
+    <div class="box soft lang-cpp">
+      <h3 class="ours">cpp11</h3>
+      <div class="mono path">C++Optimize · cxx1-1.8</div>
+      <ul>
+        <li>src/: Preprocessor, Lexer, Mangle, Type, Source, Driver</li>
+        <li>src/parser/: twelve Parser*.cpp files</li>
+        <li>src/backend/: Walker, Backend, Spelling, Masm, Dwarf, <b>CodeView, CodeViewTypes</b>, and the four targets X86_64Linux, X86_64Windows, Arm64Darwin, Tms6747</li>
+        <li>src/optimizer/: inliner, passes, register allocator (x86-64), A64Peep (arm64), C6xSched and C6xPipe (C6000)</li>
+        <li>Compiles several files on a pool of threads, one per file up to the machine's cores; <code>-j n</code> sets the count</li>
+      </ul>
+    </div>
+    <div class="box soft lang-shl">
+      <h3 class="ours">shalimar</h3>
+      <div class="mono path">Compiler-Si · shalimar-1.2</div>
+      <ul>
+        <li>src/: Lexer, Parser, Resolve, Check, CodeGen, Builtin, Type</li>
+        <li>src/backend/: Emitter, Optimize, Spelling</li>
+      </ul>
+    </div>
+  </div>
+  <div class="arrow">▼<small>each compiler writes assembly for one of four code generators</small></div>
+
+  <!-- 3. code generators -->
+  <div class="label">3 · Four code generators, written separately in each compiler's backend/</div>
+  <div class="stage cols4">
+    <div class="box soft t-lnx"><h3>X86_64Linux</h3><div class="mono path">GNU .s, ELF, System V ABI, Itanium names, DWARF</div></div>
+    <div class="box soft t-win"><h3>X86_64Windows</h3><div class="mono path">one instruction stream, two spellings: MASM .asm (Release) or GNU .s with CodeView (Debug); COFF, Microsoft ABI and names</div></div>
+    <div class="box soft t-mac"><h3>Arm64Darwin</h3><div class="mono path">Apple .s, Mach-O, AAPCS64, Itanium names, DWARF</div></div>
+    <div class="box soft t-c6x"><h3>Tms6747</h3><div class="mono path">TI C6000 .s, ELF, C6000 EABI, TI's unwind tables; no line table</div></div>
+  </div>
+  <div class="arrow">▼<small>assemble and link</small></div>
+
+  <!-- 4. assemble, link, runtime -->
+  <div class="label">4 · Assembler, linker and runtime for each target, as RIDE builds it</div>
+  <div class="stage cols4">
+    <div class="box t-lnx">
+      <h3>x86_64-linux</h3>
+      <ul><li>Assembler and linker: the system's, through <code>cc</code>/<code>c++</code></li>
+          <li>Runtime: glibc, libstdc++</li>
+          <li>Output: ELF program</li></ul>
+    </div>
+    <div class="box t-win">
+      <h3>x86_64-windows</h3>
+      <ul><li><b>Debug</b> (<code>-masm=gnu</code>): assembler <b>clang</b>'s, the object carrying CodeView; linker Microsoft's <b>link.exe /DEBUG</b>, writing the .pdb; debugger <b>cdb</b> (M10, 5.1)</li>
+          <li><b>Release</b> (<code>-masm=masm</code> when Tools names an assembler, which the installed settings.json does): assembler <b class="ours">masm</b> <span class="mono">MASM/src</span>; linker <b class="ours">link</b> <span class="mono">LINK/src</span> if named under Tools, else Microsoft's link.exe. With nothing named cpp11 writes the GNU spelling, clang assembles, link.exe links</li>
+          <li><b>Prompted retry</b>: when RIDE's own masm or link fails and the compilers found no fault, the editor asks and a Yes builds again through Visual Studio's <b>ml64</b> and <b>link.exe</b>; RIDE names ml64 nowhere else</li>
+          <li>Runtime: the Microsoft CRT</li>
+          <li>Output: PE .exe</li></ul>
+    </div>
+    <div class="box t-mac">
+      <h3>arm64-darwin</h3>
+      <ul><li>Assembler and linker: Apple's clang toolchain</li>
+          <li>Runtime: libSystem, libc++</li>
+          <li>Output: Mach-O program</li></ul>
+    </div>
+    <div class="box t-c6x">
+      <h3>tms6747</h3>
+      <ul><li>Assembler: <b class="ours">asm6x</b> <span class="mono">ASM6x/src</span>; output TI ELF .obj</li>
+          <li>Linker: <b class="ours">lnk6x</b> <span class="mono">LNK6x/src</span> (the default); TI's lnk6x when TI's compiler directory is named under Tools, or on a prompted retry after lnk6x failed</li>
+          <li>Runtime: <b class="ours">rts6x.lib / rts6xd.lib</b> <span class="mono">RTS6x/src</span> - <em>itself compiled by cpp11 and assembled by asm6x</em>; TI's rts6740_elf[_eh].lib when TI's directory is named</li>
+          <li>Shalimar also links <b>shmrt6x.lib / shmrt6xd.lib</b> - <em>cpp11's output too</em> (<code>workspace.mk</code>)</li>
+          <li>Output: .out, which Run hands to sim6747, beside the .s files Emulate on vm6747 runs</li></ul>
+    </div>
+  </div>
+  <div class="arrow">▼<small>run</small></div>
+
+  <!-- 5. run -->
+  <div class="label">5 · Where the program runs</div>
+  <div class="stage cols4">
+    <div class="box t-lnx"><h3>Linux host</h3></div>
+    <div class="box t-win"><h3>Windows host</h3><ul><li>Debug project: <b>cdb</b> reading the .pdb</li></ul></div>
+    <div class="box t-mac"><h3>macOS host</h3></div>
+    <div class="box t-c6x">
+      <h3>C6747</h3>
+      <ul><li><b class="ours">sim6747</b> <span class="mono">SIM6747/src</span>: <b>Run (F5), Run project</b> - runs the linked .out machine code with TI's boot code and the RTS6x the build linked, so asm6x, lnk6x and RTS6x are on every run's path; a build that makes no .out fails, unless the .pro says <code>"emulateOnly"</code></li>
+          <li><b class="ours">vm6747</b> <span class="mono">VM6747</span>: <b>Build ▸ Emulate on vm6747</b> - reads the compiler's .s as text and runs it over <em>a C library and an exception-handling runtime of its own</em>, linking no .out; it never sees asm6x's encoding, lnk6x's image or RTS6x. <b>Build ▸ Verify</b> runs both and compares</li>
+          <li>The TI C6747 board itself - <em>via Code Composer Studio, not RIDE</em>: the .out is the file CCS loads; RIDE has no loader</li></ul>
+    </div>
+  </div>
+
+  <h2>Edges the page used to leave out</h2>
+  <ul>
+    <li><b>cpp11 → RTS6x, shmrt-tms6747.</b> The C6747 runtime a program links against is compiled by cpp11 and assembled by asm6x (<code>RTS6x/Makefile</code>); so is Shalimar's C6000 runtime (<code>workspace.mk</code>). A fault in the compiler reaches the runtime it links.</li>
+    <li><b>cpp11 standalone → TI lnk6x + rts6740.</b> Run from a command line, <code>cpp11 -arch tms6747</code> without <code>-S</code> links through TI's lnk6x against <code>rts6740_elf[_eh].lib</code> under <code>CPP11_TI</code>/<code>CPP11_TILIB</code> (<code>Driver.cpp</code>, <code>linkTi</code>). RIDE's build is the other line - RIDE's lnk6x against RTS6x - and is the default inside the editor; the compiler alone has no RTS6x option today.</li>
+    <li><b>Debug on x86_64-windows → clang → link.exe /DEBUG → cdb.</b> Drawn above; the two configurations go through different assemblers and linkers on this target.</li>
+    <li><b>The prompted native retry</b>: RIDE → Visual Studio's ml64 and link.exe, or TI's lnk6x, after one of RIDE's own tools failed and the user said yes. The console says <code>building again with Visual Studio's ml64 and link.exe in place of the project's masm and link, as asked</code>, and the build's output ends <code>[built with Visual Studio's ml64 and link.exe, not RIDE's masm and link]</code> - or <code>[not built: ... failed as well]</code>.</li>
+  </ul>
+
+  <h2>How a build runs</h2>
+  <p>A project build is one compiler command per group, in the order the project's <code>"build"</code> names them, and
+    the link is one command after them. Inside a cpp11 command the files are compiled and assembled on cpp11's own
+    pool of threads (one per file up to the machine's cores, one thread below four files, <code>-j n</code> to say
+    otherwise); c90 and shalimar compile one file after another. <b>A tms6747 group runs on RIDE's own pool</b>: RIDE
+    writes one <code>-S -arch tms6747</code> command per source (<code>toolchain.cpp</code>, <code>Recipe::commands</code>) and
+    runs them at once, one per source up to the machine's cores, each one's output written in source order
+    (<code>compile.cpp</code>, <code>runRecipe</code>); one <code>asm6x</code> command then takes every <code>.s</code>, and one
+    <code>lnk6x</code> command the objects. The editor itself runs a build on one worker thread, so the window keeps drawing; nothing else overlaps.</p>
+
+  <h2>What verifies each tier</h2>
+  <p>Each program is held to an oracle outside this workspace, not to itself. The long form is each repository's README
+    and <code>C++Optimize/docs/</code>; this is the table of record until WS-H's verification page
+    (<code>C++Optimize/docs/VERIFICATION-2026-10-09/</code>) replaces it, and it is to be regenerated from that page.</p>
+  <div class="wrap">
+  <table>
+    <tr><th>tier</th><th>held to</th><th>by</th><th>what it cannot see</th></tr>
+    <tr class="lang-cpp"><td class="cell">c90, cpp11 - the language</td><td>clang (<code>-std=c++11 -pedantic-errors</code>) for every recorded output, every refusal's column and every linkage name; cl for the Microsoft ABI's names</td><td><code>tests/run.sh</code>, <code>emit.sh</code>, <code>names.sh</code>, <code>overload.sh</code> on three machines, <code>tools/verify-three</code></td><td>a program nobody wrote a case for; the sweeps in cpp11's CLAUDE.md are for those</td></tr>
+    <tr class="t-c6x"><td class="cell">cpp11 on tms6747</td><td>TI's asm6x and lnk6x assembling and linking every case; the CCS 5.5 C6747 cycle-accurate simulator running them</td><td><code>tools/verify-three c6747</code> = <code>release-check</code>, a scheduled job on the Windows box; <code>tests/tms6747.sh</code> on vm6747 and sim6747 every run</td><td>cycle counts: sim6747 models no memory system</td></tr>
+    <tr class="t-win"><td class="cell">masm, link</td><td>Visual Studio's ml64 and link.exe, object and image byte for byte</td><td>their probe beds (<code>MASM/tests</code>, <code>LINK/tests</code>)</td><td>cpp11's MASM spelling itself: the compiler's suites assemble the GNU spelling, and the MASM dialect a Release build goes through has been proven by hand runs, not by a suite (D15; WS-F puts it under one); cpp11's exception tables and COMDAT data are not yet in LINK's bed</td></tr>
+    <tr class="t-c6x"><td class="cell">asm6x, lnk6x</td><td>TI's asm6x and lnk6x, object and image byte for byte</td><td>their probe beds; lnk6x's known differences pinned by name in <code>tests/known-differ.txt</code></td><td>what sits inside a pinned difference (WS-H shrinks them)</td></tr>
+    <tr class="t-c6x"><td class="cell">RTS6x</td><td>TI's rts6740 on sim6747 and on CCS 5.5's simulator</td><td><code>make check</code>; <code>tools/referee</code> by hand</td><td>no recorded referee result yet (WS-H)</td></tr>
+    <tr class="t-c6x"><td class="cell">sim6747</td><td>CCS 5.5's C6747 simulator, output and cycle count</td><td>its suite, 81 programs</td><td>memory stalls</td></tr>
+    <tr class="t-c6x"><td class="cell">vm6747</td><td>the host targets' output for the same program</td><td>the compilers' suites on every run</td><td>asm6x's encoding, lnk6x's image, RTS6x: it carries its own libc and EH runtime</td></tr>
+    <tr class="ride"><td class="cell">RIDE</td><td>its own suites</td><td><code>tests/test</code>, <code>tests/session</code>, <code>tests/toolchain-check</code> on all three machines</td><td>a tool that is absent is skipped, not failed (D14, WS-G)</td></tr>
+  </table>
+  </div>
+
+  <!-- matrix -->
+  <h2>The 3 × 4 matrix: which source files compile each language for each target</h2>
+  <div class="wrap">
+  <table>
+    <tr><th>compiler</th><th>x86_64-linux</th><th>x86_64-windows</th><th>arm64-darwin</th><th>tms6747</th></tr>
+    <tr class="lang-c"><td class="cell"><b>c90</b><br><span class="mono">Compiler-Ci/src/backend</span></td>
+      <td class="t-lnx"><span class="tag">X86_64Linux.cpp</span><span class="tag">Dwarf.cpp</span></td>
+      <td class="t-win"><span class="tag">X86_64Windows.cpp</span><span class="tag">Masm.cpp</span></td>
+      <td class="t-mac"><span class="tag">Arm64Darwin.cpp</span><span class="tag">Dwarf.cpp</span></td>
+      <td class="t-c6x"><span class="tag">Tms6747.cpp</span></td></tr>
+    <tr class="lang-cpp"><td class="cell"><b>cpp11</b><br><span class="mono">C++Optimize/src/backend + optimizer</span></td>
+      <td class="t-lnx"><span class="tag">X86_64Linux.cpp</span><span class="tag">Dwarf.cpp</span><span class="tag">optimizer/Opt*</span></td>
+      <td class="t-win"><span class="tag">X86_64Windows.cpp</span><span class="tag">Masm.cpp</span><span class="tag">CodeView.cpp</span><span class="tag">CodeViewTypes.cpp</span><span class="tag">optimizer/Opt*</span></td>
+      <td class="t-mac"><span class="tag">Arm64Darwin.cpp</span><span class="tag">Dwarf.cpp</span><span class="tag">optimizer/A64Peep</span></td>
+      <td class="t-c6x"><span class="tag">Tms6747.cpp</span><span class="tag">optimizer/C6xSched</span><span class="tag">C6xPipe</span></td></tr>
+    <tr class="lang-shl"><td class="cell"><b>shalimar</b><br><span class="mono">Compiler-Si/src/backend</span></td>
+      <td class="t-lnx"><span class="tag">X86_64Linux.cpp</span><span class="tag">X86_64.cpp</span></td>
+      <td class="t-win"><span class="tag">X86_64Windows.cpp</span><span class="tag">X86_64.cpp</span></td>
+      <td class="t-mac"><span class="tag">Arm64Darwin.cpp</span></td>
+      <td class="t-c6x"><span class="tag">Tms6747.cpp</span></td></tr>
+  </table>
+  </div>
+
+  <!-- placement -->
+  <h2>Where the source code is, and where it is installed</h2>
+  <div class="grid2">
+<pre class="tree"><span class="m">~/Developer/Claude/                      source workspace, one git repo each</span>
+├─ <span class="k r">RIDE-4.7/</span>            <span class="m">IDE (RIDE 5.17 - the folder keeps an older release's name), MASTER.SEAL, release scripts</span>
+│  ├─ src/ winforms/ macos/ packaging/ tools/
+├─ <span class="k">Compilers/</span>
+│  ├─ <span class="k c">Compiler-Ci/</span>       <span class="m">c90</span>
+│  ├─ <span class="k p">C++Optimize/</span>       <span class="m">cpp11</span>
+│  ├─ <span class="k s">Compiler-Si/</span>       <span class="m">shalimar</span>
+│  └─ <span class="k">Converter-C2S/</span>     <span class="m">c2s</span>
+├─ <span class="k">TI/</span>
+│  ├─ <span class="k x">VM6747/</span>            <span class="m">vm6747</span>
+│  ├─ <span class="k x">SIM6747/</span>           <span class="m">sim6747 (C6747 simulator)</span>
+│  ├─ <span class="k x">ASM6x/</span>             <span class="m">asm6x (C6000 assembler)</span>
+│  ├─ <span class="k x">LNK6x/</span>             <span class="m">lnk6x (C6000 linker)</span>
+│  └─ <span class="k x">RTS6x/</span>             <span class="m">rts6x, printf6x (C6747 runtime, compiled by cpp11)</span>
+└─ <span class="k">Windows/</span>
+   ├─ <span class="k w">MASM/</span>              <span class="m">masm  (x86-64 assembler)</span>
+   └─ <span class="k w">LINK/</span>              <span class="m">link  (Windows PE linker)</span>
+</pre>
+<pre class="tree"><span class="m">C:\Program Files\RIDE 5.17\              installed (Windows)</span>
+├─ <span class="k r">RIDE.exe</span>
+└─ bin\
+   ├─ <span class="c">c90.exe</span>  <span class="p">cpp11.exe</span>  <span class="s">shalimar.exe</span>  c2s.exe
+   ├─ <span class="w">masm.exe</span>  <span class="w">link.exe</span>      <span class="m">Windows target, Release builds</span>
+   ├─ <span class="x">asm6x.exe</span> <span class="x">lnk6x.exe</span>     <span class="m">C6747 target</span>
+   ├─ <span class="x">vm6747.exe</span> <span class="x">sim6747.exe</span>
+   └─ lib\
+      └─ <span class="x">rts6x-tms6747\</span>
+         rts6x.lib  rts6xd.lib
+         printf6x.lib printf6xd.lib
+         shmrt6x.lib shmrt6xd.lib     <span class="m">(a tree built by hand may hold two of the six until `make confirm` passes)</span>
+</pre>
+  </div>
+
+  <h2>The twelve sealed programs</h2>
+  <p class="sub">Read from <code>MASTER.SEAL</code> (master seal 9D04AFA5, sealed 17-10-2026). The rows between the two
+    markers are to be written by <code>tools/master-seal --html</code> (WS-G) so that they cannot drift from the seal file
+    again; until that lands they were copied from it by hand.</p>
+  <div class="wrap">
+  <!-- seals: generated by tools/master-seal --html -->
+  <table>
+    <tr><th>program</th><th>source</th><th>seal file</th><th>seal</th></tr>
+    <tr class="ride"><td class="cell">RIDE</td><td class="mono">RIDE-4.7</td><td class="mono">ride-5.17.dat</td><td class="mono">4A551AB6</td></tr>
+    <tr class="lang-c"><td class="cell">c90</td><td class="mono">Compilers/Compiler-Ci</td><td class="mono">c90-1.4.dat</td><td class="mono">33EC3AED</td></tr>
+    <tr class="lang-cpp"><td class="cell">cpp11</td><td class="mono">Compilers/C++Optimize</td><td class="mono">cxx1-1.11.dat</td><td class="mono">4CFC68CE</td></tr>
+    <tr class="lang-shl"><td class="cell">shalimar</td><td class="mono">Compilers/Compiler-Si</td><td class="mono">shalimar-1.4.dat</td><td class="mono">CC2C716A</td></tr>
+    <tr class="ride"><td class="cell">c2s</td><td class="mono">Compilers/Converter-C2S</td><td class="mono">c2s-1.2.dat</td><td class="mono">4BA1604B</td></tr>
+    <tr class="t-c6x"><td class="cell">vm6747</td><td class="mono">TI/VM6747</td><td class="mono">vm6747-1.4.dat</td><td class="mono">54DF9FB6</td></tr>
+    <tr class="t-c6x"><td class="cell">asm6x</td><td class="mono">TI/ASM6x</td><td class="mono">asm6x-1.5.dat</td><td class="mono">BAB4880E</td></tr>
+    <tr class="t-win"><td class="cell">masm</td><td class="mono">Windows/MASM</td><td class="mono">masm-1.0.dat</td><td class="mono">5E4155D7</td></tr>
+    <tr class="t-win"><td class="cell">link</td><td class="mono">Windows/LINK</td><td class="mono">link-1.1.dat</td><td class="mono">DB133712</td></tr>
+    <tr class="t-c6x"><td class="cell">lnk6x</td><td class="mono">TI/LNK6x</td><td class="mono">lnk6x-1.3.dat</td><td class="mono">8D06FF9B</td></tr>
+    <tr class="t-c6x"><td class="cell">sim6747</td><td class="mono">TI/SIM6747</td><td class="mono">sim6747-1.5.dat</td><td class="mono">4850EFB4</td></tr>
+    <tr class="t-c6x"><td class="cell">rts6x</td><td class="mono">TI/RTS6x</td><td class="mono">rts6x-1.2.dat</td><td class="mono">040CE785</td></tr>
+  </table>
+  <!-- end seals -->
+  </div>
+
+  <footer>
+    RIDE 5.17 · ©2026 G. R. Akhtar. Seals from <code>MASTER.SEAL</code> of 17-10-2026 (master seal 9D04AFA5); the build
+    paths from RIDE <code>src/compile.cpp</code> and <code>src/toolchain.cpp</code> and cpp11's <code>src/Driver.cpp</code>,
+    read on 08-10-2026; and each repository's src/. Formerly <code>ride-5.0-architecture.html</code>.
+  </footer>
+</main>
+</body>
+</html>

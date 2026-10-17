@@ -1,0 +1,29 @@
+Usage:
+	eclipsec -noSplash -data "<workspace_dir>"
+		-application com.ti.ccstudio.apps.buildProject
+		(-ccs.projects <name1>[ <name2>]* | -ccs.workspace) [<options>]
+
+where options include:
+	-ccs.configuration <name>
+		The build-configuration name to build (optional).
+		Defaults to active build-configuration.
+	
+	-ccs.projects <name1>[ <name2>]*
+		Space-separated list of projects to build.
+	
+	-ccs.workspace
+		Build entire workspace.
+	
+	-ccs.buildType (incremental | full | clean)
+		The type of build to perform (optional).
+		Defaults to 'incremental'.
+	
+	-ccs.autoOpen
+		Automatically open any closed projects (optional).
+
+	-ccs.args <file>
+		File containing any extra arguments (optional).
+		
+	-ccs.help
+		Print this help message.
+

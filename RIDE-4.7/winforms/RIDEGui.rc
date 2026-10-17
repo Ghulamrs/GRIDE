@@ -1,0 +1,3 @@
+// The window's icon: the exe carries it, so Explorer, the taskbar and a
+// shortcut show it, and MainForm takes it from the exe at start.
+1 ICON "ride.ico"
