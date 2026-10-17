@@ -1,7 +1,8 @@
-# build-setup.ps1 - GRIDE-Setup-<ver>.msi: one Windows Installer package that installs either IDE of
-# GRIDEx2 - Black (GRIDEd) or Grey (GRIDE 2.0) - each with the toolchain beside it, chosen on the
-# second screen. What the user sees names only GRIDE, Black and Grey (the user's rule of 2026-10-16):
-# the screens, the folders GRIDE\Black and GRIDE\Grey, the Start menu, Programs and Features. Written through Windows Installer's own automation API (msi.dll): no WiX, no Inno
+# build-setup.ps1 - GRIDE-Setup-<ver>.msi: one Windows Installer package that installs one outlook of
+# GRIDEx2 - Black (GRIDEd), Grey (GRIDE 2.0) or White (RIDE 5.17 from GRIDE 1.0, RIDE - The Simplest) - each
+# with the toolchain beside it, chosen on the second screen; with Black or Grey, White can come along as a
+# lightweight extra (the user's design, 2026-10-17). What the user sees names GRIDE and its outlooks:
+# the screens, the folders GRIDE\Black, GRIDE\Grey, GRIDE\White, the Start menu, Programs and Features. Written through Windows Installer's own automation API (msi.dll): no WiX, no Inno
 # Setup, no setup project. Adapted from GRIDE-Installer's build-msi.ps1 (one IDE, dummy tools).
 #
 #   build-setup.ps1 [-Version 1.0.0] [-OutDir <GRIDEx2\installer\dist>]
@@ -12,9 +13,10 @@
 # .metagen. Added: Visual Studio 2022's VC++ runtime DLLs beside GRIDE.exe (app-local, as Microsoft
 # allows for Microsoft.VC143.CRT), so a machine without the VC++ Redistributable runs it.
 #
-# The package: features Black (level 1) and Grey (level 3, so not installed unless chosen); the
-# second dialog's Install button removes one and adds the other. A quiet install takes IDE=Grey for
-# GRIDE 2.0 (Condition table). ALLUSERS=2 with the UAC-compliant bit: MSIINSTALLPERUSER=1 installs
+# The package: features Black (level 1), Grey and White (level 3, so not installed unless chosen); the
+# second dialog's Install button removes the outlooks not chosen and adds the chosen one, and White too
+# when its box is ticked. A quiet install takes IDE=Grey or IDE=White, and WHITE=1 for White beside
+# Black or Grey (Condition table). ALLUSERS=2 with the UAC-compliant bit: MSIINSTALLPERUSER=1 installs
 # under the user's profile without elevation. Launch conditions: 64-bit Windows, .NET Framework 4.8,
 # no newer GRIDEx2. Component GUIDs are a hash of each file's install path, the ProductCode a hash of
 # the version, the UpgradeCode fixed.
@@ -55,6 +57,14 @@ $ides = @(
                        Description = "GRIDE in the Black outlook, with the eleven tools beside it" }
     [pscustomobject]@{ Feature = "Grey";  Folder = "Grey";  Source = "GRIDE 2.0"; Title = "GRIDE - Grey outlook";  Shortcut = "GRIDE";  Level = 3
                        Description = "GRIDE in the Grey outlook, with the eleven tools beside it" })
+# White: RIDE 5.17 from GRIDE 1.0 (RIDE - The Simplest), laid out as RIDE's own stage.cmd lays it - bin\ with
+# RIDE.exe, RIDEConsole.exe and the tools, include\, lib\, programs\, projects\, help\, settings.json. Off
+# unless chosen: on its own (IDE=White) or beside Black or Grey as a lightweight extra (WHITE=1).
+$white = [pscustomobject]@{ Feature = "White"; Folder = "White"; Source = "GRIDE 1.0"; Title = "GRIDE - White outlook (RIDE - The Simplest)"
+                            Shortcut = "RIDE - The Simplest"; Level = 3; Exe = "White/bin/RIDE.exe"; WorkDir = "White/bin"
+                            Description = "RIDE 5.17, the simplest outlook: its window and console editor, with the eleven tools beside it" }
+foreach ($ide in $ides) { $ide | Add-Member Exe "$($ide.Folder)/GRIDE.exe"; $ide | Add-Member WorkDir $ide.Folder }
+$outlooks = @($ides) + $white
 
 # ---- the stage: <stage>\GRIDEd and <stage>\GRIDE 2.0, each the solution's x64\Release ----------------
 $stage = Join-Path $OutDir "stage\$product-$Version"
@@ -65,7 +75,9 @@ if (-not $CrtFolder) {
     if (-not $crt) { throw "no x64\Microsoft.VC143.CRT under $VsRoot\VC\Redist\MSVC" }
     $CrtFolder = $crt
 }
-$skip = [regex]'\.(pdb|ilk|metagen|iobj|ipdb|exp)$'
+# what a build leaves beside the program besides the program: debug databases, and the intermediates a project
+# built on its own (not through its solution) writes into its OutDir - objects, .tlog folders, recipes, caches
+$skip = [regex]'(\.(pdb|ilk|metagen|iobj|ipdb|exp|obj|recipe|cache|lastbuildstate)|\.tlog|\.FileListAbsolute\.txt|AssemblyAttributes\.cpp)$|[\\/][^\\/]+\.tlog[\\/]'
 Say "[1/5] Stage: $stage"
 foreach ($ide in $ides) {
     $rel = Join-Path $root "$($ide.Source)\x64\Release"
@@ -75,7 +87,7 @@ foreach ($ide in $ides) {
     }
     $dest = Join-Path $stage $ide.Folder
     New-Item -ItemType Directory -Force $dest | Out-Null
-    Get-ChildItem -LiteralPath $rel -Recurse -File | Where-Object { -not $skip.IsMatch($_.Name) } | ForEach-Object {
+    Get-ChildItem -LiteralPath $rel -Recurse -File | Where-Object { -not $skip.IsMatch($_.Name) -and -not $skip.IsMatch($_.FullName) } | ForEach-Object {
         $to = Join-Path $dest $_.FullName.Substring($rel.Length + 1)
         New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
         Copy-Item -LiteralPath $_.FullName -Destination $to
@@ -95,6 +107,21 @@ foreach ($ide in $ides) {
     $n = (Get-ChildItem -LiteralPath $dest -Recurse -File).Count
     Say ("  {0,-10} {1,-10} {2,4} files, {3:N1} MB" -f $ide.Feature, $ide.Folder, $n, ((Get-ChildItem -LiteralPath $dest -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
 }
+# White, staged by RIDE's own packaging\windows\stage.cmd from GRIDE 1.0's bin\ (RIDE.sln builds RIDE and the
+# eleven tools there) and the shared toolchain's headers, with the VC++ runtime beside RIDE.exe
+$ride = Join-Path $root $white.Source
+$rideBin = Join-Path $ride "bin"
+foreach ($t in "RIDE", "RIDEConsole", "c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747") {
+    if (-not (Test-Path "$rideBin\$t.exe")) { throw "$rideBin has no $t.exe - build $($white.Source)\RIDE.sln in Release | x64 into bin\ first" }
+}
+$whiteDest = Join-Path $stage $white.Folder
+$stageCmd = Join-Path $ride "packaging\windows\stage.cmd"
+$cmdArgs = '/c ""' + $stageCmd + '" "' + $ride + '" "' + (Join-Path $root "toolchain\Compilers\C++Optimize") + '" "' + $whiteDest + '" "' +
+        (Join-Path $root "toolchain\Compilers\Compiler-Ci") + '" "' + $rideBin + '""'
+$p = Start-Process cmd.exe -ArgumentList $cmdArgs -WindowStyle Hidden -Wait -PassThru
+if ($p.ExitCode -ne 0 -or -not (Test-Path "$whiteDest\bin\RIDE.exe")) { throw "RIDE's stage.cmd did not stage $whiteDest (exit $($p.ExitCode))" }
+foreach ($dll in Get-ChildItem -LiteralPath $CrtFolder -Filter *.dll) { Copy-Item -LiteralPath $dll.FullName -Destination "$whiteDest\bin" }
+Say ("  {0,-10} {1,-10} {2,4} files, {3:N1} MB" -f $white.Feature, $white.Folder, (Get-ChildItem -LiteralPath $whiteDest -Recurse -File).Count, ((Get-ChildItem -LiteralPath $whiteDest -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
 Say "  VC++ runtime from $CrtFolder"
 
 # ---- short names, the tree, components and files (as build-msi.ps1) ----------------------------
@@ -140,7 +167,7 @@ foreach ($f in $files) {
         $dirRows.Add(@((Get-DirKey $path), (Get-DirKey $parent), (Get-ShortName (Get-DirKey $parent) $p)))
     }
 }
-$featureOf = @{}; foreach ($ide in $ides) { $featureOf[$ide.Folder] = $ide.Feature }
+$featureOf = @{}; foreach ($ide in $outlooks) { $featureOf[$ide.Folder] = $ide.Feature }
 $components = New-Object System.Collections.Generic.List[object]
 $fileRows = New-Object System.Collections.Generic.List[object]
 $hashRows = New-Object System.Collections.Generic.List[object]
@@ -194,8 +221,12 @@ foreach ($t in $MsiSchema.Keys) { foreach ($row in (Get-ValidationRows $t)) { Ro
 $props = [ordered]@{
     ProductCode = $productCode; ProductName = $productName; ProductVersion = $Version; Manufacturer = $manufacturer
     UpgradeCode = $upgradeCode; ProductLanguage = "1033"; ALLUSERS = "2"; ARPNOMODIFY = "1"; ARPCONTACT = $manufacturer; ARPCOMMENTS = $description
+    # per user by default: with ALLUSERS=2 and no MSIINSTALLPERUSER the screens install for all users, which
+    # needs an administrator the package (UAC-compliant, no elevation asked) never has - error 1925, nothing
+    # installed. msiexec ... MSIINSTALLPERUSER="" ALLUSERS=1 from an elevated prompt still installs for all.
+    MSIINSTALLPERUSER = "1"
     IDE = "Black"
-    SecureCustomProperties = "NETFRAMEWORK48;NEWERPRODUCTFOUND;PREVIOUSVERSIONSINSTALLED;IDE"
+    SecureCustomProperties = "NETFRAMEWORK48;NEWERPRODUCTFOUND;PREVIOUSVERSIONSINSTALLED;IDE;WHITE"
 }
 if ($NoUi) { $props["LIMITUI"] = "1" }
 foreach ($k in $props.Keys) { Row "Property" @($k, $props[$k]) }
@@ -207,12 +238,14 @@ Row "Directory" @("ProgramMenuFolder", "TARGETDIR", "PMenu")
 Row "Directory" @("MENUDIR", "ProgramMenuFolder", (Get-ShortName "ProgramMenuFolder" $product))
 foreach ($r in $dirRows) { Row "Directory" $r }
 
-# Features: Black installs by default; Grey is level 3 (above INSTALLLEVEL 1), so only when chosen.
-# Attributes 8: no advertising. IDE=Grey on a quiet install's command line swaps them (Condition).
+# Features: Black installs by default; Grey and White are level 3 (above INSTALLLEVEL 1), so only when chosen.
+# Attributes 8: no advertising. On a quiet install's command line IDE=Grey or IDE=White takes that one instead
+# of Black, and WHITE=1 adds White beside Black or Grey (Condition); screen 2 does the same with its events.
 $order = 0
-foreach ($ide in $ides) { $order += 2; Row "Feature" @($ide.Feature, $null, $ide.Title, $ide.Description, $order, $ide.Level, "INSTALLDIR", 8) }
-Row "Condition" @("Black", 3, "IDE=`"Grey`"")
+foreach ($ide in $outlooks) { $order += 2; Row "Feature" @($ide.Feature, $null, $ide.Title, $ide.Description, $order, $ide.Level, "INSTALLDIR", 8) }
+Row "Condition" @("Black", 3, "IDE=`"Grey`" OR IDE=`"White`"")
 Row "Condition" @("Grey", 1, "IDE=`"Grey`"")
+Row "Condition" @("White", 1, "IDE=`"White`" OR WHITE=`"1`"")
 foreach ($c in $components) { Row "Component" $c.Row; Row "FeatureComponents" @($c.Feature, $c.Row[0]) }
 foreach ($r in $fileRows) { Row "File" $r }
 foreach ($r in $hashRows) { Row "MsiFileHash" $r }
@@ -221,16 +254,17 @@ Row "Media" @(1, $seq, $null, "#$cabName", $null, $null)
 # Shortcuts: one component per IDE in its feature, keyed by a registry value (HKCU per-user, HKLM
 # per-machine), each removing the Start menu folder when it is the last one there.
 $regKey = "Software\$manufacturer\$productName"
-foreach ($ide in $ides) {
+foreach ($ide in $outlooks) {
     $f = $ide.Feature
     Row "Component" @("C_Shortcut_$f", (Get-HashGuid "component|$codeName|shortcut|$f"), "MENUDIR", 260, $null, "R_InstallDir_$f")
     Row "FeatureComponents" @($f, "C_Shortcut_$f")
     Row "Registry" @("R_InstallDir_$f", -1, "$regKey\$f", "InstallDir", "[$(Get-DirKey $ide.Folder)]", "C_Shortcut_$f")
     Row "Registry" @("R_Version_$f", -1, "$regKey\$f", "Version", "[ProductVersion]", "C_Shortcut_$f")
     Row "RemoveFile" @("RF_MenuDir_$f", "C_Shortcut_$f", $null, "MENUDIR", 2)
-    $exe = "$($ide.Folder)/GRIDE.exe"
+    $exe = $ide.Exe
     if (-not $fileKeyOf.ContainsKey($exe)) { throw "the stage has no $exe" }
-    Row "Shortcut" @("S_$f", "MENUDIR", (Get-ShortName "MENUDIR" $ide.Shortcut), "C_Shortcut_$f", "[#$($fileKeyOf[$exe])]", $null, "GRIDE, the IDE for RIDE's toolchain", $null, $null, $null, 1, (Get-DirKey $ide.Folder))
+    $tip = if ($f -eq "White") { "RIDE - The Simplest, the IDE RIDE's toolchain began with" } else { "GRIDE, the IDE for RIDE's toolchain" }
+    Row "Shortcut" @("S_$f", "MENUDIR", (Get-ShortName "MENUDIR" $ide.Shortcut), "C_Shortcut_$f", "[#$($fileKeyOf[$exe])]", $null, $tip, $null, $null, $null, 1, (Get-DirKey $ide.WorkDir))
 }
 
 Row "Upgrade" @($upgradeCode, $null, $Version, $null, 0, $null, "PREVIOUSVERSIONSINSTALLED")

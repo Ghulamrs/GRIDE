@@ -3,17 +3,20 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 
 #include "json.h"
 #include "path.h"
 #include "settings.h"
 #include "ccs/ccsworkspace.h"
+#include "ccs/ccsxml.h"
 
 namespace editor {
 
 namespace {
 
 std::string withSlashes(const std::string& text) { return path::withSlashes(text); }
+bool endsWithNoCase(const std::string& text, const std::string& tail);
 
 
 const char* languageWord(Language lang) {
@@ -97,6 +100,7 @@ void Project::begin(const std::string& dir, const std::string& name) {
     options::setActive(&options_);
     ccs_ = false;
     ccsWorkspace_.clear();
+    gride_ = false;
     indentSaid_ = false;
     indent_.width = settings::indentWidth();
     indent_.tabs = settings::indentTabs();
@@ -213,6 +217,7 @@ bool Project::load(const std::string& dir, std::string& error) {
     std::string base = path::absolute(dir);
     ccs_ = false;
     ccsWorkspace_.clear();
+    gride_ = false;
 
     // **A CCS project folder** - or one of its three files named outright. A .pro beside them wins:
     // that is RIDE's own. One registered in the workspace it sits in opens through
@@ -270,6 +275,9 @@ bool Project::load(const std::string& dir, std::string& error) {
         base = path::parent(base);
     }
 
+    // A Visual Studio solution or C++ project: read as Visual Studio keeps it, never rewritten.
+    if (endsWithNoCase(path, ".sln") || endsWithNoCase(path, ".vcxproj")) return loadVs(path, error);
+
     FILE* in = std::fopen(path.c_str(), "rb");
     if (!in) return false;
 
@@ -292,6 +300,10 @@ bool Project::load(const std::string& dir, std::string& error) {
 
     // One project of a CCS workspace: the .pro names it, and the project is read as CCS keeps it.
     if (root.get("ccs").is(Json::Object)) return loadWorkspacePro(path, root.get("ccs"), error);
+
+    // GRIDEd's and GRIDE 2.0's own .pro: read as they keep it, never rewritten.
+    if (root.has("gride") || root.has("folders") || root.has("formatVersion") || root.has("sourceFiles"))
+        return loadGride(root, path, base, error);
 
     root_ = base;
     file_ = path;
@@ -393,11 +405,15 @@ bool Project::saveAs(const std::string& file, std::string& error) {
         return false;
     }
 
+    // Save As is how a GRIDE project becomes RIDE's: the copy is written in RIDE's form.
     std::string was = file_;
+    bool wasGride = gride_;
     file_ = file;
+    gride_ = false;
     if (save(error)) return true;
 
     file_ = was;
+    gride_ = wasGride;
     return false;
 }
 
@@ -414,6 +430,27 @@ bool Project::save(std::string& error) {
         state.set("open", Json::fromText(open_));
         if (!settings::rememberCcsProjectState(root_, state)) {
             error = "cannot write settings.json, where a CCS project's state is kept";
+            return false;
+        }
+        return true;
+    }
+    // A GRIDE project's .pro is GRIDE's: RIDE's own state goes to settings.json, a change to its files is refused.
+    if (gride_) {
+        if (shape() != grideShape_) {
+            error = path::filename(file_) + " is a " + foreign_ + " project: RIDE reads it but does not rewrite it - "
+                    "Project > Save As makes a RIDE project of it, which can be changed";
+            return false;
+        }
+        Json state = settings::ccsProjectState(root_);
+        if (!state.is(Json::Object)) state = Json::object();
+        state.set("open", Json::fromText(open_));
+        state.set("arch", Json::fromText(arch_));
+        state.set("toolchain", Json::fromText(toolchainWord(toolchain_)));
+        Json list = Json::array();
+        for (size_t i = 0; i < target_.args.size(); ++i) list.push(Json::fromText(target_.args[i]));
+        state.set("args", list);
+        if (!settings::rememberCcsProjectState(root_, state)) {
+            error = "cannot write settings.json, where a " + foreign_ + " project's state is kept";
             return false;
         }
         return true;
@@ -569,6 +606,7 @@ void Project::close() {
     loaded_ = false;
     ccs_ = false;
     ccsWorkspace_.clear();
+    gride_ = false;
     root_.clear();
     file_.clear();
     name_.clear();
@@ -1086,6 +1124,401 @@ bool Project::rememberArguments(const std::string& line, std::string& error) {
     if (settings::rememberCcsProjectState(root_, state)) return true;
     error = "cannot write settings.json, where a CCS project's state is kept";
     return false;
+}
+
+namespace {
+
+bool isHeaderFile(const std::string& rel) {
+    size_t dot = rel.find_last_of('.');
+    if (dot == std::string::npos) return false;
+    std::string ext = rel.substr(dot + 1);
+    for (size_t i = 0; i < ext.size(); ++i) ext[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(ext[i])));
+    return ext == "h" || ext == "hpp" || ext == "hh" || ext == "hxx" || ext == "inl";
+}
+
+}
+
+// GRIDEd: { "gride", "name", "targets": [...], "folders": { "<folder>": [files] } }.
+// GRIDE 2.0: { "formatVersion": 2, "name", "target", "outputName", "sourceFiles": [...], "programArgs": [...] }.
+// Each folder is a group (GRIDE 2.0's one list is Sources); headers go to Headers, which is never built.
+bool Project::loadGride(const Json& root, const std::string& pro, const std::string& dir, std::string& error) {
+    // GRIDE 2.0's .pro of a Visual Studio solution names it and holds no files of its own: the solution is read.
+    std::string solution = withSlashes(root.get("visualStudio").text(std::string()));
+    if (!solution.empty() && !root.has("sourceFiles")) {
+        bool rooted = solution[0] == '/' || (solution.size() > 1 && solution[1] == ':');
+        if (!loadVs(rooted ? solution : path::join(dir, solution), error)) return false;
+        // What GRIDE 2.0 keeps for it - the compiler (cl for cppparse), the program's arguments - unless RIDE has its own.
+        Json state = settings::ccsProjectState(root_);
+        if (!state.has("toolchain")) toolchain_ = toolchainFrom(root.get("toolchain").text("auto"));
+        if (!state.has("args")) {
+            const Json& args = root.get("programArgs");
+            for (size_t i = 0; i < args.size(); ++i) target_.args.push_back(args.at(i).text(std::string()));
+        }
+        file_ = pro;
+        return true;
+    }
+    root_ = dir;
+    file_ = pro;
+    name_ = root.get("name").text(path::filename(dir));
+    toolchain_ = ToolAuto;
+    emulateOnly_ = false;
+    indentSaid_ = false;
+    indent_.width = settings::indentWidth();
+    indent_.tabs = settings::indentTabs();
+    includes_.clear();
+    libraries_.clear();
+    options_ = options::Store();
+    options::setActive(&options_);
+
+    groups_.clear();
+    Group headers;
+    headers.name = "Headers";
+    std::vector<std::pair<std::string, const Json*> > lists;
+    const Json& folders = root.get("folders");
+    for (size_t i = 0; i < folders.size(); ++i) {
+        const Json& entry = folders.valueAt(i);
+        lists.push_back(std::make_pair(folders.keyAt(i), entry.is(Json::Object) ? &entry.get("files") : &entry));
+    }
+    if (root.has("sourceFiles")) lists.push_back(std::make_pair(std::string("Sources"), &root.get("sourceFiles")));
+    for (size_t l = 0; l < lists.size(); ++l) {
+        Group group;
+        group.name = lists[l].first == "Headers" ? std::string("Header sources") : lists[l].first;
+        const Json& files = *lists[l].second;
+        for (size_t j = 0; j < files.size(); ++j) {
+            std::string relative = withSlashes(files.at(j).text());
+            if (relative.empty()) continue;
+            std::string reason;
+            if (!allows(relative, reason)) {
+                if (error.empty()) error = relative + ": " + reason;
+                continue;
+            }
+            (isHeaderFile(relative) ? headers : group).files.push_back(relative);
+        }
+        if (!group.files.empty()) groups_.push_back(group);
+    }
+    if (groups_.empty()) {
+        Group all;
+        all.name = "Sources";
+        groups_.push_back(all);
+    }
+    target_ = Target();
+    target_.name = root.get("outputName").text(name_);
+    for (size_t g = 0; g < groups_.size(); ++g) target_.groups.push_back(groups_[g].name);
+    if (!headers.files.empty()) groups_.push_back(headers);
+    const Json& args = root.get("programArgs");
+    for (size_t i = 0; i < args.size(); ++i) target_.args.push_back(args.at(i).text(std::string()));
+
+    // The target it was last built for: GRIDE 2.0's "target", GRIDEd's first of "targets".
+    std::string target = root.get("target").text(root.get("targets").at(0).text(std::string()));
+    arch_ = target.find("6747") != std::string::npos ? std::string("tms6747") : std::string(hostArch());
+
+    finishForeign("GRIDE");
+    return true;
+}
+
+namespace {
+
+bool endsWithNoCase(const std::string& text, const std::string& tail) {
+    if (text.size() < tail.size()) return false;
+    for (size_t i = 0; i < tail.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(text[text.size() - tail.size() + i])) !=
+            std::tolower(static_cast<unsigned char>(tail[i]))) return false;
+    return true;
+}
+
+std::vector<std::string> splitOn(const std::string& text, char by) {
+    std::vector<std::string> out;
+    std::string one;
+    for (size_t i = 0; i <= text.size(); ++i) {
+        if (i == text.size() || text[i] == by) {
+            size_t a = one.find_first_not_of(" \t\r\n"), b = one.find_last_not_of(" \t\r\n");
+            if (a != std::string::npos) out.push_back(one.substr(a, b - a + 1));
+            one.clear();
+        } else one += text[i];
+    }
+    return out;
+}
+
+// A leaf name against a pattern of * and ?, without regard to case, as Windows matches.
+bool globMatch(const char* p, const char* s) {
+    if (*p == '\0') return *s == '\0';
+    if (*p == '*') return globMatch(p + 1, s) || (*s != '\0' && globMatch(p, s + 1));
+    if (*s == '\0') return false;
+    if (*p != '?' && std::tolower(static_cast<unsigned char>(*p)) != std::tolower(static_cast<unsigned char>(*s))) return false;
+    return globMatch(p + 1, s + 1);
+}
+
+// What MSBuild would make of a path or a list entry: the project's and the solution's own directory
+// macros put in, anything else left as an unknown "$(" the caller drops.
+std::string vsExpand(std::string text, const std::string& projectDir, const std::string& solutionDir) {
+    struct { const char* macro; const std::string* value; } known[] = {
+        { "$(ProjectDir)", &projectDir }, { "$(MSBuildProjectDirectory)", &projectDir },
+        { "$(MSBuildThisFileDirectory)", &projectDir }, { "$(SolutionDir)", &solutionDir } };
+    for (size_t k = 0; k < sizeof known / sizeof known[0]; ++k) {
+        std::string with = *known[k].value + "/";
+        for (size_t at; (at = text.find(known[k].macro)) != std::string::npos;)
+            text.replace(at, std::strlen(known[k].macro), with);
+    }
+    for (size_t i = 0; i < text.size(); ++i) if (text[i] == '\\') text[i] = '/';
+    for (size_t at; (at = text.find("//")) != std::string::npos;) text.erase(at, 1);
+    return text;
+}
+
+bool readVsXml(const std::string& file, ccs::XmlNode& root, std::string& error) {
+    FILE* in = std::fopen(file.c_str(), "rb");
+    if (!in) { error = "cannot read " + file; return false; }
+    std::string text;
+    char chunk[4096];
+    size_t got;
+    while ((got = std::fread(chunk, 1, sizeof chunk, in)) > 0) text.append(chunk, got);
+    std::fclose(in);
+    if (text.compare(0, 3, "\xEF\xBB\xBF") == 0) text.erase(0, 3);   // Visual Studio writes a BOM
+    if (!ccs::parseXml(text, root, error)) { error = path::filename(file) + ": " + error; return false; }
+    return true;
+}
+
+const ccs::XmlNode& vsProjectElement(const ccs::XmlNode& doc) {
+    if (doc.name == "Project") return doc;
+    const ccs::XmlNode* p = doc.child("Project");
+    return p ? *p : doc;
+}
+
+// The C++ projects a .sln lists, by name and absolute path; a solution folder or a C# project is passed over.
+std::vector<std::pair<std::string, std::string> > solutionProjects(const std::string& sln) {
+    std::vector<std::pair<std::string, std::string> > out;
+    FILE* in = std::fopen(sln.c_str(), "rb");
+    if (!in) return out;
+    std::string text;
+    char chunk[4096];
+    size_t got;
+    while ((got = std::fread(chunk, 1, sizeof chunk, in)) > 0) text.append(chunk, got);
+    std::fclose(in);
+    std::vector<std::string> lines = splitOn(text, '\n');
+    for (size_t i = 0; i < lines.size(); ++i) {
+        // Project("{type}") = "name", "relative\path.vcxproj", "{guid}"
+        const std::string& line = lines[i];
+        if (line.compare(0, 8, "Project(") != 0) continue;
+        std::vector<std::string> quoted;
+        for (size_t at = line.find('='); at != std::string::npos && quoted.size() < 3;) {
+            size_t open = line.find('"', at);
+            if (open == std::string::npos) break;
+            size_t close = line.find('"', open + 1);
+            if (close == std::string::npos) break;
+            quoted.push_back(line.substr(open + 1, close - open - 1));
+            at = close + 1;
+        }
+        if (quoted.size() < 2 || !endsWithNoCase(quoted[1], ".vcxproj")) continue;
+        out.push_back(std::make_pair(quoted[0], path::join(path::parent(sln), vsExpand(quoted[1], "", ""))));
+    }
+    return out;
+}
+
+}
+
+// **A Visual Studio project opened as it is**: a .sln - its one C++ project, or of several the first
+// that makes a program - or a .vcxproj, as Visual Studio 2010 to 2022 write them. Read as GRIDEd and
+// GRIDE 2.0 read them: the ClCompile and ClInclude items (a wildcard in the file name expanded), what is
+// excluded from the build, the include directories and the definitions of Debug and Release on x64
+// (or the one platform there is). Never written: RIDE's own state goes to settings.json.
+bool Project::loadVs(const std::string& file, std::string& error) {
+    std::string opened = withSlashes(path::absolute(file)), vcx = opened, solutionDir;
+    ccs::XmlNode doc;
+    if (endsWithNoCase(opened, ".sln")) {
+        solutionDir = path::parent(opened);
+        std::vector<std::pair<std::string, std::string> > projects = solutionProjects(opened);
+        if (projects.empty()) {
+            error = path::filename(opened) + " has no C++ project (.vcxproj) RIDE can read";
+            return false;
+        }
+        vcx.clear();
+        for (size_t i = 0; i < projects.size() && vcx.empty(); ++i) {
+            ccs::XmlNode one;
+            std::string why;
+            if (!readVsXml(projects[i].second, one, why)) continue;
+            std::vector<const ccs::XmlNode*> kinds;
+            vsProjectElement(one).find("ConfigurationType", kinds);
+            if (kinds.empty() || kinds[0]->text == "Application") { vcx = projects[i].second; doc = one; }
+        }
+        if (vcx.empty()) {
+            vcx = projects[0].second;
+            if (!readVsXml(vcx, doc, error)) return false;
+        }
+    } else if (!readVsXml(vcx, doc, error)) {
+        return false;
+    }
+    const ccs::XmlNode& top = vsProjectElement(doc);
+    std::string dir = path::parent(vcx);
+    if (solutionDir.empty()) solutionDir = dir;
+
+    // The platform: x64 when the project has it, else the first it names.
+    std::string platform;
+    std::vector<const ccs::XmlNode*> configs;
+    top.find("ProjectConfiguration", configs);
+    for (size_t i = 0; i < configs.size(); ++i) {
+        std::string inc = configs[i]->attribute("Include");
+        size_t bar = inc.find('|');
+        if (bar == std::string::npos) continue;
+        if (platform.empty() || inc.substr(bar + 1) == "x64") platform = inc.substr(bar + 1);
+    }
+
+    Group sources, headers, linked, excluded;
+    sources.name = "Sources";
+    headers.name = "Headers";
+    linked.name = "Linked";
+    excluded.name = "Excluded";
+    std::vector<const ccs::XmlNode*> groups;
+    top.find("ItemGroup", groups);
+    for (size_t g = 0; g < groups.size(); ++g)
+        for (size_t c = 0; c < groups[g]->children.size(); ++c) {
+            const ccs::XmlNode& item = groups[g]->children[c];
+            bool header = item.name == "ClInclude";
+            if (!header && item.name != "ClCompile") continue;
+            bool out = false;
+            for (size_t k = 0; k < item.children.size(); ++k)
+                if (item.children[k].name == "ExcludedFromBuild" && item.children[k].text == "true") out = true;
+            std::vector<std::string> named = splitOn(item.attribute("Include"), ';');
+            for (size_t n = 0; n < named.size(); ++n) {
+                std::string one = vsExpand(named[n], dir, solutionDir);
+                if (one.find("$(") != std::string::npos || one.find("%(") != std::string::npos) continue;
+                bool rooted = !one.empty() && (one[0] == '/' || (one.size() > 1 && one[1] == ':'));
+                std::string full = rooted ? one : path::join(dir, one);
+                std::vector<std::string> found;
+                std::string leaf = path::filename(full);
+                if (leaf.find_first_of("*?") != std::string::npos) {
+                    std::string folder = path::parent(full);
+                    for (size_t at; (at = folder.find("/**")) != std::string::npos;) folder.erase(at, 3);
+                    std::vector<path::Entry> listed = path::entries(folder);
+                    for (size_t e = 0; e < listed.size(); ++e)
+                        if (!listed[e].directory && globMatch(leaf.c_str(), listed[e].name.c_str()))
+                            found.push_back(path::join(folder, listed[e].name));
+                    std::sort(found.begin(), found.end());
+                } else {
+                    found.push_back(full);
+                }
+                for (size_t f = 0; f < found.size(); ++f) {
+                    std::string rel = path::relativeTo(found[f], dir);
+                    bool outside = rel.empty() || rel.compare(0, 2, "..") == 0;
+                    Group& into = out ? excluded : header ? headers : outside ? linked : sources;
+                    std::string entry = outside ? withSlashes(found[f]) : withSlashes(rel);
+                    if (std::find(into.files.begin(), into.files.end(), entry) == into.files.end()) into.files.push_back(entry);
+                }
+            }
+        }
+
+    root_ = dir;
+    file_ = opened;
+    name_ = path::filename(vcx);
+    name_.resize(name_.size() - std::string(".vcxproj").size());
+    toolchain_ = ToolAuto;
+    arch_ = hostArch();
+    emulateOnly_ = false;
+    indentSaid_ = false;
+    indent_.width = settings::indentWidth();
+    indent_.tabs = settings::indentTabs();
+    includes_.clear();
+    libraries_.clear();
+    options_ = options::Store();
+
+    // The item definitions: those with no condition hold for both configurations, the others for theirs.
+    std::vector<std::string> defines[ConfigCount];
+    std::vector<const ccs::XmlNode*> definitions;
+    top.find("ItemDefinitionGroup", definitions);
+    for (size_t d = 0; d < definitions.size(); ++d) {
+        std::string when = definitions[d]->attribute("Condition");
+        bool applies[ConfigCount] = { when.empty(), when.empty() };
+        if (!when.empty() && (platform.empty() || when.find("|" + platform) != std::string::npos)) {
+            applies[ConfigDebug] = when.find("Debug") != std::string::npos;
+            applies[ConfigRelease] = when.find("Release") != std::string::npos;
+        }
+        if (!applies[ConfigDebug] && !applies[ConfigRelease]) continue;
+        const ccs::XmlNode* compile = definitions[d]->child("ClCompile");
+        if (!compile) continue;
+        const ccs::XmlNode* dirs = compile->child("AdditionalIncludeDirectories");
+        std::vector<std::string> listed = dirs ? splitOn(dirs->text, ';') : std::vector<std::string>();
+        for (size_t i = 0; i < listed.size(); ++i) {
+            std::string one = vsExpand(listed[i], dir, solutionDir);
+            if (one.find("$(") != std::string::npos || one.find("%(") != std::string::npos) continue;
+            while (one.size() > 1 && one[one.size() - 1] == '/') one.erase(one.size() - 1);
+            std::string rel = path::relativeTo(one, dir);
+            std::string entry = !rel.empty() && rel.compare(0, 2, "..") != 0 ? rel : one;
+            if (std::find(includes_.begin(), includes_.end(), entry) == includes_.end()) includes_.push_back(entry);
+        }
+        const ccs::XmlNode* defs = compile->child("PreprocessorDefinitions");
+        std::vector<std::string> said = defs ? splitOn(defs->text, ';') : std::vector<std::string>();
+        for (int c = 0; c < ConfigCount; ++c) {
+            if (!applies[c]) continue;
+            for (size_t i = 0; i < said.size(); ++i)
+                if (said[i].find("%(") == std::string::npos && said[i].find("$(") == std::string::npos &&
+                    std::find(defines[c].begin(), defines[c].end(), said[i]) == defines[c].end())
+                    defines[c].push_back(said[i]);
+        }
+    }
+    for (int c = 0; c < ConfigCount; ++c) {
+        std::string joined;
+        for (size_t i = 0; i < defines[c].size(); ++i) joined += (i ? ";" : "") + defines[c][i];
+        if (joined.empty()) continue;
+        options_.set(static_cast<Configuration>(c), "c90.defines", joined);
+        options_.set(static_cast<Configuration>(c), "cpp11.defines", joined);
+    }
+    options::setActive(&options_);
+
+    groups_.clear();
+    groups_.push_back(sources);
+    if (!linked.files.empty()) groups_.push_back(linked);
+    if (!headers.files.empty()) groups_.push_back(headers);
+    if (!excluded.files.empty()) groups_.push_back(excluded);
+
+    target_ = Target();
+    std::vector<const ccs::XmlNode*> names;
+    top.find("TargetName", names);
+    target_.name = !names.empty() && names[0]->text.find("$(") == std::string::npos && !names[0]->text.empty() ? names[0]->text : name_;
+    target_.groups.push_back(sources.name);
+    if (!linked.files.empty()) target_.groups.push_back(linked.name);
+
+    finishForeign("Visual Studio");
+    return true;
+}
+
+// The end of opening another IDE's project: what it is, as read, and what RIDE remembered of its own.
+void Project::finishForeign(const char* kind) {
+    grideShape_ = shape();
+    Json state = settings::ccsProjectState(root_);
+    open_ = withSlashes(state.get("open").text(std::string()));
+    if (state.has("args")) {
+        target_.args.clear();
+        const Json& kept = state.get("args");
+        for (size_t i = 0; i < kept.size(); ++i) target_.args.push_back(kept.at(i).text(std::string()));
+    }
+    std::string arch = state.get("arch").text(std::string());
+    if (!arch.empty() && (!isHostArch(arch) || arch == hostArch())) arch_ = arch;
+    if (state.has("toolchain")) toolchain_ = toolchainFrom(state.get("toolchain").text("auto"));
+    foreign_ = kind;
+    gride_ = true;
+    loaded_ = true;
+}
+
+// What a GRIDE project's .pro would have to say differently for a change: its groups, build and options.
+std::string Project::shape() const {
+    Json all = Json::object();
+    Json groups = Json::object();
+    for (size_t i = 0; i < groups_.size(); ++i) {
+        Json files = Json::array();
+        for (size_t j = 0; j < groups_[i].files.size(); ++j) files.push(Json::fromText(groups_[i].files[j]));
+        files.push(Json::fromText(toolchainWord(groups_[i].toolchain)));
+        groups.set(groups_[i].name, files);
+    }
+    all.set("groups", groups);
+    Json built = Json::array();
+    built.push(Json::fromText(target_.name));
+    for (size_t i = 0; i < target_.groups.size(); ++i) built.push(Json::fromText(target_.groups[i]));
+    all.set("build", built);
+    Json more = Json::array();
+    for (size_t i = 0; i < includes_.size(); ++i) more.push(Json::fromText("I" + includes_[i]));
+    for (size_t i = 0; i < libraries_.size(); ++i) more.push(Json::fromText("L" + libraries_[i]));
+    more.push(Json::fromBool(emulateOnly_));
+    all.set("more", more);
+    all.set("options", options_.toJson());
+    return all.write();
 }
 
 bool Project::rememberConfiguration(Configuration config) {

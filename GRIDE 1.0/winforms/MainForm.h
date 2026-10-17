@@ -986,6 +986,9 @@ private:
         // Open takes a RIDE .pro, a CCS project's .project, or a file in a CCS workspace.
         project->DropDownItems->Add("Open...", nullptr,
                                     gcnew EventHandler(this, &MainForm::OnOpenProjectFile));
+        // A Visual Studio 2010-2022 solution or C++ project, read as it is and never written (project.h).
+        project->DropDownItems->Add("Open Visual Studio Solution...", nullptr,
+                                    gcnew EventHandler(this, &MainForm::OnOpenVsSolution));
         // The last three projects, most recent first, to recall one by name.
         recentMenu_ = gcnew ToolStripMenuItem("Recent");
         recentItems_ = gcnew System::Collections::Generic::List<ToolStripMenuItem^>();
@@ -2094,7 +2097,7 @@ private:
         bool lineCountMoved = lines != sheet->lines;
         sheet->lines = lines;
         int wanted = GutterWidth(lines);
-        if (wanted > sheet->gutter->Width) sheet->gutter->Width = wanted;
+        if (wanted != sheet->gutter->Width) sheet->gutter->Width = wanted;
         sheet->gutter->Invalidate();
 
         if (sender == text_) {
@@ -2128,16 +2131,19 @@ private:
         if (sheet != nullptr) sheet->gutter->Invalidate();
     }
 
-    // Room for the dot or arrow, the digits in the code's own face, and a margin.
+    // Three characters of the code's own face: one for the dot or arrow, two for the digits - a
+    // file of a hundred lines or more takes a character more for each digit it needs.
     int GutterWidth(int lines) {
         int digits = Math::Max(2, (lines < 1 ? 1 : lines).ToString()->Length);
-        return 16 + digitWidth_ * digits + 8;
+        return digitWidth_ * (digits + 1) + 2;
     }
 
+    // One character of the face, measured over ten so that rounding does not widen it.
     static int DigitWidth(System::Drawing::Font^ font) {
-        return System::Windows::Forms::TextRenderer::MeasureText(
-            "0", font, System::Drawing::Size(100, 100),
+        int ten = System::Windows::Forms::TextRenderer::MeasureText(
+            "0000000000", font, System::Drawing::Size(2000, 200),
             System::Windows::Forms::TextFormatFlags::NoPadding).Width;
+        return Math::Max(4, (ten + 9) / 10);
     }
 
     // The gutter's pens and brushes, made once: it repaints on every keystroke and caret move.
@@ -2181,16 +2187,16 @@ private:
             bool lookingHere = sameLookFile && lookingLine_ == row + 1;
             if (standingHere || lookingHere) {
                 array<System::Drawing::PointF>^ arrow = gcnew array<System::Drawing::PointF>(3);
-                arrow[0] = System::Drawing::PointF(3.0f, top);
-                arrow[1] = System::Drawing::PointF(12.0f, top + 4.5f);
-                arrow[2] = System::Drawing::PointF(3.0f, top + 9.0f);
+                arrow[0] = System::Drawing::PointF(1.0f, top);
+                arrow[1] = System::Drawing::PointF(10.0f, top + 4.5f);
+                arrow[2] = System::Drawing::PointF(1.0f, top + 9.0f);
                 if (standingHere) e->Graphics->FillPolygon(stopBrush_, arrow);
                 else e->Graphics->DrawPolygon(lookPen_, arrow);
             } else if (marks != nullptr && marks->Contains(row + 1)) {
-                e->Graphics->FillEllipse(breakBrush_, 3.0f, top, 9.0f, 9.0f);
+                e->Graphics->FillEllipse(breakBrush_, 1.0f, top, 9.0f, 9.0f);
             }
 
-            System::Drawing::Rectangle room(0, where.Y, panel->Width - 6, box->Font->Height);
+            System::Drawing::Rectangle room(0, where.Y, panel->Width - 2, box->Font->Height);
             System::Windows::Forms::TextRenderer::DrawText(
                 e->Graphics, (row + 1).ToString(), box->Font, room,
                 row == caretLine ? System::Drawing::Color::FromArgb(60, 60, 60)
@@ -3742,7 +3748,7 @@ private:
 
         msclr::auto_handle<OpenFileDialog> pick(gcnew OpenFileDialog());
         pick->Title = "Open project";
-        pick->Filter = "Projects (*" + suffix + ", CCS .project)|*" + suffix + ";.project;.cproject;.ccsproject"
+        pick->Filter = "Projects (*" + suffix + ", CCS .project, Visual Studio .sln .vcxproj)|*" + suffix + ";.project;.cproject;.ccsproject;*.sln;*.vcxproj"
                        "|All files (*.*)|*.*";
         pick->InitialDirectory = ProjectsDir();
         if (pick->ShowDialog(this) != System::Windows::Forms::DialogResult::OK) {
@@ -3766,6 +3772,19 @@ private:
             }
         }
         LoadProject(chosen);
+    }
+
+    void OnOpenVsSolution(Object^, EventArgs^) {
+        msclr::auto_handle<OpenFileDialog> pick(gcnew OpenFileDialog());
+        pick->Title = "Open Visual Studio solution";
+        pick->Filter = "Visual Studio solutions and C++ projects (*.sln, *.vcxproj)|*.sln;*.vcxproj"
+                       "|All files (*.*)|*.*";
+        pick->InitialDirectory = ProjectsDir();
+        if (pick->ShowDialog(this) != System::Windows::Forms::DialogResult::OK) {
+            what_->Text = "no project opened";
+            return;
+        }
+        LoadProject(pick->FileName);
     }
 
     void OnSaveProjectAs(Object^, EventArgs^) {

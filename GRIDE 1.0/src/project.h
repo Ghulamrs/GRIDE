@@ -145,6 +145,14 @@ public:
     // Reads the three CCS files again; a .pro project is left as it is. False, with the reason, when they no longer read.
     bool reloadIfCcs(std::string& error);
 
+    // **A GRIDE project opened as it is**: GRIDEd's .pro ("gride", "folders") or GRIDE 2.0's
+    // ("formatVersion", "sourceFiles"). Its .pro is never rewritten: save() keeps RIDE's own state -
+    // the open file, the arguments, the target - in settings.json, as for a CCS project, and refuses
+    // a change to its files; Save As makes a RIDE project of it.
+    bool isGride() const { return gride_; }
+    // Whose project it is when isGride(): "GRIDE" or "Visual Studio".
+    const std::string& foreignKind() const { return foreign_; }
+
     void setIndent(const IndentStyle& style) { indent_ = style; indentSaid_ = true; }
     void setToolchain(ToolchainKind kind) { toolchain_ = kind; }
     void setArch(const std::string& arch) { arch_ = arch; }
@@ -195,6 +203,14 @@ private:
     bool loadCcs(const std::string& dir, std::string& error, const std::string& workspace = std::string());
     // A .pro of one CCS workspace project: { "ccs": { "workspace": ".", "project": "<name>" } }.
     bool loadWorkspacePro(const std::string& pro, const Json& ccs, std::string& error);
+    bool gride_ = false;
+    // The GRIDE project's files and build as read, to tell RIDE's own state from a change to them.
+    std::string grideShape_;
+    bool loadGride(const Json& root, const std::string& pro, const std::string& dir, std::string& error);
+    std::string shape() const;
+    std::string foreign_;
+    bool loadVs(const std::string& file, std::string& error);
+    void finishForeign(const char* kind);
 };
 
 }

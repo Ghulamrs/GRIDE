@@ -330,6 +330,7 @@ Outcome saveProject(Project& project) {
     if (!project.loaded()) return no("there is no project to save");
     // A CCS project's files are CCS's: what save() writes is RIDE's own state, elsewhere.
     if (project.isCcs()) return andSave(project, "RIDE's state for the CCS project written to settings.json - its own files are CCS's", project.file());
+    if (project.isGride()) return andSave(project, "RIDE's state for the " + project.foreignKind() + " project written to settings.json - its own files stay " + project.foreignKind() + "'s", project.file());
     return andSave(project, project.file() + " written", project.file());
 }
 

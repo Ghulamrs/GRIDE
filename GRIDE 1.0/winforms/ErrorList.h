@@ -82,11 +82,16 @@ private:
     System::Collections::Generic::List<String^>^ files_;
     int errors_;
 
+    // The name after the last slash; not Path::GetFileName, which throws on a '>' or '|' a program's own output may hold.
     static String^ Leaf(String^ file) {
-        return String::IsNullOrEmpty(file) ? "" : System::IO::Path::GetFileName(file);
+        return String::IsNullOrEmpty(file) ? "" : file->Substring(file->LastIndexOfAny(gcnew array<wchar_t>{'/', '\\'}) + 1);
     }
 
     bool Read(String^ line, Utf8% source) {
+        // MSBuild's "1>" before a line, as cl's output and a program like cppparse print it, is no part of the file.
+        int digits = 0;
+        while (digits < line->Length && Char::IsDigit(line[digits])) ++digits;
+        if (digits > 0 && digits < line->Length && line[digits] == '>') line = line->Substring(digits + 1);
         Utf8 text(line);
         int row = 0, column = 0;
         const char* file = "";

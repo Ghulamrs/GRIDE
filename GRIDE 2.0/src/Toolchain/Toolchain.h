@@ -265,7 +265,12 @@ namespace Gride
                 {
                     int eq = line == nullptr ? -1 : line->IndexOf(L'=');
                     if (eq <= 0) continue;
-                    psi->EnvironmentVariables[line->Substring(0, eq)->Trim()] = System::Environment::ExpandEnvironmentVariables(line->Substring(eq + 1));
+                    String^ name = line->Substring(0, eq)->Trim();
+                    String^ value = System::Environment::ExpandEnvironmentVariables(line->Substring(eq + 1));
+                    // NAME= with nothing after it means "not set": removed, not left empty - cpp11 reports its
+                    // optimizer's declines whenever CPP11_DECLINES merely exists, so an option off must clear it
+                    if (value->Trim()->Length == 0) psi->EnvironmentVariables->Remove(name);
+                    else psi->EnvironmentVariables[name] = value;
                 }
             if (tool != nullptr) ApplyEnvironment(psi, tool->Environment);
 
@@ -352,7 +357,9 @@ namespace Gride
                 if (eq <= 0) continue;
                 String^ name = pair->Substring(0, eq)->Trim();
                 String^ value = System::Environment::ExpandEnvironmentVariables(pair->Substring(eq + 1)->Trim());
-                if (name->Length > 0) psi->EnvironmentVariables[name] = value;
+                if (name->Length == 0) continue;
+                if (value->Length == 0) psi->EnvironmentVariables->Remove(name);     // NAME= : not set
+                else psi->EnvironmentVariables[name] = value;
             }
         }
 
