@@ -19,8 +19,8 @@ Release/
 # GRIDE 2.0's debugger source shares a name with a build folder
 !/GRIDE 2.0/src/Debug/
 # a tool's IntDir, ar6x's own output; the MSI and its checks
-/toolchain/**/build/
-/installer/dist/
+/Toolchain/**/build/
+/Installer/dist/
 # GRIDE 1.0 (RIDE 5.17, the White outlook): what its builds and tests leave in the tree. Its own
 # .gitignore beside it already keeps out bin/, dist/, obj/, x64/, lib/, build/, *.log and the programs it
 # builds (tests/test, tests/session among them).

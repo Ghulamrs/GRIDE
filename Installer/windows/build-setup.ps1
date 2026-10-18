@@ -1,11 +1,11 @@
 # build-setup.ps1 - GRIDE-Setup-<ver>.msi: one Windows Installer package that installs one outlook of
 # GRIDEx2 - Black (GRIDEd), Grey (GRIDE 2.0) or White (RIDE 5.17 from GRIDE 1.0, RIDE - The Simplest) - each
-# with the toolchain beside it, chosen on the second screen; with Black or Grey, White can come along as a
-# lightweight extra (the user's design, 2026-10-17). What the user sees names GRIDE and its outlooks:
+# with the toolchain beside it, chosen on the second screen: one of the three, White a choice like the
+# others (the user's design, 2026-10-18). What the user sees names GRIDE and its outlooks:
 # the screens, the folders GRIDE\Black, GRIDE\Grey, GRIDE\White, the Start menu, Programs and Features. Written through Windows Installer's own automation API (msi.dll): no WiX, no Inno
 # Setup, no setup project. Adapted from GRIDE-Installer's build-msi.ps1 (one IDE, dummy tools).
 #
-#   build-setup.ps1 [-Version 1.0.0] [-OutDir <GRIDEx2\installer\dist>]
+#   build-setup.ps1 [-Version 1.0.0] [-OutDir <GRIDEx2\Installer\dist>]
 #
 # Input: each solution's Release build, as Visual Studio's Build Solution leaves it -
 # GRIDEd\x64\Release and GRIDE 2.0\x64\Release (GRIDE.exe, the ten programs, toolchain.json, docs\,
@@ -14,9 +14,8 @@
 # allows for Microsoft.VC143.CRT), so a machine without the VC++ Redistributable runs it.
 #
 # The package: features Black (level 1), Grey and White (level 3, so not installed unless chosen); the
-# second dialog's Install button removes the outlooks not chosen and adds the chosen one, and White too
-# when its box is ticked. A quiet install takes IDE=Grey or IDE=White, and WHITE=1 for White beside
-# Black or Grey (Condition table). ALLUSERS=2 with the UAC-compliant bit: MSIINSTALLPERUSER=1 installs
+# second dialog's Install button removes the outlooks not chosen and adds the chosen one. A quiet
+# install takes IDE=Grey or IDE=White (Condition table). ALLUSERS=2 with the UAC-compliant bit: MSIINSTALLPERUSER=1 installs
 # under the user's profile without elevation. Launch conditions: 64-bit Windows, .NET Framework 4.8,
 # no newer GRIDEx2. Component GUIDs are a hash of each file's install path, the ProductCode a hash of
 # the version, the UpgradeCode fixed.
@@ -34,7 +33,7 @@ Set-StrictMode -Version 2
 . (Join-Path $PSScriptRoot "Msi-Com.ps1")
 if ($Version -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,5}$') { throw "the version must be major.minor.build: $Version" }
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)          # GRIDEx2
-if (-not $OutDir) { $OutDir = Join-Path $root "installer\dist" }
+if (-not $OutDir) { $OutDir = Join-Path $root "Installer\dist" }
 $OutDir = [IO.Path]::GetFullPath($OutDir)
 New-Item -ItemType Directory -Force "$OutDir\tmp", "$OutDir\logs" | Out-Null
 $env:TMP = "$OutDir\tmp"; $env:TEMP = "$OutDir\tmp"
@@ -59,7 +58,7 @@ $ides = @(
                        Description = "GRIDE in the Grey outlook, with the eleven tools beside it" })
 # White: RIDE 5.17 from GRIDE 1.0 (RIDE - The Simplest), laid out as RIDE's own stage.cmd lays it - bin\ with
 # RIDE.exe, RIDEConsole.exe and the tools, include\, lib\, programs\, projects\, help\, settings.json. Off
-# unless chosen: on its own (IDE=White) or beside Black or Grey as a lightweight extra (WHITE=1).
+# unless chosen (IDE=White).
 $white = [pscustomobject]@{ Feature = "White"; Folder = "White"; Source = "GRIDE 1.0"; Title = "GRIDE - White outlook (RIDE - The Simplest)"
                             Shortcut = "RIDE - The Simplest"; Level = 3; Exe = "White/bin/RIDE.exe"; WorkDir = "White/bin"
                             Description = "RIDE 5.17, the simplest outlook: its window and console editor, with the eleven tools beside it" }
@@ -87,7 +86,8 @@ foreach ($ide in $ides) {
     }
     $dest = Join-Path $stage $ide.Folder
     New-Item -ItemType Directory -Force $dest | Out-Null
-    Get-ChildItem -LiteralPath $rel -Recurse -File | Where-Object { -not $skip.IsMatch($_.Name) -and -not $skip.IsMatch($_.FullName) } | ForEach-Object {
+    Get-ChildItem -LiteralPath $rel -Recurse -File | Where-Object { -not $skip.IsMatch($_.Name) -and -not $skip.IsMatch($_.FullName) -and
+                                                                   $_.FullName.Substring($rel.Length + 1) -notmatch '^docs\\' } | ForEach-Object {
         $to = Join-Path $dest $_.FullName.Substring($rel.Length + 1)
         New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
         Copy-Item -LiteralPath $_.FullName -Destination $to
@@ -116,13 +116,30 @@ foreach ($t in "RIDE", "RIDEConsole", "c90", "cpp11", "shalimar", "c2s", "masm",
 }
 $whiteDest = Join-Path $stage $white.Folder
 $stageCmd = Join-Path $ride "packaging\windows\stage.cmd"
-$cmdArgs = '/c ""' + $stageCmd + '" "' + $ride + '" "' + (Join-Path $root "toolchain\Compilers\C++Optimize") + '" "' + $whiteDest + '" "' +
-        (Join-Path $root "toolchain\Compilers\Compiler-Ci") + '" "' + $rideBin + '""'
+$cmdArgs = '/c ""' + $stageCmd + '" "' + $ride + '" "' + (Join-Path $root "Toolchain\Compilers\C++Optimize") + '" "' + $whiteDest + '" "' +
+        (Join-Path $root "Toolchain\Compilers\Compiler-Ci") + '" "' + $rideBin + '""'
 $p = Start-Process cmd.exe -ArgumentList $cmdArgs -WindowStyle Hidden -Wait -PassThru
 if ($p.ExitCode -ne 0 -or -not (Test-Path "$whiteDest\bin\RIDE.exe")) { throw "RIDE's stage.cmd did not stage $whiteDest (exit $($p.ExitCode))" }
 foreach ($dll in Get-ChildItem -LiteralPath $CrtFolder -Filter *.dll) { Copy-Item -LiteralPath $dll.FullName -Destination "$whiteDest\bin" }
+# docs\ holds RIDE's reviews, audits and studies and TI's CCS reference projects - for its developers, not its users;
+# help\manual.html and shalimar-language.html are GRIDE\Help's RIDE_Manual.html and Shalimar_Reference.html (White
+# looks there too); guide.html and keys.html are opened by nothing in RIDE or this Setup
+if (Test-Path -LiteralPath "$whiteDest\docs") { Remove-Item -LiteralPath "$whiteDest\docs" -Recurse -Force }
+foreach ($page in "manual.html", "shalimar-language.html", "guide.html", "keys.html") {
+    if (Test-Path -LiteralPath "$whiteDest\help\$page") { Remove-Item -LiteralPath "$whiteDest\help\$page" -Force }
+}
 Say ("  {0,-10} {1,-10} {2,4} files, {3:N1} MB" -f $white.Feature, $white.Folder, (Get-ChildItem -LiteralPath $whiteDest -Recurse -File).Count, ((Get-ChildItem -LiteralPath $whiteDest -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
 Say "  VC++ runtime from $CrtFolder"
+# GRIDE\Help: one copy of the help for all three outlooks - RIDE's manual and the Shalimar reference for every
+# outlook, the chapter pages, the VM6747 reference and toolchain.json's format for Black and Grey, and each one's own
+# guide (Black's User Guide, Grey's Help). The guides link to the others by name, so they share one folder.
+$helpSrc = Join-Path $root "Help"
+if (-not (Test-Path "$helpSrc\RIDE_Manual.html")) { throw "$helpSrc has no RIDE_Manual.html - GRIDEx3's help folder" }
+$helpDest = Join-Path $stage "Help"; New-Item -ItemType Directory -Force $helpDest | Out-Null
+Get-ChildItem -LiteralPath $helpSrc -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $helpDest }
+Say ("  {0,-10} {1,-10} {2,4} files, {3:N1} MB" -f "(shared)", "Help", (Get-ChildItem -LiteralPath $helpDest -File).Count, ((Get-ChildItem -LiteralPath $helpDest -File | Measure-Object Length -Sum).Sum / 1MB))
+$helpFeatures = @{ "GRIDE_User_Guide.html" = @("Black"); "GRIDE_Help.html" = @("Grey");
+                   "RIDE_Manual.html" = @("Black", "Grey", "White"); "Shalimar_Reference.html" = @("Black", "Grey", "White") }
 
 # ---- short names, the tree, components and files (as build-msi.ps1) ----------------------------
 $script:shortUsed = @{}
@@ -179,7 +196,8 @@ foreach ($f in $files) {
     $h = Get-HashHex "file|$($f.Rel.ToLowerInvariant())"
     $fileKey = "F_$h"; $compKey = "C_$h"
     $fileKeyOf[$f.Rel] = $fileKey
-    $components.Add([pscustomobject]@{ Row = @($compKey, (Get-HashGuid "component|$codeName|$($f.Rel.ToLowerInvariant())"), (Get-DirKey $f.Dir), 256, $null, $fileKey); Feature = $featureOf[$f.Top] })
+    $features = if ($f.Top -eq "Help") { if ($helpFeatures.ContainsKey($f.Name)) { $helpFeatures[$f.Name] } else { @("Black", "Grey") } } else { @($featureOf[$f.Top]) }
+    $components.Add([pscustomobject]@{ Row = @($compKey, (Get-HashGuid "component|$codeName|$($f.Rel.ToLowerInvariant())"), (Get-DirKey $f.Dir), 256, $null, $fileKey); Feature = $features })
     $fileVer = $null; $language = $null
     try { $fileVer = [string](Invoke-Msi $inst "FileVersion" @($f.Full, $false)) } catch { $fileVer = "" }
     if ($fileVer) {
@@ -226,7 +244,7 @@ $props = [ordered]@{
     # installed. msiexec ... MSIINSTALLPERUSER="" ALLUSERS=1 from an elevated prompt still installs for all.
     MSIINSTALLPERUSER = "1"
     IDE = "Black"
-    SecureCustomProperties = "NETFRAMEWORK48;NEWERPRODUCTFOUND;PREVIOUSVERSIONSINSTALLED;IDE;WHITE"
+    SecureCustomProperties = "NETFRAMEWORK48;NEWERPRODUCTFOUND;PREVIOUSVERSIONSINSTALLED;IDE"
 }
 if ($NoUi) { $props["LIMITUI"] = "1" }
 foreach ($k in $props.Keys) { Row "Property" @($k, $props[$k]) }
@@ -240,13 +258,13 @@ foreach ($r in $dirRows) { Row "Directory" $r }
 
 # Features: Black installs by default; Grey and White are level 3 (above INSTALLLEVEL 1), so only when chosen.
 # Attributes 8: no advertising. On a quiet install's command line IDE=Grey or IDE=White takes that one instead
-# of Black, and WHITE=1 adds White beside Black or Grey (Condition); screen 2 does the same with its events.
+# of Black (Condition); screen 2 does the same with its events. One outlook at a time.
 $order = 0
 foreach ($ide in $outlooks) { $order += 2; Row "Feature" @($ide.Feature, $null, $ide.Title, $ide.Description, $order, $ide.Level, "INSTALLDIR", 8) }
 Row "Condition" @("Black", 3, "IDE=`"Grey`" OR IDE=`"White`"")
 Row "Condition" @("Grey", 1, "IDE=`"Grey`"")
-Row "Condition" @("White", 1, "IDE=`"White`" OR WHITE=`"1`"")
-foreach ($c in $components) { Row "Component" $c.Row; Row "FeatureComponents" @($c.Feature, $c.Row[0]) }
+Row "Condition" @("White", 1, "IDE=`"White`"")
+foreach ($c in $components) { Row "Component" $c.Row; foreach ($ft in $c.Feature) { Row "FeatureComponents" @($ft, $c.Row[0]) } }
 foreach ($r in $fileRows) { Row "File" $r }
 foreach ($r in $hashRows) { Row "MsiFileHash" $r }
 Row "Media" @(1, $seq, $null, "#$cabName", $null, $null)

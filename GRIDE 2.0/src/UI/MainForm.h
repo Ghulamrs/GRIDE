@@ -300,7 +300,9 @@ namespace Gride
             Size = System::Drawing::Size(1280, 820);
             MinimumSize = System::Drawing::Size(800, 500);
             StartPosition = FormStartPosition::CenterScreen;
-            Icon = SystemIcons::Application;
+            // The exe's own icon (src\GRIDE.rc), as Explorer and the shortcut show it; Windows' default without it.
+            try { Icon = System::Drawing::Icon::ExtractAssociatedIcon(Application::ExecutablePath); }
+            catch (Exception^) { Icon = SystemIcons::Application; }
 
             // ---- Solution Explorer
             tree = gcnew TreeView();

@@ -143,6 +143,9 @@
     <ClCompile Include="src\Main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="src\GRIDE.rc" />
+  </ItemGroup>
+  <ItemGroup>
     <ClInclude Include="src\Common\Common.h" />
     <ClInclude Include="src\Common\Json.h" />
     <ClInclude Include="src\Toolchain\ToolchainFile.h" />
@@ -172,18 +175,19 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="toolchain.json" />
+    <None Include="src\gride.ico" />
     <None Include="lib\ccs\options-ccs74-C6000_8.2.tsv" />
     <None Include="lib\ccs\options-ccs55-C6000_7.4.tsv" />
-    <None Include="docs\GRIDE_Help.html" />
-    <None Include="docs\RIDE_Manual.html" />
-    <None Include="docs\Shalimar_Reference.html" />
-    <None Include="docs\C90_Reference.html" />
-    <None Include="docs\Cpp11_Reference.html" />
-    <None Include="docs\MASM_LINK_Reference.html" />
-    <None Include="docs\ASM6x_LNK6x_Reference.html" />
-    <None Include="docs\RTS6747_Reference.html" />
-    <None Include="docs\VM6747_Reference.html" />
-    <None Include="docs\TOOLCHAIN-FORMAT.md" />
+    <None Include="..\Help\GRIDE_Help.html" />
+    <None Include="..\Help\RIDE_Manual.html" />
+    <None Include="..\Help\Shalimar_Reference.html" />
+    <None Include="..\Help\C90_Reference.html" />
+    <None Include="..\Help\Cpp11_Reference.html" />
+    <None Include="..\Help\MASM_LINK_Reference.html" />
+    <None Include="..\Help\ASM6x_LNK6x_Reference.html" />
+    <None Include="..\Help\RTS6747_Reference.html" />
+    <None Include="..\Help\VM6747_Reference.html" />
+    <None Include="..\Help\TOOLCHAIN-FORMAT.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyToolchainFile" AfterTargets="Build">
@@ -195,10 +199,10 @@
     <Copy SourceFiles="@(CcsDefinitionFiles)" DestinationFolder="$(OutDir)lib\ccs" SkipUnchangedFiles="true" />
   </Target>
   <!-- Help (R13): GRIDE's page, RIDE's manual and its chapter pages, the Shalimar reference and the toolchain
-       file's format, in docs beside the exe, where Help looks after the exe's own folder -->
+       file's format, from GRIDEx3's one help folder into docs beside the exe, where Help looks after the exe's own folder -->
   <Target Name="CopyHelpFiles" AfterTargets="Build">
     <ItemGroup>
-      <HelpFiles Include="$(ProjectDir)docs\*.html;$(ProjectDir)docs\*.md" />
+      <HelpFiles Include="$(ProjectDir)..\Help\*.html;$(ProjectDir)..\Help\*.md" />
     </ItemGroup>
     <Copy SourceFiles="@(HelpFiles)" DestinationFolder="$(OutDir)docs" SkipUnchangedFiles="true" />
   </Target>

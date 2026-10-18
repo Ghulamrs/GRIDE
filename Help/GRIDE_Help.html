@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GRIDE 2.0 Help</title>
+<style>
+  body { font-family: "Segoe UI", sans-serif; margin: 0; background: #F6F6F4; color: #1E1F22; line-height: 1.5; }
+  header { background: #1F2226; color: #F2F2F2; padding: 28px 40px; }
+  header h1 { margin: 0; font-size: 30px; } header p { margin: 4px 0 0; color: #C9CED6; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 40px 60px; }
+  h2 { border-bottom: 2px solid #E0A23B; padding-bottom: 4px; margin-top: 36px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: #fff; }
+  th, td { border: 1px solid #D5D8DD; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #ECEDEF; }
+  code, kbd { font-family: Consolas, monospace; background: #ECEDEF; padding: 1px 5px; border-radius: 3px; }
+  .note { background: #FFF6E3; border-left: 4px solid #E0A23B; padding: 8px 14px; }
+  .toc { background: #fff; border: 1px solid #D5D8DD; padding: 8px 14px; }
+  .toc a { margin-right: 14px; white-space: nowrap; }
+  h3 { margin-top: 26px; }
+  pre { background: #ECEDEF; padding: 10px 14px; border-radius: 3px; overflow-x: auto; }
+  pre code { padding: 0; background: none; }
+  a { color: #8A5A00; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GRIDE 2.0 Help</h1>
+  <p>C90 &middot; C++11 &middot; Shalimar &mdash; Windows &middot; Linux &middot; macOS &middot; TMS6747 &mdash; RIDE's conventions</p>
+</header>
+<main>
+
+<p class="toc"><a href="#s1">1. Quick start</a><a href="#s2">2. Projects</a><a href="#s3">3. Building</a><a href="#s4">4. Running</a>
+<a href="#s5">5. Debugging</a><a href="#s6">6. Settings</a><a href="#s7">7. Keys</a><a href="#s8">8. Help</a></p>
+
+<p>GRIDE 2.0 is a Visual Studio-style IDE for RIDE's toolchain - the C90, C++11 and Shalimar compilers, RIDE's assemblers and linkers, the TMS6747's emulator and simulator - and follows RIDE's conventions: its command lines (from <code>toolchain.json</code>), build rules, error shapes, Compiler Options and debuggers. It holds <b>one project at a time</b>.</p>
+
+<h2 id="s1">1. Quick start: the cppparse example</h2>
+<p>cppparse is a Visual Studio 2022 C++ solution, built with Visual Studio's <code>cl</code> and <code>link.exe</code> - nothing to set first.</p>
+<ol>
+  <li><b>File &gt; Open Project</b> (<kbd>Ctrl+Shift+O</kbd>) &rarr; <code>examples\cppparse\cppparse.pro</code>. The title shows <code>cppparse [Visual Studio 2022 v143, read-only]</code>.</li>
+  <li><kbd>Ctrl+Shift+B</kbd> builds it (Debug or Release from the toolbar's <b>Config</b> box). The Output pane ends <code>[built &hellip;\.gride\out\Release\cppparse.exe]</code>.</li>
+  <li><kbd>F5</kbd> builds and runs it in the Output pane: <code>cppparse.exe --health .</code> reports on its own sources, then <code>[program returned 0]</code>.</li>
+</ol>
+<p class="note">The Visual Studio files are only read. <code>cppparse.pro</code> keeps GRIDE's choices for it - compiler <code>cl</code>, the configuration, the arguments - and the build goes to <code>.gride\</code> beside the <code>.vcxproj</code>.</p>
+
+<h2 id="s2">2. Projects</h2>
+<table>
+  <tr><th>Do</th><th>Use</th></tr>
+  <tr><td>New / open / recent / close</td><td><b>File &gt; New Project</b>, <b>Open Project</b> (a <code>.pro</code>, a CCS project, a Visual Studio solution or project), <b>Recent Projects</b>, <b>Close Project</b></td></tr>
+  <tr><td>Add or remove files</td><td><b>Project &gt; Add New File</b>, <b>Add Existing File</b>, <b>Remove from Project</b></td></tr>
+  <tr><td>Include folders, libraries, defines and flags per configuration</td><td><b>Project &gt; Properties</b></td></tr>
+  <tr><td>One compiler for every file (c90, cpp11, shalimar; cl for a Visual Studio project)</td><td><b>Project &gt; Properties &gt; Toolchain</b> - else each file's suffix picks it</td></tr>
+</table>
+<p><b>The <code>.pro</code> file</b> is GRIDE 2.0's own JSON: <code>formatVersion</code>, <code>name</code>, <code>language</code>, <code>target</code>, <code>outputName</code>, <code>sourceFiles</code> (relative to the <code>.pro</code>), <code>includePaths</code>, <code>libraries</code>, <code>activeConfiguration</code>, <code>configurations</code> (defines, flags, link flags, output folder), and when set: <code>toolchain</code>, <code>emulateOnly</code>, <code>programArgs</code>, <code>options</code> (Compiler Options).</p>
+<p><b>Code Composer Studio 7.4 / 5.5 and Visual Studio projects</b> open read only: <b>File &gt; Open Project</b> on a <code>.project</code>, <code>.sln</code> or <code>.vcxproj</code> (or <b>File &gt; Import CCS Project</b> on a folder). Their files are never written; GRIDE's choices for them go to <code>settings.json</code>, or - for a Visual Studio project - to a <code>.pro</code> that names it:</p>
+<pre><code>{ "formatVersion": 2, "name": "cppparse", "activeConfiguration": "Release",
+  "toolchain": "cl", "programArgs": [ "--health", "." ], "visualStudio": "cppparse.sln" }</code></pre>
+
+<h2 id="s3">3. Building</h2>
+<table>
+  <tr><th>Command</th><th>Key</th></tr>
+  <tr><td>Build Project</td><td><kbd>Ctrl+Shift+B</kbd></td></tr>
+  <tr><td>Compile Current File</td><td><kbd>Ctrl+F7</kbd></td></tr>
+  <tr><td>Rebuild Project, Clean Project, Cancel Build</td><td><b>Build</b> menu</td></tr>
+</table>
+<ul>
+  <li><b>Debug or Release</b> from the toolbar's <b>Config</b> box. The project keeps the choice (<code>activeConfiguration</code>).</li>
+  <li><b>Flags</b> are RIDE's: <code>-g -D_DEBUG=1</code> / <code>-O2 -DNDEBUG=1</code> for c90 and cpp11, <code>--debug</code> for shalimar, <code>/Od /Zi /D_DEBUG</code> / <code>/O2 /DNDEBUG</code> for cl. Change them under <b>Project &gt; Compiler Options</b>; only what differs from RIDE's defaults is written to the <code>.pro</code>.</li>
+  <li><b>A Visual Studio project built with cl</b> also gets its own settings (e.g. <code>/W4 /WX /permissive- /EHsc /MT</code>), without RIDE's header folders in front of Microsoft's.</li>
+  <li><b>Targets</b> - Windows, Linux, macOS, TMS6747 - from the toolbar's Target box. A target this machine is not builds to assembly only, and says so.</li>
+  <li>Errors go to the Error List; double-click one to reach its line.</li>
+</ul>
+
+<h2 id="s4">4. Running</h2>
+<table>
+  <tr><th>Command</th><th>Key</th><th>Runs</th></tr>
+  <tr><td>Build and Run</td><td><kbd>F5</kbd></td><td>the program inside the Output pane, with an input line under it, to <code>[program returned N]</code></td></tr>
+  <tr><td>Run Without Building</td><td><kbd>Ctrl+F5</kbd></td><td>the same, without building first</td></tr>
+  <tr><td>Stop</td><td><kbd>Shift+F5</kbd></td><td></td></tr>
+  <tr><td>Debug &gt; Emulate on vm6747</td><td></td><td>the assembly on the TMS6747 emulator (on TMS6747, Run uses <code>sim6747</code> on the linked <code>.out</code>)</td></tr>
+</table>
+<p>A project marked <i>Emulate only</i> (Project &gt; Properties) stops at the assembly. <b>Help &gt; Toolchain Reference &gt; VM6747 / SIM6747</b> compares the two.</p>
+
+<h2 id="s5">5. Debugging</h2>
+<table>
+  <tr><th>Key</th><th>Does</th><th>Key</th><th>Does</th></tr>
+  <tr><td><kbd>F8</kbd></td><td>Debug, or carry on</td><td><kbd>F9</kbd></td><td>Breakpoint on / off</td></tr>
+  <tr><td><kbd>F7</kbd></td><td>Step over</td><td><kbd>F6</kbd></td><td>Step into</td></tr>
+  <tr><td><kbd>Ctrl+Up</kbd> / <kbd>Ctrl+Down</kbd></td><td>Walk the stack</td><td><kbd>Shift+F5</kbd></td><td>Stop</td></tr>
+</table>
+<ul>
+  <li><b>Windows:</b> a Debug build carries CodeView and runs under <code>cdb</code> (or <code>lldb</code> where cdb is not installed).</li>
+  <li><b>TMS6747:</b> <code>sim6747</code> with the <code>.out</code>, or <code>vm6747</code> with the assembly.</li>
+  <li><b>Shalimar:</b> the program debugs itself and stops by statement; Locals says where it is, not what is in it.</li>
+  <li>Panes beside the Output: Locals, Watch, Call Stack, Registers, Memory, Breakpoints.</li>
+</ul>
+
+<h2 id="s6">6. Settings and the toolchain</h2>
+<table>
+  <tr><th>What</th><th>Where</th></tr>
+  <tr><td>Your settings</td><td><code>%APPDATA%\GRIDE\settings.json</code> (or a <code>settings.json</code> beside <code>GRIDE.exe</code> for a portable copy)</td></tr>
+  <tr><td>RIDE's settings - include and lib, vcvars, TI's compiler directory, shared include folders and libraries, the C6747 debugger</td><td><b>Tools &gt; Options &gt; RIDE Paths</b></td></tr>
+  <tr><td>Flags a new project starts with</td><td><b>Tools &gt; Options &gt; Compiler Options</b></td></tr>
+  <tr><td>The native-tools question (use Visual Studio's linker when RIDE's fails)</td><td><b>Tools &gt; Options &gt; General</b></td></tr>
+  <tr><td>Tools, libraries, argument templates</td><td><code>toolchain.json</code> beside <code>GRIDE.exe</code>; your changes in <code>%APPDATA%\GRIDE\toolchain.json</code> (shared with GRIDEd) - every field is in <a href="TOOLCHAIN-FORMAT.md">TOOLCHAIN-FORMAT.md</a></td></tr>
+</table>
+<p class="note">A tool not found? <b>Tools &gt; Check Toolchain</b> shows where each one was looked for: its environment variable (<code>$C90</code>, <code>$CPP11</code> &hellip;), beside <code>GRIDE.exe</code>, the RIDE installation, then <code>PATH</code>.</p>
+
+<h2 id="s7">7. Keys</h2>
+<table>
+  <tr><th>Keys</th><th>Command</th><th>Keys</th><th>Command</th></tr>
+  <tr><td><kbd>Ctrl+Shift+O</kbd></td><td>Open project</td><td><kbd>Ctrl+Shift+B</kbd></td><td>Build project</td></tr>
+  <tr><td><kbd>Ctrl+F7</kbd></td><td>Compile file</td><td><kbd>F5</kbd> / <kbd>Ctrl+F5</kbd></td><td>Build and run / Run</td></tr>
+  <tr><td><kbd>F8</kbd></td><td>Debug / carry on</td><td><kbd>F9</kbd></td><td>Breakpoint</td></tr>
+  <tr><td><kbd>F7</kbd> / <kbd>F6</kbd></td><td>Step over / into</td><td><kbd>F4</kbd></td><td>Properties window</td></tr>
+</table>
+<p><b>Tools &gt; Convert C -&gt; Shalimar</b> and <b>Shalimar -&gt; C</b> run <code>c2s</code>. <b>Help &gt; Keyboard Shortcuts</b> lists every key; <b>Help &gt; Placeholder Reference</b> lists the placeholders of a tool's arguments.</p>
+
+<h2 id="s8">8. Help</h2>
+<p><kbd>F1</kbd> opens this page. The reference items open the GRIDE Manual - the toolchain's manual (<a href="RIDE_Manual.html">RIDE_Manual.html</a>) - at the right chapter:</p>
+<table>
+  <tr><th>Help &gt;</th><th>Opens</th></tr>
+  <tr><td>Language Reference &gt; C90</td><td>the manual's &sect;7 (what c90 supports) and &sect;15 (its command line)</td></tr>
+  <tr><td>Language Reference &gt; C++11</td><td>&sect;8 (what cpp11 supports) and &sect;16 (its command line)</td></tr>
+  <tr><td>Language Reference &gt; Shalimar</td><td>Appendix A - the complete language reference (<a href="Shalimar_Reference.html">Shalimar_Reference.html</a>)</td></tr>
+  <tr><td>Toolchain Reference &gt; MASM / LINK (Windows)</td><td>&sect;22 - Windows assembly, linking and debugging</td></tr>
+  <tr><td>Toolchain Reference &gt; ASM6x / LNK6x</td><td>&sect;23 (the C6000 target) and &sect;25 (real silicon)</td></tr>
+  <tr><td>Toolchain Reference &gt; RTS6747 Runtime</td><td>&sect;21 (the tms6747 target) and &sect;23</td></tr>
+  <tr><td>Toolchain Reference &gt; VM6747 / SIM6747</td><td>the emulator and the simulator side by side</td></tr>
+</table>
+<p class="note">All help lives in one folder, <code>GRIDE\Help</code>, beside the outlook's own folder. A <code>.pdf</code> or <code>.chm</code> of the same name beside <code>GRIDE.exe</code> is opened instead.</p>
+
+</main>
+</body>
+</html>

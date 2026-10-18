@@ -218,10 +218,10 @@
   </ImportGroup>
   <Target Name="CopyToolchainFile" AfterTargets="Build">
     <Copy SourceFiles="$(ProjectDir)toolchain.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-    <!-- the help beside the exe (Help > View Help looks in docs beside it): an MSBuild copy, not the old post-build
+    <!-- the help beside the exe (Help > View Help looks in docs beside it), from GRIDEx3's one help folder: an MSBuild copy, not the old post-build
          xcopy, so the build needs no cmd.exe -->
     <ItemGroup>
-      <GrideDocs Include="$(SolutionDir)docs\**\*" />
+      <GrideDocs Include="$(SolutionDir)..\Help\*" />
     </ItemGroup>
     <Copy SourceFiles="@(GrideDocs)" DestinationFiles="@(GrideDocs->'$(OutDir)docs\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(ProjectDir)lib\ccs\options-ccs74-C6000_8.2.tsv;$(ProjectDir)lib\ccs\options-ccs55-C6000_7.4.tsv" DestinationFolder="$(OutDir)lib\ccs" SkipUnchangedFiles="true" />

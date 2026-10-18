@@ -289,8 +289,8 @@ PRODUCT_DIR ?= $(HOME)/$(PRODUCT_LOWER)
 # Where cxx1's headers are copied from for the product. The binary comes from
 # BINDIR like the others; the headers stay in the checkout,
 # Compilers/C++Optimize on every machine.
-CXX1_DIR ?= ../toolchain/Compilers/C++Optimize
-CC1_DIR ?= ../toolchain/Compilers/Compiler-Ci
+CXX1_DIR ?= ../Toolchain/Compilers/C++Optimize
+CC1_DIR ?= ../Toolchain/Compilers/Compiler-Ci
 
 # `confirm` and not `$(EDITOR)`, for the reason build.bat gives on its own
 # product rule: an editor without its compilers is not a product, it is half of

@@ -16,7 +16,7 @@ rem RELEASE_BIN naming a bin\ already built, runs build.bat confirm over it. Nei
 setlocal enabledelayedexpansion
 rem GRIDE1: this is RIDE's own release, cloned from its repositories on GitHub (RIDE-4.7 among them) and sealed
 rem by MASTER.SEAL, which GRIDE 1.0 does not carry. It does not apply inside GRIDE1; GRIDE1 ships through
-rem installer\windows. RIDE_RELEASE_OUTSIDE_GRIDE1=1 runs it all the same.
+rem Installer\windows. RIDE_RELEASE_OUTSIDE_GRIDE1=1 runs it all the same.
 if not "%RIDE_RELEASE_OUTSIDE_GRIDE1%"=="1" (echo release.cmd: RIDE's own release - it does not apply inside GRIDE1 & exit /b 2)
 set "VER=%~1"
 if "%VER%"=="" set "VER=5.17"

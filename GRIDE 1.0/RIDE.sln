@@ -2,25 +2,25 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "c90", "..\toolchain\Compilers\Compiler-Ci\ide\cc1.vcxproj", "{6C1B4A2E-5D3F-4A18-9E77-2B0C4F8A1D31}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "c90", "..\Toolchain\Compilers\Compiler-Ci\ide\cc1.vcxproj", "{6C1B4A2E-5D3F-4A18-9E77-2B0C4F8A1D31}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cpp11", "..\toolchain\Compilers\C++Optimize\ide\cxx1.vcxproj", "{9CCC91A3-EF5C-130A-8C1D-A127C1300F62}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cpp11", "..\Toolchain\Compilers\C++Optimize\ide\cxx1.vcxproj", "{9CCC91A3-EF5C-130A-8C1D-A127C1300F62}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm6747", "..\toolchain\TI\VM6747\vm6747.vcxproj", "{D5DA3DC4-A351-76DB-AFBA-C05657A7ED4D}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vm6747", "..\Toolchain\TI\VM6747\vm6747.vcxproj", "{D5DA3DC4-A351-76DB-AFBA-C05657A7ED4D}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "asm6x", "..\toolchain\TI\ASM6x\asm6x.vcxproj", "{5C99626E-F1B6-1A08-BDE8-E20EE380DF30}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "asm6x", "..\Toolchain\TI\ASM6x\asm6x.vcxproj", "{5C99626E-F1B6-1A08-BDE8-E20EE380DF30}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "masm", "..\toolchain\Windows\MASM\masm.vcxproj", "{CAA842CC-7EF0-CA4B-5FB6-DED02144F554}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "masm", "..\Toolchain\Windows\MASM\masm.vcxproj", "{CAA842CC-7EF0-CA4B-5FB6-DED02144F554}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "link", "..\toolchain\Windows\LINK\link.vcxproj", "{1434130E-D2FD-44EC-BAC0-2C11DFAE714A}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "link", "..\Toolchain\Windows\LINK\link.vcxproj", "{1434130E-D2FD-44EC-BAC0-2C11DFAE714A}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "lnk6x", "..\toolchain\TI\LNK6x\lnk6x.vcxproj", "{798D12B2-F1A0-5AA0-9205-3B8F1381F5B3}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "lnk6x", "..\Toolchain\TI\LNK6x\lnk6x.vcxproj", "{798D12B2-F1A0-5AA0-9205-3B8F1381F5B3}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sim6747", "..\toolchain\TI\SIM6747\sim6747.vcxproj", "{1BDA1404-D525-5E50-A89C-4F0C5C67E39C}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sim6747", "..\Toolchain\TI\SIM6747\sim6747.vcxproj", "{1BDA1404-D525-5E50-A89C-4F0C5C67E39C}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ar6x", "..\toolchain\TI\RTS6x\tools\ar6x\ar6x.vcxproj", "{8A3DAB66-313B-46EB-A72F-4B9307972378}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ar6x", "..\Toolchain\TI\RTS6x\tools\ar6x\ar6x.vcxproj", "{8A3DAB66-313B-46EB-A72F-4B9307972378}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rts6x", "..\toolchain\TI\RTS6x\rts6x.vcxproj", "{08BE728A-FAFA-293F-A679-72F80B983AD1}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rts6x", "..\Toolchain\TI\RTS6x\rts6x.vcxproj", "{08BE728A-FAFA-293F-A679-72F80B983AD1}"
 	ProjectSection(ProjectDependencies) = postProject
 		{9CCC91A3-EF5C-130A-8C1D-A127C1300F62} = {9CCC91A3-EF5C-130A-8C1D-A127C1300F62}
 		{5C99626E-F1B6-1A08-BDE8-E20EE380DF30} = {5C99626E-F1B6-1A08-BDE8-E20EE380DF30}
@@ -28,12 +28,12 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rts6x", "..\toolchain\TI\RT
 		{8A3DAB66-313B-46EB-A72F-4B9307972378} = {8A3DAB66-313B-46EB-A72F-4B9307972378}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "shalimar", "..\toolchain\Compilers\Compiler-Si\ide\shc.vcxproj", "{5BC0DB40-BD9A-72C2-1130-8E762F9DB1F7}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "shalimar", "..\Toolchain\Compilers\Compiler-Si\ide\shc.vcxproj", "{5BC0DB40-BD9A-72C2-1130-8E762F9DB1F7}"
 	ProjectSection(ProjectDependencies) = postProject
 		{9CCC91A3-EF5C-130A-8C1D-A127C1300F62} = {9CCC91A3-EF5C-130A-8C1D-A127C1300F62}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "c2s", "..\toolchain\Compilers\Converter-C2S\c2s.vcxproj", "{A4FC64B4-14A5-3103-5CD2-A17F9F320FE2}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "c2s", "..\Toolchain\Compilers\Converter-C2S\c2s.vcxproj", "{A4FC64B4-14A5-3103-5CD2-A17F9F320FE2}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RIDEConsole", "RIDEConsole.vcxproj", "{2FF23966-297C-F635-8A5A-7FDC5EBFEE4B}"
 	ProjectSection(ProjectDependencies) = postProject

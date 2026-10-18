@@ -19,12 +19,12 @@ the tree as its README.md lays it out -
     toolchain\\   the tools both solutions build, as ..\\toolchain\\...: Compilers\\ (c90, cpp11, shalimar, c2s),
                  TI\\ (asm6x, lnk6x, rts6x and its ar6x, sim6747, vm6747), Windows\\ (masm, link); MANIFEST.md,
                  copy-toolchain.py, msbuild\\Toolchain.targets
-    installer\\   windows\\ (the MSI) and macos\\
+    Installer\\   windows\\ (the MSI) and macos\\
 
 The tree goes whole: every file git tracks in it, as it is on disk (a change not yet committed included),
 and a tracked file missing from the disk as git has it. No file is left out for its kind - tests, scripts,
 docs, binaries git tracks all go. What git does not track does not: x64\\, obj\\, the tools' build\\,
-installer\\dist\\, .vs\\ are what building and testing made. .git does not. Both IDEs go: GRIDE 2.0\\ is part
+Installer\\dist\\, .vs\\ are what building and testing made. .git does not. Both IDEs go: GRIDE 2.0\\ is part
 of this tree (the GRIDEd-only washout left it out). The tool trees under toolchain\\ are the minimal copies
 this tree keeps (toolchain\\MANIFEST.md), not repositories of their own: they go as the tree has them, and
 washout does not reach for the tool repositories.
@@ -53,7 +53,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 BUILT = [
     re.compile(r"(^|/)(x64|obj|\.vs|\.git)(/|$)"),             # each solution's output, VS's own folder
     re.compile(r"^toolchain/.*/build(/|$)"),                   # a tool's IntDir, ar6x's own output
-    re.compile(r"^installer/dist(/|$)"),                       # the MSI and its checks
+    re.compile(r"^Installer/dist(/|$)"),                       # the MSI and its checks
 ]
 LITTER = {".DS_Store", "Thumbs.db", "desktop.ini"}
 

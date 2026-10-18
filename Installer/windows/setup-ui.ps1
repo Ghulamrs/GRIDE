@@ -1,9 +1,8 @@
 # setup-ui.ps1 - dot-sourced by build-setup.ps1: the dialogs of GRIDE's Setup. Screen 1 welcomes,
-# screen 2 chooses the outlook - Black, Grey or White, each with the toolchain beside it - and, with Black
-# or Grey, whether White (RIDE - The Simplest, lightweight) comes along; then it installs. The screens name
+# screen 2 chooses the outlook - Black, Grey or White, one of the three, each with the toolchain beside
+# it; then it installs. The screens name
 # GRIDE and its outlooks (Black is GRIDEd, Grey is GRIDE 2.0, White is RIDE 5.17); then the progress and the closing page. Installed, it offers Repair and Remove. /qb and
-# /qn show none of it: a quiet install takes IDE=Black (the default), IDE=Grey or IDE=White, and WHITE=1 for
-# White beside Black or Grey, on the command line.
+# /qn show none of it: a quiet install takes IDE=Black (the default), IDE=Grey or IDE=White on the command line.
 # Adapted from GRIDE-Installer's msi-ui.ps1.
 Set-StrictMode -Version 2
 
@@ -28,13 +27,13 @@ function Add-SetupUi([string]$productName) {
             @("TimeRemaining", "Time remaining: {[1] minutes }{[2] seconds}"))) { Row "UIText" $u }
 
     $name = "[ProductName]"
-    $bottom = @("BottomLine", "Line", 0, 234, 374, 0, 1, $null, $null, $null, $null)
+    $bottom = @("BottomLine", "Line", 0, 234, 370, 0, 1, $null, $null, $null, $null)
     # key, title, control-first, default, cancel, controls (Control, Type, X, Y, W, H, Attributes, Property, Text, Next, Help), events (Control, Event, Argument, Condition, Ordering)
     $dialogs = @(
         @{ Key = "WelcomeDlg"; Attr = 3; Title = "$name Setup"; First = "Next"; Default = "Next"; Cancel = "Cancel"
            Controls = @(
                @("Title", "Text", 20, 15, 330, 24, 131075, $null, "{\DlgTitleFont}Welcome to the $name Setup", $null, $null),
-               @("Description", "Text", 20, 60, 330, 120, 131075, $null, "GRIDE is an IDE for RIDE's toolchain - C90, C++11 and Shalimar for Windows and the TMS320C6747. It comes in three outlooks: Black, Grey and White - White being RIDE itself, the simplest. On the next page you choose one, and with Black or Grey you may add White; Setup installs it with the toolchain beside it and a Start menu entry. Programs and Features removes it again.", $null, $null),
+               @("Description", "Text", 20, 60, 330, 120, 131075, $null, "GRIDE is an IDE for RIDE's toolchain - C90, C++11 and Shalimar for Windows and the TMS320C6747. It comes in three outlooks: Black, Grey and White - White being RIDE itself, the simplest. On the next page you choose one of the three; Setup installs it with the toolchain beside it and a Start menu entry. Programs and Features removes it again.", $null, $null),
                $bottom,
                @("Next", "PushButton", 236, 243, 56, 17, 3, $null, "&Next >", "Cancel", $null),
                @("Cancel", "PushButton", 304, 243, 56, 17, 3, $null, "Cancel", "Next", $null))
@@ -43,19 +42,18 @@ function Add-SetupUi([string]$productName) {
            Controls = @(
                @("Title", "Text", 20, 15, 330, 24, 131075, $null, "{\DlgTitleFont}Choose GRIDE's outlook", $null, $null),
                @("Description", "Text", 20, 40, 330, 30, 131075, $null, "GRIDE builds for Windows and the TMS320C6747 with the same eleven tools in every outlook. Choose its skin:", $null, $null),
-               @("IdeChoice", "RadioButtonGroup", 20, 72, 330, 104, 3, "IDE", $null, "AlsoWhite", $null),
-               @("AlsoWhite", "CheckBox", 30, 180, 320, 16, 3, "WHITE", "Also install &White - RIDE - The Simplest (lightweight)", "Back", $null),
+               @("IdeChoice", "RadioButtonGroup", 20, 72, 330, 104, 3, "IDE", $null, "Back", $null),
                @("Folder", "Text", 20, 205, 330, 20, 131075, $null, "It goes into [INSTALLDIR], in a folder of its own.", $null, $null),
                $bottom,
                @("Back", "PushButton", 168, 243, 56, 17, 3, $null, "< &Back", "Install", $null),
                @("Install", "PushButton", 236, 243, 56, 17, 3, $null, "&Install", "Cancel", $null),
                @("Cancel", "PushButton", 304, 243, 56, 17, 3, $null, "Cancel", "IdeChoice", $null))
-           # Install: the outlooks not chosen come off, the chosen one goes on, and White too when its box is ticked
+           # Install: the two outlooks not chosen come off, the chosen one goes on
            Events = @(@("Back", "NewDialog", "WelcomeDlg", "1", 1),
                       @("Install", "Remove", "Black", "IDE<>`"Black`"", 1), @("Install", "Remove", "Grey", "IDE<>`"Grey`"", 2),
-                      @("Install", "Remove", "White", "IDE<>`"White`" AND WHITE<>`"1`"", 3),
+                      @("Install", "Remove", "White", "IDE<>`"White`"", 3),
                       @("Install", "AddLocal", "Black", "IDE=`"Black`"", 4), @("Install", "AddLocal", "Grey", "IDE=`"Grey`"", 5),
-                      @("Install", "AddLocal", "White", "IDE=`"White`" OR WHITE=`"1`"", 6),
+                      @("Install", "AddLocal", "White", "IDE=`"White`"", 6),
                       @("Install", "EndDialog", "Return", "1", 7), @("Cancel", "SpawnDialog", "CancelDlg", "1", 1)) },
         @{ Key = "MaintenanceDlg"; Attr = 3; Title = "$name Setup"; First = "Repair"; Default = "Repair"; Cancel = "Cancel"
            Controls = @(
@@ -65,7 +63,18 @@ function Add-SetupUi([string]$productName) {
                @("Repair", "PushButton", 168, 243, 56, 17, 3, $null, "Re&pair", "Remove", $null),
                @("Remove", "PushButton", 236, 243, 56, 17, 3, $null, "&Remove", "Cancel", $null),
                @("Cancel", "PushButton", 304, 243, 56, 17, 3, $null, "Cancel", "Repair", $null))
+           # Remove only leads to its own page, which asks once more: no single click or key uninstalls GRIDE
            Events = @(@("Repair", "[REINSTALL]", "ALL", "1", 1), @("Repair", "EndDialog", "Return", "1", 2),
+                      @("Remove", "NewDialog", "RemoveDlg", "1", 1), @("Cancel", "SpawnDialog", "CancelDlg", "1", 1)) },
+        @{ Key = "RemoveDlg"; Attr = 3; Title = "$name Setup"; First = "Back"; Default = "Back"; Cancel = "Cancel"
+           Controls = @(
+               @("Title", "Text", 20, 15, 330, 24, 131075, $null, "{\DlgTitleFont}Remove ${name}?", $null, $null),
+               @("Description", "Text", 20, 60, 330, 100, 131075, $null, "Remove takes every outlook of GRIDE, its toolchain and its Start menu entries off this computer. Your own projects are not touched. Click Remove to go ahead, or Back to keep GRIDE.", $null, $null),
+               $bottom,
+               @("Back", "PushButton", 168, 243, 56, 17, 3, $null, "< &Back", "Remove", $null),
+               @("Remove", "PushButton", 236, 243, 56, 17, 3, $null, "&Remove", "Cancel", $null),
+               @("Cancel", "PushButton", 304, 243, 56, 17, 3, $null, "Cancel", "Back", $null))
+           Events = @(@("Back", "NewDialog", "MaintenanceDlg", "1", 1),
                       @("Remove", "[REMOVE]", "ALL", "1", 1), @("Remove", "EndDialog", "Return", "1", 2), @("Cancel", "SpawnDialog", "CancelDlg", "1", 1)) },
         @{ Key = "ProgressDlg"; Attr = 1; Title = "$name Setup"; First = "Cancel"; Default = "Cancel"; Cancel = "Cancel"
            Controls = @(
@@ -99,7 +108,7 @@ function Add-SetupUi([string]$productName) {
            Events = @(, @("Finish", "EndDialog", "Exit", "1", 1)) },
         @{ Key = "CancelDlg"; Attr = 3; Title = "$name Setup"; First = "No"; Default = "No"; Cancel = "No"; Width = 260; Height = 85
            Controls = @(
-               @("Text", "Text", 20, 15, 220, 30, 131075, $null, "Are you sure you want to cancel the installation of ${name}?", $null, $null),
+               @("Text", "Text", 20, 15, 220, 30, 131075, $null, "Are you sure you want to cancel ${name} Setup?", $null, $null),
                @("Yes", "PushButton", 72, 57, 56, 17, 3, $null, "&Yes", "No", $null),
                @("No", "PushButton", 132, 57, 56, 17, 3, $null, "&No", "Yes", $null))
            Events = @(@("Yes", "EndDialog", "Exit", "1", 1), @("No", "EndDialog", "Return", "1", 1)) },
@@ -133,14 +142,10 @@ function Add-SetupUi([string]$productName) {
         foreach ($c in $d.Controls) { Row "Control" (@($d.Key) + $c) }
         foreach ($e in $d.Events) { Row "ControlEvent" (@($d.Key) + $e) }
     }
-    # The three choices of screen 2 (the radio buttons of the property IDE, Text at most 64 characters), and the
-    # box that adds White beside Black or Grey - greyed out when White itself is the choice
+    # The three choices of screen 2, one of which is taken (the radio buttons of the property IDE, Text at most 64 characters)
     Row "RadioButton" @("IDE", 1, "Black", 10, 2, 310, 30, "&Black outlook - GRIDE", $null)
     Row "RadioButton" @("IDE", 2, "Grey", 10, 36, 310, 30, "&Grey outlook - GRIDE", $null)
     Row "RadioButton" @("IDE", 3, "White", 10, 70, 310, 30, "W&hite outlook - RIDE - The Simplest", $null)
-    Row "CheckBox" @("WHITE", "1")
-    Row "ControlCondition" @("ChooseDlg", "AlsoWhite", "Disable", "IDE=`"White`"")
-    Row "ControlCondition" @("ChooseDlg", "AlsoWhite", "Enable", "IDE<>`"White`"")
     Row "EventMapping" @("ProgressDlg", "ProgressBar", "SetProgress", "Progress")
     Row "EventMapping" @("ProgressDlg", "ActionText", "ActionText", "Text")
     Row "InstallUISequence" @("WelcomeDlg", "NOT Installed", 1200)

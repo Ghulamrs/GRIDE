@@ -5942,12 +5942,18 @@ private:
     void OnHelpResources(Object^, EventArgs^) { OpenHelpPage("resources.html", "RIDE's resources"); }
 
     void OpenHelpPage(String^ leaf, String^ said) {
+        // ..\..\Help is GRIDE's one Help folder, shared by its three outlooks (GRIDE\Help beside White,
+        // GRIDEx3\help in the tree), where the manual and the Shalimar reference go by GRIDE's names
         array<String^>^ places = gcnew array<String^>{
             System::IO::Path::Combine(AppDir(), "help"),
             System::IO::Path::Combine(Application::StartupPath, "help"),
-            System::IO::Path::Combine(System::IO::Path::Combine(AppDir(), ".."), "help")};
+            System::IO::Path::Combine(System::IO::Path::Combine(AppDir(), ".."), "help"),
+            System::IO::Path::Combine(System::IO::Path::Combine(AppDir(), "..\\.."), "Help")};
+        String^ shared = leaf == "manual.html" ? "RIDE_Manual.html"
+                       : leaf == "shalimar-language.html" ? "Shalimar_Reference.html" : leaf;
         for each (String^ place in places) {
             String^ page = System::IO::Path::Combine(place, leaf);
+            if (!System::IO::File::Exists(page)) page = System::IO::Path::Combine(place, shared);
             if (!System::IO::File::Exists(page)) continue;
             try {
                 System::Diagnostics::ProcessStartInfo^ start = gcnew System::Diagnostics::ProcessStartInfo(page);

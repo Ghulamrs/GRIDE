@@ -1,15 +1,15 @@
 # test-setup.ps1 - the Setup's health with its own defaults (per user, no elevation), once for each
-# choice: Black, Grey, White on its own, and Black with White beside it (IDE=Black WHITE=1). After msiexec /i
+# choice: Black, Grey and White, one at a time (IDE=Black|Grey|White). After msiexec /i
 # each chosen outlook's folder holds its IDE and the ten programs, the outlooks not chosen are absent, the
 # Start menu shortcuts and registry values are there, one Installed apps entry names GRIDE, each IDE starts
 # and answers and cpp11 runs; a deleted program comes back with msiexec /fa; msiexec /x takes every folder,
 # shortcut, registry value and the Installed apps entry away again.
 #
-#   test-setup.ps1 [-Msi <GRIDE-Setup-ver.msi>] [-Choices Black,Grey,White,Black+White]
-param([string]$Msi = "", [string[]]$Choices = @("Black", "Grey", "White", "Black+White"))
+#   test-setup.ps1 [-Msi <GRIDE-Setup-ver.msi>] [-Choices Black,Grey,White]
+param([string]$Msi = "", [string[]]$Choices = @("Black", "Grey", "White"))
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-if (-not $Msi) { $Msi = Get-ChildItem (Join-Path $root "installer\dist") -Filter "GRIDE-Setup-*.msi" | Sort-Object LastWriteTime | Select-Object -Last 1 -ExpandProperty FullName }
+if (-not $Msi) { $Msi = Get-ChildItem (Join-Path $root "Installer\dist") -Filter "GRIDE-Setup-*.msi" | Sort-Object LastWriteTime | Select-Object -Last 1 -ExpandProperty FullName }
 $logs = Join-Path (Split-Path $Msi) "logs"; New-Item -ItemType Directory -Force $logs | Out-Null
 # the product's name as the package gives it (GRIDE <version>), which names its registry key and Installed apps entry
 $wi = New-Object -ComObject WindowsInstaller.Installer; $pdb = $wi.OpenDatabase($Msi, 0); $pv = $pdb.OpenView("SELECT Value FROM Property WHERE Property='ProductName'"); $pv.Execute(); $productName = $pv.Fetch().StringData(1); $pv = $null; $pdb = $null
@@ -50,7 +50,7 @@ $outlook = @{
 "Setup: $Msi ($productName)"
 foreach ($c in $Choices) {
   $chosen = @($c -split '\+')
-  $props = @("IDE=$($chosen[0])"); if ($chosen.Count -gt 1 -and $chosen[1] -eq "White") { $props += "WHITE=1" }
+  $props = @("IDE=$($chosen[0])")
   "== $c ($($props -join ' '))"
   # the Setup's own defaults, as a double-click takes them (per user, no elevation)
   $rc = Msiexec (@("/i", "`"$Msi`"", "/qn") + $props) "install-$($c -replace '\+','-').log"
@@ -76,6 +76,14 @@ foreach ($c in $Choices) {
       Check ($shl.Count -eq 20 -and (Test-Path "$bin\examples\shalimar\classic\factorial\factorial.pro")) "$o`: examples\shalimar (20 Shalimar sources)"
       Check ((Test-Path "$bin\examples\showcase\README.md") -and (Test-Path "$bin\examples\showcase\solve3-shalimar\solve3.shl") -and (Test-Path "$bin\examples\showcase\average-c90\src\rng.c") -and (Test-Path "$bin\examples\showcase\solve3-cpp11\src\CMatrix.h")) "$o`: examples\showcase"
     }
+    # the one Help folder: the manual and the Shalimar reference for every outlook, each one's own guide, no docs\
+    $help = Join-Path $base "Help"
+    Check ((Test-Path "$help\RIDE_Manual.html") -and (Test-Path "$help\Shalimar_Reference.html")) "$o`: GRIDE\Help has the manual and the Shalimar reference"
+    $guide = @{ Black = "GRIDE_User_Guide.html"; Grey = "GRIDE_Help.html"; White = $null }[$o]
+    if ($guide) { Check ((Test-Path "$help\$guide") -and (Test-Path "$help\C90_Reference.html") -and (Test-Path "$help\VM6747_Reference.html")) "$o`: GRIDE\Help has $guide and the references" }
+    $other = @("GRIDE_User_Guide.html", "GRIDE_Help.html" | Where-Object { $_ -ne $guide })
+    Check (@($other | Where-Object { Test-Path "$help\$_" }).Count -eq 0) "$o`: no other outlook's guide in GRIDE\Help"
+    Check (-not (Test-Path (Join-Path (Join-Path $base $o) "docs"))) "$o`: no docs\ of its own (internal papers stay out)"
     Check (Test-Path (Join-Path $menu $outlook[$o].Link)) "$o`: Start menu $($outlook[$o].Link)"
     Check (Test-Path "HKCU:\Software\G. R. Akhtar\$productName\$o") "$o`: HKCU registry key"
     $v = & "$bin\cpp11.exe" --version 2>&1 | Select-Object -First 1
@@ -98,6 +106,7 @@ foreach ($c in $Choices) {
     Check (-not (Test-Path (Join-Path $menu $outlook[$o].Link))) "$o`: the shortcut removed"
     Check (-not (Test-Path "HKCU:\Software\G. R. Akhtar\$productName\$o")) "$o`: the registry key removed"
   }
+  Check (-not (Test-Path (Join-Path $base "Help"))) "GRIDE\Help removed"
   Check (@(InstalledApps).Count -eq 0) "Installed apps entry removed"
 }
 if ($script:fail -eq 0) { "all checks passed" } else { "$($script:fail) check(s) failed"; exit 1 }
