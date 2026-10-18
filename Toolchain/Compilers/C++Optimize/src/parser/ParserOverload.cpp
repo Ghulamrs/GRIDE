@@ -6,6 +6,7 @@
 #include "../Mangle.h"
 #include "../Source.h"
 
+#include <algorithm>
 #include <climits>
 #include <cstring>
 
@@ -619,12 +620,12 @@ Parser::Rank Parser::rankArgument(const Expr &arg, const Type *param) {
             }
         }
 
-        // **A reference to a base binds to a derived object** - [dcl.init.ref], and the sequence is
-        // a derived-to-base Conversion, which is what makes `f(Base &)` lose to `f(Derived &)` for
-        // a Derived rather than tie with it.
+        // **A reference to a base binds to a derived object** - [dcl.init.ref], a derived-to-base
+        // Conversion, so `f(Base &)` loses to `f(Derived &)` for a Derived; and /5 binds a const
+        // one to a derived class temporary too, `f(D(3))` for `f(const B &)`.
         if (want->unqualified() != given->unqualified() &&
-            accessibleBaseOffset(given, want) > -1 &&
-            isLvalue(arg) && !param->isRValueReference()) {
+            accessibleBaseOffset(given, want) > -1 && !param->isRValueReference() &&
+            (isLvalue(arg) || (want->isConst() && given->unqualified()->isStructOrUnion()))) {
             if (!want->isConst() && given->isConst()) return Rank::None;
             return Rank::Conversion;
         }
@@ -744,7 +745,23 @@ std::string Parser::describeSignature(const Signature &f) {
         out += f.params[i]->describe();
     }
     if (f.variadic) out += f.params.empty() ? "..." : ", ...";
-    return out + ")";
+    out += ")";
+    if (f.constThis) out += " const";
+    return out + (f.refThis == RefQual::LValue ? " &" : f.refThis == RefQual::RValue ? " &&" : "");
+}
+
+// [over.match.funcs]/4: `X &&` for `&&`, else `X &` - and an rvalue still binds an unqualified
+// member's; `const &` binds an rvalue as any const lvalue reference does, [dcl.init.ref]/5.
+bool Parser::refQualifierViable(RefQual ref, bool constThis, bool objectLvalue) {
+    if (ref == RefQual::None) return true;
+    if (ref == RefQual::RValue) return !objectLvalue;
+    return objectLvalue || constThis;
+}
+
+std::string Parser::refQualifierRefusal(const std::string &name, bool objectLvalue) {
+    return "'this' argument to member function '" + name + "' is an " +
+           (objectLvalue ? "lvalue, but function has rvalue ref-qualifier"
+                         : "rvalue, but function has non-const lvalue ref-qualifier");
 }
 
 // The best viable function, or a refusal naming every candidate: F beats G
@@ -788,6 +805,11 @@ bool Parser::betterCandidate(const std::vector<Rank> &a,
     if (better && worse) return false;
     if (better) return true;
     if (worse) return false;
+    // [over.ics.rank]/3.2.3: two ref-qualified members both viable means an rvalue object,
+    // which `&&` binds as an rvalue reference where `const &` binds an lvalue one.
+    if (ranksObjectA && ranksObjectB && fa.refThis != fb.refThis &&
+        fa.refThis != RefQual::None && fb.refThis != RefQual::None)
+        return fa.refThis == RefQual::RValue;
     if (fa.fromTemplate && fb.fromTemplate && fa.pattern != nullptr &&
         fb.pattern != nullptr)
         return moreSpecializedFunction(fa, fb);
@@ -837,7 +859,11 @@ std::vector<std::string> Parser::lookupKeys(const std::string &name,
         if (!t->isStructOrUnion() || !t->inNamespace()) continue;
         const std::string &tag = t->tag();
         const std::size_t cut = tag.rfind("::");
-        if (cut != std::string::npos) add(tag.substr(0, cut) + "::" + name);
+        if (cut == std::string::npos) continue;
+        add(tag.substr(0, cut) + "::" + name);
+        // [basic.lookup.argdep]/2: an inline namespace's class has the enclosing one too.
+        const std::vector<std::string> alts = inlineAliasPrefixes(tag.substr(0, cut) + "::");
+        for (std::size_t a = 0; a < alts.size(); a++) add(alts[a] + name);
     }
     return keys;
 }
@@ -889,6 +915,7 @@ Parser::OperatorChoice Parser::resolveOperator(const std::string &name,
                     // where the constness agrees, a qualification conversion for a
                     // const member on a non-const object, no match the other way.
                     if (lt->isConst() && !f.constThis) continue;
+                    if (!refQualifierViable(f.refThis, f.constThis, objectIsLvalue(left))) continue;
                     std::vector<Rank> r;
                     r.push_back(lt->isConst() == f.constThis ? Rank::Identity
                                                              : Rank::Qualification);
@@ -909,6 +936,8 @@ Parser::OperatorChoice Parser::resolveOperator(const std::string &name,
     for (std::size_t ki = 0; ki < keys.size(); ki++)
     if (const std::vector<std::size_t> *set = overloadsOf(keys[ki]))
         for (std::size_t k = 0; k < set->size(); k++) {
+            // Two keys may reach one function - the bare name and its namespace's - and it is one candidate.
+            if (std::find(which.begin(), which.end(), (*set)[k]) != which.end()) continue;
             const Signature &f = functions_[(*set)[k]];
             if (f.params.size() != written + 1) continue;
             Rank a = rankArgument(left, f.params[0]);
@@ -1013,7 +1042,7 @@ void Parser::applyDefaults(Signature f, std::vector<ExprPtr> &args,
 Parser::Signature Parser::resolveOverload(const std::string &written,
                                           const std::vector<ExprPtr> &args,
                                           std::size_t pos,
-                                          const Type *object) {
+                                          const Type *object, bool objectLvalue) {
     // An unqualified name inside a namespace names that namespace's function
     // if it has one - the enclosing scopes are tried from the innermost out,
     // then whatever a `using namespace` has opened.
@@ -1078,6 +1107,7 @@ Parser::Signature Parser::resolveOverload(const std::string &written,
     std::vector<std::vector<Rank> > ranks;
     // Set when only the object's constness stopped a candidate, for the message.
     bool droppedForConst = false;
+    bool droppedForRef = false;
 
     for (std::size_t k = 0; k < set->size(); k++) {
         const Signature &f = functions_[(*set)[k]];
@@ -1093,6 +1123,7 @@ Parser::Signature Parser::resolveOverload(const std::string &written,
         std::vector<Rank> r;
         if (object != nullptr) {
             if (object->isConst() && !f.constThis) { droppedForConst = true; continue; }
+            if (!refQualifierViable(f.refThis, f.constThis, objectLvalue)) { droppedForRef = true; continue; }
             r.push_back(object->isConst() == f.constThis ? Rank::Identity
                                                          : Rank::Qualification);
         }
@@ -1117,6 +1148,7 @@ Parser::Signature Parser::resolveOverload(const std::string &written,
         src_.fail(pos, "'" + name + "' is not a const member function, and this "
                        "object is const - calling it could change what the "
                        "const promised not to");
+    if (viable.empty() && droppedForRef) src_.fail(pos, refQualifierRefusal(name, objectLvalue));
 
     if (viable.empty()) {
         std::string why = "no function called '" + name + "' takes these " +

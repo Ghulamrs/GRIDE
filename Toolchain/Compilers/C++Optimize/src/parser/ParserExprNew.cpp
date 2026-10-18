@@ -117,13 +117,25 @@ ExprPtr Parser::classTemporary(const Type *cls, std::size_t pos) {
     buildBracedArguments(key, args, pos);
     if (hasConstructors(plain->tag()))
         convertThroughConversionFunction(args, plain, true, pos);
+    const bool trivialCopyable = copyConstructorOf(plain) == nullptr && moveConstructorOf(plain) == nullptr;
+    // From an object of a class derived from it, `CVector<4>(quat)`, the copy is of the base subobject.
+    if (args.size() == 1 && args[0]->type() != nullptr && trivialCopyable && isGlvalue(*args[0]) &&
+        args[0]->type()->unqualified() != plain && args[0]->type()->unqualified()->isStructOrUnion() &&
+        accessibleBaseOffset(args[0]->type(), plain) >= 0) {
+        const Type *from = args[0]->type()->unqualified();
+        ExprPtr at(new Unary('&', std::move(args[0])));
+        at->setType(types_.pointerTo(from));
+        at = convert(std::move(at), types_.pointerTo(plain));
+        ExprPtr base(new Unary('*', std::move(at)));
+        base->setType(plain);
+        args[0] = std::move(base);
+    }
     // **`T(t)` for a class whose constructors leave its copy trivial** is a
     // copy of bytes too: no copy constructor was declared, so resolution had
     // nothing to find and `T b = T(T::make())` was refused.
     const bool trivialSameClass =
         args.size() == 1 && args[0]->type() != nullptr &&
-        args[0]->type()->unqualified() == plain &&
-        copyConstructorOf(plain) == nullptr && moveConstructorOf(plain) == nullptr;
+        args[0]->type()->unqualified() == plain && trivialCopyable;
     if (!hasConstructors(plain->tag()) || trivialSameClass) {
         // No constructor at all: `P(x)` is then a copy of another P, which is
         // a move of bytes, and `P()` is an object with nothing to set.
@@ -140,6 +152,7 @@ ExprPtr Parser::classTemporary(const Type *cls, std::size_t pos) {
         // Expiring, whichever of the three shapes below answers - the same
         // mark the constructor branch sets, for the same reason.
         obj->setXvalue();
+        obj->setDeclCategory(Expr::Category::Prvalue);
         if (args.empty()) {
             // **[dcl.init]/8: `P()` value-initialises, and for a class with no
             // user-provided constructor that means zeroing it.** The slot was
@@ -158,6 +171,7 @@ ExprPtr Parser::classTemporary(const Type *cls, std::size_t pos) {
             ExprPtr made(new Unary('*', std::move(both)));
             made->setType(plain);
             made->setXvalue();
+            made->setDeclCategory(Expr::Category::Prvalue);
             return made;
         }
         checkAssignable(*args[0], plain, pos, "this temporary");
@@ -172,6 +186,7 @@ ExprPtr Parser::classTemporary(const Type *cls, std::size_t pos) {
         ExprPtr made(new Unary('*', std::move(both)));
         made->setType(plain);
         made->setXvalue();
+        made->setDeclCategory(Expr::Category::Prvalue);
         return made;
     }
 
@@ -367,7 +382,11 @@ ExprPtr Parser::aggregateTemporary(const Type *plain, Init &in, std::size_t pos)
     }
     ExprPtr obj(Var::local(name, off));
     obj->setType(plain);
-    if (chain == nullptr) { obj->setXvalue(); return obj; }
+    if (chain == nullptr) {
+        obj->setXvalue();
+        obj->setDeclCategory(Expr::Category::Prvalue);
+        return obj;
+    }
     ExprPtr at(new Unary('&', std::move(obj)));
     at->setType(types_.pointerTo(plain));
     ExprPtr both(new Comma(std::move(chain), std::move(at)));
@@ -375,6 +394,7 @@ ExprPtr Parser::aggregateTemporary(const Type *plain, Init &in, std::size_t pos)
     ExprPtr made(new Unary('*', std::move(both)));
     made->setType(plain);
     made->setXvalue();
+    made->setDeclCategory(Expr::Category::Prvalue);
     return made;
 }
 
@@ -760,6 +780,7 @@ ExprPtr Parser::constructTemporary(const Type *plain, const Signature &ctor,
     // the compiler is told.** The lowering reads as an ordinary lvalue, so without
     // it a temporary passed by value reached for the copy constructor.
     made->setXvalue();
+    made->setDeclCategory(Expr::Category::Prvalue);
     return made;
 }
 

@@ -16,9 +16,7 @@
 const Type *Parser::memberTypeWalk(const Type *t) {
     while (peek().is("::") && peekAt(1).kind == TokenKind::Ident) {
         const std::string member = peekAt(1).text;
-        if (patternOnly_ &&
-            (t->kind() == Kind::TemplateParam || t->kind() == Kind::DependentMember ||
-             (t->isStructOrUnion() && t->isSpecialization()))) {
+        if (patternOnly_ && dependentType(t)) {
             at_ += 2;
             t = types_.dependentMember(t, member);
             continue;
@@ -73,6 +71,8 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
 
     std::string tag;
     if (peek().kind == TokenKind::Ident) { tag = peek().text; at_++; }
+    // **[class.union]/5: an anonymous union** - nameless, a body, a `;` straight after - its members the scope's own.
+    const bool anonProper = kind == Kind::Union && tag.empty() && peek().is("{") && anonymousUnionAhead();
 
     // **`final` on a class head forbids deriving from it** - [class]/3 - recorded on the type
     // and checked by every later base clause. Contextual: only in front of the body is it the keyword.
@@ -244,6 +244,8 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
     const bool msBits = target_.microsoftNames();
     long long msUnitStart = 0, msUnitBits = 0;
     long long widestBits = 0;
+    // [class.union]/4: at most one member of a union has a brace-or-equal-initializer.
+    std::size_t unionInits = 0;
 
     // **The base subobject is laid down first, at offset 0**, its members
     // copied in at the offsets they already have - that is what the layout IS,
@@ -495,6 +497,7 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                 src_.fail(peek().pos, "explicit instantiation in a class is not "
                                       "supported yet");
             templateParameters(mt.params);
+            refuseAfterPack(mt.params);
             mt.afterParams = at_;
             mt.pos = peek().pos;
             if (peek().is("struct") || peek().is("class") || peek().is("union"))
@@ -562,6 +565,34 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
         if (peek().is("using") && tag.empty() && peekAt(2).is("="))
             src_.fail(peek().pos, "an alias declaration needs a class with a name - this one is anonymous");
         if (aliasDeclaration(tag + "::")) continue;
+        // **`using B::B;` inherits B's constructors**, [class.inhctor] - recorded here, declared once the class is complete.
+        if (peek().is("using") && !tag.empty()) {
+            std::size_t e = at_ + 1;
+            for (int depth = 0; e < tokens_.size() && !(depth == 0 && tokens_[e].is(";")); e++) {
+                if (tokens_[e].is("<")) depth++;
+                else if (tokens_[e].is(">")) depth--;
+                else if (tokens_[e].kind == TokenKind::End) break;
+            }
+            const Type *named = nullptr;
+            if (e < tokens_.size() && e >= at_ + 4 && tokens_[e - 1].kind == TokenKind::Ident &&
+                tokens_[e - 2].is("::")) {
+                const std::string ctor = tokens_[e - 1].text;
+                for (const Type::BaseSpec *b : type->directBases())
+                    if (b->type->localName() == ctor ||
+                        (b->type->isSpecialization() && b->type->templateName() == ctor))
+                        named = b->type;
+            }
+            if (named != nullptr) {
+                for (const Type::BaseSpec *b : type->directBases())
+                    if (b->type == named && b->isVirtual)
+                        src_.fail(peek().pos, "inheriting the constructors of a virtual base is not "
+                                              "supported yet - the most-derived class would have to be told "
+                                              "which of them builds it");
+                inheritFrom_[tag].push_back(named);
+                at_ = e + 1;
+                continue;
+            }
+        }
         if (peek().is("using"))
             src_.fail(peek().pos, "a using-declaration inside a class is not "
                                   "supported yet - it redeclares a base member "
@@ -759,6 +790,10 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
         // keyed "S::value", the same qualified key a nested class uses, so it is
         // found from inside the class, from a member's body, and from outside.
         if (msc == StorageTypedef) {
+            if (anonProper) {
+                const Declared td = declarator(base);
+                src_.fail(td.pos, "types cannot be declared in an anonymous union");
+            }
             if (tag.empty())
                 src_.fail(peek().pos, "a typedef needs a class with a name - "
                                       "this one is anonymous");
@@ -779,18 +814,60 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
 
         // **`struct Inner { ... };` declares a type and no member.**
         if (peek().is(";")) {
+            // [class.union]/5: a type declared in an anonymous union, and clang's column is the name's.
+            if (anonProper && (wasEnum || (base->isStructOrUnion() && !base->tag().empty())))
+                src_.fail(tokens_[itemStart + 1].pos, "types cannot be declared in an anonymous union");
             // An `enum Kind { ... };` in a class body declares a type, no member.
             if (wasEnum) { at_++; continue; }
-            // **An anonymous union's members are members of the class around
-            // it** - [class.union] - so they take its storage and are named
-            // without going through it.
-            if (base->kind() == Kind::Union && base->tag().empty())
-                src_.fail(peek().pos, "an anonymous union is not supported "
-                                      "yet: its members would have to become "
-                                      "members of the class around it, "
-                                      "sharing storage - give the union a "
-                                      "name and reach them through it");
-            if (!base->isStructOrUnion() || base->tag().empty())
+            // **An anonymous union's members are members of the class around it** - [class.union]/5 - at one
+            // offset, with the access where it is written; an anonymous struct is the GNU extension clang refuses.
+            if (base->isStructOrUnion() && base->tag().empty()) {
+                if (base->kind() != Kind::Union)
+                    src_.fail(tokens_[itemStart].pos, "anonymous structs are a GNU extension");
+                if (anonProper)
+                    src_.fail(tokens_[itemStart].pos, "anonymous types declared in an anonymous union are an extension");
+                if (msc != StorageNone)
+                    src_.fail(tokens_[itemStart].pos, "anonymous union at class scope must not have a storage specifier");
+                if (base->members().empty())
+                    src_.fail(tokens_[itemStart].pos, "declaration does not declare anything");
+                const Type *u = base;
+                const int a = Packed::to(u->align(target_), pack);
+                if (a > widest) widest = a;
+                const long long openEnd = (msBits && msUnitBits != 0) ? msUnitStart + msUnitBits : bitCursor;
+                const long long byteCursor = ((bitCursor > openEnd ? bitCursor : openEnd) + 7) / 8;
+                long long at = (kind == Kind::Union) ? 0 : alignTo(byteCursor, a);
+                // The one slot is laid as a member of the union's type would be, the empty-subobject walk included.
+                endsZero = u->endsWithZeroSized();
+                if (!target_.microsoftNames() && kind != Kind::Union)
+                    while (Conflict::at(empties, u, static_cast<int>(at))) at += a;
+                Conflict::add(empties, u, static_cast<int>(at));
+                const std::vector<Member> &inner = u->members();
+                const std::vector<std::size_t> &where = anonUnionMemberPos_[u];
+                for (std::size_t i = 0; i < inner.size(); i++) {
+                    const std::size_t mpos = i < where.size() ? where[i] : peek().pos;
+                    for (std::size_t j = ownFrom; j < members.size(); j++)
+                        if (members[j].name == inner[i].name)
+                            src_.fail(mpos, "member of anonymous union redeclares '" + inner[i].name + "'");
+                    Member m = inner[i];
+                    m.offset += static_cast<int>(at);
+                    m.access = access;
+                    m.anonUnion = u;
+                    members.push_back(m);
+                    // Its initialiser was keyed under the nameless tag; it is this class's now.
+                    std::map<std::string, std::size_t>::iterator init = memberInit_.find("::" + inner[i].name);
+                    if (init != memberInit_.end()) {
+                        memberInit_[tag + "::" + inner[i].name] = init->second;
+                        memberInit_.erase(init);
+                    }
+                }
+                const long long endBits = (at + u->size(target_)) * 8;
+                if (kind == Kind::Union) { if (endBits > widestBits) widestBits = endBits; }
+                else bitCursor = endBits;
+                msUnitBits = 0;
+                at_++;
+                continue;
+            }
+            if (!base->isStructOrUnion())
                 src_.fail(peek().pos, "this declares nothing - a member needs a "
                                       "name");
             if (base->enclosing() != nullptr)
@@ -865,6 +942,40 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             const bool memberIsFunction = peek().is("(") || d.paramsAt != 0 ||
                                           d.type->isFunction();
 
+            // [class.union]/5: what an anonymous union may not hold, each refused at the name clang points at;
+            // a member whose class has special members of its own is the unrestricted union, not built.
+            if (anonProper) {
+                if (memberIsFunction)
+                    src_.fail(d.pos, "functions cannot be declared in an anonymous union");
+                if (msc == StorageStatic)
+                    src_.fail(d.pos, "static data member '" + d.name + "' not allowed in anonymous union");
+                if (access != Access::Public)
+                    src_.fail(d.pos, std::string("anonymous union cannot contain a ") +
+                                     (access == Access::Private ? "private" : "protected") + " data member");
+                const Type *mc = d.type->unqualified();
+                while (mc->isArray()) mc = mc->pointee()->unqualified();
+                if (mc->isStructOrUnion() && !mc->tag().empty() &&
+                    (hasConstructors(mc->tag()) || destructorOf(mc) != nullptr ||
+                     copyConstructorOf(mc) != nullptr || moveConstructorOf(mc) != nullptr ||
+                     copyAssignOf(mc) != nullptr || moveAssignOf(mc) != nullptr))
+                    src_.fail(d.pos, "'" + d.name + "' is a member of an anonymous union, and its class "
+                                     "'" + mc->tag() + "' has a constructor, destructor or assignment of "
+                                     "its own - a union holding one is not supported yet: [class.union]/2 "
+                                     "would delete the enclosing class's own special members");
+                anonUnionMemberPos_[type].push_back(d.pos);
+            } else if (kind == Kind::Union && !memberIsFunction && msc != StorageStatic) {
+                const Type *mc = d.type->unqualified();
+                while (mc->isArray()) mc = mc->pointee()->unqualified();
+                if (mc->isStructOrUnion() && !mc->tag().empty() &&
+                    (hasConstructors(mc->tag()) || destructorOf(mc) != nullptr ||
+                     copyConstructorOf(mc) != nullptr || moveConstructorOf(mc) != nullptr ||
+                     copyAssignOf(mc) != nullptr || moveAssignOf(mc) != nullptr))
+                    src_.fail(d.pos, "'" + d.name + "' is a member of a union, and its class '" +
+                                     mc->tag() + "' has a constructor, destructor or assignment of its "
+                                     "own - a union holding one is not supported yet: [class.union]/2 "
+                                     "would delete the union's own special members");
+            }
+
             // **[dcl.stc]/9 names what `mutable` may not be applied to**, and
             // each of the four would be a contradiction rather than a gap.
             if (isMutable) {
@@ -883,6 +994,9 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                 !d.type->isFunction())
                 d.type = types_.withoutConst(d.type);
 
+            // [class.union]/2: a union holds no reference, clang's words at the name.
+            if (kind == Kind::Union && !memberIsFunction && d.type->isReference())
+                src_.fail(d.pos, "union member '" + d.name + "' has reference type '" + d.type->describe() + "'");
             // **A reference member is bound, never assigned**, so a class with one
             // and no constructor could never be built. Said here rather than at the
             // first use, where the reader hears only that something is uninitialised.
@@ -987,15 +1101,6 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                 parameterTypes(mparams, mvariadic);
                 skipAttributes();
                 d.type = types_.functionType(d.type, std::move(mparams), mvariadic);
-                // **A ref-qualifier picks the overload by the object's own
-                // value category** - `f() &` against `f() &&` - which is a
-                // rank the implicit object parameter does not carry here.
-                if (peek().is("&") || peek().is("&&"))
-                    src_.fail(peek().pos, "a ref-qualifier on a member "
-                                          "function - 'f() &' or 'f() &&' - is "
-                                          "not supported yet: the object's "
-                                          "value category does not choose an "
-                                          "overload here");
                 bool constThis = false;
                 if (consume("const")) constThis = true;
                 // `f() volatile` and `f() const volatile`: the cv on `this` is
@@ -1007,12 +1112,18 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                               "- the qualifier on 'this' is part of the name on "
                               "both ABIs, and 'volatile' is not in this "
                               "compiler's type system");
+                // [dcl.fct]/6: the ref-qualifier, after the cv - `f() &`, `f() const &&`.
+                const std::size_t refAt = peek().pos;
+                const RefQual refThis = refQualifier();
                 // [class.static]/1: a static member function has no `this`, so
                 // there is nothing for either of these to qualify.
                 if (memberIsStatic && constThis)
                     src_.fail(d.pos, "'" + d.name + "' is a static member "
                                      "function and has no 'this', so 'const' "
                                      "has nothing to qualify");
+                if (memberIsStatic && refThis != RefQual::None)
+                    src_.fail(refAt, "static member function '" + d.name + "' cannot have a "
+                                     "ref-qualifier - it has no 'this' for one to qualify");
                 if (memberIsStatic && isVirtual)
                     src_.fail(d.pos, "'" + d.name + "' cannot be both 'static' "
                                      "and 'virtual' - one says there is no "
@@ -1067,7 +1178,7 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                         src_.fail(d.pos, "a member function needs a class with "
                                          "a name - this one is anonymous");
                     const std::size_t sigAt = functions_.size();
-                    declareMember(tag, d, constThis, access,
+                    declareMember(tag, d, constThis, refThis, access,
                                   kind == Kind::Union, isVirtual, memberIsStatic,
                                   isPure, virt);
                     pendingBodies_.push_back(PendingBody{
@@ -1081,7 +1192,7 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                 if (tag.empty())
                     src_.fail(d.pos, "a member function needs a class with a "
                                      "name - this one is anonymous");
-                declareMember(tag, d, constThis, access, kind == Kind::Union,
+                declareMember(tag, d, constThis, refThis, access, kind == Kind::Union,
                               isVirtual, memberIsStatic, isPure, virt);
                 if (special == SpecialDef::Deleted) {
                     // A deleted virtual would leave its slot naming a function with no body.
@@ -1145,6 +1256,8 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             // where they are and their place is recorded; every constructor that does
             // not name this member in its own list reads them again.
             if (peek().is("=") || peek().is("{")) {
+                if (kind == Kind::Union && unionInits++ > 0)
+                    src_.fail(d.pos, "initializing multiple members of union");
                 consume("=");
                 // `= {}` and `= {0}` zero the member, [dcl.init.list]/3; `{v}` on a scalar is the
                 // value, narrowing checked at the replay; a list for a class or an array is refused.
@@ -1318,20 +1431,26 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
     if (noData) empties.push_back(Type::EmptyAt{ type, 0 });
     type->setEmptySubobjects(empties);
     type->complete(members, size, align);
-    // Held bodies are read now, with the class complete: every member exists,
-    // so a body may name one declared below it. Taken out of the vector first,
-    // because a body may itself define a class with held bodies of its own.
+    // Held bodies are read now, with the class complete, so a body may name a member declared below
+    // it; taken out of the vector first, since a body may define a class with held bodies of its own.
+    // A specialization also takes its nested classes' bodies, which waited for it, [temp.inst]/2.
+    const bool takesNested = !specializationOf.empty() && deferSpecializationBodies_;
+    auto ownBody = [&](const PendingBody &b) {
+        return b.tag == tag || (takesNested && b.tag.compare(0, tag.size() + 2, tag + "::") == 0);
+    };
     std::vector<PendingBody> mine;
     for (std::size_t i = 0; i < pendingBodies_.size(); i++)
-        if (pendingBodies_[i].tag == tag) mine.push_back(pendingBodies_[i]);
+        if (ownBody(pendingBodies_[i])) mine.push_back(pendingBodies_[i]);
     if (!mine.empty()) {
         std::vector<PendingBody> rest;
         for (std::size_t i = 0; i < pendingBodies_.size(); i++)
-            if (pendingBodies_[i].tag != tag) rest.push_back(pendingBodies_[i]);
+            if (!ownBody(pendingBodies_[i])) rest.push_back(pendingBodies_[i]);
         pendingBodies_.swap(rest);
     }
 
     declareImplicitSpecials(tag, type, pos);
+    // After them: an inherited constructor is not user-declared, so it leaves the implicit default one.
+    declareInheritingCtors(tag, type, pos);
     // **Who takes cl's hidden flag**, recorded once the class is laid out and
     // its implicit members declared: every constructor of a Microsoft class
     // with a virtual base, by symbol, because the flag is not in the name.
@@ -1367,8 +1486,14 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
     // **A specialization's member bodies are not replayed here.** This is in the
     // middle of whatever asked for the class, and a replay goes through topLevel,
     // which clears the locals; they are handed to the pass that defines them.
+    bool insideSpecialization = false;
+    for (std::size_t i = 0; i < classStack_.size(); i++)
+        if (classStack_[i] != type && classStack_[i]->isSpecialization()) insideSpecialization = true;
     if (!specializationOf.empty() && deferSpecializationBodies_)
         heldForSpecialization_ = std::move(mine);
+    else if (deferSpecializationBodies_ && insideSpecialization)
+        // Nested in a specialization being made: compiled where called, with the specialization's own.
+        pendingBodies_.insert(pendingBodies_.end(), mine.begin(), mine.end());
     else
         replayInlineBodies(std::move(mine));
     return type;
@@ -1488,7 +1613,11 @@ const Type *Parser::enumSpecifier() {
     while (!peek().is("}")) {
         std::size_t npos = peek().pos;
         std::string name = expectIdent("an enumerator");
-        if (enumIndex_.count(within_ + name) != 0 || (!scoped && findEnum(prefix + name)))
+        // Declared twice under this very key - not one an inline namespace's enumerator put here.
+        const std::unordered_map<std::string, std::size_t>::const_iterator twice =
+            enumIndex_.find(within_ + name);
+        if ((twice != enumIndex_.end() && enums_[twice->second].name == within_ + name) ||
+            (!scoped && twice == enumIndex_.end() && findEnum(prefix + name)))
             src_.fail(npos, "'" + name + "' is declared twice");
         if (consume("=")) {
             const long long given = constantExpression("a constant");
@@ -1505,6 +1634,17 @@ const Type *Parser::enumSpecifier() {
         made.push_back(enums_.size() - 1);
         // C++11's `E::a` for an unscoped E too, [dcl.enum]/11.
         if (!scoped && !tag.empty()) enumIndex_[prefix + tag + "::" + name] = enums_.size() - 1;
+        // And under the enclosing namespace's name where this one is inline.
+        {
+            const std::vector<std::string> alts = within == nullptr ? inlineAliasPrefixes(prefix)
+                                                                    : std::vector<std::string>();
+            const std::string tail = scoped ? tag + "::" + name : name;
+            for (std::size_t a = 0; a < alts.size(); a++) {
+                enumIndex_.insert(std::make_pair(alts[a] + tail, enums_.size() - 1));
+                if (!scoped && !tag.empty())
+                    enumIndex_.insert(std::make_pair(alts[a] + tag + "::" + name, enums_.size() - 1));
+            }
+        }
         if (scoped) {
             const std::size_t had = enumIndex_.count(prefix + name);
             inBody.push_back(std::make_pair(prefix + name,
@@ -1735,14 +1875,12 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
             continue;
         }
         if (consume("volatile")) { quals->isVolatile = sawVolatile(); continue; }
-        // **`inline` is a hint about linkage, not about the type.** It makes a
-        // function's definition mergeable across translation units; nothing
-        // else downstream needs it.
+        // **`inline` is a hint about linkage, not about the type.** It makes a function's
+        // definition mergeable across translation units; nothing else downstream needs it.
+        // `inline namespace` at file scope is topLevel's; here it is one in a class or block.
         if (peek().is("inline") && peekAt(1).is("namespace"))
-            src_.fail(peek().pos, "an inline namespace is not supported yet - "
-                                  "its members would have to be found in the "
-                                  "namespace around it, and 'namespace N { }' "
-                                  "without 'inline' works here");
+            src_.fail(peek().pos, "a namespace is defined at namespace scope, and this one is "
+                                  "inside a class or a function");
         if (consume("inline")) { quals->isInline = true; continue; }
         if (consume("register")) { *storage = StorageRegister; continue; }
         if (consume("auto"))     { *storage = StorageAuto; continue; }
@@ -1984,6 +2122,109 @@ void Parser::refuseDuplicateMember(const std::vector<Member> &members,
                            " - a class has one member of each name, and the "
                            "second would be a second place in the object that "
                            "nothing could name");
+}
+
+// At the `{` of a nameless union: is the token after its matching `}` a `;`?
+bool Parser::anonymousUnionAhead() const {
+    int depth = 0;
+    for (std::size_t i = at_; i < tokens_.size(); i++) {
+        if (tokens_[i].kind == TokenKind::End) return false;
+        if (tokens_[i].is("{")) depth++;
+        else if (tokens_[i].is("}") && --depth == 0)
+            return i + 1 < tokens_.size() && tokens_[i + 1].is(";");
+    }
+    return false;
+}
+
+// A bit-field has no object to be a field of where the members are names of a scope.
+void Parser::refuseAnonymousUnionShape(const Type *u, std::size_t pos) {
+    const std::vector<Member> &ms = u->members();
+    const std::vector<std::size_t> &where = anonUnionMemberPos_[u];
+    for (std::size_t i = 0; i < ms.size(); i++)
+        if (ms[i].isBitField())
+            src_.fail(i < where.size() ? where[i] : pos,
+                      "'" + ms[i].name + "' is a bit-field of an anonymous union outside a class, and "
+                      "a bit-field there is not supported yet - it would be a name with no object to "
+                      "be a field of; give the union a name");
+}
+
+// The storage's name, measured from clang: Itanium spells the first member as a mangled variable with
+// no `L` (`_Z1a`, `_ZN1n1eE`); Microsoft numbers the object `$S<n>` of type `<unnamed-type-$S<n>>`.
+std::string Parser::anonymousUnionSymbol(const Type *u, std::size_t pos) {
+    const std::string hidden = "$S" + std::to_string(anonUnionSeq_);
+    const std::string first = u->members().empty() ? hidden : u->members()[0].name;
+    if (!target_.microsoftNames()) {
+        const std::string q = namespacePrefix() + first;
+        if (q.find("::") != std::string::npos) return itaniumDataName(q, false);
+        return "_Z" + std::to_string(first.size()) + first;
+    }
+    Type *shape = types_.structType(Kind::Union, namespacePrefix() + "<unnamed-type-" + hidden + ">");
+    shape->setLocalName("<unnamed-type-" + hidden + ">");
+    if (!namespaceStack_.empty()) shape->setInNamespace();
+    std::string out, why;
+    if (!microsoftDataName(namespacePrefix() + hidden, shape, &out, &why))
+        src_.fail(pos, "this anonymous union cannot be given a name the linker can hold: " + why);
+    return out;
+}
+
+// **[class.union]/6: an anonymous union at namespace scope is `static`**, its members names of that scope
+// sharing one object; in a block they are locals sharing one frame slot, or one static object.
+void Parser::declareAnonymousUnionObject(const Type *u, StorageClass sc, std::size_t pos, bool local) {
+    if (u->members().empty()) src_.fail(pos, "declaration does not declare anything");
+    refuseAnonymousUnionShape(u, pos);
+    const std::vector<Member> &ms = u->members();
+    const std::vector<std::size_t> &where = anonUnionMemberPos_[u];
+    anonUnionSeq_++;
+    const std::string hidden = "$S" + std::to_string(anonUnionSeq_);
+    auto redeclares = [&](std::size_t i) {
+        src_.fail(i < where.size() ? where[i] : pos,
+                  "member of anonymous union redeclares '" + ms[i].name + "'");
+    };
+    if (!local) {
+        if (sc != StorageStatic && !inUnnamedNamespace_)
+            src_.fail(pos, "anonymous unions at namespace or global scope must be declared 'static'");
+        const std::string symbol = anonymousUnionSymbol(u, pos);
+        for (std::size_t i = 0; i < ms.size(); i++) {
+            const std::string gname = namespacePrefix() + ms[i].name;
+            if (findGlobalToUpdate(gname) != nullptr) redeclares(i);
+            globalIndex_[gname] = globals_.size();
+            globals_.push_back(GlobalSym{ gname, symbol, ms[i].type, ms[i].type->isConst(), true, false, false, 0 });
+        }
+        current_->globals.push_back(Global{ hidden, symbol, u, std::vector<GlobalPiece>(), false, true, false });
+        return;
+    }
+    const std::size_t from = scopeStarts_.empty() ? 0 : scopeStarts_.back();
+    for (std::size_t i = 0; i < ms.size(); i++)
+        for (std::size_t k = from; k < locals_.size(); k++)
+            if (locals_[k].name == ms[i].name) redeclares(i);
+    if (sc == StorageStatic) {
+        const std::string symbol = uniqueStaticSymbol(ms.empty() ? hidden : ms[0].name);
+        for (std::size_t i = 0; i < ms.size(); i++)
+            declareStaticLocal(ms[i].name, ms[i].type, i < where.size() ? where[i] : pos, symbol);
+        current_->globals.push_back(Global{ symbol, symbol, u, std::vector<GlobalPiece>(), false, true, false });
+        return;
+    }
+    if (sc != StorageNone)
+        src_.fail(pos, "an anonymous union in a block takes no storage class but 'static'");
+    const int offset = declare(hidden, u, pos, 0);
+    for (std::size_t i = 0; i < ms.size(); i++) {
+        locals_.push_back(Local{ ms[i].name, offset, ms[i].type, false, std::string() });
+        locals_.back().sharesSlot = true;
+        locals_.back().serial = ++localSerial_;
+        fnVars_.push_back(::Local{ ms[i].name, ms[i].type, offset, false, std::string(), currentBlock() });
+        fnVars_.back().align = objectAlign(ms[i].type, target_);
+    }
+}
+
+// Which anonymous unions of `cls` have a member among `names` - the mem-initialiser list's, or
+// what a delegating constructor already built - so the rest of each is left alone.
+std::set<const Type *> Parser::unionsNamedBy(const Type *cls, const std::set<std::string> &names) const {
+    std::set<const Type *> out;
+    const std::vector<Member> &ms = cls->members();
+    for (std::size_t i = 0; i < ms.size(); i++)
+        if (ms[i].anonUnion != nullptr && ms[i].declaredIn == nullptr && names.count(ms[i].name) != 0)
+            out.insert(ms[i].anonUnion);
+    return out;
 }
 
 bool Parser::podForLayout(const Type *t) const {
@@ -2338,7 +2579,14 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
                                       "'this' is not part of a function type "
                                       "here, so this one cannot be told from "
                                       "the other");
-            outer = types_.functionType(base, std::move(params), variadic);
+            // `int (S::*)() &` - the ref-qualifier is the function type's, [dcl.fct]/6; a
+            // pointer or reference to a non-member function type may not carry one.
+            if (!wrapsMemberPointer && (peek().is("&") || peek().is("&&")))
+                src_.fail(peek().pos, "a pointer or reference to a function type cannot "
+                                      "have a '" + peek().text + "' qualifier - only a "
+                                      "non-static member function can, [dcl.fct]/6");
+            const RefQual ref = refQualifier();
+            outer = types_.functionType(base, std::move(params), variadic, ref);
         } else {
             outer = arraySuffix(base, posOuter);
         }
@@ -2444,6 +2692,14 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
         name = declaredName("a member name after '::'");
         if (destructor) name = "~" + name;
     }
+    // `int b::f()` inside `namespace a`: the qualifier's first name is found innermost first, `a::b`.
+    if (!qualifier.empty() && !namespaces_.count(qualifier)) {
+        const std::size_t cut = qualifier.find("::");
+        const std::string head = qualifier.substr(0, cut);
+        const std::string ns = namespaceNamed(head);
+        if (!ns.empty() && ns != head)
+            qualifier = ns + (cut == std::string::npos ? std::string() : qualifier.substr(cut));
+    }
 
     skipAttributes();
     // `int D::modes_[Count]`: the bound after a class's declarator-id is in its scope.
@@ -2463,6 +2719,19 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
     } else {
         const StaticMemberScope scope(this, declaredIn != nullptr && declaredIn->isStructOrUnion() &&
                                             peek().is("[") ? declaredIn : nullptr);
+        // `int ns::f(S s)`: what follows the declarator-id is looked up in ns, [basic.lookup.unqual]/8.
+        struct Restore {
+            std::vector<std::string> &stack; const std::vector<std::string> saved;
+            ~Restore() { stack = saved; }
+        } restore{ namespaceStack_, namespaceStack_ };
+        if (declaredIn == nullptr && !qualifier.empty() && namespaces_.count(qualifier)) {
+            namespaceStack_.clear();
+            for (std::size_t s = 0, e; s <= qualifier.size(); s = e + 2) {
+                e = qualifier.find("::", s);
+                if (e == std::string::npos) e = qualifier.size();
+                namespaceStack_.push_back(qualifier.substr(s, e - s));
+            }
+        }
         t = arraySuffix(base, pos);
     }
     skipAttributes();
@@ -2478,6 +2747,12 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
     return Declared{ name, t, pos, paramsAt, qualifier };
 }
 
+
+RefQual Parser::refQualifier() {
+    if (consume("&"))  return RefQual::LValue;
+    if (consume("&&")) return RefQual::RValue;
+    return RefQual::None;
+}
 
 // **`V<N>(` and `~V<N>(` in V<N>'s own body name its constructor and destructor**:
 // the injected-class-name with its own arguments, [temp.local]/1. C++11 takes it, C++20

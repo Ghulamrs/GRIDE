@@ -78,9 +78,24 @@ StmtPtr Parser::constructObject(const Declared &d, const std::string &symbol,
 // concatenation, because a nested class's is a whole nested-name -
 // ??_GInner@Outer@@UEAAPEAXI@Z, not ??_GOuter::Inner@@...
 bool Parser::overrides(const VSlot &s, const std::string &name,
-                       const std::vector<const Type *> &params, bool constThis) {
-    if (s.name != name || s.constThis != constThis) return false;
+                       const std::vector<const Type *> &params, bool constThis,
+                       RefQual refThis) {
+    if (s.name != name || s.constThis != constThis || s.refThis != refThis) return false;
     return sameParameters(s.params, params);
+}
+
+// [over.load]/2: with one parameter-type-list, either every overload has a ref-qualifier or none has.
+static bool mixesRefQualifier(RefQual a, RefQual b) {
+    return (a == RefQual::None) != (b == RefQual::None);
+}
+
+std::string Parser::refQualifierMixRefusal(RefQual written, RefQual other) {
+    const RefQual with = written != RefQual::None ? written : other;
+    const std::string spelt = std::string("with ref-qualifier '") +
+                              (with == RefQual::LValue ? "&" : "&&") + "'";
+    const std::string none = "without a ref-qualifier";
+    return "cannot overload a member function " + (written != RefQual::None ? spelt : none) +
+           " with a member function " + (written != RefQual::None ? none : spelt) + " - [over.load]/2";
 }
 
 // **[class.virtual]/8: an override returns the same type, or a pointer or
@@ -119,6 +134,12 @@ std::string Parser::deletingDestructorSymbol(const std::string &cls) {
          : itaniumDeletingDestructorName(cls, findTypedef(cls));
 }
 
+// [class.ctor]/1 and [class.dtor]/1 give neither a cv-qualifier nor a ref-qualifier, as clang says.
+void Parser::refuseSpecialRefQualifier(const char *what) const {
+    if (!peek().is("&") && !peek().is("&&")) return;
+    src_.fail(peek().pos, "ref-qualifier '" + peek().text + "' is not allowed on a " + what);
+}
+
 void Parser::declareDestructor(const std::string &cls, std::size_t pos,
                                Access access, bool isVirtual) {
     std::vector<const Type *> params;
@@ -126,6 +147,7 @@ void Parser::declareDestructor(const std::string &cls, std::size_t pos,
     parameterTypes(params, variadic);
     if (!params.empty() || variadic)
         src_.fail(pos, "a destructor takes no parameters");
+    refuseSpecialRefQualifier("destructor");
     // A destructor is `noexcept` in C++11 whether or not it says so.
     pendingNoexcept_ = exceptionSpecification();
     const VirtSpecifiers virt = takeVirtSpecifiers();
@@ -1166,13 +1188,10 @@ bool Parser::sameParameters(const std::vector<const Type *> &a,
     return true;
 }
 
-bool Parser::memberFromBase(const Type *cls, const Member &m) {
-    const std::vector<Type::BaseSpec> &bs = cls->bases();
-    for (std::size_t k = 0; k < bs.size(); k++)
-        if (m.offset >= bs[k].offset &&
-            m.offset < bs[k].offset + bs[k].type->dataSize())
-            return true;
-    return false;
+bool Parser::memberFromBase(const Type *, const Member &m) {
+    // Which class wrote it, not where it sits: a base's data size reaches past its own members
+    // once a virtual base is laid at the end, and a derived member may sit in that range.
+    return m.declaredIn != nullptr || m.inVirtualBase != nullptr;
 }
 
 // **[dcl.init]/7 refuses a const object that nothing would initialise**, and
@@ -1825,6 +1844,7 @@ void Parser::declareConstructor(const std::string &cls, std::size_t pos,
     parameterTypes(params, variadic);
     if (variadic)
         src_.fail(pos, "a constructor cannot take '...'");
+    refuseSpecialRefQualifier("constructor");
     // Read here rather than at the call site.
     pendingNoexcept_ = exceptionSpecification();
     const SpecialDef special = takeSpecialDef();
@@ -2555,6 +2575,11 @@ std::string Parser::baseConstructorSymbol(const Signature &ctor, const Type *bas
     const Type *fnType = types_.functionType(types_.get(Kind::Void), ctor.params,
                                              false);
     std::string sub, why;
+    // An inherited constructor's base-subobject form is its CI2.
+    const std::map<std::string, const Type *>::const_iterator inh = inheritedFrom_.find(ctor.symbol);
+    if (inh != inheritedFrom_.end())
+        return itaniumInheritingConstructorName(base->tag(), base, inh->second, fnType, false, &sub, &why)
+               ? sub : ctor.symbol;
     if (itaniumConstructorName(base->tag(), base, fnType, false, &sub, &why))
         return sub;
     return ctor.symbol;
@@ -2565,9 +2590,16 @@ std::string Parser::baseConstructorSymbol(const Signature &ctor, const Type *bas
 // member is declared only where it has some - a vptr, or a base or member to build.
 void Parser::declareImplicitSpecials(const std::string &tag, const Type *type,
                                      std::size_t pos) {
-    if (tag.empty() || type->kind() == Kind::Union) return;
+    if (tag.empty()) return;
     // Asked before the copy constructor is declared, because declaring one would answer it yes.
     const bool wroteConstructor = hasConstructors(tag);
+    // [class.union]/4: a union's one member initialiser is applied by its implicit default
+    // constructor, the only special member of a union of trivial members that has work.
+    if (type->kind() == Kind::Union) {
+        if (!wroteConstructor && hasMemberInitialiser(tag))
+            declareImplicitDefaultCtor(tag, type, pos, Access::Public);
+        return;
+    }
     // A member written `= default` is user-declared for [class.copy]/7 and /9 and implicit for everything else.
     const Defaulted df = defaulted_.count(tag) != 0 ? defaulted_[tag] : Defaulted();
     // **Read now, for the same reason and at the same moment.** After the three calls
@@ -2612,7 +2644,13 @@ void Parser::declareImplicitSpecials(const std::string &tag, const Type *type,
             work = true;
     }
     if (!work) return;
+    declareImplicitDefaultCtor(tag, type, pos,
+                               df.defaultCtor.is ? df.defaultCtor.access : Access::Public);
+}
 
+// The implicit default constructor's signature, named for the linker; its body is written on use.
+void Parser::declareImplicitDefaultCtor(const std::string &tag, const Type *type,
+                                        std::size_t pos, Access access) {
     const std::vector<const Type *> params;
     const Type *fn = types_.functionType(types_.get(Kind::Void), params, false);
     std::string out, why;
@@ -2626,8 +2664,7 @@ void Parser::declareImplicitSpecials(const std::string &tag, const Type *type,
 
     functionIndex_[constructorKey(tag)].push_back(functions_.size());
     functions_.push_back(Signature{ tag, out, types_.get(Kind::Void), params,
-                                    false, false, pos, false, tag, false,
-                                    df.defaultCtor.is ? df.defaultCtor.access : Access::Public, false });
+                                    false, false, pos, false, tag, false, access, false });
     functions_.back().implicit = true;
 }
 
@@ -2993,9 +3030,93 @@ void Parser::declareImplicitCopyCtor(const std::string &tag, const Type *type,
     functions_.back().deleted = deleted;
 }
 
+// **`using B::B;`**: each constructor of B but its default, copy and move ones becomes one of this
+// class's, with B's parameters, defaults, access and `explicit`, building B from them and every other
+// base and member as the implicit default constructor would - [class.inhctor] as P0136 has it.
+void Parser::declareInheritingCtors(const std::string &tag, const Type *type, std::size_t pos) {
+    auto it = inheritFrom_.find(tag);
+    if (it == inheritFrom_.end()) return;
+    const std::vector<const Type *> bases = it->second;
+    for (const Type *base : bases) {
+        if (memberTemplates_.count(constructorKey(base->tag())) != 0)
+            src_.fail(pos, "inheriting '" + base->describe() + "''s constructor template is not "
+                           "supported yet - its specializations would have to be made for the derived class");
+        const std::vector<std::size_t> *set = overloadsOf(constructorKey(base->tag()));
+        if (set == nullptr) continue;
+        const std::vector<std::size_t> from = *set;
+        for (std::size_t idx : from) {
+            const Signature b = functions_[idx];
+            if (b.deleted || b.owner != base->tag()) continue;
+            // An inherited default constructor is D's own default one, by name and body, as clang has it.
+            if (b.params.empty()) {
+                bool has = false;
+                if (const std::vector<std::size_t> *own = overloadsOf(constructorKey(tag)))
+                    for (std::size_t k : *own)
+                        if (functions_[k].params.empty()) has = true;
+                if (has) continue;
+                const Type *fn0 = types_.functionType(types_.get(Kind::Void), std::vector<const Type *>(), false);
+                const char code0 = b.access == Access::Public ? 'Q' : b.access == Access::Protected ? 'I' : 'A';
+                std::string out0, why0;
+                const bool ok0 = target_.microsoftNames()
+                        ? microsoftConstructorName(tag, type, fn0, code0, &out0, &why0)
+                        : itaniumConstructorName(tag, type, fn0, true, &out0, &why0);
+                if (!ok0)
+                    src_.fail(pos, "'" + tag + "''s default constructor cannot be given a name the linker "
+                                   "can hold: " + why0);
+                functionIndex_[constructorKey(tag)].push_back(functions_.size());
+                functions_.push_back(Signature{ tag, out0, types_.get(Kind::Void), std::vector<const Type *>(),
+                                                false, false, pos, false, tag, false, b.access, false });
+                functions_.back().implicit = true;
+                continue;
+            }
+            if (b.params.size() == 1 && b.params[0]->isReference() &&
+                b.params[0]->referent()->unqualified() == base->unqualified())
+                continue;
+            // One this class declared itself with the same parameters hides it.
+            bool hidden = false;
+            if (const std::vector<std::size_t> *own = overloadsOf(constructorKey(tag)))
+                for (std::size_t k : *own)
+                    if (sameParameters(functions_[k].params, b.params)) hidden = true;
+            if (hidden) continue;
+            if (b.variadic)
+                src_.fail(pos, "inheriting '" + base->tag() + "''s constructor with '...' is not "
+                               "supported yet - its arguments would have to be forwarded as they came");
+            for (const Type *p : b.params)
+                if (!p->isReference() && passedByAddress(p))
+                    src_.fail(pos, "inheriting '" + base->tag() + "''s constructor that takes '" +
+                                   p->describe() + "' by value is not supported yet - the copy "
+                                   "would have to be passed on rather than made twice");
+            const Type *fn = types_.functionType(types_.get(Kind::Void), b.params, false);
+            auto chained = inheritedFrom_.find(b.symbol);
+            const Type *origin = chained != inheritedFrom_.end() ? chained->second : base;
+            const char code = b.access == Access::Public ? 'Q' : b.access == Access::Protected ? 'I' : 'A';
+            std::string out, why;
+            const bool ok = target_.microsoftNames()
+                    ? microsoftConstructorName(tag, type, fn, code, &out, &why)
+                    : itaniumInheritingConstructorName(tag, type, origin, fn, true, &out, &why);
+            if (!ok)
+                src_.fail(pos, "'" + tag + "''s constructor inherited from '" + base->tag() +
+                               "' cannot be given a name the linker can hold: " + why);
+            functionIndex_[constructorKey(tag)].push_back(functions_.size());
+            functions_.push_back(Signature{ tag, out, types_.get(Kind::Void), b.params,
+                                            false, false, pos, false, tag, false, b.access, false });
+            functions_.back().implicit = true;
+            functions_.back().isExplicit = b.isExplicit;
+            auto dflt = defaultArgs_.find(b.symbol);
+            if (dflt != defaultArgs_.end()) {
+                defaultArgs_[out] = dflt->second;
+                auto ns = defaultArgNamespace_.find(b.symbol);
+                if (ns != defaultArgNamespace_.end()) defaultArgNamespace_[out] = ns->second;
+            }
+            inheriting_[functions_.size() - 1] = Inheriting{ base, idx };
+            inheritedFrom_[out] = origin;
+        }
+    }
+}
+
 // The body of a default constructor nobody wrote: the bases in the order they were
 // written, then the vptrs, then the members with constructors of their own. Scalars
-// are left alone, which is what [dcl.init] means by default-initialisation.
+// are left alone, as [dcl.init] has it; an inheriting constructor's forwards its parameters to its base.
 void Parser::synthesizeDefaultCtor(std::size_t which) {
     const std::string cls = functions_[which].owner;
     const std::size_t pos = functions_[which].pos;
@@ -3015,6 +3136,16 @@ void Parser::synthesizeDefaultCtor(std::size_t which) {
     if (takesVtt(type)) {
         vttSlot_ = allocateFrameSlot(vttType());
         params.push_back(Param{ vttType(), vttSlot_ });
+    }
+    // An inheriting constructor's own parameters, B's: a reference arrives as its address.
+    const auto inh = inheriting_.find(which);
+    const Type *inhBase = inh != inheriting_.end() ? inh->second.base : nullptr;
+    const std::vector<const Type *> forwarded = functions_[which].params;
+    std::vector<int> fwdSlots;
+    for (const Type *p : forwarded) {
+        const Type *slotType = p->isReference() ? types_.pointerTo(p->referent()) : p;
+        fwdSlots.push_back(allocateFrameSlot(slotType));
+        params.push_back(Param{ slotType, fwdSlots.back() });
     }
     int flagSlot = -1;
     if (target_.microsoftNames() && type->hasVirtualBase()) {
@@ -3039,7 +3170,8 @@ void Parser::synthesizeDefaultCtor(std::size_t which) {
         // wrong when it is built here.
         if (bs[i].isVirtual) continue;
         if (!hasConstructors(base->tag())) continue;
-        const Signature *ctor = defaultConstructorOf(base);
+        const bool inherited = inhBase != nullptr && base->unqualified() == inhBase->unqualified();
+        const Signature *ctor = inherited ? &functions_[inh->second.from] : defaultConstructorOf(base);
         if (ctor == nullptr)
             src_.fail(pos, "'" + cls + "' has no constructor of its own, and the "
                            "one the compiler would write cannot build its base '" +
@@ -3056,7 +3188,25 @@ void Parser::synthesizeDefaultCtor(std::size_t which) {
         // Copied before the defaults are read - see constructLocalArray.
         const Signature chosen = *ctor;
         std::vector<ExprPtr> defaults;
-        applyDefaults(chosen, defaults, pos);
+        if (inherited) {
+            // Forwarded as they came: an lvalue reference as the object, an rvalue one as an xvalue.
+            for (std::size_t k = 0; k < forwarded.size(); k++) {
+                const Type *p = forwarded[k];
+                ExprPtr v(Var::local("$inh" + std::to_string(k), fwdSlots[k]));
+                if (p->isReference()) {
+                    v->setType(types_.pointerTo(p->referent()));
+                    ExprPtr obj(new Unary('*', std::move(v)));
+                    obj->setType(p->referent());
+                    if (p->kind() == Kind::RValueRef) obj->setXvalue();
+                    defaults.push_back(std::move(obj));
+                } else {
+                    v->setType(p);
+                    defaults.push_back(std::move(v));
+                }
+            }
+        } else {
+            applyDefaults(chosen, defaults, pos);
+        }
         const std::string sym = baseConstructorSymbol(chosen, base);
 
         const Type *basePtr = types_.pointerTo(base);
@@ -3104,7 +3254,7 @@ void Parser::synthesizeDefaultCtor(std::size_t which) {
         if (memberFromBase(type, ms[i])) continue;
         StmtPtr one = memberInitialiser(cls, type, ms[i], thisSlot, pos);
         std::vector<ExprPtr> none;
-        if (one == nullptr && type->kind() != Kind::Union)
+        if (one == nullptr && type->kind() != Kind::Union && ms[i].anonUnion == nullptr)
             one = constructMember(cls, type, ms[i], thisSlot, none, pos, true);
         if (one != nullptr) body.push_back(std::move(one));
     }
@@ -3119,7 +3269,23 @@ void Parser::synthesizeDefaultCtor(std::size_t which) {
     // The same two names a written constructor is emitted under: C1 for a
     // complete object and C2 for a base subobject, the second a label in front
     // of the first. Microsoft has one name and wants no alias.
-    if (!target_.microsoftNames()) {
+    if (!target_.microsoftNames() && inhBase != nullptr) {
+        const Type *fnType = types_.functionType(types_.get(Kind::Void), forwarded, false);
+        std::string c2, why;
+        auto origin = inheritedFrom_.find(symbol);
+        if (itaniumInheritingConstructorName(cls, type, origin != inheritedFrom_.end() ? origin->second : inhBase,
+                                             fnType, false, &c2, &why)) {
+            // A virtual base of the class splits it as it splits any constructor: this body is CI2.
+            if (type->hasVirtualBase()) {
+                current_->functions.back().setSymbol(c2);
+                closeFrame(savedFrame);
+                vttSlot_ = savedVtt;
+                synthesizeCompleteCtor(type, forwarded, symbol, c2, true, pos);
+                return;
+            }
+            current_->functions.back().setAlias(c2);
+        }
+    } else if (!target_.microsoftNames()) {
         const Type *fnType = types_.functionType(types_.get(Kind::Void),
                                                  std::vector<const Type *>(), false);
         std::string c2, why;
@@ -3464,7 +3630,7 @@ const Parser::Signature *Parser::keyFunction(const std::string &tag) const {
         bool pure = false;
         if (vt != vtables_.end())
             for (std::size_t k = 0; k < vt->second.size(); k++)
-                if (vt->second[k].pure && overrides(vt->second[k], f.name, f.params, f.constThis))
+                if (vt->second[k].pure && overrides(vt->second[k], f.name, f.params, f.constThis, f.refThis))
                     pure = true;
         if (pure) continue;
         return &f;
@@ -3696,7 +3862,7 @@ void Parser::defineImplicitFunctions() {
             if (!functions_[i].name.empty() && functions_[i].name[0] == '~')
                                                     synthesizeDestructor(i);
             else if (functions_[i].name == "operator=") synthesizeCopy(i, true);
-            else if (functions_[i].params.empty())   synthesizeDefaultCtor(i);
+            else if (functions_[i].params.empty() || inheriting_.count(i)) synthesizeDefaultCtor(i);
             else                                    synthesizeCopy(i, false);
             again = true;
         }
@@ -3956,7 +4122,7 @@ void Parser::checkNotAbstract(const Type *t, std::size_t pos,
 }
 
 void Parser::declareMember(const std::string &cls, const Declared &d,
-                           bool constThis, Access access, bool inUnion,
+                           bool constThis, RefQual refThis, Access access, bool inUnion,
                            bool isVirtual, bool isStatic, bool isPure,
                            VirtSpecifiers virt) {
     if (inUnion)
@@ -3971,8 +4137,11 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
     const std::vector<const Type *> &params = fn->params();
     for (std::size_t k = 0; k < set.size(); k++) {
         const Signature &f = functions_[set[k]];
-        if (f.constThis == constThis && sameParameters(f.params, params))
+        if (!sameParameters(f.params, params)) continue;
+        if (f.constThis == constThis && f.refThis == refThis)
             src_.fail(d.pos, "'" + key + "' is declared twice");
+        if (mixesRefQualifier(f.refThis, refThis))
+            src_.fail(d.pos, refQualifierMixRefusal(refThis, f.refThis));
     }
 
     if (inUnion && isVirtual)
@@ -3981,7 +4150,7 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
     // **A static member takes no slot and overrides nothing.**
     if (isStatic) {
         const std::string sym = memberSymbol(cls, d.name, fn, access, false,
-                                             d.pos, false, true);
+                                             RefQual::None, d.pos, false, true);
         if (!pendingDefaults_.empty()) {
             defaultArgs_[sym] = pendingDefaults_;
             defaultArgNamespace_[sym] = namespaceStack_;
@@ -4005,7 +4174,11 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
     std::size_t slot = slots.size();
     bool foundBase = false;
     for (std::size_t i = 0; i < slots.size(); i++) {
-        if (!overrides(slots[i], d.name, params, constThis)) continue;
+        // clang refuses an override that drops or adds the ref-qualifier as [over.load]/2 does.
+        if (slots[i].name == d.name && sameParameters(slots[i].params, params) &&
+            mixesRefQualifier(slots[i].refThis, refThis))
+            src_.fail(d.pos, refQualifierMixRefusal(refThis, slots[i].refThis));
+        if (!overrides(slots[i], d.name, params, constThis, refThis)) continue;
         checkOverrideReturn(slots[i], fn->returns(), cls, d.name, d.pos);
         checkNotFinal(slots[i], cls, d.name, d.pos);
         slot = i;
@@ -4024,7 +4197,7 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
                     vtables_.find(bs[bi].type->tag());
                 if (it == vtables_.end()) continue;
                 for (std::size_t i = 0; i < it->second.size(); i++)
-                    if (overrides(it->second[i], d.name, params, constThis)) {
+                    if (overrides(it->second[i], d.name, params, constThis, refThis)) {
                         checkOverrideReturn(it->second[i], fn->returns(), cls, d.name, d.pos);
                         checkNotFinal(it->second[i], cls, d.name, d.pos);
                         isVirtual = foundBase = true;
@@ -4046,7 +4219,7 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
                          d.name + "' is not declared 'virtual' and overrides nothing");
 
     const std::string symbol = memberSymbol(cls, d.name, fn, access, constThis,
-                                            d.pos, isVirtual);
+                                            refThis, d.pos, isVirtual);
     if (!pendingDefaults_.empty()) defaultArgs_[symbol] = pendingDefaults_;
     if (!pendingDefaults_.empty())
         defaultArgNamespace_[symbol] = namespaceStack_;
@@ -4057,6 +4230,7 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
         fn->returns(), params, fn->isVariadicFn(), false, d.pos, false,
         cls, constThis, access, isVirtual });
     functions_.back().isNoexcept = pendingNoexcept_;
+    functions_.back().refThis = refThis;
     pendingNoexcept_ = false;
 
     if (!isVirtual) return;
@@ -4080,7 +4254,8 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
             if (slots[i].name == d.name) { at = i; break; }
     }
     slots.insert(slots.begin() + static_cast<std::ptrdiff_t>(at),
-                 VSlot{ d.name, entry, params, constThis, isPure, fn->returns(), virt.isFinal });
+                 VSlot{ d.name, entry, params, constThis, isPure, fn->returns(), virt.isFinal,
+                        refThis });
 }
 
 void Parser::checkNotFinal(const VSlot &s, const std::string &cls, const std::string &name,
@@ -4095,7 +4270,8 @@ void Parser::checkNotFinal(const VSlot &s, const std::string &cls, const std::st
 // choice here.
 std::string Parser::memberSymbol(const std::string &cls, const std::string &name,
                                  const Type *fn, Access access, bool constThis,
-                                 std::size_t pos, bool isVirtual, bool isStatic) {
+                                 RefQual refThis, std::size_t pos, bool isVirtual,
+                                 bool isStatic) {
     // Q public, I protected, A private - the Microsoft ABI puts the access in
     // the name and Itanium does not, both measured.
     const char code = isStatic && access == Access::Public    ? 'S'
@@ -4113,14 +4289,14 @@ std::string Parser::memberSymbol(const std::string &cls, const std::string &name
     bool ok = target_.microsoftNames()
             ? (owner != nullptr
                    ? microsoftLocalMemberName(*owner, cls, findTypedef(cls), name,
-                                              shown, code, constThis, &out, &why)
+                                              shown, code, constThis, refThis, &out, &why)
                    : microsoftMemberName(cls, findTypedef(cls), name, shown, code,
-                                         constThis, &out, &why))
+                                         constThis, refThis, &out, &why))
             : (owner != nullptr
                    ? itaniumLocalMemberName(*owner, cls, findTypedef(cls), name,
-                                            fn, constThis, &out, &why)
+                                            fn, constThis, refThis, &out, &why)
                    : itaniumMemberName(cls, findTypedef(cls), name, fn, constThis,
-                                       &out, &why));
+                                       refThis, &out, &why));
     if (!ok)
         src_.fail(pos, "'" + cls + "::" + name + "' cannot be given a name the "
                        "linker can hold: " + why);
@@ -4159,7 +4335,8 @@ void Parser::declareFunction(const std::string &name, const Type *returns,
     // namespace goes on here, once**, every table below being keyed by the whole name.
     const std::string plain = instantiationName(name);
     const std::string qualified =
-        (cLinkage_ > 0 || plain == "main" || namespaceStack_.empty())
+        (cLinkage_ > 0 || plain == "main" || namespaceStack_.empty() ||
+         (!instantiationKey_.empty() && plain == instantiationKey_))
             ? plain : namespacePrefix() + plain;
     const std::string &key = qualified;
     checkOperatorDeclarable(key, params, false, pos, internal);
@@ -4167,12 +4344,16 @@ void Parser::declareFunction(const std::string &name, const Type *returns,
     std::vector<std::size_t> &set = functionIndex_[key];
     const SpecialDef special = takeSpecialDef();
 
-    for (std::size_t k = 0; k < set.size(); k++) {
+    // An inline namespace's member sits under the enclosing name too, and only a qualified
+    // declarator reaches it there - `int lib::f(int) {}` defines lib::v2::f - after lib's own.
+    for (std::size_t pass = 0, k = 0; pass < (definingQualified_ ? 2u : 1u); k++) {
+        if (k == set.size()) { pass++; k = static_cast<std::size_t>(-1); continue; }
         Signature &f = functions_[set[k]];
         // A specialization sits in this list under the template's plain name
         // so that resolution can see it. It is not a declaration of that
         // name, so a function written with the same parameters is a new one.
         if (f.fromTemplate && instantiationKey_.empty()) continue;
+        if ((!f.fromTemplate && f.name != key) != (pass == 1)) continue;
         if (f.variadic != variadic || !sameParameters(f.params, params)) continue;
         // [dcl.fct.def.delete]/4: a deleted definition is the first declaration.
         if (special == SpecialDef::Deleted)
@@ -4206,7 +4387,7 @@ void Parser::declareFunction(const std::string &name, const Type *returns,
         if (!pendingDefaults_.empty()) {
             // The scope this declaration was written in, for
             // [dcl.fct.default]/5.
-            defaultArgNamespace_[f.symbol] = namespaceStack_;
+            defaultArgNamespace_[f.symbol] = definitionNamespace_.empty() ? namespaceStack_ : definitionNamespace_;
             std::vector<std::size_t> &have = defaultArgs_[f.symbol];
             if (have.size() < pendingDefaults_.size())
                 have.resize(pendingDefaults_.size(), 0);
@@ -4250,12 +4431,13 @@ void Parser::declareFunction(const std::string &name, const Type *returns,
     functions_.back().isNoexcept = pendingNoexcept_;
     functions_.back().deleted = special == SpecialDef::Deleted;
     pendingNoexcept_ = false;
+    if (!cName) aliasFunctionKey(key, functions_.size() - 1);
     if (pendingExplicitConversion_ && isConversionName(instantiationName(name)))
         functions_.back().isExplicit = true;
     pendingExplicitConversion_ = false;
     if (!pendingDefaults_.empty()) {
         defaultArgs_[functions_.back().symbol] = pendingDefaults_;
-        defaultArgNamespace_[functions_.back().symbol] = namespaceStack_;
+        defaultArgNamespace_[functions_.back().symbol] = definitionNamespace_.empty() ? namespaceStack_ : definitionNamespace_;
     }
     pendingDefaults_.clear();
 }
@@ -4291,12 +4473,15 @@ Parser::lookupSignature(const std::string &name,
                           ? name
                           : qualifyForLookup(instantiationName(name),
                                              &Parser::hasFunctionNamed);
+    // The namespace's own function before one an inline namespace put under its name.
     if (const std::vector<std::size_t> *set = overloadsOf(key)) {
-        for (std::size_t k = 0; k < set->size(); k++) {
-            const Signature &f = functions_[(*set)[k]];
-            if (f.variadic == variadic && sameParameters(f.params, params))
-                return f;
-        }
+        for (int pass = 0; pass < 2; pass++)
+            for (std::size_t k = 0; k < set->size(); k++) {
+                const Signature &f = functions_[(*set)[k]];
+                if ((!f.fromTemplate && f.name != key) == (pass == 1) && f.variadic == variadic &&
+                    sameParameters(f.params, params))
+                    return f;
+            }
     }
     src_.fail(pos, "'" + name + "' was not declared - a prototype must come first");
 }
@@ -4409,6 +4594,13 @@ void Parser::refuseDeletedDefaultInit(const Type *t, const std::string &name,
         if (!needsOne) continue;
         if (memberInit_.find(plain->tag() + "::" + all[i].name) != memberInit_.end())
             continue;
+        // A const member of an anonymous union is set where another member of it has an initialiser.
+        bool unionSet = false;
+        for (std::size_t k = 0; k < all.size() && all[i].anonUnion != nullptr; k++)
+            if (all[k].anonUnion == all[i].anonUnion &&
+                memberInit_.find(plain->tag() + "::" + all[k].name) != memberInit_.end())
+                unionSet = true;
+        if (unionSet) continue;
         src_.fail(pos, "'" + name + "' has type '" + plain->describe() +
                        "', whose member '" + all[i].name + "' is " +
                        (all[i].type->isReference() ? "a reference"
@@ -4435,8 +4627,10 @@ std::vector<StmtPtr> Parser::memberInitialisers(const std::string &tag,
                                                 std::size_t pos) {
     std::vector<StmtPtr> out;
     const std::vector<Member> &ms = type->members();
+    const std::set<const Type *> taken = unionsNamedBy(type, already);
     for (std::size_t i = 0; i < ms.size(); i++) {
         if (already.find(ms[i].name) != already.end()) continue;
+        if (ms[i].anonUnion != nullptr && taken.count(ms[i].anonUnion) != 0) continue;
         StmtPtr one = memberInitialiser(tag, type, ms[i], thisSlot, pos);
         if (one != nullptr) out.push_back(std::move(one));
     }

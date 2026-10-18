@@ -67,7 +67,23 @@ ExprPtr Parser::castExpr() {
         ExprPtr v = decay(castExpr());
         if (to->isVoid()) return ExprPtr(new Cast(to, std::move(v)));
         refuseUnrelatedClassCast(*v, to, openPos, "a cast");
-        return convert(std::move(v), to, true);   // a cast allows explicit
+        // **`(const V &)q` and `(int &)k` name an lvalue of the referent**, [expr.cast]/4 - built on
+        // addresses, which carries a base's offset, so the result is an operand, not a reference-typed value.
+        if (to->isReference() && !to->isRValueReference() && v->type() != nullptr &&
+            !v->type()->isFunction() && !to->pointee()->isFunction() && isGlvalue(*v) &&
+            to->pointee()->isStructOrUnion() == v->type()->unqualified()->isStructOrUnion()) {
+            const Type *ref = to->pointee();
+            const Type *from = v->type();
+            ExprPtr at(new Unary('&', std::move(v)));
+            at->setType(types_.pointerTo(from));
+            at = convert(std::move(at), types_.pointerTo(ref), true);
+            ExprPtr r(new Unary('*', std::move(at)));
+            r->setType(ref);
+            return r;
+        }
+        ExprPtr r = convert(std::move(v), to, true);   // a cast allows explicit
+        if (!to->isReference()) r->setDeclCategory(Expr::Category::Prvalue);
+        return r;
     }
     return unary();
 }
@@ -78,7 +94,7 @@ ExprPtr Parser::castExpr() {
 ExprPtr Parser::boundMemberPointer(const Type *cls, const Signature &f,
                                    std::size_t pos, long long vtableCode,
                                    const std::string &code) {
-    const Type *fn = types_.functionType(f.returns, f.params, f.variadic);
+    const Type *fn = types_.functionType(f.returns, f.params, f.variadic, f.refThis);
     const Type *mp = types_.memberFunctionPointerTo(cls, fn, target_);
     const int slot = allocateFrameSlot(mp);
     const Type *word = types_.pointerTo(types_.get(Kind::Void));
@@ -142,6 +158,16 @@ ExprPtr Parser::boundMemberPointer(const Type *cls, const Signature &f,
     made->setType(mp);
     (void)pos;
     return made;
+}
+
+// [expr.mptr.oper]/6: a pointer to a `&` member is called on an lvalue alone, a `&&` one on an rvalue.
+void Parser::refuseMemberPointerCategory(const Expr &mp, bool lvalue, std::size_t pos) const {
+    const Type *t = mp.type()->unqualified();
+    if (!t->isMemberFunctionPointer()) return;
+    const RefQual ref = t->pointee()->refQualifier();
+    if (ref == RefQual::None || (ref == RefQual::LValue) == lvalue) return;
+    src_.fail(pos, "pointer-to-member function type '" + t->describe() + "' can only be called "
+                   "on an " + (ref == RefQual::LValue ? "lvalue" : "rvalue"));
 }
 
 ExprPtr Parser::applyMemberPointer(ExprPtr addr, ExprPtr mp, std::size_t pos,
@@ -298,10 +324,12 @@ ExprPtr Parser::memberPointerExpr() {
                 src_.fail(pos, "the left of '.*' has to be an object of class "
                                "type, and this is '" + of->describe() + "'");
             const bool constObject = of->isConst();
+            const bool lvalue = objectIsLvalue(*n);
             ExprPtr addr(new Unary('&', std::move(n)));
             addr->setType(types_.pointerTo(of->unqualified()));
-            n = applyMemberPointer(std::move(addr), memberPointerExpr(), pos,
-                                   constObject);
+            ExprPtr mp = memberPointerExpr();
+            refuseMemberPointerCategory(*mp, lvalue, pos);
+            n = applyMemberPointer(std::move(addr), std::move(mp), pos, constObject);
             continue;
         }
         if (consume("->*")) {
@@ -860,6 +888,7 @@ ExprPtr Parser::conditional() {
         // About to expire, like any other temporary: without the mark, passing
         // one by value would reach for the copy constructor.
         made->setXvalue();
+        made->setDeclCategory(Expr::Category::Prvalue);
         return made;
     } else if (ta == tb) {
         result = ta;
@@ -900,7 +929,9 @@ ExprPtr Parser::assign() {
     for (const auto &c : kCompound) {
         if (peek().is(c.tok)) {
             std::size_t pos = peek().pos; at_++;
-            return compound(c.op, std::move(n), decay(assign()), pos);
+            ExprPtr r = compound(c.op, std::move(n), decay(assign()), pos);
+            if (dynamic_cast<const Assign *>(r.get())) r->setDeclCategory(Expr::Category::Lvalue);
+            return r;
         }
     }
 
@@ -978,6 +1009,7 @@ ExprPtr Parser::assign() {
     }
     ExprPtr node(new Assign(std::move(n), convert(std::move(value), to)));
     node->setType(to);
+    node->setDeclCategory(Expr::Category::Lvalue);
     return node;
 }
 

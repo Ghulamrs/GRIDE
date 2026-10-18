@@ -234,6 +234,9 @@ ExprPtr Parser::lambdaExpression() {
                                   "something the enclosing function already "
                                   "declared");
         const Local *have = findLocal(cname);
+        // [expr.prim.lambda]/10: a member of an anonymous union is no variable to capture, clang's words.
+        if (have != nullptr && have->sharesSlot)
+            src_.fail(cpos, "'" + cname + "' in capture list does not name a variable");
         const Type *fromOuter = nullptr;
         if (have == nullptr) {
             // A capture of the lambda around this one, which is a member of
@@ -299,6 +302,8 @@ ExprPtr Parser::lambdaExpression() {
                 if (capNames[k] == n) { had = true; break; }
             if (had) continue;
             const Local *have = findLocal(n);
+            if (have != nullptr && have->sharesSlot)
+                src_.fail(tokens_[i].pos, "unnamed variable cannot be implicitly captured in a lambda expression");
             const Type *raw = have != nullptr ? have->type : nullptr;
             if (raw == nullptr) {
                 // **A lambda inside a lambda, taking the outer one's capture.**
@@ -395,7 +400,7 @@ ExprPtr Parser::lambdaExpression() {
     d.name = "operator()";
     d.type = types_.functionType(returns, params, false);
     d.pos = pos;
-    declareMember(tag, d, !isMutable, Access::Public, false, false);
+    declareMember(tag, d, !isMutable, RefQual::None, Access::Public, false, false);
 
     // The tokens the replay will read. Appended rather than spliced: an index
     // into tokens_ is what PendingBody keeps, and an index survives the vector
@@ -622,12 +627,12 @@ void Parser::captureFreeConversion(const std::string &tag, const std::string &lo
     inv.name = "__invoke";
     inv.type = fn;
     inv.pos = pos;
-    declareMember(tag, inv, false, Access::Public, false, false, true);
+    declareMember(tag, inv, false, RefQual::None, Access::Public, false, false, true);
     Declared cv;
     cv.name = "operator " + fn->describe() + " *";
     cv.type = types_.functionType(fp, std::vector<const Type *>(), false);
     cv.pos = pos;
-    declareMember(tag, cv, true, Access::Public, false, false);
+    declareMember(tag, cv, true, RefQual::None, Access::Public, false, false);
 
     const std::string k = std::to_string(lambdaConvSeq_++);
     const std::string cls = "$lcls" + k, ptr = "$lfp" + k, ret = "$lret" + std::to_string(lambdaRetSeq_++);
