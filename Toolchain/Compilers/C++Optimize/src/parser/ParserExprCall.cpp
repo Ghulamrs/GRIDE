@@ -11,6 +11,7 @@
 
 
 void Parser::parseArguments(std::vector<ExprPtr> &args) {
+    OverloadTarget none(*this, nullptr);
     if (consume(")")) return;
     for (;;) {
         // **`rest...` - one thing written, one argument per member.** The names
@@ -393,6 +394,10 @@ ExprPtr Parser::materialiseCopy(const Type *type, ExprPtr arg, std::size_t pos,
         node->setType(to);
         return node;
     }
+    // [over.best.ics]/6: a derived object is copied into a base parameter from its base subobject.
+    if (arg->type() != nullptr && arg->type()->unqualified() != cls && isGlvalue(*arg) &&
+        arg->type()->unqualified()->isStructOrUnion() && accessibleBaseOffset(arg->type(), cls) >= 0)
+        arg = baseSubobject(std::move(arg), cls);
     if (cc->access != Access::Public && !insideAccessOf(cls, cc->access) &&
         !isFriendOf(cls))
         src_.fail(pos, "'" + cls->describe() + "' is passed by value as " + what +
