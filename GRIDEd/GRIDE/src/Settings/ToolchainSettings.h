@@ -153,13 +153,15 @@ namespace Gride { namespace Settings {
             return RideToolchain::SearchPlaces(d, dir, RideRoot);
         }
 
-        // the RTS6x directory in force: the one named, else found as RIDE finds it
+        // the RTS6x directory in force: the one named, else found as RIDE finds it. Only a rooted answer
+        // is taken: the definition's lib\rts6x-tms6747 "exists" when GRIDE runs in its own folder, and
+        // lnk6x, run in the project's, then found no rts6xd.lib behind -i "lib\rts6x-tms6747"
         String^ ResolveRuntimeDir()
         {
             if (!String::IsNullOrWhiteSpace(RuntimeDir))
             {
                 String^ r = Resolve(RuntimeDir);
-                if (Directory::Exists(r)) return r;
+                if (Path::IsPathRooted(r) && Directory::Exists(r)) return r;
             }
             String^ found = RideToolchain::FindRuntimeDir(ToolDir, RideRoot);
             return found == nullptr ? (String::IsNullOrWhiteSpace(RuntimeDir) ? String::Empty : Resolve(RuntimeDir)) : found;
