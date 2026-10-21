@@ -87,7 +87,7 @@ namespace Gride { namespace Model {
                     b->Optimise = OptimiseOf(c);
                     List<String^>^ extra = gcnew List<String^>();
                     for each (String^ u in c->Undefines) extra->Add("-U" + u);
-                    if (c->AdditionalOptions->Length > 0) p->Vs->ReportLines->Add("VS project " + r->Name + " (" + c->Name + "): cl's additional options are given to cl only (Project > Properties > Compiler), not to RIDE's compilers: " + c->AdditionalOptions);
+                    if (c->AdditionalOptions->Length > 0) p->Vs->ReportLines->Add("VS project " + r->Name + " (" + c->Name + "): cl's additional options are given to cl only (Project > Properties > Compiler), not to GRIDE's compilers: " + c->AdditionalOptions);
                     b->ExtraCompileFlags = String::Join(" ", extra);
                     if (c->TargetName->Length > 0 && !VsProject::HasMacro(c->TargetName) && String::Compare(c->TargetName, r->Name, true) != 0) b->OutputName = c->TargetName;
                     List<String^>^ excluded = gcnew List<String^>();

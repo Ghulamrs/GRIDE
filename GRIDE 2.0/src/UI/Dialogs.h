@@ -408,9 +408,9 @@ namespace Gride
         property LanguageKind Language;
         [Category("General"), Description("Target platform: Windows (MASM/LINK), Linux, macOS, or TMS6747 DSP (ASM6x/LNK6x/RTS6747).")]
         property TargetKind Target;
-        [Category("General"), Description("RIDE's toolchain word: auto (each file's own compiler), c90, cpp11 or shalimar (cc1, cxx1 and shc are the same). A compiler named for a file it does not take refuses the build.")]
+        [Category("General"), Description("The .pro's toolchain word: auto (each file's own compiler), c90, cpp11 or shalimar (cc1, cxx1 and shc are the same). A compiler named for a file it does not take refuses the build.")]
         property String^ Toolchain;
-        [Category("General"), Description("RIDE's emulateOnly (TMS6747): the build stops at the assembly, which vm6747 runs - no asm6x, no lnk6x, no .out.")]
+        [Category("General"), Description("The .pro's emulateOnly (TMS6747): the build stops at the assembly, which vm6747 runs - no asm6x, no lnk6x, no .out.")]
         property bool EmulateOnly;
         [Category("Output"), Description("Output file name without extension.")]
         property String^ OutputName;
@@ -489,11 +489,11 @@ namespace Gride
         property String^ ReadFrom;
         [Category("Project"), ReadOnly(true), Description("The configuration built. Change it from the toolbar.")]
         property String^ Configuration;
-        [Category("Build"), Description("The compiler: auto (RIDE's, by each file's language: c90, cpp11, shalimar), c90, cpp11, or msvc - Visual Studio's own cl (cl is the same word), which a Visual Studio project is written for. Kept with GRIDE's state for this project (its .pro, else the settings), never in its files.")]
+        [Category("Build"), Description("The compiler: auto (by each file's language: c90, cpp11, shalimar), c90, cpp11, or msvc - Visual Studio's own cl (cl is the same word), which a Visual Studio project is written for. Kept with GRIDE's state for this project (its .pro, else the settings), never in its files.")]
         property String^ Toolchain;
         [Category("Run"), Description("The program's arguments as a command line: separated by spaces, one that holds a space in double quotes. Kept with GRIDE's state for this project (its .pro, else the settings), not in its files.")]
         property String^ ProgramArguments;
-        [Category("Run"), Description("RIDE's emulateOnly (a TMS6747 build): the build stops at the assembly, which vm6747 runs - no asm6x, no lnk6x, no .out. Kept with GRIDE's state for this project.")]
+        [Category("Run"), Description("emulateOnly (a TMS6747 build): the build stops at the assembly, which vm6747 runs - no asm6x, no lnk6x, no .out. Kept with GRIDE's state for this project.")]
         property bool EmulateOnly;
 
         static ImportedProjectPropertiesView^ FromProject(GrideProject^ p)

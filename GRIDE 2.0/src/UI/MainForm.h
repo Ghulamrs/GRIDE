@@ -17,7 +17,6 @@
 #include "../Build/ProgramRunner.h"
 #include "DebugPanes.h"
 #include "HelpFiles.h"
-#include "../Common/ToolVersions.h"
 
 using namespace System::Collections::Concurrent;
 using System::Threading::CancellationTokenSource;
@@ -300,9 +299,7 @@ namespace Gride
             Size = System::Drawing::Size(1280, 820);
             MinimumSize = System::Drawing::Size(800, 500);
             StartPosition = FormStartPosition::CenterScreen;
-            // The exe's own icon (src\GRIDE.rc), as Explorer and the shortcut show it; Windows' default without it.
-            try { Icon = System::Drawing::Icon::ExtractAssociatedIcon(Application::ExecutablePath); }
-            catch (Exception^) { Icon = SystemIcons::Application; }
+            Icon = SystemIcons::Application;
 
             // ---- Solution Explorer
             tree = gcnew TreeView();
@@ -414,29 +411,28 @@ namespace Gride
             pageBreakpoints = AddPanePage("Breakpoints", breakpointsPane);
             watchPane->UpdateFrom(nullptr);
 
-            // ---- splitters: Solution Explorer | (editor over Output) | Properties - both side panes the full
-            // height, the Output under the editor only (as GRIDEd lays them out)
-            splitCenter = gcnew SplitContainer();
-            splitCenter->Dock = DockStyle::Fill;
-            splitCenter->Orientation = System::Windows::Forms::Orientation::Horizontal;
-            splitCenter->FixedPanel = System::Windows::Forms::FixedPanel::Panel2;
-            docs->Dock = DockStyle::Fill;
-            splitCenter->Panel1->Controls->Add(docs);
-            splitCenter->Panel2->Controls->Add(bottomTabs);
-
+            // ---- splitters
             splitRight = gcnew SplitContainer();
             splitRight->Dock = DockStyle::Fill;
             splitRight->Orientation = System::Windows::Forms::Orientation::Vertical;
             splitRight->FixedPanel = System::Windows::Forms::FixedPanel::Panel2;
-            splitRight->Panel1->Controls->Add(splitCenter);
+            docs->Dock = DockStyle::Fill;
+            splitRight->Panel1->Controls->Add(docs);
             splitRight->Panel2->Controls->Add(MakeToolWindow("Properties", props));
+
+            splitCenter = gcnew SplitContainer();
+            splitCenter->Dock = DockStyle::Fill;
+            splitCenter->Orientation = System::Windows::Forms::Orientation::Horizontal;
+            splitCenter->FixedPanel = System::Windows::Forms::FixedPanel::Panel2;
+            splitCenter->Panel1->Controls->Add(splitRight);
+            splitCenter->Panel2->Controls->Add(bottomTabs);
 
             splitMain = gcnew SplitContainer();
             splitMain->Dock = DockStyle::Fill;
             splitMain->Orientation = System::Windows::Forms::Orientation::Vertical;
             splitMain->FixedPanel = System::Windows::Forms::FixedPanel::Panel1;
             splitMain->Panel1->Controls->Add(MakeToolWindow("Solution Explorer", tree));
-            splitMain->Panel2->Controls->Add(splitRight);
+            splitMain->Panel2->Controls->Add(splitCenter);
         }
 
         void BuildTreeMenu()
@@ -841,7 +837,7 @@ namespace Gride
         {
             StringBuilder^ t = gcnew StringBuilder();
             for each (String^ l in p->Vs->ReportLines) t->Append(l)->Append("\n");
-            t->Append("\nBuilt here with RIDE's compilers for x86_64-windows into .gride\\ beside the project; c90, cpp11 and shalimar take Compiler Options' defaults (");
+            t->Append("\nBuilt here with GRIDE's compilers for x86_64-windows into .gride\\ beside the project; c90, cpp11 and shalimar take Compiler Options' defaults (");
             ToolEntry^ c90 = ToolchainFile::Current->ToolByRole("cCompiler");
             CompilerOptionStore^ none = gcnew CompilerOptionStore();
             TargetEntry^ win = TargetInfo::Get(TargetKind::Windows)->Entry;
@@ -884,7 +880,7 @@ namespace Gride
             bool ccs = !vs && (CcsImporter::IsProjectFile(full) || Directory::Exists(full));
             if (ccs && !settings->CcsEnabled)
             {
-                Ui::Error(this, String::Format("Could not open project:\n{0}\n\nOpening CCS projects is turned off under Tools > Options > RIDE Paths.", full));
+                Ui::Error(this, String::Format("Could not open project:\n{0}\n\nOpening CCS projects is turned off under Tools > Options > GRIDE Paths.", full));
                 return;
             }
             // GRIDE 2.0 holds one project: a solution with several C++ projects asks which (before anything is closed)
@@ -923,7 +919,6 @@ namespace Gride
                 return;
             }
             project = p;
-            ClearBuildOutput();                              // the last project's build and run are not this one's
             RememberProjectTime();
             settings->AddRecentProject(p->IsVs && p->Vs->StateFile->Length == 0 ? p->FilePath : full);     // a Visual Studio project by its project file (its solution is found again); one a .pro stands for by the .pro
             SaveSettings();
@@ -942,34 +937,12 @@ namespace Gride
                 // RIDE's Messages lines about the reading: what is not supported, RIDE's own instead, the sources, the refusals
                 for each (String^ line in project->CcsReportLines) EnqueueOutput(line);
                 if (project->CcsReportLines->Count > 0) ShowBottom(pageOutput);
-                SetStatus(String::Format("Opened CCS project '{0}' (read-only: built as RIDE builds it, edited in CCS; {1} files)", project->Name, project->SourceFiles->Count));
+                SetStatus(String::Format("Opened CCS project '{0}' (read-only: built as GRIDE builds it, edited in CCS; {1} files)", project->Name, project->SourceFiles->Count));
             }
             else if (project->IsReadOnly)
                 SetStatus(String::Format("Imported CCS project '{0}' (read-only, {1} files)", project->Name, project->SourceFiles->Count));
             else
                 SetStatus(String::Format("Opened project '{0}'", project->Name));
-            ShowMainSource();
-        }
-
-        // the program on screen once its project opens: the source with main() in it, else the first source
-        void ShowMainSource()
-        {
-            if (project == nullptr || project->SourceFiles->Count == 0) return;
-            String^ first = nullptr;
-            for each (String^ rel in project->SourceFiles)
-            {
-                String^ f = project->ResolvePath(rel);
-                if (!File::Exists(f)) continue;
-                if (first == nullptr) first = f;
-                try
-                {
-                    if (System::Text::RegularExpressions::Regex::IsMatch(File::ReadAllText(f), "^\\s*((int|void)?\\s*|fun\\s*<[^>]*>\\s*=\\s*)main\\s*\\(",
-                                                                         System::Text::RegularExpressions::RegexOptions::Multiline))
-                    { OpenFile(f); return; }
-                }
-                catch (IOException^) { }
-            }
-            if (first != nullptr) OpenFile(first);
         }
 
         // RIDE's own state for a CCS project lives in the settings (ccs.projects), never in CCS's files: the
@@ -1092,6 +1065,10 @@ namespace Gride
                 Dictionary<String^, TreeNode^>^ vsFolders = project->IsVs ? gcnew Dictionary<String^, TreeNode^>(StringComparer::OrdinalIgnoreCase) : nullptr;
                 if (vsFolders != nullptr)
                     for each (String^ f in project->Vs->Reading->Filters) VsFolderNode(root, vsFolders, f);
+                // a .pro of the one format shows its groups as the folders, in its own order
+                Dictionary<String^, TreeNode^>^ groupNodes = vsFolders == nullptr && project->HasGroups ? gcnew Dictionary<String^, TreeNode^>(StringComparer::OrdinalIgnoreCase) : nullptr;
+                if (groupNodes != nullptr)
+                    for each (String^ g in project->Groups) { groupNodes[g] = MakeFolderNode(g); root->Nodes->Add(groupNodes[g]); }
 
                 for each (String^ rel in project->SourceFiles)
                 {
@@ -1114,12 +1091,22 @@ namespace Gride
                         if (notBuilt) { n->ForeColor = Color::Gray; n->ToolTipText = String::Format("{0} (not built in {1})", full, project->ActiveConfig()->Name); }
                         VsFolderNode(root, vsFolders, vsFolder)->Nodes->Add(n);
                     }
+                    else if (groupNodes != nullptr)
+                    {
+                        n->Text = Path::GetFileName(rel);
+                        if (!File::Exists(full)) n->Text = String::Format("{0}  (missing)", n->Text);
+                        if (!project->IsBuilt(rel) && TargetInfo::IsSource(ext, settings)) { n->ForeColor = Color::Gray; n->ToolTipText = String::Format("{0} (its group is not built)", full); }
+                        String^ g = project->GroupOfFile(rel);
+                        TreeNode^ gn;
+                        if (!groupNodes->TryGetValue(g, gn)) { gn = MakeFolderNode(g); groupNodes[g] = gn; root->Nodes->Add(gn); }
+                        gn->Nodes->Add(n);
+                    }
                     else if (TargetInfo::IsSource(ext, settings)) srcNode->Nodes->Add(n);
                     else if (TargetInfo::IsHeader(ext)) hdrNode->Nodes->Add(n);
                     else otherNode->Nodes->Add(n);
                     if (selected != nullptr && PathUtil::SamePath(selected, full)) toSelect = n;
                 }
-                if (vsFolders == nullptr)
+                if (vsFolders == nullptr && groupNodes == nullptr)
                 {
                     root->Nodes->Add(srcNode);
                     root->Nodes->Add(hdrNode);
@@ -2994,43 +2981,29 @@ namespace Gride
                 "Ctrl+S  Save    Ctrl+Shift+S  Save all    Ctrl+F4  Close file\n"
                 "Ctrl+Z / Ctrl+Y  Undo / Redo\n"
                 "Ctrl+F  Find    Ctrl+H  Replace    F3  Find next    Ctrl+G  Go to line\n"
+                "Ctrl+Shift+F  Find in files    Ctrl+X / Ctrl+C / Ctrl+V / Ctrl+A  Cut / Copy / Paste / Select all\n"
                 "Tab / Shift+Tab  Indent / outdent selected lines\n"
-                "Ctrl+Shift+B  Build    F5  Build and run    Ctrl+F5  Run    Shift+F5  Stop\n"
+                "Ctrl+Alt+L  Solution Explorer    F4  Properties window    Ctrl+Alt+O  Output panel    Ctrl+Alt+E  Error list\n"
+                "Ctrl+Shift+A  Add new file    Shift+Alt+A  Add existing file    Alt+F7  Project properties\n"
+                "Ctrl+Shift+B  Build    Ctrl+F7  Compile file    Ctrl+Break  Cancel build\n"
+                "F5  Build and run    Ctrl+F5  Run    Shift+F5  Stop\n"
                 "F8  Start debugging / carry on    F9  Breakpoint    F7  Step over    F6  Step into\n"
                 "Ctrl+Up / Ctrl+Down  While stopped: the frame that called this one / back down\n"
-                "Alt+F7  Project properties    F4  Properties window    F1  Help\n"
+                "F1  Help    Alt+F4  Exit\n"
                 "Middle-click a tab to close it. Double-click an error to jump to it.");
         }
 
         void OnAbout(Object^ sender, EventArgs^ e)
         {
-            // the same About as GRIDEd's: the IDE's version, then each tool's as the tool reports it (GrideAbout::ToolVersions)
-            Form^ f = gcnew Form();
-            f->Text = "About " + AppInfo::Name;
-            f->FormBorderStyle = System::Windows::Forms::FormBorderStyle::FixedDialog;
-            f->MaximizeBox = false; f->MinimizeBox = false; f->ShowInTaskbar = false;
-            f->StartPosition = FormStartPosition::CenterParent;
-            f->ClientSize = System::Drawing::Size(620, 470);
-            Label^ name = gcnew Label();
-            name->Text = AppInfo::Name;
-            name->Font = gcnew System::Drawing::Font("Segoe UI Semibold", 22.0f);
-            name->Location = Point(24, 16);
-            name->AutoSize = true;
-            f->Controls->Add(name);
-            Label^ info = gcnew Label();
-            info->Location = Point(26, 70);
-            info->Size = System::Drawing::Size(580, 350);
-            info->Font = gcnew System::Drawing::Font("Consolas", 9.5f);
-            Cursor = Cursors::WaitCursor;
-            info->Text = GrideAbout::ToolVersions::Text(AppDomain::CurrentDomain->BaseDirectory, IdeSettings::SettingsPath());
-            Cursor = Cursors::Default;
-            f->Controls->Add(info);
-            Button^ ok = gcnew Button();
-            ok->Text = "OK"; ok->DialogResult = System::Windows::Forms::DialogResult::OK;
-            ok->Location = Point(f->ClientSize.Width - 100, f->ClientSize.Height - 40); ok->Size = System::Drawing::Size(80, 28);
-            f->Controls->Add(ok);
-            f->AcceptButton = ok; f->CancelButton = ok;
-            f->ShowDialog(this);
+            Ui::Info(this, String::Format(
+                "{0}  (version {1})\n\n"
+                "IDE for the C90, C++11 and Shalimar compilers.\n"
+                "Targets: Windows (MASM/LINK), Linux, macOS, TMS6747 DSP (ASM6x/LNK6x/RTS6747/VM6747).\n"
+                "Reads Code Composer Studio 7.4 / 5.5 projects and Visual Studio solutions (read-only).\n"
+                "Debugs with GRIDE's debuggers: sim6747 and vm6747, cdb (or lldb), a Shalimar program's own session.\n"
+                "Follows White's conventions; its Help is the one the three outlooks share, with the toolchain's manual (RIDE 5.17's).\n"
+                "Its example is cppparse, built with GRIDE's own cpp11, masm and link.\n\n"
+                "C++/CLI, .NET Framework 4.8, Windows Forms.", AppInfo::Name, AppInfo::Version));
         }
 
         // ============================================================ drag & drop, closing

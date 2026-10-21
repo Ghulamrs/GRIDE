@@ -202,11 +202,7 @@ namespace Gride { namespace Services {
                 if (eq <= 0) continue;
                 String^ name = pair->Substring(0, eq)->Trim();
                 String^ value = Environment::ExpandEnvironmentVariables(pair->Substring(eq + 1)->Trim());
-                if (name->Length == 0) continue;
-                // NAME= with nothing after it means "not set": the variable is removed, not left empty - a tool
-                // that asks only whether it exists (cpp11's CPP11_DECLINES, an option off) must not find it
-                if (value->Length == 0) si->EnvironmentVariables->Remove(name);
-                else si->EnvironmentVariables[name] = value;
+                if (name->Length > 0) si->EnvironmentVariables[name] = value;
             }
         }
 

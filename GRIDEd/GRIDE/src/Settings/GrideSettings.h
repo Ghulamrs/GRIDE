@@ -1,5 +1,5 @@
 // =============================================================================
-//  GrideSettings.h - everything stored in gride.settings.json
+//  GrideSettings.h - everything stored in settings.json (%APPDATA%\GRIDE, shared with the other outlooks)
 //
 //    EnvironmentSettings  theme, fonts, editor options, folders
 //    ToolchainSettings    one per target (see ToolchainSettings.h)
@@ -80,7 +80,7 @@ namespace Gride { namespace Settings {
         property List<String^>^ SharedLibraries; // "libraries": libraries every host link takes
         property bool    CcsEnabled;             // "ccs.enabled": File > Open > CCS Project
         property String^ CcsRoot;                // "ccs.root": the CCS installation ${CG_TOOL_ROOT} is found under (C:\ti\ccsv7)
-        property String^ C6747Debugger;          // auto (sim6747 on a .out with lines, else vm6747), sim6747, vm6747; RIDE_DEBUG_* at start win
+        property String^ C6747Debugger;          // auto (sim6747 on a .out with lines, else vm6747), sim6747, vm6747; GRIDE_DEBUG_* at start win
         property Dictionary<String^, String^>^ SyntaxColors;   // token -> "#RRGGBB" override
 
         // what ${CG_TOOL_ROOT} is resolved from, in RIDE's order: the CCS root when one is named (the
@@ -93,13 +93,13 @@ namespace Gride { namespace Settings {
             return CcsToolRoot == nullptr ? String::Empty : CcsToolRoot;
         }
 
-        // the C6747 debugger choice in force: RIDE_DEBUG_VM6747 / RIDE_DEBUG_SIM6747 in the environment
+        // the C6747 debugger choice in force: GRIDE_DEBUG_VM6747 / GRIDE_DEBUG_SIM6747 in the environment
         // at start win over the setting, as in RIDE
         String^ EffectiveC6747Debugger()
         {
-            String^ vm = Environment::GetEnvironmentVariable("RIDE_DEBUG_VM6747");
+            String^ vm = Environment::GetEnvironmentVariable("GRIDE_DEBUG_VM6747");
             if (!String::IsNullOrWhiteSpace(vm) && vm->Trim() != "0") return "vm6747";
-            String^ sim = Environment::GetEnvironmentVariable("RIDE_DEBUG_SIM6747");
+            String^ sim = Environment::GetEnvironmentVariable("GRIDE_DEBUG_SIM6747");
             if (!String::IsNullOrWhiteSpace(sim) && sim->Trim() != "0") return "sim6747";
             return String::IsNullOrWhiteSpace(C6747Debugger) ? "auto" : C6747Debugger->Trim()->ToLowerInvariant();
         }
@@ -122,9 +122,10 @@ namespace Gride { namespace Settings {
             o->SetString("defaultProjectLocation", DefaultProjectLocation);
             o->SetString("ccsToolRoot", CcsToolRoot);
             o->SetString("helpDirectory", HelpDirectory);
-            o->SetString("rideRoot", RideRoot);
-            o->SetString("rideIncludeDir", RideIncludeDir);
-            o->SetString("rideLibDir", RideLibDir);
+            // GRIDE's names since GRIDEx3: no RIDE in settings.json (FromJson still reads rideRoot ...)
+            o->SetString("grideRoot", RideRoot);
+            o->SetString("grideIncludeDir", RideIncludeDir);
+            o->SetString("grideLibDir", RideLibDir);
             o->SetString("vcvars", Vcvars);
             o->SetString("tiCompilerDir", TiCompilerDir);
             o->SetString("tiLibDir", TiLibDir);
@@ -157,9 +158,9 @@ namespace Gride { namespace Settings {
             DefaultProjectLocation = o->GetString("defaultProjectLocation", DefaultProjectLocation);
             CcsToolRoot = o->GetString("ccsToolRoot", CcsToolRoot);
             HelpDirectory = o->GetString("helpDirectory", HelpDirectory);
-            RideRoot = o->GetString("rideRoot", RideRoot);
-            RideIncludeDir = o->GetString("rideIncludeDir", RideIncludeDir);
-            RideLibDir = o->GetString("rideLibDir", RideLibDir);
+            RideRoot = o->GetString("grideRoot", o->GetString("rideRoot", RideRoot));
+            RideIncludeDir = o->GetString("grideIncludeDir", o->GetString("rideIncludeDir", RideIncludeDir));
+            RideLibDir = o->GetString("grideLibDir", o->GetString("rideLibDir", RideLibDir));
             Vcvars = o->GetString("vcvars", Vcvars);
             TiCompilerDir = o->GetString("tiCompilerDir", TiCompilerDir);
             TiLibDir = o->GetString("tiLibDir", TiLibDir);
@@ -243,7 +244,6 @@ namespace Gride { namespace Settings {
             {
                 // Placeholder word list - edit it in Tools > Options > Languages > Shalimar
                 Extensions->Add(".shl");
-                Extensions->Add(".shm");          // RIDE's older programs (Documents\RIDE\programs)
                 Keywords->AddRange(c90kw);
                 Types->AddRange(c90ty);
                 break;
@@ -289,10 +289,6 @@ namespace Gride { namespace Settings {
         {
             if (o == nullptr) return;
             if (o->Has("ext")) Extensions = o->GetStringList("ext");
-            // Shalimar is .shl and RIDE's older .shm, both always: a list saved before .shm was known gains it
-            if (Lang == Language::Shalimar)
-                for each (String^ e in gcnew array<String^>{ ".shl", ".shm" })
-                    if (!OwnsExtension(e)) Extensions->Add(e);
             if (o->Has("keywords")) Keywords = o->GetStringList("keywords");
             if (o->Has("types")) Types = o->GetStringList("types");
             LineComment = o->GetString("lineComment", LineComment);
@@ -483,7 +479,7 @@ namespace Gride { namespace Settings {
         property RecentList^ Recent;
         property List<ExternalTool^>^ ExternalTools;
         property Dictionary<String^, String^>^ KeyBindings;
-        property String^ KeySet;                             // "visualstudio" or "ride": the key set under the bindings
+        property String^ KeySet;                             // "visualstudio" or "gride" (RIDE's keys): the key set under the bindings
         property Dictionary<String^, String^>^ Snippets;     // name -> text (Tools > Code Snippets)
         // RIDE's installation-level Compiler Options (settings.json "options"): what a new project starts with
         property CompilerOptionStore^ CompilerOptions;
@@ -640,6 +636,7 @@ namespace Gride { namespace Settings {
             if (keys != nullptr)
                 for each (String^ k in keys->KeyNames) s->KeyBindings[k] = keys->GetString(k, String::Empty);
             s->KeySet = o->GetString("keySet", s->KeySet);
+            if (String::Compare(s->KeySet, "ride", true) == 0) s->KeySet = "gride";   // the name before GRIDEx3
 
             JsonValue^ snip = o->GetObject("snippets");
             if (snip != nullptr)
@@ -679,18 +676,24 @@ namespace Gride { namespace Settings {
     };
 
     // -------------------------------------------------------------------------
-    //  SettingsManager - finds, loads and saves gride.settings.json
-    //    1. <folder of GRIDE.exe>\gride.settings.json   (portable install)
-    //    2. %APPDATA%\GRIDE\gride.settings.json         (normal install)
+    //  SettingsManager - finds, loads and saves settings.json, GRIDE's one settings file
+    //    1. <folder of GRIDE.exe>\settings.json   (portable install)
+    //    2. %APPDATA%\GRIDE\settings.json         (normal install)
+    //  The same file whichever outlook is installed (GRIDEx3): Black's keys sit beside Grey's and White's,
+    //  whose names never meet Black's, so a save keeps the keys it does not own. gride.settings.json,
+    //  the name before GRIDEx3, is read once when settings.json holds none of Black's keys, then removed.
     // -------------------------------------------------------------------------
     public ref class SettingsManager abstract sealed
     {
     public:
-        static String^ PortablePath() { return Path::Combine(PathUtil::AppDirectory(), "gride.settings.json"); }
+        literal String^ FileName = "settings.json";
+        literal String^ FormerFileName = "gride.settings.json";
+
+        static String^ PortablePath() { return Path::Combine(PathUtil::AppDirectory(), FileName); }
         static String^ UserPath()
         {
-            return Path::Combine(Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData),
-                                 "GRIDE\\gride.settings.json");
+            return Path::Combine(Path::Combine(Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData), "GRIDE"),
+                                 FileName);
         }
 
         // warning receives a message when the file was unreadable (it is then backed up); the toolchain
@@ -698,34 +701,78 @@ namespace Gride { namespace Settings {
         static GrideSettings^ Load(String^% warning)
         {
             warning = nullptr;
-            String^ path = File::Exists(PortablePath()) ? PortablePath() : UserPath();
-            bool portable = PathUtil::SamePath(path, PortablePath());
+            bool portable = File::Exists(PortablePath()) || File::Exists(Path::Combine(PathUtil::AppDirectory(), FormerFileName));
+            String^ path = portable ? PortablePath() : UserPath();
+            String^ former = Path::Combine(Path::GetDirectoryName(path), FormerFileName);
             ToolchainDefinitions::Current = ToolchainDefinitions::Load(ToolchainDefinitions::ShippedPath(), ToolchainDefinitions::UserPath(portable));
-            GrideSettings^ s;
+
+            JsonValue^ shared = nullptr;
             if (File::Exists(path))
             {
-                try { s = GrideSettings::FromJson(JsonParser::ParseFile(path)); }
+                try
+                {
+                    shared = JsonParser::ParseFile(path);
+                    if (!shared->IsObject) throw gcnew FormatException("the file is not a JSON object");
+                }
                 catch (Exception^ ex)
                 {
                     String^ backup = path + ".bad";
                     try { File::Copy(path, backup, true); } catch (Exception^) { }
                     warning = "Settings file could not be read and was reset to defaults.\n" + ex->Message +
                               "\nA copy was kept as: " + backup;
+                    shared = nullptr;
+                }
+            }
+
+            // Black's own keys: from settings.json, else (once) from the file of the former name
+            JsonValue^ mine = Holds(shared) ? shared : nullptr;
+            bool moving = false;
+            if (mine == nullptr && File::Exists(former))
+            {
+                try { mine = JsonParser::ParseFile(former); moving = mine->IsObject; } catch (Exception^) { mine = nullptr; }
+                if (!moving) mine = nullptr;
+            }
+            GrideSettings^ s = gcnew GrideSettings();
+            if (mine != nullptr)
+            {
+                try { s = GrideSettings::FromJson(mine); }
+                catch (Exception^ ex)
+                {
+                    warning = "Settings could not be read and were reset to defaults.\n" + ex->Message;
                     s = gcnew GrideSettings();
                 }
             }
-            else s = gcnew GrideSettings();
 
             s->FilePath = path;
-            s->IsPortable = PathUtil::SamePath(path, PortablePath());
-            if (!File::Exists(path)) Save(s);
+            s->IsPortable = portable;
+            if (moving || !Holds(shared))
+            {
+                // the former file goes once its keys are safely in settings.json
+                if (Save(s) && moving && !PathUtil::SamePath(former, path))
+                    try { File::Delete(former); } catch (Exception^) { }
+            }
             return s;
         }
 
-        static void Save(GrideSettings^ s)
+        // Black's keys over what the file holds now - the other outlooks' keys stay as they are
+        static bool Save(GrideSettings^ s)
         {
-            try { JsonWriter::WriteFile(s->FilePath, s->ToJson()); }
-            catch (Exception^) { /* read-only media: keep running with in-memory settings */ }
+            try
+            {
+                JsonValue^ doc = nullptr;
+                if (File::Exists(s->FilePath))
+                    try { doc = JsonParser::ParseFile(s->FilePath); } catch (Exception^) { doc = nullptr; }
+                if (doc == nullptr || !doc->IsObject) doc = JsonValue::MakeObject();
+                JsonValue^ own = s->ToJson();
+                for each (String^ k in own->KeyNames) doc->SetValue(k, own->Get(k));
+                JsonWriter::WriteFile(s->FilePath, doc);
+                return true;
+            }
+            catch (Exception^) { return false; /* read-only media: keep running with in-memory settings */ }
         }
+
+    private:
+        // whether a settings object holds Black's settings ("gride" marks its format, "environment" its first section)
+        static bool Holds(JsonValue^ o) { return o != nullptr && o->IsObject && (o->Has("gride") || o->Has("environment")); }
     };
 }}

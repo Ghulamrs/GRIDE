@@ -107,7 +107,7 @@ bool ccsEnabled();
 std::string ccsRoot();
 bool rememberCcs(bool enabled, const std::string& root);
 void overrideCcs(bool enabled, const std::string& root);   // --ccs [--ccs-root dir], for this run only
-// **RIDE's own state for a CCS project goes here, never into CCS's files**: the open file and the
+// **GRIDE's own state for a CCS project goes here, never into CCS's files**: the open file and the
 // configuration, under "ccs": { "projects": { "<absolute dir>": { "open": ..., "config": ... } } }.
 Json ccsProjectState(const std::string& dir);
 bool rememberCcsProjectState(const std::string& dir, const Json& state);

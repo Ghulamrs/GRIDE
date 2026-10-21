@@ -109,7 +109,7 @@ namespace Gride
         literal String^ WinDebugLinker     = "win.mslink";     // Microsoft's link.exe /DEBUG, which writes the PDB
         literal String^ WinNativeAssembler = "win.ml64";       // offered when the project's own assembler fails (the native question)
         literal String^ WinDebugger        = "win.cdb";        // the Windows debugger (cdb, which reads the PDB)
-        literal String^ WinFallbackDebugger = "win.lldb";      // the one standing in where cdb is not installed (lldb, $RIDE_LLDB)
+        literal String^ WinFallbackDebugger = "win.lldb";      // the one standing in where cdb is not installed (lldb, $GRIDE_LLDB)
         literal String^ LinuxAssembler     = "linux.as";
         literal String^ LinuxLinker        = "linux.ld";
         literal String^ LinuxRunner        = "linux.run";
@@ -505,8 +505,7 @@ namespace Gride
         property String^ EnvVar;              // the environment variable that names it outright ($C90, $VM6747, $RTS6X ...)
         property List<String^>^ Aliases;      // the other names tried, in order (cc1.exe, shc.exe, ASM6x.exe ...)
         property String^ InstallDir;          // the installation sub-folder it lives in (bin; lib\rts6x-tms6747 for the runtime)
-        property List<String^>^ Dirs;         // folders of its own, looked in before PATH (cdb: the Windows SDK's Debuggers\x64)
-        property bool OnPath;                // also looked for on PATH (not RIDE's link, which Microsoft's would be taken for)
+        property bool OnPath;                 // also looked for on PATH (not RIDE's link, which Microsoft's would be taken for)
         property bool Vcvars;                 // Visual Studio's: looked for in its folders (VendorTools.h), as vcvars64.bat would put them on PATH
         property bool TiCompilerDir;          // TI's: looked for in TI's C6000 compiler directory's bin
         property String^ Definition;          // the file's tool (or library) id behind this entry; empty when the file lacks it
@@ -550,7 +549,6 @@ namespace Gride
             if (Aliases == nullptr)        Aliases = gcnew List<String^>();
             if (EnvVar == nullptr)         EnvVar = String::Empty;
             if (InstallDir == nullptr)     InstallDir = String::Empty;
-            if (Dirs == nullptr)           Dirs = gcnew List<String^>();
             if (Definition == nullptr)     Definition = String::Empty;
             if (Operation == nullptr)      Operation = String::Empty;
             if (About == nullptr)          About = String::Empty;
@@ -561,7 +559,6 @@ namespace Gride
         {
             if (def == nullptr) return;
             EnvVar = def->EnvVar; InstallDir = def->InstallDir; OnPath = def->OnPath; Vcvars = def->Vcvars; TiCompilerDir = def->TiCompilerDir;
-            Dirs = gcnew List<String^>(def->Dirs);
             Aliases = gcnew List<String^>(def->Aliases);
             Definition = def->Definition; Operation = def->Operation; About = def->About;
         }
@@ -632,7 +629,6 @@ namespace Gride
             if (InstallDir->Length > 0) for each (String^ d in IdeSettingsPaths::SearchDirs(InstallDir)) sb->Append(d)->Append(", ");
             if (Vcvars) sb->Append("Visual Studio's folders (")->Append(VisualStudio::Where())->Append("), ");
             if (TiCompilerDir) sb->Append("TI's C6000 compiler directory (")->Append(TiCompiler::Dir() == nullptr ? Str("none found") : TiCompiler::Bin())->Append("), ");
-            for each (String^ own in Dirs) sb->Append(System::Environment::ExpandEnvironmentVariables(own))->Append(", ");
             if (OnPath && !IsRuntime) sb->Append("PATH");
             return sb->ToString()->TrimEnd(L' ', L',');
         }
@@ -649,7 +645,7 @@ namespace Gride
             Id = String::Empty; DisplayName = String::Empty; Category = "Tool"; ExecutablePath = String::Empty; Arguments = String::Empty;
             IncludeSwitch = String::Empty; DefineSwitch = String::Empty; LibrarySwitch = String::Empty; ErrorPattern = String::Empty;
             Environment = String::Empty; SetupScript = String::Empty; OutputCodePage = 0; Custom = false;
-            Aliases = gcnew List<String^>(); EnvVar = String::Empty; InstallDir = String::Empty; Dirs = gcnew List<String^>(); OnPath = true; Vcvars = false; TiCompilerDir = false;
+            Aliases = gcnew List<String^>(); EnvVar = String::Empty; InstallDir = String::Empty; OnPath = true; Vcvars = false; TiCompilerDir = false;
             Definition = String::Empty; Operation = String::Empty; About = String::Empty;
         }
 
@@ -686,11 +682,6 @@ namespace Gride
                     String^ bin = TiCompiler::Bin();
                     if (bin != nullptr && File::Exists(Path::Combine(bin, name))) return Path::GetFullPath(Path::Combine(bin, name));
                 }
-                for each (String^ own in Dirs)
-                {
-                    String^ c = Path::Combine(System::Environment::ExpandEnvironmentVariables(own), name);
-                    if (File::Exists(c)) return Path::GetFullPath(c);
-                }
                 if (OnPath && !IsRuntime) return PathUtil::FindExecutable(name);
             }
             catch (ArgumentException^) {}
@@ -723,8 +714,10 @@ namespace Gride
         [DataMember(Order = 3)]  property String^ LastProject;
         [DataMember(Order = 4)]  property List<String^>^ RecentProjects;
         [DataMember(Order = 5)]  property List<String^>^ RecentFiles;
-        // RIDE's installation (its root, or its bin): where the tools are looked for after the IDE's own folder
-        [DataMember(Order = 6)]  property String^ RideRoot;
+        // RIDE's installation (its root, or its bin): where the tools are looked for after the IDE's own folder.
+        // In settings.json under GRIDE's names since GRIDEx3 (GrideRoot, GrideIncludeDir, GrideLibDir); the
+        // Former* members read the names before, once, and are never written.
+        [DataMember(Name = "GrideRoot", Order = 6)]  property String^ RideRoot;
         // RIDE's way after a failed build: the editor on the first error
         [DataMember(Order = 7)]  property bool JumpToFirstError;
         // RIDE's askNative: offer Visual Studio's (or TI's) assembler and linker when the project's own fail
@@ -732,8 +725,12 @@ namespace Gride
         // a program runs inside the IDE, in the Output pane with an input line (RIDE's window); off: in a console window of its own
         [DataMember(Order = 9)]  property bool RunInIde;
         // ---- RIDE's settings.json, merged (R07)
-        [DataMember(Order = 60)] property String^ RideIncludeDir;            // "include": cpp11's headers, against the installation ("" = its include)
-        [DataMember(Order = 61)] property String^ RideLibDir;                // "lib": c90's headers ("" = the installation's lib)
+        [DataMember(Name = "GrideIncludeDir", Order = 60)] property String^ RideIncludeDir;   // "include": cpp11's headers, against the installation ("" = its include)
+        [DataMember(Name = "GrideLibDir", Order = 61)] property String^ RideLibDir;           // "lib": c90's headers ("" = the installation's lib)
+        [DataMember(Name = "RideRoot", Order = 90, EmitDefaultValue = false)] property String^ FormerRideRoot;
+        [DataMember(Name = "RideIncludeDir", Order = 91, EmitDefaultValue = false)] property String^ FormerRideIncludeDir;
+        [DataMember(Name = "RideLibDir", Order = 92, EmitDefaultValue = false)] property String^ FormerRideLibDir;
+        static array<String^>^ FormerNames() { return gcnew array<String^>{ "RideRoot", "RideIncludeDir", "RideLibDir" }; }
         [DataMember(Order = 62)] property String^ Vcvars;                    // "vcvars": a vcvars64.bat whose Visual Studio is taken (never run)
         [DataMember(Order = 63)] property String^ TiCompilerDir;             // "ti": TI's C6000 compiler directory ("" = the newest one found)
         [DataMember(Order = 64)] property String^ TiLibDir;                  // "tilib": a second directory TI's runtime is looked for in
@@ -852,6 +849,10 @@ namespace Gride
             if (LastProject == nullptr) LastProject = String::Empty;
             if (RecentProjects == nullptr) RecentProjects = gcnew List<String^>();
             if (RecentFiles == nullptr) RecentFiles = gcnew List<String^>();
+            if (String::IsNullOrEmpty(RideRoot) && !String::IsNullOrEmpty(FormerRideRoot)) RideRoot = FormerRideRoot;
+            if (String::IsNullOrEmpty(RideIncludeDir) && !String::IsNullOrEmpty(FormerRideIncludeDir)) RideIncludeDir = FormerRideIncludeDir;
+            if (String::IsNullOrEmpty(RideLibDir) && !String::IsNullOrEmpty(FormerRideLibDir)) RideLibDir = FormerRideLibDir;
+            FormerRideRoot = nullptr; FormerRideIncludeDir = nullptr; FormerRideLibDir = nullptr;
             if (RideRoot == nullptr) RideRoot = String::Empty;
             if (RideIncludeDir == nullptr) RideIncludeDir = String::Empty;
             if (RideLibDir == nullptr) RideLibDir = String::Empty;
@@ -940,7 +941,7 @@ namespace Gride
         CompilerOptionStore^ OptionStore() { return CompilerOptionStore::FromData(CompilerOptions); }
         void SetOptionStore(CompilerOptionStore^ store) { CompilerOptions = store == nullptr ? nullptr : store->ToData(); }
 
-        // the C6747's debugger in force: RIDE_DEBUG_VM6747 or RIDE_DEBUG_SIM6747 in the environment at start
+        // the C6747's debugger in force: GRIDE_DEBUG_VM6747 or GRIDE_DEBUG_SIM6747 in the environment at start
         // wins (as in RIDE), else the setting; "" is RIDE's choice
         String^ EffectiveC6747Debugger()
         {
@@ -948,7 +949,7 @@ namespace Gride
             {
                 ToolEntry^ e = ToolIds::EntryOf(id);
                 if (e == nullptr) continue;
-                String^ v = System::Environment::GetEnvironmentVariable(String::Concat("RIDE_DEBUG_", e->Name->ToUpperInvariant()));
+                String^ v = System::Environment::GetEnvironmentVariable(String::Concat("GRIDE_DEBUG_", e->Name->ToUpperInvariant()));
                 if (!String::IsNullOrWhiteSpace(v) && v->Trim() != "0") return id;
             }
             return C6747Debugger;
@@ -1028,7 +1029,8 @@ namespace Gride
 
         // ---------------------------------------------------------------
         // settings.json beside GRIDE.exe when one is there (a portable layout, as toolchain.user.json beside
-        // it is), else %APPDATA%\GRIDE
+        // it is), else %APPDATA%\GRIDE - the one file of GRIDE's settings, whichever outlook is installed
+        // (GRIDEx3): Grey's keys sit beside Black's and White's, whose names never meet Grey's, and Save keeps them
         static String^ SettingsFolder()
         {
             String^ beside = IdeSettingsPaths::IdeDirectory();
@@ -1066,7 +1068,7 @@ namespace Gride
             error = nullptr;
             try
             {
-                JsonSave<IdeSettings>(SettingsPath(), this);
+                JsonSaveKeeping<IdeSettings>(SettingsPath(), this, FormerNames());
                 return true;
             }
             catch (Exception^ ex)
@@ -1124,7 +1126,6 @@ namespace Gride
                         d->OutputCodePage = String::Equals(e->OutputEncoding, "utf-8", StringComparison::OrdinalIgnoreCase) ? 65001 : 0;
                         d->LookedFor(e->Lookup->Env, e->Lookup->InstallDir, e->Lookup->OnPath, e->Aliases);
                         d->Vcvars = e->Lookup->Vcvars;
-                        d->Dirs = gcnew List<String^>(e->Lookup->Dirs);
                         d->TiCompilerDir = String::Equals(b->Role, "nativeLinker") && te != nullptr && te->Emulated;
                         d->Definition = e->Id; d->Operation = b->Operation; d->About = e->Description;
                     }
@@ -1201,12 +1202,12 @@ namespace Gride
         {
             List<ToolDefinition^>^ t = gcnew List<ToolDefinition^>();
             String^ cArgs = "-S \"{in}\" -o \"{out}\" -arch {arch} {configflags} {flags} {includes} {defines}";
-            t->Add(gcnew ToolDefinition(ToolIds::CompilerC90, "c90 (RIDE's C90 compiler)", "Compiler", "c90.exe", cArgs, "-I", "-D", ""));
-            t->Add(gcnew ToolDefinition(ToolIds::CompilerCpp11, "cpp11 (RIDE's C++ compiler)", "Compiler", "cpp11.exe", cArgs, "-I", "-D", ""));
-            t->Add(gcnew ToolDefinition(ToolIds::CompilerShalimar, "shalimar (RIDE's Shalimar compiler)", "Compiler", "shalimar.exe",
+            t->Add(gcnew ToolDefinition(ToolIds::CompilerC90, "c90 (GRIDE's C90 compiler)", "Compiler", "c90.exe", cArgs, "-I", "-D", ""));
+            t->Add(gcnew ToolDefinition(ToolIds::CompilerCpp11, "cpp11 (GRIDE's C++ compiler)", "Compiler", "cpp11.exe", cArgs, "-I", "-D", ""));
+            t->Add(gcnew ToolDefinition(ToolIds::CompilerShalimar, "shalimar (GRIDE's Shalimar compiler)", "Compiler", "shalimar.exe",
                 "-S \"{in}\" -o \"{out}\" --target={arch} {configflags} {flags}", "", "", ""));
-            t->Add(gcnew ToolDefinition(ToolIds::WinAssembler, "masm (RIDE's x86-64 assembler)", "Windows", "masm.exe", "-t x64 \"{in}\" -o \"{out}\"", "", "", ""));
-            t->Add(gcnew ToolDefinition(ToolIds::WinLinker, "link (RIDE's Windows linker)", "Windows", "link.exe",
+            t->Add(gcnew ToolDefinition(ToolIds::WinAssembler, "masm (GRIDE's x86-64 assembler)", "Windows", "masm.exe", "-t x64 \"{in}\" -o \"{out}\"", "", "", ""));
+            t->Add(gcnew ToolDefinition(ToolIds::WinLinker, "link (GRIDE's Windows linker)", "Windows", "link.exe",
                 "/nologo /subsystem:console /out:\"{out}\" {objs} {libs} {crtlibs} {linkflags}", "", "", ""));
             t->Add(gcnew ToolDefinition(ToolIds::LinuxAssembler, "as (Linux)", "Linux", "as", "\"{in}\" -o \"{out}\"", "", "", ""));
             t->Add(gcnew ToolDefinition(ToolIds::LinuxLinker, "cc (Linux linker)", "Linux", "cc", "{objs} -o \"{out}\" {libs} -lm {linkflags}", "", "", "-l"));
@@ -1214,12 +1215,12 @@ namespace Gride
             t->Add(gcnew ToolDefinition(ToolIds::MacAssembler, "as (macOS)", "macOS", "as", "\"{in}\" -o \"{out}\"", "", "", ""));
             t->Add(gcnew ToolDefinition(ToolIds::MacLinker, "cc (macOS linker)", "macOS", "cc", "{objs} -o \"{out}\" {libs} -lm {linkflags}", "", "", "-l"));
             t->Add(gcnew ToolDefinition(ToolIds::MacRunner, "macOS Runner", "macOS", "", "\"{exe}\" {args}", "", "", ""));
-            t->Add(gcnew ToolDefinition(ToolIds::TmsAssembler, "asm6x (RIDE's C6000 assembler)", "TMS6747", "asm6x.exe", "\"{in}\" -o \"{out}\"", "", "", ""));
-            t->Add(gcnew ToolDefinition(ToolIds::TmsLinker, "lnk6x (RIDE's C6000 linker)", "TMS6747", "lnk6x.exe",
+            t->Add(gcnew ToolDefinition(ToolIds::TmsAssembler, "asm6x (GRIDE's C6000 assembler)", "TMS6747", "asm6x.exe", "\"{in}\" -o \"{out}\"", "", "", ""));
+            t->Add(gcnew ToolDefinition(ToolIds::TmsLinker, "lnk6x (GRIDE's C6000 linker)", "TMS6747", "lnk6x.exe",
                 "-mv6740 --abi=eabi -i \"{runtimedir}\" {cmdfiles} {linkflags} {objs} {libs} -o \"{out}\"", "", "", "-l"));
-            t->Add(gcnew ToolDefinition(ToolIds::TmsRuntime, "RTS6x (RIDE's C runtime for the C6747, a library file)", "Runtime", "rts6x.lib", "", "", "", ""));
-            t->Add(gcnew ToolDefinition(ToolIds::TmsSimulator, "vm6747 (RIDE's C6000 emulator, runs the assembly)", "TMS6747", "vm6747.exe", "\"{asmdir}\" {args}", "", "", ""));
-            t->Add(gcnew ToolDefinition(ToolIds::TmsSim, "sim6747 (RIDE's C6747 simulator, runs the .out)", "TMS6747", "sim6747.exe", "--run -c \"{exe}\"", "", "", ""));
+            t->Add(gcnew ToolDefinition(ToolIds::TmsRuntime, "RTS6x (GRIDE's C runtime for the C6747, a library file)", "Runtime", "rts6x.lib", "", "", "", ""));
+            t->Add(gcnew ToolDefinition(ToolIds::TmsSimulator, "vm6747 (GRIDE's C6000 emulator, runs the assembly)", "TMS6747", "vm6747.exe", "\"{asmdir}\" {args}", "", "", ""));
+            t->Add(gcnew ToolDefinition(ToolIds::TmsSim, "sim6747 (GRIDE's C6747 simulator, runs the .out)", "TMS6747", "sim6747.exe", "--run -c \"{exe}\"", "", "", ""));
             t->Add(gcnew ToolDefinition(ToolIds::ConvertCToShalimar, "c2s: C to Shalimar", "Converter", "c2s.exe", "--to-shalimar \"{in}\" -o \"{out}\"", "", "", ""));
             t->Add(gcnew ToolDefinition(ToolIds::ConvertShalimarToC, "c2s: Shalimar to C", "Converter", "c2s.exe", "--to-c \"{in}\" -o \"{out}\"", "", "", ""));
             return t;

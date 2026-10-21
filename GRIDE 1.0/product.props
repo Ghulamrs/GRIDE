@@ -4,6 +4,6 @@
      PRODUCT, src/product.h and packaging/windows/make-setup.ps1 spell it the same. -->
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
-    <PRODUCT>RIDE</PRODUCT>
+    <PRODUCT>GRIDE</PRODUCT>
   </PropertyGroup>
 </Project>

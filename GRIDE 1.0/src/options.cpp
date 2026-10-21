@@ -9,7 +9,7 @@ namespace editor {
 namespace options {
 
 // The rows, in the order each tab shows them. A Choice's first value is the compiler's own default,
-// which is never written on a command line; the defaults below are RIDE's, per configuration.
+// which is never written on a command line; the defaults below are GRIDE's, per configuration.
 static const Def kDefs[] = {
     { "general.nologo", "General", "Hide the compiler's banner (-nologo)", Check, "", "c90, cpp11 and shalimar" },
     { "general.jobs", "General", "Parallel jobs (-j)", Choice, "Auto|1|2|4|8", "c90 and cpp11; Auto is serial below four files" },

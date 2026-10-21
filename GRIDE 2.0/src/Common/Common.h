@@ -49,7 +49,7 @@ namespace Gride
     {
     public:
         literal String^ Name    = "GRIDE 2.0";
-        literal String^ Version = "1.0";       // the IDE's version; the "2.0" is part of its name
+        literal String^ Version = "2.0.0";
     };
 
     // Makes a literal a String^ (needed inside ?: where literals would decay to char*).
@@ -70,15 +70,36 @@ namespace Gride
     T^ JsonLoad(String^ path)
     {
         DataContractJsonSerializer^ ser = JsonSerializerFor<T>();
-        // a UTF-8 byte-order mark (Notepad's, PowerShell's) is not JSON: the serializer stops at it
-        array<Byte>^ bytes = File::ReadAllBytes(path);
-        int skip = bytes->Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
-        MemoryStream^ ms = gcnew MemoryStream(bytes, skip, bytes->Length - skip);
-        return safe_cast<T^>(ser->ReadObject(ms));
+        T^ result = nullptr;
+        FileStream^ fs = File::OpenRead(path);
+        try
+        {
+            result = safe_cast<T^>(ser->ReadObject(fs));
+        }
+        finally
+        {
+            fs->Close();
+        }
+        return result;
     }
 
-    // Save an object as indented JSON. Writes to a temp file first so a crash
-    // never leaves a half-written project/settings file.
+    // Writes to a temp file first so a crash never leaves a half-written project/settings file.
+    inline void WriteFileSafely(String^ path, array<Byte>^ bytes)
+    {
+        String^ full = Path::GetFullPath(path);
+        String^ dir = Path::GetDirectoryName(full);
+        if (!String::IsNullOrEmpty(dir)) Directory::CreateDirectory(dir);
+        String^ tmp = String::Concat(full, ".tmp");
+        File::WriteAllBytes(tmp, bytes);
+        if (File::Exists(full))
+        {
+            try { File::Replace(tmp, full, nullptr); }
+            catch (IOException^) { File::Copy(tmp, full, true); File::Delete(tmp); }   // e.g. network shares
+        }
+        else File::Move(tmp, full);
+    }
+
+    // Save an object as indented JSON.
     template<typename T>
     void JsonSave(String^ path, T^ obj)
     {
@@ -89,18 +110,55 @@ namespace Gride
         ser->WriteObject(w, obj);
         w->Flush();
         w->Close();
+        WriteFileSafely(path, ms->ToArray());
+    }
 
-        String^ full = Path::GetFullPath(path);
-        String^ dir = Path::GetDirectoryName(full);
-        if (!String::IsNullOrEmpty(dir)) Directory::CreateDirectory(dir);
-        String^ tmp = String::Concat(full, ".tmp");
-        File::WriteAllBytes(tmp, ms->ToArray());
-        if (File::Exists(full))
+    // A member's JSON name, as the JSON-to-XML mapping gives it: the element's name, or its item
+    // attribute where the name is not one XML allows.
+    inline String^ JsonMemberName(System::Xml::XmlElement^ e)
+    {
+        return (e->LocalName == "item" && e->HasAttribute("item")) ? e->GetAttribute("item") : e->LocalName;
+    }
+
+    // As JsonSave, keeping the members of the file already there that obj does not write - in
+    // settings.json, the keys of GRIDE's other outlooks, which share the file (GRIDEx3) - except the
+    // names in dropped (a member's name before it was renamed). A file that does not read keeps nothing.
+    template<typename T>
+    void JsonSaveKeeping(String^ path, T^ obj, array<String^>^ dropped)
+    {
+        DataContractJsonSerializer^ ser = JsonSerializerFor<T>();
+        MemoryStream^ fresh = gcnew MemoryStream();
+        ser->WriteObject(fresh, obj);
+        System::Xml::XmlDocument^ doc = gcnew System::Xml::XmlDocument();
+        doc->Load(JsonReaderWriterFactory::CreateJsonReader(fresh->ToArray(), System::Xml::XmlDictionaryReaderQuotas::Max));
+        System::Xml::XmlElement^ root = doc->DocumentElement;
+        if (File::Exists(path))
         {
-            try { File::Replace(tmp, full, nullptr); }
-            catch (IOException^) { File::Copy(tmp, full, true); File::Delete(tmp); }   // e.g. network shares
+            try
+            {
+                System::Xml::XmlDocument^ old = gcnew System::Xml::XmlDocument();
+                old->Load(JsonReaderWriterFactory::CreateJsonReader(File::ReadAllBytes(path), System::Xml::XmlDictionaryReaderQuotas::Max));
+                HashSet<String^>^ own = gcnew HashSet<String^>();
+                for each (System::Xml::XmlNode^ n in root->ChildNodes)
+                    if (dynamic_cast<System::Xml::XmlElement^>(n) != nullptr) own->Add(JsonMemberName(safe_cast<System::Xml::XmlElement^>(n)));
+                for each (System::Xml::XmlNode^ n in old->DocumentElement->ChildNodes)
+                {
+                    System::Xml::XmlElement^ e = dynamic_cast<System::Xml::XmlElement^>(n);
+                    if (e == nullptr) continue;
+                    String^ name = JsonMemberName(e);
+                    if (own->Contains(name) || (dropped != nullptr && Array::IndexOf(dropped, name) >= 0)) continue;
+                    root->AppendChild(doc->ImportNode(e, true));
+                }
+            }
+            catch (Exception^) { }
         }
-        else File::Move(tmp, full);
+        MemoryStream^ ms = gcnew MemoryStream();
+        System::Xml::XmlDictionaryWriter^ w =
+            JsonReaderWriterFactory::CreateJsonWriter(ms, Encoding::UTF8, false, true, "  ");
+        root->WriteTo(w);
+        w->Flush();
+        w->Close();
+        WriteFileSafely(path, ms->ToArray());
     }
 
     // Deep copy through JSON (used to edit settings/projects in dialogs).

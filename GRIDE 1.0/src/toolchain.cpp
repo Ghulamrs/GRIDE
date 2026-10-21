@@ -1,5 +1,6 @@
 #include "toolchain.h"
 
+#include "compile.h"
 #include "options.h"
 
 #include "path.h"
@@ -13,13 +14,10 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#define POPEN  _popen
-#define PCLOSE _pclose
+#pragma comment(lib, "advapi32.lib")
 const char kSep = '\\';
 #else
 #include <unistd.h>
-#define POPEN  popen
-#define PCLOSE pclose
 const char kSep = '/';
 #endif
 
@@ -54,41 +52,66 @@ std::string quoteDirectory(const std::string& s) {
 
 #ifdef _WIN32
 
-// Nothing asked from here may read the editor's input - cmd running vcvars64.bat did, and ate the keystrokes - and the redirect goes on a parenthesised block, since in a '&&' chain cmd binds '< NUL' to the one command it follows.
-std::string forCmd(const std::string& s) { return "\"( " + s + " ) < NUL\""; }
+// Where an installation keeps one folder per compiler version.
+const char* const kMsvcTools = "VC\\Tools\\MSVC";
 
+// The first line a program writes - started by itself, not through cmd.
 std::string firstLineOf(const std::string& command) {
-    FILE* pipe = POPEN(command.c_str(), "r");
-    if (!pipe) return std::string();
-
-    char buffer[1024];
-    std::string line;
-    if (std::fgets(buffer, sizeof buffer, pipe)) line = buffer;
-    PCLOSE(pipe);
-
-    while (!line.empty() && (line[line.size() - 1] == '\n' || line[line.size() - 1] == '\r'))
+    std::string out;
+    if (runCaptured(command, out) != 0) return std::string();
+    std::string line = out.substr(0, out.find('\n'));
+    while (!line.empty() && (line[line.size() - 1] == '\r' || line[line.size() - 1] == ' '))
         line.resize(line.size() - 1);
     return line;
 }
 
-// The batch file that puts cl, ml64 and link on PATH and LIB where they can be found: named in
-// the settings when a person had to, else the newest Visual Studio vswhere knows of - any
-// version, any edition, Build Tools included - and failing vswhere, the places the installer puts them.
-std::string findVcvars() {
-    std::string named = settings::vcvars();
-    if (!named.empty()) return named;
+// Whether version folder a is newer than b, number by number: 14.52.36725 is newer than 14.44.35207,
+// and 10.0.26100.0 than 10.0.22621.0.
+bool newerVersion(const std::string& a, const std::string& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() || j < b.size()) {
+        unsigned long x = 0, y = 0;
+        while (i < a.size() && a[i] >= '0' && a[i] <= '9') x = x * 10 + (a[i++] - '0');
+        while (j < b.size() && b[j] >= '0' && b[j] <= '9') y = y * 10 + (b[j++] - '0');
+        if (x != y) return x > y;
+        if (i < a.size()) ++i;
+        if (j < b.size()) ++j;
+    }
+    return false;
+}
+
+// The newest version folder under dir that has inside below it, or "".
+std::string newestHolding(const std::string& dir, const std::string& inside) {
+    std::string best;
+    std::vector<path::Entry> all = path::entries(dir);
+    for (size_t i = 0; i < all.size(); ++i)
+        if (all[i].directory && path::exists(path::join(path::join(dir, all[i].name), inside)) &&
+            (best.empty() || newerVersion(all[i].name, best)))
+            best = all[i].name;
+    return best;
+}
+
+// **Which Visual Studio.** The installation whose vcvars64.bat settings.json names, when a person had
+// to name one - the batch file is never run, its place says which installation - else the newest
+// vswhere knows of (any version, any edition, Build Tools included), else the places the installer
+// puts them. "" when there is none.
+std::string findVisualStudio() {
+    const std::string named = settings::vcvars();
+    if (!named.empty()) {
+        std::string root = named;   // <root>\VC\Auxiliary\Build\vcvars64.bat
+        for (int i = 0; i < 4 && !root.empty(); ++i) root = path::parent(root);
+        if (!root.empty() && path::isDirectory(path::join(root, kMsvcTools))) return root;
+    }
 
     const char* programFiles = std::getenv("ProgramFiles(x86)");
     if (programFiles) {
         std::string vswhere = std::string(programFiles) +
                               "\\Microsoft Visual Studio\\Installer\\vswhere.exe";
         if (path::exists(vswhere)) {
-            std::string where = firstLineOf(forCmd(
-                quote(vswhere) + " -latest -prerelease -products *"
-                                 " -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
-                                 " -property installationPath"));
-            std::string bat = where + "\\VC\\Auxiliary\\Build\\vcvars64.bat";
-            if (!where.empty() && path::exists(bat)) return bat;
+            std::string where = firstLineOf(quote(vswhere) + " -latest -prerelease -products *"
+                                            " -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+                                            " -property installationPath");
+            if (!where.empty() && path::isDirectory(path::join(where, kMsvcTools))) return where;
         }
     }
 
@@ -103,13 +126,45 @@ std::string findVcvars() {
     };
     for (size_t r = 0; r < sizeof roots / sizeof roots[0]; ++r)
         for (size_t e = 0; e < sizeof editions / sizeof editions[0]; ++e) {
-            std::string bat = std::string(roots[r]) + editions[e] +
-                              "\\VC\\Auxiliary\\Build\\vcvars64.bat";
-            if (path::exists(bat)) return bat;
+            std::string root = std::string(roots[r]) + editions[e];
+            if (path::isDirectory(path::join(root, kMsvcTools))) return root;
         }
     return std::string();
 }
 
+// The Windows SDK: where the registry says it is installed, else where its installer puts it.
+std::string windowsKit() {
+    char value[MAX_PATH];
+    DWORD size = sizeof value;
+    if (RegGetValueA(HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Microsoft\\Microsoft SDKs\\Windows\\v10.0",
+                     "InstallationFolder", RRF_RT_REG_SZ, NULL, value, &size) == ERROR_SUCCESS) {
+        std::string kit = value;
+        while (kit.size() > 3 && kit[kit.size() - 1] == '\\') kit.resize(kit.size() - 1);
+        if (path::isDirectory(path::join(kit, "Lib"))) return kit;
+    }
+    static const char* const homes[] = {"ProgramFiles(x86)", "ProgramFiles"};
+    for (size_t i = 0; i < sizeof homes / sizeof homes[0]; ++i) {
+        const char* home = std::getenv(homes[i]);
+        if (!home) continue;
+        std::string kit = path::join(home, "Windows Kits\\10");
+        if (path::isDirectory(path::join(kit, "Lib"))) return kit;
+    }
+    return std::string();
+}
+
+// A variable's directories put ahead of what it held.
+void putAhead(const char* name, const std::string& dirs) {
+    const char* held = std::getenv(name);
+    const std::string value = held && *held ? dirs + ";" + held : dirs;
+    _putenv_s(name, value.c_str());
+}
+
+// **Visual Studio's environment without cmd** (GRIDE 1.0). GRIDE ran vcvars64.bat and took its `set`;
+// a batch file runs only in cmd, and a policy may disable cmd - it does where this was written. So the
+// directories vcvars64.bat would set are taken from the installation's layout, as Black and Grey take
+// them (toolchain.json's visualStudio section): the newest compiler under VC\Tools\MSVC for cl, ml64
+// and link.exe, clang under VC\Tools\Llvm, and the newest Windows SDK's headers, libraries and tools -
+// PATH, INCLUDE and LIB, each ahead of what it held.
 bool importMsvcEnvironment() {
     static int done = 0;
     if (done == 1) return true;
@@ -121,46 +176,52 @@ bool importMsvcEnvironment() {
         return true;
     }
 
-    // cmd reads '%' in a line even inside quotes, and CALL doubles a quoted '^': a batch file whose
-    // path holds either would be a different path by the time it ran, so it is not run (M14).
-    std::string bat = findVcvars();
-    if (bat.empty() || bat.find_first_of("%^\"") != std::string::npos) {
+    const std::string root = findVisualStudio();
+    const std::string tools = root.empty() ? std::string() : path::join(root, kMsvcTools);
+    const std::string version = tools.empty() ? std::string() : newestHolding(tools, "bin\\Hostx64\\x64\\cl.exe");
+    if (version.empty()) {
         done = -1;
         return false;
     }
+    const std::string msvc = path::join(tools, version);
+    std::string bins = path::join(msvc, "bin\\Hostx64\\x64");
+    std::string includes = path::join(msvc, "include");
+    std::string libs = path::join(msvc, "lib\\x64");
+    const std::string llvm = path::join(root, "VC\\Tools\\Llvm\\x64\\bin");
+    if (path::isDirectory(llvm)) bins += ";" + llvm;
 
-    std::string command = forCmd("call " + quote(bat) + " >nul && set");
-    FILE* pipe = POPEN(command.c_str(), "r");
-    if (!pipe) {
-        done = -1;
-        return false;
+    const std::string kit = windowsKit();
+    const std::string sdk = kit.empty() ? std::string() : newestHolding(path::join(kit, "Lib"), "um\\x64\\kernel32.lib");
+    if (!sdk.empty()) {
+        libs += ";" + path::join(kit, "Lib\\" + sdk + "\\ucrt\\x64") + ";" + path::join(kit, "Lib\\" + sdk + "\\um\\x64");
+        static const char* const headers[] = {"ucrt", "um", "shared", "winrt", "cppwinrt"};
+        for (size_t i = 0; i < sizeof headers / sizeof headers[0]; ++i) {
+            const std::string dir = path::join(kit, "Include\\" + sdk + "\\" + headers[i]);
+            if (path::isDirectory(dir)) includes += ";" + dir;
+        }
+        const std::string kitBin = path::join(kit, "bin\\" + sdk + "\\x64");
+        if (path::isDirectory(kitBin)) bins += ";" + kitBin;
+        _putenv_s("WindowsSdkDir", (kit + "\\").c_str());
+        _putenv_s("WindowsSDKVersion", (sdk + "\\").c_str());
     }
 
-    char line[4096];
-    int taken = 0;
-    while (std::fgets(line, sizeof line, pipe)) {
-        char* eq = std::strchr(line, '=');
-        if (!eq) continue;
-        *eq = '\0';
-
-        char* value = eq + 1;
-        size_t n = std::strlen(value);
-        while (n > 0 && (value[n - 1] == '\n' || value[n - 1] == '\r')) value[--n] = '\0';
-
-        if (_putenv_s(line, value) == 0) ++taken;
-    }
-    PCLOSE(pipe);
-
-    done = (taken > 0) ? 1 : -1;
-    return done == 1;
+    putAhead("PATH", bins);
+    putAhead("INCLUDE", includes);
+    putAhead("LIB", libs);
+    _putenv_s("VSINSTALLDIR", (root + "\\").c_str());
+    _putenv_s("VCToolsInstallDir", (msvc + "\\").c_str());
+    _putenv_s("VSCMD_ARG_HOST_ARCH", "x64");
+    _putenv_s("VSCMD_ARG_TGT_ARCH", "x64");
+    done = 1;
+    return true;
 }
 #endif
 
 }
 
-std::string visualStudioVcvars() {
+std::string visualStudioRoot() {
 #ifdef _WIN32
-    return findVcvars();
+    return findVisualStudio();
 #else
     return std::string();
 #endif
@@ -400,7 +461,7 @@ bool emitsDebugInfo(ToolchainKind kind, const std::string& arch) {
     if (kind == ToolCxx) return true;
 
     // shalimar since D1 to D5 (2026-10-13, Compiler-Si's CLAUDE.md "Debug information for the debuggers
-    // RIDE drives"): DWARF on the two GNU targets, CodeView on x86_64-windows through clang's assembler
+    // GRIDE drives"): DWARF on the two GNU targets, CodeView on x86_64-windows through clang's assembler
     // and link.exe /DEBUG, as c90's and cpp11's, and cl6x's .dwpsn for the C6000 as cpp11 writes it -
     // which vm6747 --debug stops on, and sim6747 --run --debug through the .debug_line asm6x and lnk6x
     // make of it.
@@ -578,7 +639,7 @@ std::string mine(const std::string& what) {
     return tempDir() + kSep + what + "-" + id;
 }
 
-// "ride-run", "ride-objs": the temporary names a build leaves, from the product's name; mine() adds this process's id.
+// "gride-run", "gride-objs": the temporary names a build leaves, from the product's name; mine() adds this process's id.
 std::string productNamed(const char* what) { return std::string(product::kLower) + "-" + what; }
 
 std::string programPath() {
@@ -980,7 +1041,7 @@ bool nativeToolsAvailable(const std::string& arch) {
 
 std::string assemblerFlag(ToolchainKind kind, const std::string& arch, Configuration config) {
     // **A Debug build's CodeView goes through clang's assembler**, whatever assembler is named:
-    // the project's masm carries no CodeView (M10, RIDE docs/M10-ANALYSIS.md).
+    // the project's masm carries no CodeView (M10, GRIDE docs/M10-ANALYSIS.md).
     // shalimar has no -masm: its -g alone chooses the GNU spelling and clang on this target (D4).
     if (debugsWithCodeView(kind, arch, config) && kind != ToolShc) return " -masm=gnu";
     if (kind == ToolCxx1 && arch == "x86_64-windows" && !settings::assembler().empty())

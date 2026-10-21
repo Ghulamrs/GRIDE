@@ -147,7 +147,7 @@ namespace Gride { namespace Services {
         // full path of the linked program for a project/config/target
         static String^ ProgramPath(GrideProject^ p, BuildConfiguration^ cfg)
         {
-            String^ name = String::IsNullOrEmpty(cfg->OutputName) ? p->Name : cfg->OutputName;
+            String^ name = String::IsNullOrEmpty(cfg->OutputName) ? p->ProgramName() : cfg->OutputName;
             return Path::Combine(p->ToAbsolute(cfg->OutDir), name + TargetInfo::ProgramExtension(cfg->TargetKind));
         }
 
@@ -158,7 +158,8 @@ namespace Gride { namespace Services {
             return e == ".h" || e == ".hpp" || e == ".hh" || e == ".hxx" || e == ".inc" || e == ".inl";
         }
 
-        // source files that take part in a build (compiled languages + assembly); a CCS project's exclusions are per configuration
+        // source files that take part in a build (compiled languages + assembly), from the folders the .pro's "build"
+        // names; a CCS project's exclusions are per configuration
         List<String^>^ BuildableFiles(GrideProject^ p) { return BuildableFiles(p, nullptr); }
         List<String^>^ BuildableFiles(GrideProject^ p, String^ configName)
         {
@@ -166,7 +167,7 @@ namespace Gride { namespace Services {
             HashSet<String^>^ seen = gcnew HashSet<String^>(StringComparer::OrdinalIgnoreCase);
             for each (String^ f in p->AllFiles())
             {
-                if (p->IsExcludedIn(f, configName) || IsHeader(f)) continue;
+                if (p->IsExcludedIn(f, configName) || IsHeader(f) || !p->IsBuilt(f)) continue;
                 Language l = settings->DetectLanguage(f, p->Lang);
                 if ((LanguageInfo::IsCompiled(l) || l == Language::Assembly) && seen->Add(f)) r->Add(f);
             }
@@ -239,7 +240,7 @@ namespace Gride { namespace Services {
 
         static String^ ProgramStem(GrideProject^ p, BuildConfiguration^ cfg)
         {
-            return String::IsNullOrEmpty(cfg->OutputName) ? p->Name : cfg->OutputName;
+            return String::IsNullOrEmpty(cfg->OutputName) ? p->ProgramName() : cfg->OutputName;
         }
 
         // RIDE's refusal before any compiler runs: the program's directory must take a file
@@ -914,7 +915,7 @@ namespace Gride { namespace Services {
             {
                 LibraryDefinition^ rtsLib = ToolchainDefinitions::Current->RuntimeOf(cfg->TargetKind);
                 Report(Severity::Error, nullptr, made + "a tms6747 build links against RTS6x in " + (rtsLib == nullptr ? "its directory" : rtsLib->Directory) +
-                       " beside GRIDE, or TI's runtime when its compiler directory is named under Tools > Options > Projects > RIDE Paths, and neither is here");
+                       " beside GRIDE, or TI's runtime when its compiler directory is named under Tools > Options > Projects > GRIDE Paths, and neither is here");
                 return -1;
             }
             String^ tiLib = rts6x ? nullptr : Path::Combine(tiDir, cd->TiLib);
@@ -924,7 +925,7 @@ namespace Gride { namespace Services {
             if (!eh && !tiNamed)
             {
                 Report(Severity::Error, nullptr, made + tiDir + " has only " + cd->RuntimeFallback + " - these objects need " + cd->RuntimeLibrary +
-                       ", named under Tools > Options > Projects > RIDE Paths (TI library directory)");
+                       ", named under Tools > Options > Projects > GRIDE Paths (TI library directory)");
                 return -1;
             }
             // the C runtime in force, which every name a project has for it (libc.a, rts6740*, rts6x.lib ...) is read as
@@ -942,6 +943,8 @@ namespace Gride { namespace Services {
                 if (!libs->Contains(l)) libs->Add(l);
             }
             if (cfg->Libs->Count == 0 && rts->Length > 0) { libs->Add(rts); namedRts = true; }
+            // the .pro's "libraries", for every configuration
+            for each (String^ l in p->Libraries) if (!String::IsNullOrWhiteSpace(l) && !libs->Contains(p->ToAbsolute(l->Trim()))) libs->Add(p->ToAbsolute(l->Trim()));
             if (shalimarProgram)
             {
                 String^ shm = RideToolchain::ShalimarRtsLibrary(debug);
@@ -1079,6 +1082,8 @@ namespace Gride { namespace Services {
             String^ defineFlag = hostTool ? ownDefine : tc->DefineFlag;
             List<String^>^ inc = gcnew List<String^>();
             for each (String^ d in cfg->IncludeDirs) inc->Add(p->ToAbsolute(d));
+            // the .pro's "include", for every configuration
+            for each (String^ d in p->Includes) if (!String::IsNullOrWhiteSpace(d)) inc->Add(p->ToAbsolute(d->Trim()));
             inc->AddRange(tc->IncludeDirs);
             for each (String^ d in settings->Env->SharedIncludes)
                 if (!String::IsNullOrWhiteSpace(d)) inc->Add(Environment::ExpandEnvironmentVariables(d->Trim()));
@@ -1136,8 +1141,7 @@ namespace Gride { namespace Services {
             mx->Set("DebugAssembler", tc->ResolveFor("debugAssembler", tc->DebugAssembler));
             mx->Set("DebugLinker", tc->ResolveFor("debugLinker", tc->DebugLinker));
             mx->Set("Runtime", tc->Resolve(tc->Runtime));
-            // RTS6x is the TMS320C6747's runtime alone: no other target is given its directory
-            mx->Set("RuntimeDir", RideToolchain::IsEmulated(cfg->TargetKind) ? tc->ResolveRuntimeDir() : String::Empty);
+            mx->Set("RuntimeDir", tc->ResolveRuntimeDir());
             mx->Set("Simulator", tc->ResolveFor("simulator", tc->Simulator));
             mx->Set("Emulator", tc->ResolveFor("emulator", tc->Emulator));
             mx->Set("Debugger", tc->ResolveFor("debugger", tc->Debugger));
@@ -1162,6 +1166,8 @@ namespace Gride { namespace Services {
 
             List<String^>^ inc = gcnew List<String^>();
             for each (String^ d in cfg->IncludeDirs) inc->Add(p->ToAbsolute(d));
+            // the .pro's "include", for every configuration
+            for each (String^ d in p->Includes) if (!String::IsNullOrWhiteSpace(d)) inc->Add(p->ToAbsolute(d->Trim()));
             inc->AddRange(tc->IncludeDirs);
             mx->Set("IncludeFlags", MacroExpander::JoinFlags(tc->IncludeFlag, inc));
             mx->Set("DefineFlags", MacroExpander::JoinDefines(tc->DefineFlag, cfg->Defines));
@@ -1171,31 +1177,14 @@ namespace Gride { namespace Services {
             libDirs->AddRange(tc->LibDirs);
             mx->Set("LibDirFlags", MacroExpander::JoinFlags(tc->LibDirFlag, libDirs));
             // the project's libraries, then the shared ones every host link takes (RIDE's settings.json "libraries")
-            List<String^>^ libs = gcnew List<String^>();
-            for each (String^ l in cfg->Libs)
-            {
-                // RTS6x's libraries (rts6x, printf6x, shmrt6x, TI's rts6740...) belong to the TMS320C6747 alone
-                if (!RideToolchain::IsEmulated(cfg->TargetKind) && IsC6747Library(l))
-                {
-                    Say("[" + l + " is the TMS320C6747's runtime - left out of the " + TargetInfo::Name(cfg->TargetKind) + " link]");
-                    continue;
-                }
-                libs->Add(l);
-            }
+            List<String^>^ libs = gcnew List<String^>(cfg->Libs);
+            // the .pro's "libraries", for every configuration
+            for each (String^ l in p->Libraries) if (!String::IsNullOrWhiteSpace(l)) libs->Add(p->ToAbsolute(l->Trim()));
             if (!RideToolchain::IsEmulated(cfg->TargetKind))
                 for each (String^ l in settings->Env->SharedLibraries)
                     if (!String::IsNullOrWhiteSpace(l) && !libs->Contains(l->Trim())) libs->Add(Environment::ExpandEnvironmentVariables(l->Trim()));
             mx->Set("LibFlags", MacroExpander::JoinFlags(tc->LibFlag, libs));
             return mx;
-        }
-
-        // a library of the TMS320C6747's runtime, by its file name: RTS6x's rts6x / printf6x / shmrt6x (debug
-        // variants too) and TI's rts6740_elf... - never for a Windows, Linux or macOS link
-        static bool IsC6747Library(String^ lib)
-        {
-            if (String::IsNullOrWhiteSpace(lib)) return false;
-            String^ n = Path::GetFileName(lib->Trim()->Trim('"'));
-            return System::Text::RegularExpressions::Regex::IsMatch(n, "^(rts6|printf6x|shmrt6x)", System::Text::RegularExpressions::RegexOptions::IgnoreCase);
         }
 
         DateTime NewestHeader(GrideProject^ p)

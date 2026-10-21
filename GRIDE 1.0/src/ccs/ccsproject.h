@@ -12,12 +12,12 @@ namespace ccs {
 
 // **A CCS 7.4 or 5.5 project for the TMS320C6747, read as it is.** Nothing is converted and
 // nothing is written: .ccsproject, .cproject and .project are read afresh on every open and every
-// build, so an edit made in CCS is seen at once. What of it RIDE's own toolchain can honour is
+// build, so an edit made in CCS is seen at once. What of it GRIDE's own toolchain can honour is
 // mapped (docs/ccs-reference/FORMAT.md, "Proposed mapping"); the rest is named, never dropped
 // in silence. The switch is settings.json's "ccs": { "enabled": true, "root": "C:/ti/ccsv7" }.
 struct Config {
     std::string name;                    // CCS's: Debug, Release
-    Configuration which;                 // RIDE's
+    Configuration which;                 // GRIDE's
     // The compiler, mapped: what Compiler Options will show for c90 and cpp11.
     std::string opt;                     // -O0, -O1 or -O2
     bool debug;                          // -g (DWARF); on tms6747 no line table is written anyway
@@ -31,7 +31,7 @@ struct Config {
     // The sources this configuration builds: absolute, exclusions applied, .cmd files apart.
     std::vector<std::string> sources;
     std::vector<std::string> excluded;   // project-relative, as .cproject spells them
-    // What RIDE cannot honour and what it decides for itself, each as cl6x would have been given it.
+    // What GRIDE cannot honour and what it decides for itself, each as cl6x would have been given it.
     std::vector<std::string> unsupported;
     std::vector<std::string> ownInstead;
     // One line per mapped option, "cl6x -O3 -> cpp11 -O2", for the read-only dialog.
@@ -52,7 +52,7 @@ struct Reading {
     bool elf;
     std::vector<Config> configs;          // Debug first where there is one, then Release
     std::vector<std::string> linked;      // linked resources' absolute paths, files only
-    std::vector<std::string> notBuilt;    // sources of a kind RIDE does not build: .asm, .sa, .lib, .obj
+    std::vector<std::string> notBuilt;    // sources of a kind GRIDE does not build: .asm, .sa, .lib, .obj
     std::vector<std::string> headers;     // the folder's own headers, relative: shown and opened, never built
     std::vector<std::string> notes;       // anything else worth a line: a macro left unresolved, definitions missing
     std::map<std::string, std::string> macros;   // build variables, per project (the first configuration's), then the workspace's
@@ -61,7 +61,7 @@ struct Reading {
     std::string workspace;
     std::map<std::string, std::string> pathVariables;   // the workspace's, for a linked resource's locationURI
     std::map<std::string, std::string> projects;        // the workspace's projects, name to folder, for ${workspace_loc:/P}
-    std::vector<std::string> references;                // .project's referenced projects, which RIDE does not build
+    std::vector<std::string> references;                // .project's referenced projects, which GRIDE does not build
 
     Reading() : elf(true) {}
     const Config* config(Configuration which) const;
@@ -79,9 +79,9 @@ struct Workspace;
 bool read(const std::string& dir, Reading& out, std::string& error, const Workspace* workspace = 0);
 
 // The Messages line for one configuration: "CCS project K6747c (Release): 2 options not
-// supported, using RIDE's defaults: --opt_for_speed=5, -ms3; RIDE's own instead of: ...".
+// supported, using GRIDE's defaults: --opt_for_speed=5, -ms3; GRIDE's own instead of: ...".
 std::string report(const Reading& reading, Configuration which);
-// The Messages line about the sources: linked files not on this machine, kinds RIDE does not build.
+// The Messages line about the sources: linked files not on this machine, kinds GRIDE does not build.
 std::string sourceReport(const Reading& reading);
 
 // The dialog's text for a configuration: every mapped option, then the two lists, then "edit in CCS".
@@ -92,7 +92,7 @@ std::string mappingText(const Reading& reading, Configuration which);
 std::string resolveMacros(const std::string& text, const Reading& reading);
 
 // Where ${CG_TOOL_ROOT} is: under the CCS root settings.json names, the compiler directory of
-// that version; else the TI compiler directory RIDE's tms6747 builds already link against.
+// that version; else the TI compiler directory GRIDE's tms6747 builds already link against.
 std::string cgToolRootFor(const std::string& ccsRoot, const std::string& cgtVersion);
 
 }

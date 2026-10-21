@@ -242,7 +242,6 @@ namespace Gride { namespace UI {
         bool HasWritableProject();
         bool HasSelectedFile();
         bool CanBuild();
-        bool CanEmulate();
         bool IsBuilding();
         bool IsDebugging();
         bool IsInBreak();
@@ -442,11 +441,6 @@ namespace Gride { namespace UI {
         void RunExitedUI(Object^ status, Object^ stopped);
         void OnOutputInput(String^ line);
         bool FindEntryPoint(GrideProject^ p, String^% file, int% line);
-        // a file with main() and no project: built and run as a program of its own
-        bool ActiveFileHasMain();
-        bool EnsureProgram();
-        void ShowStartupSource();
-        GrideProject^ RunProject();
         void OnDebugState(DebugState s);
         void OnDebugStopped(StopInfo^ info);
         void OnDebugOutput(String^ line);

@@ -483,10 +483,9 @@ namespace Gride
             l->Text = "Address:"; l->AutoSize = true; l->Location = Point(4, 6);
             bar->Controls->Add(l);
             address = gcnew TextBox();
-            address->Text = String::Empty;      // until one is typed: the first local variable's
+            address->Text = "0x11800000";
             address->Location = Point(64, 2);
-            address->Width = 150;
-            chosen = false;
+            address->Width = 130;
             address->KeyDown += gcnew KeyEventHandler(this, &MemoryPane::OnAddressKey);
             bar->Controls->Add(address);
             Button^ go = gcnew Button();
@@ -510,22 +509,15 @@ namespace Gride
         {
             engine = d;
             if (d == nullptr || d->State != DebugState::Break) { view->Text = "Memory is shown while the program is stopped."; return; }
-            // nothing typed yet: where the stop's first variable lives (a 64-bit stack address on Windows,
-            // the C6747's own on the simulators), so the pane shows something of the program's
-            if (!chosen)
-                for each (DebugVariable^ v in d->Locals())
-                    if (!String::IsNullOrEmpty(v->Address) && v->Address->StartsWith("0x")) { address->Text = v->Address; break; }
-            if (address->Text->Trim()->Length == 0) { view->Text = "Type an address and press Enter."; return; }
-            UInt64 addr = 0;
-            String^ a = address->Text->Trim()->ToLowerInvariant()->Replace("0x", "")->Replace("`", "");
-            if (!UInt64::TryParse(a, System::Globalization::NumberStyles::HexNumber, System::Globalization::CultureInfo::InvariantCulture, addr)) { view->Text = "Not an address."; return; }
+            UInt32 addr = 0;
+            String^ a = address->Text->Trim()->ToLowerInvariant()->Replace("0x", "");
+            if (!UInt32::TryParse(a, System::Globalization::NumberStyles::HexNumber, System::Globalization::CultureInfo::InvariantCulture, addr)) { view->Text = "Not an address."; return; }
             array<Byte>^ b = d->ReadMemory(addr, 256);
-            if (b->Length == 0) { view->Text = String::Concat("(no memory at 0x", addr.ToString("x"), " from ", d->Backend, ")"); return; }
+            if (b->Length == 0) { view->Text = String::Concat("(no memory from ", d->Backend, ")"); return; }
             StringBuilder^ sb = gcnew StringBuilder();
-            String^ wide = addr + (UInt64)b->Length > 0xFFFFFFFFull ? "{0:X16}  " : "{0:X8}  ";
             for (int row = 0; row < b->Length; row += 16)
             {
-                sb->AppendFormat(wide, addr + (UInt64)row);
+                sb->AppendFormat("{0:X8}  ", addr + (UInt32)row);
                 StringBuilder^ ascii = gcnew StringBuilder();
                 for (int i = 0; i < 16 && row + i < b->Length; i++)
                 {
@@ -542,9 +534,8 @@ namespace Gride
         TextBox^ address;
         TextBox^ view;
         DebugEngine^ engine;
-        bool chosen;                        // an address was typed: kept from stop to stop
-        void OnGo(Object^ sender, EventArgs^ e) { chosen = address->Text->Trim()->Length > 0; UpdateFrom(engine); }
-        void OnAddressKey(Object^ sender, KeyEventArgs^ e) { if (e->KeyCode == Keys::Enter) { e->SuppressKeyPress = true; chosen = address->Text->Trim()->Length > 0; UpdateFrom(engine); } }
+        void OnGo(Object^ sender, EventArgs^ e) { UpdateFrom(engine); }
+        void OnAddressKey(Object^ sender, KeyEventArgs^ e) { if (e->KeyCode == Keys::Enter) { e->SuppressKeyPress = true; UpdateFrom(engine); } }
     };
 
     // ------------------------------------------------------------------ Breakpoints

@@ -220,8 +220,8 @@ namespace Gride { namespace UI {
 
         static String^ FileFilter()
         {
-            return "Source files (*.c;*.cpp;*.shl;*.shm;*.h;*.hpp;*.asm)|*.c;*.cpp;*.cc;*.shl;*.shm;*.h;*.hpp;*.asm;*.s;*.sa|"
-                   "C90 (*.c;*.h)|*.c;*.h|C++11 (*.cpp;*.hpp)|*.cpp;*.cc;*.cxx;*.hpp|Shalimar (*.shl;*.shm)|*.shl;*.shm|"
+            return "Source files (*.c;*.cpp;*.shl;*.h;*.hpp;*.asm)|*.c;*.cpp;*.cc;*.shl;*.h;*.hpp;*.asm;*.s;*.sa|"
+                   "C90 (*.c;*.h)|*.c;*.h|C++11 (*.cpp;*.hpp)|*.cpp;*.cc;*.cxx;*.hpp|Shalimar (*.shl)|*.shl|"
                    "Assembly (*.asm;*.s)|*.asm;*.s;*.sa|Linker command (*.cmd)|*.cmd|All files (*.*)|*.*";
         }
 

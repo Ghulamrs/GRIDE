@@ -1,5 +1,5 @@
 // =============================================================================
-//  OptionsDialog.h - Tools > Options  (everything in gride.settings.json)
+//  OptionsDialog.h - Tools > Options  (everything in settings.json)
 //
 //    Environment  > General | Fonts and Colors | Keyboard
 //    Toolchains   > Windows | Linux | macOS | TMS320C6747
@@ -679,19 +679,19 @@ namespace Gride { namespace UI {
         {
             env = e;
             loc = gcnew PathField(true, true); loc->Value = e->DefaultProjectLocation; Row("Default project location", loc);
-            Section("RIDE's installation");
-            ride = gcnew PathField(true, true); ride->Value = e->RideRoot; Row("RIDE root or bin", ride);
+            Section("The toolchain's installation");
+            ride = gcnew PathField(true, true); ride->Value = e->RideRoot; Row("Installation root or bin", ride);
             Label^ rideNote = gcnew Label();
             rideNote->Text = "Where c90, cpp11, shalimar, masm, link, asm6x, lnk6x, vm6747, sim6747 and lib\\rts6x-tms6747 are looked for when a "
-                             "toolchain names a tool without a folder. Empty: %ProgramFiles%\\RIDE\\bin, then PATH.";
+                             "toolchain names a tool without a folder. Empty: a RIDE installation under %ProgramFiles%\\RIDE\\bin, else beside GRIDE.exe, then PATH.";
             rideNote->AutoSize = true; rideNote->Tag = "muted"; rideNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, rideNote);
             Section("Code Composer Studio 7.4 / 5.5 projects");
             ccsEnabled = Check("Open Code Composer Studio projects (File > Open > CCS Project)", e->CcsEnabled); Row(String::Empty, ccsEnabled);
             ccsRoot = gcnew PathField(true, true); ccsRoot->Value = e->CcsRoot; Row("CCS installation", ccsRoot);
             Label^ rootNote = gcnew Label();
-            rootNote->Text = "RIDE's ccs.root (C:\\ti\\ccsv7): ${CG_TOOL_ROOT} is the project's compiler version under its tools\\compiler. "
-                             "Empty: TI's compiler directory (RIDE Paths), else the directory below.";
+            rootNote->Text = "White's ccs.root (C:\\ti\\ccsv7): ${CG_TOOL_ROOT} is the project's compiler version under its tools\\compiler. "
+                             "Empty: TI's compiler directory (GRIDE Paths), else the directory below.";
             rootNote->AutoSize = true; rootNote->Tag = "muted"; rootNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, rootNote);
             cg = gcnew PathField(true, true); cg->Value = e->CcsToolRoot; Row("${CG_TOOL_ROOT}", cg);
@@ -727,12 +727,12 @@ namespace Gride { namespace UI {
         {
             env = s->Env;
             String^ root = RideToolchain::InstallRoot(ToolchainSettings::RideRoot);
-            Section("RIDE's headers (settings.json include / lib)");
+            Section("The installation's headers (settings.json include / lib)");
             include = gcnew PathField(true, true); include->Value = env->RideIncludeDir; include->BaseDir = root; Row("cpp11's headers (include)", include);
             lib = gcnew PathField(true, true); lib->Value = env->RideLibDir; lib->BaseDir = root; Row("c90's headers (lib)", lib);
             Label^ hdrNote = gcnew Label();
             hdrNote->Text = "Every cpp11 compile is given the include directory and every c90 compile the lib directory, after the project's own. "
-                            "Relative to RIDE's installation" + (root == nullptr ? " (none found)" : " (" + root + ")") + "; empty: the directory of that name there.";
+                            "Relative to the toolchain's installation" + (root == nullptr ? " (none found)" : " (" + root + ")") + "; empty: the directory of that name there.";
             hdrNote->AutoSize = true; hdrNote->Tag = "muted"; hdrNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, hdrNote);
             Section("Visual Studio (settings.json vcvars)");
@@ -768,7 +768,7 @@ namespace Gride { namespace UI {
             if (c6747->SelectedIndex < 0) c6747->SelectedIndex = 0;
             Row("TMS320C6747 debugger", c6747);
             Label^ dbgNote = gcnew Label();
-            dbgNote->Text = "auto: sim6747 on this build's .out when it has a line table, else vm6747 on the assembly (RIDE). RIDE_DEBUG_SIM6747=1 / RIDE_DEBUG_VM6747=1 in the environment at start win.";
+            dbgNote->Text = "auto: sim6747 on this build's .out when it has a line table, else vm6747 on the assembly (White's rule). GRIDE_DEBUG_SIM6747=1 / GRIDE_DEBUG_VM6747=1 in the environment at start win.";
             dbgNote->AutoSize = true; dbgNote->Tag = "muted"; dbgNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, dbgNote);
             include->UpdateStatus(); lib->UpdateStatus(); vcvars->UpdateStatus(); ti->UpdateStatus(); tilib->UpdateStatus();
@@ -799,7 +799,7 @@ namespace Gride { namespace UI {
         CompilerOptionsPage(GrideSettings^ s)
         {
             Label^ n = gcnew Label();
-            n->Text = "RIDE's Compiler Options as the installation sets them: what a new project starts with. A project's own are under Project > Compiler Options; a build takes the project's.";
+            n->Text = "The Compiler Options as the installation sets them: what a new project starts with. A project's own are under Project > Compiler Options; a build takes the project's.";
             n->AutoSize = true; n->Tag = "muted"; n->MaximumSize = SD::Size(700, 0);
             grid->ColumnStyles[0]->Width = 0;
             Row(String::Empty, n);
@@ -1237,7 +1237,7 @@ namespace Gride { namespace UI {
             tree->Nodes->Add("Converters")->Nodes->Add("C <-> Shalimar")->Name = "Converters";
             TreeNode^ prNode = tree->Nodes->Add("Projects");
             prNode->Nodes->Add("Defaults and Locations")->Name = "Projects";
-            prNode->Nodes->Add("RIDE Paths")->Name = "RidePaths";
+            prNode->Nodes->Add("GRIDE Paths")->Name = "RidePaths";
             prNode->Nodes->Add("Compiler Options")->Name = "CompilerOptions";
             tree->ExpandAll();
             tree->AfterSelect += gcnew TreeViewEventHandler(this, &OptionsDialog::OnSelect);

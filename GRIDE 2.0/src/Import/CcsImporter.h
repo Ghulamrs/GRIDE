@@ -125,8 +125,8 @@ namespace Gride
                 shown->Name = c->Name;
                 shown->Options->AddRange(c->Mapped);
                 for each (String^ cmd in c->Link->CmdFiles) shown->Options->Add("linker command file: " + cmd);
-                for each (String^ u in c->Unsupported) shown->Options->Add("not supported, RIDE's default instead: " + u);
-                for each (String^ o in c->OwnInstead) shown->Options->Add("RIDE's own instead of: " + o);
+                for each (String^ u in c->Unsupported) shown->Options->Add("not supported, GRIDE's default instead: " + u);
+                for each (String^ o in c->OwnInstead) shown->Options->Add("GRIDE's own instead of: " + o);
                 for each (String^ e in c->Excluded) shown->Options->Add("excluded from the build: " + e);
                 p->CcsConfigurations->Add(shown);
             }
@@ -148,7 +148,7 @@ namespace Gride
             String^ sources = r->SourceReport();
             if (sources->Length > 0) p->CcsReportLines->Add(sources);
             for each (String^ refusal in r->Refusals)
-                p->CcsReportLines->Add(String::Format("CCS project {0}: RIDE would refuse it - {1}; read all the same, the build stands on what was read", r->Name, refusal));
+                p->CcsReportLines->Add(String::Format("CCS project {0}: GRIDE would refuse it - {1}; read all the same, the build stands on what was read", r->Name, refusal));
             return p;
         }
 

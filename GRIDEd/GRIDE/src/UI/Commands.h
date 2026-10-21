@@ -112,9 +112,10 @@ namespace Gride { namespace UI {
     {
     public:
         literal String^ VisualStudio = "visualstudio";
-        literal String^ Ride = "ride";
+        // settings.json names RIDE's set "gride" since GRIDEx3 (no RIDE in the file); "ride" is still read
+        literal String^ Ride = "gride";
 
-        static bool IsRide(String^ name) { return String::Compare(name, Ride, true) == 0; }
+        static bool IsRide(String^ name) { return String::Compare(name, Ride, true) == 0 || String::Compare(name, "ride", true) == 0; }
 
         static Dictionary<String^, String^>^ For(String^ name)
         {
@@ -137,7 +138,7 @@ namespace Gride { namespace UI {
         // what the Options page shows for each set
         static String^ Describe(String^ name)
         {
-            return IsRide(name) ? "RIDE (F8 debugs or carries on, F7 / F6 step over / into, F9 breakpoint, Ctrl+Up / Ctrl+Down the stack, F4 builds, F5 runs, Ctrl+B compiles)"
+            return IsRide(name) ? "White's (F8 debugs or carries on, F7 / F6 step over / into, F9 breakpoint, Ctrl+Up / Ctrl+Down the stack, F4 builds, F5 runs, Ctrl+B compiles)"
                                 : "Visual Studio (F5 debugs, F10 / F11 step over / into, Shift+F11 steps out, F9 breakpoint, F7 builds, Ctrl+F5 runs)";
         }
     };

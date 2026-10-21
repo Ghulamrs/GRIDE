@@ -14,7 +14,7 @@ namespace ccs {
 // -O2, the linker's --rom_model - is in the definition and nowhere else, and so is how an
 // enumerated value is spelled on the command line. docs/ccs-reference/ti-option-definitions/
 // options-ccs74-C6000_8.2.tsv and options-ccs55-C6000_7.4.tsv are those definitions, one row per
-// option, made from the XML CCS ships; the two files travel with RIDE in lib/ccs.
+// option, made from the XML CCS ships; the two files travel with GRIDE in lib/ccs.
 struct OptionDef {
     std::string id;           // the tail after the version prefix: compilerID.OPT_LEVEL
     std::string valueType;    // string, boolean, enumerated, stringList, definedSymbols, includePath, libPaths, libs

@@ -199,7 +199,7 @@ bool writePro(const std::string& workspaceDir, const std::string& project, std::
     ccs.set("project", Json::fromText(project));
     Json root = Json::object();
     root.set("ccs", ccs);
-    std::string text = root.write() + "\n";
+    std::string text = root.document();
     FILE* out = std::fopen(file.c_str(), "wb");
     if (!out) { error = "cannot write " + file; return false; }
     bool trouble = std::fwrite(text.data(), 1, text.size(), out) != text.size();

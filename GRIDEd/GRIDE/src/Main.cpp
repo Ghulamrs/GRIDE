@@ -7,6 +7,10 @@
 
 using namespace Gride::UI;
 
+// GRIDE's version, which Help > About GRIDE shows (and the Help's Versions list): the Black outlook, 1.5 - between
+// White's 1.0 and Grey's 2.0
+[assembly: System::Reflection::AssemblyVersionAttribute("1.5.0.0")];
+
 namespace Gride {
 
     // last-chance error handler: show the error instead of crashing silently

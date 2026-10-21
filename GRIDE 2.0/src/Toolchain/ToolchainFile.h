@@ -28,10 +28,9 @@ namespace Gride
     public ref class ToolLookup
     {
     public:
-        ToolLookup() { Env = String::Empty; InstallDir = String::Empty; Dirs = gcnew List<String^>(); OnPath = true; Vcvars = false; Description = String::Empty; }
+        ToolLookup() { Env = String::Empty; InstallDir = String::Empty; OnPath = true; Vcvars = false; Description = String::Empty; }
         property String^ Env;
         property String^ InstallDir;
-        property List<String^>^ Dirs;      // folders of its own (cdb: the Windows SDK's Debuggers\x64), %VAR% expanded
         property bool OnPath;
         property bool Vcvars;
         property String^ Description;
@@ -734,8 +733,8 @@ namespace Gride
                 }
                 else
                 {
+                    // Settings only: what the file is and how it overrides is the Help's to say (Settings_Files.html).
                     if (!UserJson->Has("format")) UserJson->SetNumber("format", Format > 0 ? Format : 1);
-                    if (!UserJson->Has("description")) UserJson->SetString("description", UserHeader);
                     JsonWriter::WriteFile(UserFile, UserJson);
                 }
                 return true;
@@ -743,8 +742,7 @@ namespace Gride
             catch (Exception^ ex) { error = ex->Message; return false; }
         }
 
-        // an empty user file to start from (Tools > Options > Definitions > Edit user overrides)
-        literal String^ UserHeader = "the user's overrides of the shipped toolchain.json: a field named here wins, every other field keeps the shipped value";
+        // an empty user file to start from (Tools > Options > Definitions > Edit user overrides): its format, nothing else
         static bool WriteEmptyUserFile(String^ path, String^% error)
         {
             error = nullptr;
@@ -752,7 +750,6 @@ namespace Gride
             {
                 JsonValue^ v = JsonValue::MakeObject();
                 v->SetNumber("format", 1);
-                v->SetString("description", UserHeader);
                 JsonWriter::WriteFile(path, v);
                 return true;
             }
@@ -1220,7 +1217,6 @@ namespace Gride
                     {
                         d->Lookup->Env = l->GetString("env", String::Empty);
                         d->Lookup->InstallDir = l->GetString("installDir", String::Empty);
-                        d->Lookup->Dirs = ReadList(l, "dirs");
                         d->Lookup->OnPath = l->GetBool("path", true);
                         d->Lookup->Vcvars = l->GetBool("vcvars", false);
                         d->Lookup->Description = l->GetString("description", String::Empty);

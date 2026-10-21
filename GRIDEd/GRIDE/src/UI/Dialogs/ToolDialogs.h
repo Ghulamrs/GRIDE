@@ -9,7 +9,6 @@
 #pragma once
 #include "OptionsDialog.h"
 #include "../../Services/CodeConverter.h"
-#include "../../Services/ToolVersions.h"
 
 namespace Gride { namespace UI {
 
@@ -25,7 +24,7 @@ namespace Gride { namespace UI {
             OutputPath = nullptr;
             TableLayoutPanel^ grid = MakeGrid(110);
             inputField = gcnew PathField(false, false);
-            inputField->Filter = "C and Shalimar sources (*.c;*.h;*.shl;*.shm)|*.c;*.h;*.shl;*.shm|All files (*.*)|*.*";
+            inputField->Filter = "C and Shalimar sources (*.c;*.h;*.shl)|*.c;*.h;*.shl|All files (*.*)|*.*";
             inputField->Value = input == nullptr ? String::Empty : input;
             inputField->Controls[0]->TextChanged += gcnew EventHandler(this, &ConvertDialog::OnInputChanged);
             AddRow(grid, "Source file", inputField);
@@ -106,7 +105,7 @@ namespace Gride { namespace UI {
         {
             if (sender == inputField->Controls[0] && File::Exists(inputField->Value))
             {
-                bool shl = PathUtil::HasExtension(inputField->Value, ".shl") || PathUtil::HasExtension(inputField->Value, ".shm");
+                bool shl = PathUtil::HasExtension(inputField->Value, ".shl");
                 toC->Checked = shl; toShl->Checked = !shl;
             }
             Suggest();
@@ -369,7 +368,7 @@ namespace Gride { namespace UI {
     public ref class AboutDialog : public ThemedDialog
     {
     public:
-        AboutDialog(String^ settingsPath) : ThemedDialog("About GRIDE", 620, 520)
+        AboutDialog(String^ settingsPath) : ThemedDialog("About GRIDE", 520, 380)
         {
             PictureBox^ logo = gcnew PictureBox();
             logo->Image = IconFactory::AppIcon()->ToBitmap();
@@ -385,14 +384,19 @@ namespace Gride { namespace UI {
             name->AutoSize = true;
             Controls->Add(name);
 
-            // the IDE's own version, then each tool's as the tool reports it (GrideAbout::ToolVersions)
             Label^ info = gcnew Label();
             info->Location = SD::Point(102, 70);
-            info->Size = SD::Size(500, 380);
-            info->Font = gcnew SD::Font("Consolas", 9.5f);
-            Cursor = Cursors::WaitCursor;
-            info->Text = GrideAbout::ToolVersions::Text(AppDomain::CurrentDomain->BaseDirectory, settingsPath);
-            Cursor = Cursors::Default;
+            info->Size = SD::Size(400, 230);
+            info->Text = String::Format(
+                "Version {0}\n\n"
+                "A 3-language, 4-target integrated development environment.\n\n"
+                "Languages:  C90 / C++11 / Shalimar\n"
+                "Targets:    Windows (MASM/LINK) / Linux / macOS / TMS320C6747\n"
+                "DSP tools:  ASM6x / LNK6x / RTS6747 / VM6747 / SIM6747\n"
+                "Opens:      CCS 7.4 / 5.5 projects, Visual Studio solutions (read-only)\n\n"
+                ".NET Framework {1}\n"
+                "Settings:   {2}",
+                System::Reflection::Assembly::GetExecutingAssembly()->GetName()->Version->ToString(3), Environment::Version, settingsPath);
             Controls->Add(info);
 
             Button^ ok = AddButton("OK");

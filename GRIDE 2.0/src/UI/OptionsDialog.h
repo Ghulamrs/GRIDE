@@ -124,15 +124,15 @@ namespace Gride
             TabPage^ p = AddPage("General");
             chkReopen = Ui::AddCheck(p, "Reopen the last project at startup", 16, 16);
             chkSaveBeforeBuild = Ui::AddCheck(p, "Save all modified files before building", 16, 44);
-            chkJumpToFirstError = Ui::AddCheck(p, "After a failed build, put the caret on the first error (as RIDE does)", 340, 16);
+            chkJumpToFirstError = Ui::AddCheck(p, "After a failed build, put the caret on the first error (as White does)", 340, 16);
             chkAskNative = Ui::AddCheck(p, "Offer the vendor's assembler and linker when the project's own fail", 340, 44);
             chkRunInIde = Ui::AddCheck(p, "Run programs in the Output pane (off: a console window)", 340, 72);
-            Ui::AddLabel(p, "RIDE installation (its root, or its bin):", 16, 84);
+            Ui::AddLabel(p, "Toolchain installation (its root, or its bin):", 16, 84);
             txtRideRoot = Ui::AddText(p, 16, 108, 560);
             Button^ br = Ui::AddButton(p, "Browse...", 584, 106, 90);
             br->Click += gcnew EventHandler(this, &OptionsDialog::OnBrowseRideRoot);
-            Label^ h = Ui::AddLabel(p, "A tool named without a path is looked for as RIDE looks: its environment variable ($C90, $VM6747 ...), beside GRIDE.exe,\n"
-                                       "RIDE's installation (this folder, else the default roots toolchain.json names, with one of its markers in their bin), then PATH.", 16, 140);
+            Label^ h = Ui::AddLabel(p, "A tool named without a path is looked for in this order: its environment variable ($C90, $VM6747 ...), beside GRIDE.exe,\n"
+                                       "the toolchain's installation (this folder, else the default roots toolchain.json names - a RIDE installation among them - with one of its markers in their bin), then PATH.", 16, 140);
             h->ForeColor = Color::DimGray;
             Label^ l = Ui::AddLabel(p, String::Format("Settings file: {0}", IdeSettings::SettingsPath()), 16, 190);
             l->ForeColor = Color::DimGray;
@@ -249,9 +249,9 @@ namespace Gride
             help->Text =
                 "Placeholders: toolchain.json's $(Source) $(AsmFile) $(ObjFile) $(Objects) $(Output) $(Program) $(ArchFlag) $(ConfigFlags) ... or GRIDE's {in} {out} {objs} {libs} "
                 "{crtlibs} {includes} {defines} {configflags} {flags} {linkflags} {arch} {config} {exe} {cmdfiles} {runtime} {runtimedir} {args} ... (Help > Placeholder Reference).\n"
-                "Program: a full path, or a name looked for as RIDE looks (its $VARIABLE, beside GRIDE.exe, RIDE's installation, PATH). A tool follows toolchain.json until its program, "
+                "Program: a full path, or a name looked for in order (its $VARIABLE, beside GRIDE.exe, the toolchain's installation, PATH). A tool follows toolchain.json until its program, "
                 "arguments or switches are changed here. Environment: NAME=value;NAME2=value (%VAR% allowed). Code page 0 = OEM, 65001 = UTF-8. "
-                "Error regex (optional) groups: file, line, col, sev, code, msg; RIDE's shapes, MSVC's, TI's and GCC's are built in.";
+                "Error regex (optional) groups: file, line, col, sev, code, msg; GRIDE's own shapes, MSVC's, TI's and GCC's are built in.";
             p->Controls->Add(help);
 
             txtPath->TextChanged += gcnew EventHandler(this, &OptionsDialog::OnToolFieldChanged);
@@ -383,15 +383,15 @@ namespace Gride
         // what every compile and link takes, the defaults, CCS
         void BuildRidePathsPage()
         {
-            TabPage^ p = AddPage("RIDE Paths");
+            TabPage^ p = AddPage("GRIDE Paths");
             p->AutoScroll = true;
             int y = 8;
             String^ root = IdeSettingsPaths::RideRootDir();
-            Section(p, "RIDE's headers (settings.json include / lib)", y); y += 24;
+            Section(p, "The installation's headers (settings.json include / lib)", y); y += 24;
             txtRideInclude = PathRow(p, "cpp11's headers (include):", y, nullptr); y += 28;
             txtRideLib = PathRow(p, "c90's headers (lib):", y, nullptr); y += 28;
             Note(p, String::Format("Every cpp11 compile is given the include directory and every c90 compile the lib directory, after the project's own. "
-                                   "Relative to RIDE's installation ({0}); empty: the directory of that name there.", root == nullptr ? Str("none found") : root), y, 30); y += 38;
+                                   "Relative to the toolchain's installation ({0}); empty: the directory of that name there.", root == nullptr ? Str("none found") : root), y, 30); y += 38;
 
             Section(p, "Visual Studio (settings.json vcvars)", y); y += 24;
             txtVcvars = PathRow(p, "vcvars64.bat:", y, "Batch files (*.bat)|*.bat|All files (*.*)|*.*"); y += 28;
@@ -430,13 +430,13 @@ namespace Gride
             for each (String^ id in DebuggerIds()) cboC6747Debugger->Items->Add(DebuggerName(id));
             p->Controls->Add(cboC6747Debugger);
             y += 30;
-            Note(p, "auto: the simulator on this build's .out when it has a line table, else the emulator on the assembly (RIDE). "
-                    "RIDE_DEBUG_SIM6747=1 / RIDE_DEBUG_VM6747=1 in the environment at start win.", y, 30); y += 38;
+            Note(p, "auto: the simulator on this build's .out when it has a line table, else the emulator on the assembly (White's rule). "
+                    "GRIDE_DEBUG_SIM6747=1 / GRIDE_DEBUG_VM6747=1 in the environment at start win.", y, 30); y += 38;
 
             Section(p, "Code Composer Studio 7.4 / 5.5 projects (settings.json ccs)", y); y += 24;
             chkCcsEnabled = Ui::AddCheck(p, "Open CCS projects (File > Open Project, File > Import CCS Project)", 16, y); y += 28;
             txtCcsRoot = PathRow(p, "CCS installation:", y, nullptr); y += 28;
-            Note(p, "RIDE's ccs.root (C:\\ti\\ccsv7): ${CG_TOOL_ROOT} is the project's compiler version under its tools\\compiler. "
+            Note(p, "White's ccs.root (C:\\ti\\ccsv7): ${CG_TOOL_ROOT} is the project's compiler version under its tools\\compiler. "
                     "Empty: TI's compiler directory above, named or found.", y, 30);
         }
 
@@ -444,7 +444,7 @@ namespace Gride
         static array<String^>^ DebuggerIds() { return gcnew array<String^>{ String::Empty, ToolIds::TmsSim, ToolIds::TmsSimulator }; }
         static String^ DebuggerName(String^ id)
         {
-            if (String::IsNullOrEmpty(id)) return "auto (RIDE's choice)";
+            if (String::IsNullOrEmpty(id)) return "auto (White's choice)";
             ToolEntry^ e = ToolIds::EntryOf(id);
             return e == nullptr ? id : e->Name;
         }
@@ -462,7 +462,7 @@ namespace Gride
             n->Dock = DockStyle::Top;
             n->Height = 34;
             n->ForeColor = Color::DimGray;
-            n->Text = "The Compiler Options a new project starts with (RIDE's settings.json options). A project's own are under Project > Compiler Options; "
+            n->Text = "The Compiler Options a new project starts with (White's settings.json options). A project's own are under Project > Compiler Options; "
                       "a CCS project's come from its configurations.";
             p->Controls->Add(optionsEditor);
             p->Controls->Add(n);
@@ -570,7 +570,7 @@ namespace Gride
         void OnBrowseRideRoot(Object^ sender, EventArgs^ e)
         {
             FolderBrowserDialog^ d = gcnew FolderBrowserDialog();
-            d->Description = "RIDE's installation: its root (with bin, lib and include under it), or its bin";
+            d->Description = "The toolchain's installation: its root (with bin, lib and include under it), or its bin - a RIDE installation too";
             if (d->ShowDialog(this) == System::Windows::Forms::DialogResult::OK) txtRideRoot->Text = d->SelectedPath;
             delete d;
         }

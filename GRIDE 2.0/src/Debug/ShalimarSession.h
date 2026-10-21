@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // ============================================================================
 //  GRIDE 2.0 - RIDE's shalimar::Session (R09: GRIDEd's ShalimarSession.h
 //  ported). A Shalimar program stops itself: the compiler calls shm_line before
@@ -161,7 +161,7 @@ namespace Gride
         virtual String^ Evaluate(String^ expression, bool% ok) override { ok = false; return ShalimarWords::SaysWhereOnly + " - nothing to watch with"; }
         virtual bool SetVariable(String^ name, String^ value, String^% said) override { said = ShalimarWords::SaysWhereOnly; return false; }
         virtual List<RegisterValue^>^ Registers() override { return gcnew List<RegisterValue^>(); }
-        virtual array<Byte>^ ReadMemory(UInt64 address, int length) override { return gcnew array<Byte>(0); }
+        virtual array<Byte>^ ReadMemory(UInt32 address, int length) override { return gcnew array<Byte>(0); }
 
         // the breakpoints changed while stopped: the ones set taken away, the ones wanted set
         virtual void BreakpointsChanged() override

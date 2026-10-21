@@ -29,8 +29,8 @@ bool dbg_gdbLike(DebuggerKind kind);
 bool dbg_imageHasLines(const std::string& out, std::string* why = 0);
 
 // Which program debugs a tms6747 build: "sim6747" on the .out beside the assembly when it exists, is no
-// older than the build and has lines, else "vm6747" on the assembly; RIDE_DEBUG_SIM6747=1 and
-// RIDE_DEBUG_VM6747=1 force one. why says what decided it when the fallback was taken.
+// older than the build and has lines, else "vm6747" on the assembly; GRIDE_DEBUG_SIM6747=1 and
+// GRIDE_DEBUG_VM6747=1 force one. why says what decided it when the fallback was taken.
 std::string dbg_c6xBackend(const std::string& executable, std::string* why = 0);
 
 DebuggerKind dbg_here();

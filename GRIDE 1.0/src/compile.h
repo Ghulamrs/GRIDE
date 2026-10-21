@@ -102,7 +102,7 @@ struct LinkerChoice {
     std::string say;
 };
 
-// RIDE's own lnk6x, for a link against RTS6x: settings.json's, else the one beside the editor.
+// GRIDE's own lnk6x, for a link against RTS6x: settings.json's, else the one beside the editor.
 LinkerChoice ourLinker();
 LinkerChoice tiLinker(const std::string& chosen, const std::string& named,
                       const std::string& tiDir);
@@ -125,7 +125,7 @@ int runnerFor(int asked, const std::string& arch, bool emulateOnly);
 std::string runnerLine(int runner, const std::string& program);
 
 // **Run and Build > Verify, for tms6747 (R5).** A build links <program>.out
-// with asm6x and lnk6x beside RIDE against RTS6x, or TI's runtime named under Tools; sim6747 runs
+// with asm6x and lnk6x beside GRIDE against RTS6x, or TI's runtime named under Tools; sim6747 runs
 // that TI program as TI's simulator does. Why a simulated run cannot happen, or empty when it can.
 std::string simulationMissing(const std::string& program);
 // The .out run on the simulator with a real input, as startProgram runs the emulator.
@@ -145,7 +145,7 @@ Ran runProgram(const Toolchain& tool, ToolchainKind kind, const std::string& sou
 typedef void (*ChunkSink)(void* context, const char* bytes, size_t size, bool isStderr);
 // **Build > Clean.** What a build of `program` made and left - the program, its .pdb, .ilk, .map, .out
 // and .dSYM, the <program>.vm of the emulated target, and with `itsFolder` the folder it was built in
-// (a CCS project's, which is RIDE's own) - and this process's scratch in the temporary directory.
+// (a CCS project's, which is GRIDE's own) - and this process's scratch in the temporary directory.
 // Each path removed, by its full name; a source, a .pro or CCS's own files are never among them.
 std::vector<std::string> cleanBuilt(const std::string& program, bool itsFolder);
 

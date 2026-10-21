@@ -1,3 +1,0 @@
-// The Grey outlook's icon - GRIDE in a blue swirl, its letters thinning as it winds in. The exe carries it,
-// so Explorer, the taskbar and the Start menu shortcut show it, and MainForm takes it from the exe.
-1 ICON "gride.ico"

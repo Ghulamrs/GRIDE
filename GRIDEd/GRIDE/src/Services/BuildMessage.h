@@ -265,16 +265,6 @@ namespace Gride { namespace Services {
         BuildMessage^ OwnLine(String^ line)
         {
             if (toolName->Length == 0 || String::IsNullOrEmpty(line)) return nullptr;
-            // c90 and cpp11 say a missing source without their name: "cannot open nofile.c"
-            String^ bare = line->Trim();
-            if (bare->StartsWith("cannot open ") || bare->StartsWith("cannot read "))
-            {
-                BuildMessage^ missing = gcnew BuildMessage();
-                missing->Sev = Severity::Error;
-                missing->File = String::Empty;
-                missing->Text = bare;
-                return missing;
-            }
             int at = line->IndexOf(": ");
             if (at <= 0) return nullptr;
             String^ who = Path::GetFileName(line->Substring(0, at)->Trim())->ToLowerInvariant();
@@ -282,8 +272,7 @@ namespace Gride { namespace Services {
             String^ text = line->Substring(at + 2)->Trim();
             if (text->Length == 0) return nullptr;
             BuildMessage^ b = gcnew BuildMessage();
-            // shalimar names the other files of the program it compiled along ("also compiled linalg.shl"): a note
-            b->Sev = text->StartsWith("also compiled ") ? Severity::Info : Severity::Error;
+            b->Sev = Severity::Error;
             b->File = String::Empty;
             b->Text = text;
             return b;

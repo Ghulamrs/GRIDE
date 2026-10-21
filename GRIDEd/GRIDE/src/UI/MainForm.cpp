@@ -455,9 +455,6 @@ namespace Gride { namespace UI {
         }
         EditorDocument^ d = docs->Active;
         if (d != nullptr && LanguageInfo::IsCompiled(d->Lang)) cbLanguage->SelectedIndex = (int)d->Lang;
-        // no source on screen: the startup project's language, not the last file's
-        else if (workspace != nullptr && workspace->StartupProject != nullptr && LanguageInfo::IsCompiled(workspace->StartupProject->Lang))
-            cbLanguage->SelectedIndex = (int)workspace->StartupProject->Lang;
         updatingCombos = false;
     }
 

@@ -15,7 +15,7 @@
 //  R12: a .pro may stand for a Visual Studio project ("visualStudio": the
 //  solution or project beside it) and keep GRIDE's state for it - the compiler
 //  (cl, Visual Studio's own), the configuration, the program's arguments - as
-//  GRIDEd's .grws entry does; the example, samples\cppparse\cppparse.pro, is one.
+//  GRIDEd's .grws entry does.
 //  A project's configuration keeps the file's (VsConfig): its own ClCompile
 //  settings go to cl through toolchain.json's projectSettings.
 // ============================================================================
@@ -177,7 +177,7 @@ namespace Gride
                     for each (String^ u in c->Undefines) extra->Add(String::Concat("-U", u));
                     b->Flags = String::Join(" ", extra);
                     if (c->AdditionalOptions->Length > 0)
-                        lines->Add(String::Format("VS project {0} ({1}): cl's additional options go to cl only, not to RIDE's compilers: {2}", r->Name, c->Name, c->AdditionalOptions));
+                        lines->Add(String::Format("VS project {0} ({1}): cl's additional options go to cl only, not to GRIDE's compilers: {2}", r->Name, c->Name, c->AdditionalOptions));
                     if (c->ConfigurationType->Length > 0 && String::Compare(c->ConfigurationType, "Application", true) != 0)
                         lines->Add(String::Format("VS project {0} ({1}): a {2} in Visual Studio - GRIDE 2.0 links a program of it", r->Name, c->Name, c->ConfigurationType));
                     if (!outputNamed && c->TargetName->Length > 0 && !VsProject::HasMacro(c->TargetName)) { p->OutputName = c->TargetName; outputNamed = true; }

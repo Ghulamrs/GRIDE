@@ -274,8 +274,11 @@ void cancelBuilds() {
     unlockLive();
 }
 
-int runCaptured(const std::string& command, std::string& output,
-                LineSink sink, void* context) {
+namespace {
+
+// One program, its output kept, started in directory when one is named.
+int runOne(const std::string& command, const std::string& directory, std::string& output,
+           LineSink sink, void* context) {
     // Nothing run from here may read the editor's own input: a compiler that inherits it eats the
     // keystrokes not yet read, and on Windows the editor's next read saw end of file and quit. The
     // child's input is the null device, as the " < NUL" once on the command made it.
@@ -283,7 +286,15 @@ int runCaptured(const std::string& command, std::string& output,
     if (cancelEpoch.load() != epoch) return saidStopped(output, sink, context);
 
     Process child;
-    if (!child.startCaptured(command)) return -1;
+    if (!child.startCaptured(command, directory)) {
+        std::string program = command;
+        if (!program.empty() && program[0] == '"') program = program.substr(1, program.find('"', 1) - 1);
+        else program = program.substr(0, program.find(' '));
+        const std::string said = program + " could not be started - it is not there, or not a program";
+        output += said + "\n";
+        if (sink) sink(context, said);
+        return -1;
+    }
     int slot = enlist(&child);
     if (cancelEpoch.load() != epoch) child.kill();
 
@@ -301,6 +312,78 @@ int runCaptured(const std::string& command, std::string& output,
     int status = child.finish();
     if (cancelEpoch.load() != epoch) return saidStopped(output, sink, context);
     return status;
+}
+
+#ifdef _WIN32
+std::string trimmed(const std::string& s) {
+    size_t begin = s.find_first_not_of(" \t"), end = s.find_last_not_of(" \t");
+    return begin == std::string::npos ? std::string() : s.substr(begin, end - begin + 1);
+}
+
+// **A recipe's line without cmd** (GRIDE 1.0). GRIDE's recipes are cmd lines - programs joined by
+// "&&", and "cd <dir>" before an object build - and a policy may disable cmd (it does where this was
+// written). So the line is taken apart here, at each "&&" outside quotes, and nothing else of cmd's
+// is in a recipe: "cd" says where the programs after it start, and each program runs only when the
+// one before it succeeded.
+std::vector<std::string> stepsOf(const std::string& line) {
+    std::vector<std::string> steps;
+    std::string step;
+    bool quoted = false;
+    for (size_t i = 0; i < line.size(); ++i) {
+        const char c = line[i];
+        if (c == '"') quoted = !quoted;
+        if (!quoted && c == '&' && i + 1 < line.size() && line[i + 1] == '&') {
+            steps.push_back(trimmed(step));
+            step.clear();
+            ++i;
+            continue;
+        }
+        step += c;
+    }
+    steps.push_back(trimmed(step));
+    return steps;
+}
+
+// "cd <dir>" (or "cd /d <dir>"): true, and the directory without its quotes.
+bool directoryOf(const std::string& step, std::string& dir) {
+    if (step.compare(0, 3, "cd ") != 0) return false;
+    dir = trimmed(step.substr(3));
+    if (dir.compare(0, 3, "/d ") == 0) dir = trimmed(dir.substr(3));
+    if (dir.size() >= 2 && dir[0] == '"' && dir[dir.size() - 1] == '"') dir = dir.substr(1, dir.size() - 2);
+    // quoteDirectory doubles a final backslash, so that cmd did not read it as escaping the quote
+    while (dir.size() > 3 && dir.compare(dir.size() - 2, 2, "\\\\") == 0) dir.resize(dir.size() - 1);
+    return true;
+}
+#endif
+
+}
+
+int runCaptured(const std::string& command, std::string& output,
+                LineSink sink, void* context) {
+#ifdef _WIN32
+    const std::vector<std::string> steps = stepsOf(command);
+    std::string directory;
+    int status = 0;
+    for (size_t i = 0; i < steps.size(); ++i) {
+        if (steps[i].empty()) continue;
+        std::string dir;
+        if (directoryOf(steps[i], dir)) {
+            if (!path::isDirectory(dir)) {
+                const std::string said = "no such directory: " + dir;
+                output += said + "\n";
+                if (sink) sink(context, said);
+                return 1;
+            }
+            directory = dir;
+            continue;
+        }
+        status = runOne(steps[i], directory, output, sink, context);
+        if (status != 0) return status;
+    }
+    return status;
+#else
+    return runOne(command, std::string(), output, sink, context);
+#endif
 }
 
 namespace {
@@ -359,7 +442,7 @@ void setAskNative(AskNative ask, void* context) {
 // fault in the source (a fault of the user's is not the tools'), one of the project's own tools
 // was in play for this target, and the settings say to ask. The question names what was in play.
 // Whether the output says one of our own tools failed, and not the program: cpp11 and c90 name a
-// failed assembler or linker run, RIDE names lnk6x; an unresolved or duplicate symbol, or a library
+// failed assembler or linker run, GRIDE names lnk6x; an unresolved or duplicate symbol, or a library
 // for another platform, is the program's fault and the vendor's tools would refuse it the same way.
 bool ownToolFailed(const std::string& output, bool emulated) {
     if (emulated ? output.find("lnk6x did not link it") == std::string::npos
@@ -723,7 +806,7 @@ void makeTiProgram(Built& result, const Toolchain& tool, const std::string& prog
     for (size_t i = 0; i < sources.size(); ++i)
         objects.push_back(sources[i].substr(0, sources[i].size() - 2) + ".obj");
 
-    // **RTS6x unless TI's own compiler directory is named under Tools** (5.1): RIDE's lnk6x against
+    // **RTS6x unless TI's own compiler directory is named under Tools** (5.1): GRIDE's lnk6x against
     // rts6x.lib beside the editor, so nothing of TI's is on the link line; a CCS found, not named, does not count.
     const std::string named = settings::namedTi(), ours = rts6xRuntimeDir();
     const bool rts6x = named.empty() && !ours.empty();
@@ -751,7 +834,7 @@ void makeTiProgram(Built& result, const Toolchain& tool, const std::string& prog
     if (choice.path.empty()) {
         result.ok = false;
         std::string hint = !choice.say.empty() ? choice.say
-            : rts6x ? std::string("no lnk6x beside the editor - RTS6x's link needs RIDE's own C6000 linker")
+            : rts6x ? std::string("no lnk6x beside the editor - RTS6x's link needs GRIDE's own C6000 linker")
             : "no lnk6x under " + ti + " - Tools names TI's C6000 compiler directory, the one with bin\\lnk6x";
         result.output += hint + "\n";
         if (sink) sink(context, hint);
@@ -763,7 +846,7 @@ void makeTiProgram(Built& result, const Toolchain& tool, const std::string& prog
     }
     std::string lnk = choice.path;
     // **A CCS project's link is the project's**: its .cmd files, sizes, search paths, libraries
-    // and initialisation model, as .cproject says them (ccs/ccsproject.h); RIDE's own flat memory map otherwise.
+    // and initialisation model, as .cproject says them (ccs/ccsproject.h); GRIDE's own flat memory map otherwise.
     const TiLink& given = tool.tiLink;
     std::string cmdfile = path::join(dir, "ti-link.cmd");
     if (!given.given || given.cmdFiles.empty()) {
@@ -828,7 +911,7 @@ void makeTiProgram(Built& result, const Toolchain& tool, const std::string& prog
 
 }
 
-// RTS6x's link is RIDE's own lnk6x: the one settings.json names, else the one beside the editor.
+// RTS6x's link is GRIDE's own lnk6x: the one settings.json names, else the one beside the editor.
 LinkerChoice ourLinker() {
     LinkerChoice choice;
     std::string named = settings::tilinker();
@@ -1027,7 +1110,7 @@ Built buildPartsOnce(const Toolchain& tool, const std::vector<Part>& parts,
         if (linked < 0) {
             std::string hint = linkerName(withCpp) +
                                " could not be run - it is the host's linker, and on Windows "
-                               "it reaches PATH only after vcvars64.bat";
+                               "Visual Studio's, found where its installation keeps it";
             result.output += hint + "\n";
             if (sink) sink(context, hint);
         }
@@ -1086,7 +1169,7 @@ void removeProgram(const Built& built) {
 #ifdef __APPLE__
     // The .dSYM a debug build leaves beside the program - the compiler's driver makes one for a
     // single file, buildParts for a project - is a directory, and std::remove does not take those.
-    // Left behind, the temporary directory filled with ride-run-<pid>.dSYM bundles, one per F8.
+    // Left behind, the temporary directory filled with gride-run-<pid>.dSYM bundles, one per F8.
     if (!built.program.empty()) path::removeTree(built.program + ".dSYM");
 #endif
 }
@@ -1198,7 +1281,7 @@ Ran runProgram(const Toolchain& tool, ToolchainKind kind, const std::string& sou
 std::vector<std::string> cleanBuilt(const std::string& program, bool itsFolder) {
     std::vector<std::string> removed;
     // A file only - a project named as one of its own folders must not lose the folder - and a
-    // directory only where it is a build's own: a .dSYM, a .vm, RIDE's folder for a CCS project.
+    // directory only where it is a build's own: a .dSYM, a .vm, GRIDE's folder for a CCS project.
     auto gone = [&removed](const std::string& p, bool directory) {
         if (p.empty() || !path::exists(p) || path::isDirectory(p) != directory) return;
         if (directory) path::removeTree(p);
@@ -1215,14 +1298,14 @@ std::vector<std::string> cleanBuilt(const std::string& program, bool itsFolder) 
         gone(stem + ".map", false);
         gone(stem + ".out", false);
         gone(emulatedProgram(program), true);
-        // RIDE's own folder for a CCS project, and only when it is: named <product>-ccs-<project>.
+        // GRIDE's own folder for a CCS project, and only when it is: named <product>-ccs-<project>.
         const std::string folder = path::parent(program);
         if (itsFolder && path::filename(folder).compare(0, std::string(product::kLower).size() + 5,
                                                         std::string(product::kLower) + "-ccs-") == 0)
             gone(folder, true);
     }
     // This process's own scratch: <product>-run-<id>, <product>-build-<id> and what hangs off them -
-    // never another RIDE's, which may be building as this one cleans.
+    // never another GRIDE's, which may be building as this one cleans.
     char id[32];
 #ifdef _WIN32
     std::snprintf(id, sizeof id, "-%lu", static_cast<unsigned long>(GetCurrentProcessId()));

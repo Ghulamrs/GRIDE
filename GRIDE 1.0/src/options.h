@@ -14,7 +14,7 @@ namespace options {
 
 // **The compiler options a project sets, per configuration**, and the table both windowed front ends
 // draw their Compiler Options dialog from: one row per option, the tab it sits on, its control and
-// the flag it becomes. What is not set answers its default, and the defaults are the flags RIDE passed before the dialog existed.
+// the flag it becomes. What is not set answers its default, and the defaults are the flags GRIDE passed before the dialog existed.
 // What a menu already decides - the assembler, include paths, libraries, tool paths, the target - is not here.
 enum Control { Check, Choice, Text };
 

@@ -1,4 +1,5 @@
 #include "about.h"
+#include "compile.h"
 #include "path.h"
 #include "product.h"
 #include "settings.h"
@@ -12,20 +13,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#if defined(_WIN32)
-#define POPEN  _popen
-#define PCLOSE _pclose
-#else
-#define POPEN  popen
-#define PCLOSE pclose
-#endif
-
 namespace editor {
 namespace about {
 
 const char* name() { return product::kName; }
 
-const char* version() { return "5.17"; }
+const char* version() { return "1.0"; }
 
 namespace {
 
@@ -38,23 +31,24 @@ std::string askVersion(const std::string& program) {
 
     // Quoted, because a path may hold a space. `--version` is the flag all four answer: cc1, shc
     // and c2s write one line and stop, cxx1 writes its banner first and its version second, so
-    // the line kept is the last one naming a version - and the first when none does.
-    const std::string command = "\"" + found + "\" --version 2>&1";
-    FILE* pipe = POPEN(command.c_str(), "r");
-    if (!pipe) return std::string();
+    // the line kept is the last one naming a version - and the first when none does. Run as the
+    // builds run their tools, with no cmd (GRIDE 1.0), and its two streams already as one.
+    std::string out;
+    if (runCaptured("\"" + found + "\" --version", out) < 0) return std::string();
 
     // The first line is the banner, which is what About shows: every one of the four opens with
     // one, and cxx1's version line beneath is detail. Its own copyright is taken off, since the box
     // ends with it once - so a row reads "cpp11 - ISO C++ 11" beside "c90 - ISO C 90".
-    char buffer[256];
     std::string first;
-    while (std::fgets(buffer, sizeof buffer, pipe)) {
-        std::string line = buffer;
+    for (size_t at = 0; at < out.size() && first.empty();) {
+        size_t end = out.find('\n', at);
+        if (end == std::string::npos) end = out.size();
+        std::string line = out.substr(at, end - at);
         while (!line.empty() && (line[line.size() - 1] == '\n' || line[line.size() - 1] == '\r'))
             line.resize(line.size() - 1);
-        if (first.empty() && !line.empty()) first = line;
+        if (!line.empty()) first = line;
+        at = end + 1;
     }
-    PCLOSE(pipe);
 
     const std::string owner = "\xC2\xA9""2026 G. R. Akhtar - ";
     if (first.compare(0, owner.size(), owner) == 0) first.erase(0, owner.size());
@@ -90,10 +84,10 @@ void row(std::vector<std::string>& said, const std::string& what, const std::str
     said.push_back(left + (file.empty() ? std::string("-") : file) + (from.empty() ? std::string() : "   (" + from + ")"));
 }
 
-// A tool beside RIDE, the way the build finds it: beside this program first, then PATH.
+// A tool beside GRIDE, the way the build finds it: beside this program first, then PATH.
 void besideOrPath(std::vector<std::string>& said, const std::string& what, const std::string& program) {
     std::string found = path::besideProgram(program);
-    if (!found.empty()) { row(said, what, found, "beside RIDE"); return; }
+    if (!found.empty()) { row(said, what, found, "beside the editor"); return; }
     found = path::onPath(program);
     row(said, what, found, found.empty() ? "not found" : "on PATH");
 }
@@ -128,9 +122,9 @@ std::vector<std::string> environment() {
     const std::string vs = settings::vcvars();
     if (!vs.empty()) row(said, "Visual Studio", vs, "settings.json");
     else {
-        const std::string found = visualStudioVcvars();
+        const std::string found = visualStudioRoot();
         row(said, "Visual Studio", found, found.empty() ? "none found - cl, ml64, link.exe and the Windows libraries need it"
-                                                        : "found by vswhere");
+                                                        : "found by vswhere - its tools and libraries are taken from its folders");
     }
 #else
     row(said, "Visual Studio", "", "not on this machine - Windows programs link on Windows");
@@ -218,7 +212,7 @@ std::string selfLine() {
 #endif
     char stamp[64];
     std::strftime(stamp, sizeof stamp, "%d-%m-%Y %H:%M:%S PKT", &when);
-    // Named by the release, "RIDE 5.17", the same in every window and in the console.
+    // Named by the release, "GRIDE 1.0", the same in every window and in the console.
     std::string said = std::string(name()) + " " + version() + "  " + stamp;
     unsigned long crc = 0;
     if (crc32Of(file, crc)) {
@@ -251,7 +245,7 @@ const char* kRecord = "release.crc";
 std::string recordedFor(const std::string& leaf, unsigned long& crc, long long& size) {
     FILE* f = std::fopen(path::join(path::programDirectory(), kRecord).c_str(), "r");
 #ifdef __APPLE__
-    if (!f) f = std::fopen((std::string("/usr/local/ride-") + version() + "/bin/" + kRecord).c_str(), "r");
+    if (!f) f = std::fopen((std::string("/usr/local/gride-") + version() + "/bin/" + kRecord).c_str(), "r");
 #endif
     if (!f) return std::string();
     char line[1024];

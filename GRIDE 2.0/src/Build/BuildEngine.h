@@ -123,18 +123,6 @@ namespace Gride
         BuildMessage^ ParseOwnLine(String^ line, String^ toolName)
         {
             if (String::IsNullOrEmpty(toolName) || String::IsNullOrEmpty(line)) return nullptr;
-            // c90 and cpp11 say a missing source without their name: "cannot open nofile.c"
-            String^ bare = line->Trim();
-            if (bare->StartsWith("cannot open ") || bare->StartsWith("cannot read "))
-            {
-                BuildMessage^ missing = gcnew BuildMessage();
-                missing->Severity = "error";
-                missing->FilePath = String::Empty;
-                missing->Line = 0; missing->Column = 0;
-                missing->Code = String::Empty;
-                missing->Text = bare;
-                return missing;
-            }
             int at = line->IndexOf(": ");
             if (at <= 0) return nullptr;
             String^ who = Path::GetFileName(line->Substring(0, at)->Trim())->ToLowerInvariant();
@@ -143,8 +131,7 @@ namespace Gride
             String^ text = line->Substring(at + 2)->Trim();
             if (text->Length == 0) return nullptr;
             BuildMessage^ b = gcnew BuildMessage();
-            // shalimar names the other files of the program it compiled along ("also compiled linalg.shl"): a note
-            b->Severity = text->StartsWith("also compiled ") ? Str("info") : Str("error");
+            b->Severity = "error";
             b->FilePath = String::Empty;
             b->Line = 0; b->Column = 0;
             b->Code = String::Empty;
@@ -1022,7 +1009,8 @@ namespace Gride
             for each (String^ rel in project->SourceFiles)
             {
                 String^ full = project->ResolvePath(rel);
-                if (!TargetInfo::IsSource(Path::GetExtension(full), settings) || map->ContainsKey(full)) continue;
+                // a file of a group the .pro's "build" does not name is not built
+                if (!TargetInfo::IsSource(Path::GetExtension(full), settings) || map->ContainsKey(full) || !project->IsBuilt(rel)) continue;
                 map[full] = MakeStem(rel, used);
             }
             return map;
@@ -1048,7 +1036,7 @@ namespace Gride
             {
                 String^ ext = Path::GetExtension(src);
                 String^ why;
-                String^ compilerId = TargetInfo::CompilerFor(ext, settings, project->Toolchain, why);
+                String^ compilerId = TargetInfo::CompilerFor(ext, settings, project->ToolchainFor(src), why);
                 if (compilerId == nullptr && why->Length > 0) { refusal = why; refusedFile = src; return nullptr; }   // RIDE's refusal
                 if (compilerId == nullptr && !TargetInfo::IsAssemblySource(ext)) continue;
                 if (config->Excludes(src)) continue;                 // excluded in this configuration (a CCS project's sourceEntries)
@@ -1438,13 +1426,6 @@ namespace Gride
             {
                 if (String::IsNullOrWhiteSpace(l)) continue;
                 String^ lp = l->Trim();
-                // RTS6x's libraries and TI's runtime belong to the TMS320C6747 alone: a project's list is shared by
-                // its targets, so on any other target they are left out of the link, said in the Output
-                if (!target->Emulated && IsC6747Library(lp))
-                {
-                    Out("[" + lp + " is the TMS320C6747's runtime - left out of this target's link]");
-                    continue;
-                }
                 if (runtime != nullptr && rl != nullptr && (rl->IsAlias(lp) || IsTiRuntimeName(lp))) { lp = runtime; runtimeNamed = true; }
                 else if (lp->IndexOf(L'\\') >= 0 || lp->IndexOf(L'/') >= 0 || File::Exists(Path::Combine(projectDir, lp)))
                     lp = PathUtil::Resolve(projectDir, lp);
@@ -1455,13 +1436,6 @@ namespace Gride
                                   linker->Arguments->IndexOf("$(Runtime)", StringComparison::OrdinalIgnoreCase) >= 0;
             if (runtime != nullptr && !runtimeNamed && !argsUseRuntime) libs->Add(runtime);
             return libs;
-        }
-
-        // RTS6x's own libraries by file name: rts6x, printf6x, shmrt6x and their debug variants
-        static bool IsC6747Library(String^ lib)
-        {
-            String^ n = Path::GetFileName(lib->Trim()->Trim(L'"'));
-            return System::Text::RegularExpressions::Regex::IsMatch(n, "^(rts6|printf6x|shmrt6x)", System::Text::RegularExpressions::RegexOptions::IgnoreCase);
         }
 
         // TI's names for the C runtime (toolchain.json's ccs.tiRuntime: libc.a, rts6740_elf_eh.lib, rts6740_elf.lib)
@@ -1596,7 +1570,7 @@ namespace Gride
                 String^ tiDir = TiCompiler::Dir();
                 if (tiDir == nullptr)
                 {
-                    AddMessage("error", String::Concat(made, String::Format("a {0} build links against {1} in {2} beside GRIDE, or TI's runtime when its compiler directory is named under Tools > Options > RIDE Paths, and neither is here",
+                    AddMessage("error", String::Concat(made, String::Format("a {0} build links against {1} in {2} beside GRIDE, or TI's runtime when its compiler directory is named under Tools > Options > GRIDE Paths, and neither is here",
                                                                             target->Arch, rl == nullptr ? Str("its runtime") : rl->Name, rl == nullptr ? String::Empty : rl->Directory)), nullptr, 0);
                     return false;
                 }
@@ -1610,7 +1584,7 @@ namespace Gride
                 bool eh = File::Exists(Path::Combine(tiRuntimeDir, cd->RuntimeLibrary)) || (tiExtraDir != nullptr && File::Exists(Path::Combine(tiExtraDir, cd->RuntimeLibrary)));
                 if (!eh && !tiNamed)
                 {
-                    AddMessage("error", String::Concat(made, String::Format("{0} has only {1} - these objects need {2}, named under Tools > Options > RIDE Paths (TI library directory)", tiDir, cd->RuntimeFallback, cd->RuntimeLibrary)), nullptr, 0);
+                    AddMessage("error", String::Concat(made, String::Format("{0} has only {1} - these objects need {2}, named under Tools > Options > GRIDE Paths (TI library directory)", tiDir, cd->RuntimeFallback, cd->RuntimeLibrary)), nullptr, 0);
                     return false;
                 }
                 rt = eh ? cd->RuntimeLibrary : cd->RuntimeFallback;          // found through -i: TI's lib, the second directory

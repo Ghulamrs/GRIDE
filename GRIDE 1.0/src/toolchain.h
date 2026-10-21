@@ -44,7 +44,7 @@ ToolchainKind hostCppToolchain();
 
 // **What lnk6x is handed for a tms6747 link besides the objects**, from a CCS project
 // (ccs/ccsproject.h): its linker command files, sizes, search paths and libraries. Not given,
-// and the link takes RIDE's own flat memory map (compile.cpp, tiLinkCmd).
+// and the link takes GRIDE's own flat memory map (compile.cpp, tiLinkCmd).
 struct TiLink {
     bool given;
     std::vector<std::string> cmdFiles;      // absolute, in the order CCS lists them
@@ -107,8 +107,9 @@ const char* programOf(const Toolchain& tool, ToolchainKind kind);
 // emit. Nothing is assembled or linked: the program is the .s file, or a directory of them.
 bool isEmulated(const std::string& arch);
 std::string emulatorProgram();
-// Visual Studio's vcvars64.bat: the one settings.json names, else the newest vswhere finds; "" when none.
-std::string visualStudioVcvars();
+// Visual Studio's installation folder: the one whose vcvars64.bat settings.json names, else the newest
+// vswhere finds; "" when none. Its tools and libraries are found below it - no batch file is run.
+std::string visualStudioRoot();
 // The C6000 assembler beside the editor (ASM6x's asm6x.exe), or empty when it is not there; $ASM6X names one elsewhere.
 std::string c6xAssembler();
 // Why no asm6x can run - none beside the editor, or $ASM6X naming one that is gone; empty when one can (D2).
@@ -154,7 +155,7 @@ std::string whyNotRun(ToolchainKind kind, const std::string& arch);
 
 struct Recipe {
     std::string command;
-    // A tms6747 group's per-source compiles, run at once on RIDE's pool (P3); command is them joined by &&.
+    // A tms6747 group's per-source compiles, run at once on GRIDE's pool (P3); command is them joined by &&.
     std::vector<std::string> commands;
     std::string assemblyPath;
     std::vector<std::string> leftovers;

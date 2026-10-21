@@ -364,7 +364,7 @@ namespace Gride { namespace UI {
     // =========================================================================
     void MainForm::HelpView() { HelpUserGuide(); }
 
-    void MainForm::HelpUserGuide() { OpenHelpFile("GRIDE_User_Guide"); }
+    void MainForm::HelpUserGuide() { OpenHelpFile("GRIDE_Help"); }   // the Help the three outlooks share
 
     // where the help and the docs are looked for, in order: the folder named under Tools > Options >
     // Projects, then beside the exe and its docs folder (the development layout, where the post-build
@@ -423,16 +423,14 @@ namespace Gride { namespace UI {
         String^ text;
         if (f != nullptr) text = File::ReadAllText(f);
         else text =
-            "GRIDE 1.0\r\n"
-            "=========\r\n\r\n"
-            "* VS-style shell: File, Edit, View, Project, Build, Debug, Tools, Window, Help\r\n"
-            "* Languages C90, C++11, Shalimar; targets Windows, Linux, macOS, TMS320C6747\r\n"
-            "* JSON project (.pro), workspace (.grws) and settings (gride.settings.json) files\r\n"
-            "* Read-only import of Code Composer Studio 7.4 projects\r\n"
-            "* Template-driven build engine (compile -> assemble -> link) with error parsing\r\n"
-            "* C <-> Shalimar conversion through configurable converter tools\r\n"
-            "* Placeholder debugger with breakpoints, stepping, registers, memory, call stack\r\n"
-            "* Dark / Light / Blue themes, dockable and floatable panes, keyboard customisation\r\n";
+            "GRIDE 1.5.0 - the Black outlook\r\n"
+            "===============================\r\n\r\n"
+            "* Visual Studio's shell and keys, or White's key set (Tools > Options > Environment > Keyboard)\r\n"
+            "* Workspaces (.grws) of GRIDE projects (.pro), CCS 7.4 / 5.5 projects and Visual Studio solutions\r\n"
+            "* GRIDE's toolchain beside GRIDE.exe, as toolchain.json defines it: c90, cpp11 1.10, shalimar, c2s,\r\n"
+            "  masm, link, asm6x, lnk6x, sim6747, vm6747, with RTS6x and the Shalimar runtimes\r\n"
+            "* GRIDE's debuggers: sim6747 and vm6747 on the C6747, cdb on Windows, a Shalimar program's own session\r\n"
+            "* F1: the Help the three outlooks (Black, Grey, White) share\r\n";
         TextDialog^ dlg = gcnew TextDialog("Release Notes", text);
         dlg->ShowDialog(this);
     }

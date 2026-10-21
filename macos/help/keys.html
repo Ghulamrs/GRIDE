@@ -1,0 +1,84 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Keys, menus and the command line</title><style>
+:root{--bg:#fff;--fg:#1a1a1a;--muted:#5a5a5a;--rule:#e2e2e2;--accent:#6a4a2a;
+--codebg:#f5f3ef;--codefg:#3a2a1a;--tableh:#f0ece6;--link:#8a5a2a}
+@media (prefers-color-scheme:dark){:root{--bg:#1b1b1b;--fg:#e6e6e6;--muted:#a5a5a5;
+--rule:#333;--accent:#d8b48a;--codebg:#242220;--codefg:#e6d8c8;--tableh:#2a2724;--link:#e0b487}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:52rem;margin:0 auto;padding:2.5rem 1.25rem 6rem}
+h1,h2,h3,h4,h5,h6{line-height:1.25;font-weight:650;scroll-margin-top:1rem}
+h1{font-size:2rem;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:2px solid var(--rule)}
+h2{font-size:1.5rem;margin:2rem 0 .5rem;color:var(--accent)}
+h3{font-size:1.2rem;margin:1.5rem 0 .4rem}
+h4{font-size:1.02rem;margin:1.2rem 0 .3rem}
+p{margin:.6rem 0}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+code{background:var(--codebg);color:var(--codefg);padding:.1rem .3rem;border-radius:4px;
+font:0.85em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{background:var(--codebg);color:var(--codefg);padding:1rem;border-radius:8px;
+overflow-x:auto;border:1px solid var(--rule)}
+pre code{background:none;padding:0;font-size:.82rem;line-height:1.45}
+blockquote{margin:.8rem 0;padding:.3rem 1rem;border-left:3px solid var(--accent);color:var(--muted)}
+hr{border:none;border-top:1px solid var(--rule);margin:2rem 0}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--rule);padding:.45rem .6rem;text-align:left;vertical-align:top}
+th{background:var(--tableh);font-weight:650}
+ul,ol{margin:.5rem 0;padding-left:1.5rem}li{margin:.25rem 0}
+.masthead{margin:0 0 1rem}.masthead .sub{color:var(--muted);font-size:.95rem}
+nav.toc{background:var(--codebg);border:1px solid var(--rule);border-radius:8px;
+padding:1rem 1.25rem;margin:1.5rem 0 2.5rem}
+nav.toc .t{font-weight:650;margin-bottom:.4rem}
+nav.toc ul{list-style:none;margin:0;padding:0}
+nav.toc li{margin:.15rem 0}
+nav.toc .l2{padding-left:1rem}nav.toc .l3{padding-left:2rem;font-size:.9rem}
+nav.toc a{color:var(--fg)}
+@media print{body{font-size:11pt}.wrap{max-width:none;padding:0}
+nav.toc{break-after:page}h1,h2{break-after:avoid}pre,table,blockquote{break-inside:avoid}
+a{color:inherit;text-decoration:none}}
+</style></head><body><div class="wrap"><div class="masthead"><h1 style="border:none;margin-top:0">Keys, menus and the command line</h1><div class="sub">Chapter 10 of the RIDE 5.17 manual</div></div><nav class="toc"><div class="t">Contents</div><ul>
+<li class="l1"><a href="#10-keys-menus-and-the-command-line">10. Keys, menus and the command line</a></li>
+<li class="l2"><a href="#every-key">Every key</a></li>
+<li class="l2"><a href="#the-mouse">The mouse</a></li>
+<li class="l2"><a href="#the-menus">The menus</a></li>
+<li class="l2"><a href="#the-command-line">The command line</a></li>
+<li class="l2"><a href="#the-three-machines">The three machines</a></li>
+<li class="l2"><a href="#building-ride-itself">Building RIDE itself</a></li>
+</ul></nav><h1 id="10-keys-menus-and-the-command-line">10. Keys, menus and the command line</h1>
+<h2 id="every-key">Every key</h2>
+<table><thead><tr><th></th><th></th><th></th><th></th></tr></thead><tbody><tr><td><code>F1</code></td><td>the keys</td><td><code>Ctrl-B</code></td><td>compile this file</td></tr><tr><td><code>F10</code></td><td>the menu</td><td><code>F5</code></td><td>run this file</td></tr><tr><td><code>F2</code> / <code>F3</code></td><td>previous / next file</td><td><code>F4</code></td><td>build the project</td></tr><tr><td><code>F9</code></td><td>breakpoint</td><td><code>F8</code></td><td>debug — start or continue</td></tr><tr><td><code>F7</code> / <code>F6</code></td><td>step over / into</td><td><code>Ctrl-D</code></td><td>debug or release</td></tr><tr><td><code>Ctrl-Up</code> / <code>Ctrl-Down</code></td><td>up / down the stack</td><td><code>Ctrl-T</code></td><td>next target</td></tr><tr><td><code>Ctrl-K</code></td><td>next compiler</td><td><code>Ctrl-L</code></td><td>line numbers</td></tr><tr><td><code>Ctrl-W</code></td><td>next pane</td><td><code>Ctrl-P</code></td><td>project pane</td></tr><tr><td><code>Ctrl-E</code></td><td>bottom panel</td><td><code>Tab</code></td><td>lay this line out</td></tr><tr><td><code>Ctrl-A</code></td><td>re-indent selection</td><td><code>Ctrl-F</code></td><td>find</td></tr><tr><td><code>Ctrl-G</code></td><td>find next</td><td><code>Ctrl-R</code></td><td>replace</td></tr><tr><td><code>Ctrl-Z</code> / <code>Ctrl-Y</code></td><td>undo / redo</td><td><code>Ctrl-S</code></td><td>save</td></tr><tr><td><code>Ctrl-C</code> / <code>Ctrl-X</code> / <code>Ctrl-V</code></td><td>copy / cut / paste</td><td><code>Ctrl-Q</code></td><td>leave</td></tr><tr><td>shift + arrows</td><td>select</td><td></td><td></td></tr></tbody></table>
+<p>In the project pane, enter opens. In the panel, left and right change tab; <strong>shift with up or down makes the panel taller or shorter</strong>, which is where shift and an arrow do nothing else; on Console, enter goes to the line the compiler named; on Debug, enter on a frame looks at it and enter on the top line goes back.</p>
+<p><strong><code>RIDE.exe</code> on Windows differs on ten keys deliberately</strong> — <code>Ctrl+PageDown</code> and <code>Ctrl+PageUp</code> move between files there, because <code>F2</code> and <code>F3</code> are Rename and Find next in a Windows application and pretending otherwise would be worse.</p>
+<h2 id="the-mouse">The mouse</h2>
+<p>The console editor takes the mouse on every machine - macOS's Terminal and iTerm, a Linux terminal or an ssh session, Windows Terminal and the Windows console. Every key above still works; the mouse is a second way in.</p>
+<ul>
+<li><strong>Menu bar</strong> - a click opens a menu, a click on an item does it, a click anywhere else closes it.</li>
+<li><strong>File tabs</strong> - a click brings that file to the front.</li>
+<li><strong>Project pane</strong> - a click picks an entry, a double click opens a file or folds a folder; a click on a folder's <code>+</code> or <code>-</code> folds it at once.</li>
+<li><strong>Gutter</strong> - a click sets or clears a breakpoint on that line.</li>
+<li><strong>Text</strong> - a click puts the cursor there, Shift-click extends the selection, a double click takes the word, a drag selects.</li>
+<li><strong>Panel</strong> - a click on Console, Debug or Assembly shows it; a double click on a line goes to the error, or to the frame.</li>
+<li><strong>Lists</strong> (Project &gt; Open and the other questions) - a click picks, a double click takes it.</li>
+<li><strong>The wheel</strong> scrolls the text, the project pane or the panel, whichever is under it.</li>
+</ul>
+<p>While RIDE has the mouse, the terminal's own text selection wants a modifier: Shift in Windows Terminal and most Linux terminals, Option in macOS's Terminal and iTerm.</p>
+<h2 id="the-menus">The menus</h2>
+<p><strong>File</strong> — New, Open, Save, Save As, Close, Next file, Previous file, Quit. <strong>Edit</strong> — Undo, Redo, Cut, Copy, Paste, Select all, Find, Find next, Find previous, Replace, Re-indent, Project pane, Bottom panel, Line numbers, Plain frame. <strong>Project</strong> — New, Open, Save, Save as, Close, then New File, Add File, Remove File. No item here repeats the word "project": the column says it. The five above the rule are the project itself; the three below are its list of files, and none of those three touches the disk except New File, which makes one. <strong>Build</strong> — Compile file, Run file, Build project, Run project, Debug, Release, Console, Debug, Assembly. <strong>Debug</strong> — Start / continue, Debug project, Toggle breakpoint, Step over, Step into, Step out, Up the stack, Down the stack, Watch expression, Stop debugging. <strong>Language</strong> — By extension, C, C++, Shalimar, JSON, Plain text. <strong>Tools</strong> — By language, c90, cpp11, shalimar, MSVC (cl), C++ (host). Ours first, then the machine's. <code>Ctrl-K</code> walks them in that order. <strong>Target</strong> — the three architectures.</p>
+<p>Those last three are one chain and sit in that order: what the file <strong>is</strong>, which <strong>compiler</strong> reads it, and which <strong>machine</strong> the output runs on. Target is the most downstream of the three, which is why it comes last. <strong>Help</strong> — Contents, Keys, About.</p>
+<h2 id="the-command-line">The command line</h2>
+<pre><code>RIDE.exe [file] [--project dir] [--toolchain auto|c90|cpp11|msvc|shalimar|c++]
+    [--config debug|release] [--c90 path] [--cpp11 path] [--cl path] [--shalimar path]
+    [--cxx path] [--c2s path] [--width n] [--tabs] [--case-indent] [--plain]</code></pre>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td><code>--toolchain</code></td><td>use one compiler for everything; it says so where it cannot take the file</td></tr><tr><td><code>--config</code></td><td><code>debug</code> (the default) or <code>release</code></td></tr><tr><td><code>--c90</code>, <code>--cpp11</code>, <code>--cl</code>, <code>--shalimar</code>, <code>--cxx</code>, <code>--c2s</code></td><td>the programs to run</td></tr><tr><td><code>--project</code></td><td>what the pane on the left shows</td></tr><tr><td><code>--width n</code></td><td>columns per indent step (4)</td></tr><tr><td><code>--tabs</code></td><td>indent with tabs instead of spaces</td></tr><tr><td><code>--case-indent</code></td><td><code>case</code> one step inside its <code>switch</code> rather than in its own column</td></tr><tr><td><code>--plain</code></td><td>frame the screen with <code>-</code>, `</td><td><code> and </code>+`</td></tr></tbody></table>
+<p><code>$C90</code>, <code>$CPP11</code>, <code>$SHALIMAR</code>, <code>$CXX</code> and <code>$C2S</code> name them when the flags do not, and a <code>c90</code>, <code>cpp11</code>, <code>shalimar</code> or <code>c2s</code> beside the editor is found before PATH is asked; <code>cl</code> is also found through Visual Studio 2022 itself, so no Developer Command Prompt is needed.</p>
+<p><strong>Settings in the project are what that project always does; anything on the command line is applied after and wins.</strong></p>
+<h2 id="the-three-machines">The three machines</h2>
+<p>RIDE is built and checked on three, and each says something the others cannot.</p>
+<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>a Mac</td><td>where it is written; <code>arm64-darwin</code> natively; clang++</td></tr><tr><td>the Linux box</td><td>real g++, which is the only thing that can say whether the sources are ISO C++14; <code>x86_64-linux</code>; the only place a C++ group goes to g++</td></tr><tr><td>the Windows box</td><td>the only machine with <code>cl</code>, and so the only one where a C and C++ target meets that linker; MSVC at <code>/W4 /WX</code></td></tr></tbody></table>
+<p><code>tools/to-linux.sh</code> and <code>tools/to-windows.sh</code> relay this working tree to the other two and build it from clean. Neither uses the checkout that may already be on those machines: a clone only has what has been pushed, and those scripts exist to check what is in front of you before it is committed.</p>
+<h2 id="building-ride-itself">Building RIDE itself</h2>
+<pre><code>make                                     the terminal editor
+make check CC1=$HOME/... SHC=$HOME/...   both suites
+build.bat check                          the same on Windows
+build.bat gui                            the window, as RIDE.exe</code></pre>
+<p>Spell those paths with <code>$HOME</code> and never <code>~</code>: make hands a literal <code>~</code> to the test process, where nothing expands it, and the build then fails with a compiler that works perfectly when you run it by hand.</p></div></body></html>

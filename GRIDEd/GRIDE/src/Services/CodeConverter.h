@@ -80,7 +80,7 @@ namespace Gride { namespace Services {
 
         static ConvertDirection DirectionFor(String^ input)
         {
-            return PathUtil::HasExtension(input, ".shl") || PathUtil::HasExtension(input, ".shm") ? ConvertDirection::ShalimarToC : ConvertDirection::CToShalimar;
+            return PathUtil::HasExtension(input, ".shl") ? ConvertDirection::ShalimarToC : ConvertDirection::CToShalimar;
         }
 
         // kalman.c -> kalman.shl ; if it exists: kalman_conv.shl

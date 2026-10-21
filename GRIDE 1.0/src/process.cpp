@@ -105,6 +105,39 @@ Process::~Process() {
 
 #ifdef _WIN32
 
+namespace {
+
+// **A program named without a directory is found as cmd found it: on PATH** (GRIDE 1.0). Started
+// without cmd, CreateProcess would look beside the editor first, where GRIDE's own link.exe is - and a
+// Debug build's "link.exe" is Microsoft's, the linker that writes a PDB. So the name is looked for on
+// PATH, which Visual Studio's folders lead (toolchain.cpp), and the line names what was found in full;
+// a name PATH does not have is left to CreateProcess.
+std::string onPathFirst(const std::string& command) {
+    std::string program, rest;
+    if (!command.empty() && command[0] == '"') {
+        const size_t close = command.find('"', 1);
+        if (close == std::string::npos) return command;
+        program = command.substr(1, close - 1);
+        rest = command.substr(close + 1);
+    } else {
+        const size_t space = command.find(' ');
+        program = command.substr(0, space);
+        rest = space == std::string::npos ? std::string() : command.substr(space);
+    }
+    if (program.empty() || program.find_first_of("\\/:") != std::string::npos) return command;
+
+    const DWORD size = GetEnvironmentVariableA("PATH", NULL, 0);
+    if (size == 0) return command;
+    std::vector<char> path(size);
+    GetEnvironmentVariableA("PATH", &path[0], size);
+    char found[MAX_PATH];
+    const DWORD n = SearchPathA(&path[0], program.c_str(), ".exe", MAX_PATH, found, NULL);
+    if (n == 0 || n >= MAX_PATH) return command;
+    return "\"" + std::string(found) + "\"" + rest;
+}
+
+}
+
 bool Process::start(const std::string& command) {
     if (running_) return false;
 
@@ -131,7 +164,9 @@ bool Process::start(const std::string& command) {
     startup.hStdOutput = childWrites;
     startup.hStdError = childWrites;
 
-    std::string line = "cmd /c \"" + command + "\"";
+    // The program itself, not through cmd: a policy may disable cmd (it does where GRIDE 1.0 was
+    // made), and the debuggers started here are a program and its quoted arguments.
+    const std::string line = onPathFirst(command);
     std::vector<char> writable(line.begin(), line.end());
     writable.push_back('\0');
 
@@ -282,7 +317,7 @@ namespace {
 // only the handles named - so a pipe made on another thread for another child is not inherited
 // and cannot hold this one's output open. Suspended until it is in the job, so nothing escapes it.
 bool launchInJob(const std::string& line, HANDLE input, HANDLE output, HANDLE errors,
-                 HANDLE& child, HANDLE& job) {
+                 HANDLE& child, HANDLE& job, const std::string& directory = std::string()) {
     job = CreateJobObjectA(NULL, NULL);
     if (job) {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
@@ -322,8 +357,8 @@ bool launchInJob(const std::string& line, HANDLE input, HANDLE output, HANDLE er
     writable.push_back('\0');
     PROCESS_INFORMATION made;
     std::memset(&made, 0, sizeof made);
-    BOOL ok = CreateProcessA(NULL, &writable[0], NULL, NULL, TRUE, flags, NULL, NULL,
-                             &startup.StartupInfo, &made);
+    BOOL ok = CreateProcessA(NULL, &writable[0], NULL, NULL, TRUE, flags, NULL,
+                             directory.empty() ? NULL : directory.c_str(), &startup.StartupInfo, &made);
     if (listed) DeleteProcThreadAttributeList(list);
     if (!ok) {
         if (job) CloseHandle(job);
@@ -352,9 +387,11 @@ bool inheritablePipe(HANDLE& reads, HANDLE& writes, bool childReads) {
 
 }
 
-// Through cmd, as popen ran it: a build's command is a shell line. The input is NUL - nothing
-// run from here may read the editor's own - and both streams go to one pipe, as 2>&1 put them.
-bool Process::startCaptured(const std::string& command) {
+// Not through cmd, which popen used and a policy may disable (GRIDE 1.0): the command is one program
+// and its quoted arguments, started in directory when one is named - runCaptured takes a line's "cd"
+// and "&&" apart. The input is NUL - nothing run from here may read the editor's own - and both
+// streams go to one pipe, as 2>&1 put them.
+bool Process::startCaptured(const std::string& command, const std::string& directory) {
     if (running_) return false;
 
     SECURITY_ATTRIBUTES inherit;
@@ -368,8 +405,7 @@ bool Process::startCaptured(const std::string& command) {
     if (!inheritablePipe(weRead, childWrites, false)) { CloseHandle(nothing); return false; }
 
     HANDLE child = NULL, job = NULL;
-    bool ok = launchInJob("cmd /c \"" + command + "\"", nothing, childWrites, childWrites,
-                          child, job);
+    bool ok = launchInJob(onPathFirst(command), nothing, childWrites, childWrites, child, job, directory);
     CloseHandle(nothing);
     CloseHandle(childWrites);
     if (!ok) { CloseHandle(weRead); return false; }
@@ -867,7 +903,7 @@ int statusOf(int raw) {
 
 }
 
-bool Process::startCaptured(const std::string& command) {
+bool Process::startCaptured(const std::string& command, const std::string& directory) {
     if (running_) return false;
 
     int nothing = open("/dev/null", O_RDONLY);
@@ -887,6 +923,7 @@ bool Process::startCaptured(const std::string& command) {
         dup2(fromChild[1], STDOUT_FILENO);
         dup2(fromChild[1], STDERR_FILENO);
         close(nothing); close(fromChild[0]); close(fromChild[1]);
+        if (!directory.empty() && chdir(directory.c_str()) != 0) _exit(127);
         execl("/bin/sh", "sh", "-c", command.c_str(), static_cast<char*>(0));
         _exit(127);
     }

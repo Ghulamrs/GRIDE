@@ -64,7 +64,7 @@ bool unreadable(const std::string& file) {
 
 }
 
-// The per-user state, ~/.ride/state.json: what was opened last and the choices
+// The per-user state, ~/.gride/state.json: what was opened last and the choices
 // made in the window. The configuration is settings.json, beside it.
 std::string fileName() {
     std::string home = path::homeDir();
@@ -131,7 +131,7 @@ bool writeAll(const Json& root) {
 
     path::makeDirectories(path::parent(where));
 
-    return replaceFile(where, root.write());
+    return replaceFile(where, root.document());
 }
 
 }
@@ -186,15 +186,17 @@ bool rememberIndent(size_t width, bool tabs) {
     return writeInstall(root);
 }
 
+void carryFormerOver();
+
 namespace {
 
 // A pointer and never a std::string: in the C++/CLI window a native global with a destructor corrupts the onexit table before main (STATUS_HEAP_CORRUPTION under register_onexit_function); `moved` above is a pointer for the same reason.
 std::string* pretended = 0;
 
-// **settings.json is the user's, in ~/.ride beside state.json, on every system** - on macOS since
-// 4.5, on Windows and Linux since 03-10-2026: Program Files and /opt are not the user's to write, and
-// the one there could not be changed. The installation's own file is the defaults the user's starts
-// from; what either names is still resolved against the installation.
+// **settings.json is the user's**: on Windows GRIDE's one file in %APPDATA%\GRIDE, which every outlook
+// shares (GRIDEx3); elsewhere in ~/.gride beside state.json. Program Files and /opt are not the user's
+// to write, and the one there could not be changed. The installation's own file is the defaults the
+// user's starts from; what either names is still resolved against the installation.
 bool perUserInstallFile() {
     return !(pretended && !pretended->empty()) && !path::homeDir().empty();
 }
@@ -202,7 +204,12 @@ bool perUserInstallFile() {
 std::string installDir() {
     if (pretended && !pretended->empty()) return *pretended;
     std::string where = path::programDirectory();
-    return where.empty() ? std::string() : path::parent(where);
+    if (where.empty()) return std::string();
+    // GRIDE 1.0: the programs, settings.json, include\, lib\ and docs\ are beside GRIDE.exe (x64\<config>, or the
+    // outlook's folder an installer made), so that folder is the installation; GRIDE's own bin\ under one still is.
+    std::string leaf = path::filename(where);
+    for (size_t i = 0; i < leaf.size(); ++i) leaf[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(leaf[i])));
+    return leaf == "bin" ? path::parent(where) : where;
 }
 
 Json readJsonFile(const std::string& file) {
@@ -231,6 +238,7 @@ std::string defaultsFile() {
 // The defaults with the user's own over them, key by key: a key the user's file has wins, and one it
 // lacks - one a later release added, say - comes from the installation.
 Json readInstall() {
+    carryFormerOver();
     Json mine = readJsonFile(installFile());
     if (!perUserInstallFile()) return mine;
     Json root = readJsonFile(defaultsFile());
@@ -243,6 +251,7 @@ Json readInstall() {
 // include/ and lib/ beside it - so that a checkout built in place, or the
 // suite driving its menus, never grows one.
 bool writeInstall(const Json& root) {
+    carryFormerOver();
     std::string file = installFile();
     if (file.empty()) return false;
     std::string base = installDir();
@@ -252,7 +261,7 @@ bool writeInstall(const Json& root) {
         return false;
     // What was read of a file that would not parse was nothing, so writing now would keep one key.
     if (unreadable(file)) return false;
-    return replaceFile(file, root.write() + "\n");
+    return replaceFile(file, root.document());
 }
 
 // A directory named in the file, made absolute against it; else the
@@ -289,12 +298,49 @@ void pretendInstalledAt(const std::string& directory) {
     *pretended = directory;
 }
 
+#ifdef _WIN32
+namespace {
+
+// %APPDATA%\GRIDE - the folder of GRIDE's one settings.json, whichever outlook is installed (GRIDEx3).
+std::string appDataGride() {
+    const char* appData = std::getenv("APPDATA");
+    if (appData && *appData) return path::join(appData, product::kName);
+    return path::join(path::join(path::join(path::homeDir(), "AppData"), "Roaming"), product::kName);
+}
+
+// Where White kept the user's file before GRIDEx3: C:\Users\<you>\GRIDE 1.0\settings.json.
+std::string formerInstallFile() {
+    return path::join(path::join(path::homeDir(), std::string(product::kName) + " " + about::version()), "settings.json");
+}
+
+}
+#endif
+
+// **The file of the former place is carried over once** (GRIDEx3): each key it holds that settings.json
+// lacks goes in - the keys Black and Grey keep there stay as they are - and then the former file goes,
+// and its folder with it when nothing else is in it.
+void carryFormerOver() {
+#ifdef _WIN32
+    if (!perUserInstallFile()) return;
+    const std::string former = formerInstallFile(), now = installFile();
+    if (!path::exists(former) || path::same(former, now)) return;
+    Json old = readJsonFile(former);
+    Json root = readJsonFile(now);
+    for (size_t i = 0; i < old.size(); ++i)
+        if (!root.has(old.keyAt(i))) root.set(old.keyAt(i), old.valueAt(i));
+    path::makeDirectories(path::parent(now));
+    if (unreadable(now) || !replaceFile(now, root.document())) return;
+    path::remove(former);
+    if (path::entries(path::parent(former)).empty()) path::removeTree(path::parent(former));
+#endif
+}
+
 std::string installFile() {
 #ifdef _WIN32
-    // On Windows in a folder the user can see and open, named for the release: C:\Users\<you>\RIDE 5.17.
+    // GRIDE's one settings.json, in %APPDATA%\GRIDE (GRIDEx3): White's keys beside Black's and Grey's,
+    // whose names never meet White's; each outlook keeps the others' keys when it writes.
     if (perUserInstallFile())
-        return path::join(path::join(path::homeDir(), std::string(product::kName) + " " + about::version()),
-                          "settings.json");
+        return path::join(appDataGride(), "settings.json");
 #endif
     if (perUserInstallFile())
         return path::join(path::join(path::homeDir(), product::kStateDirectory), "settings.json");
@@ -575,8 +621,8 @@ bool rememberCcsProjectState(const std::string& dir, const Json& state) {
 
 #ifdef _WIN32
 namespace {
-// The newest earlier release's settings.json in the home directory - C:\Users\<you>\RIDE 4.7 before
-// RIDE 5.17, say - so that a new release starts from what the user had chosen. Versions read as
+// The newest earlier release's settings.json in the home directory - C:\Users\<you>\GRIDE 1.0 before
+// GRIDE 1.0, say - so that a new release starts from what the user had chosen. Versions read as
 // decimals, which is how this product's ran: 4.5, 4.51, 4.7, 5.0, 5.1, 5.12, 5.13, 5.14, 5.15, 5.16, 5.17. Empty when there is none.
 std::string earlierReleaseFile() {
     std::string home = path::homeDir();

@@ -165,10 +165,27 @@ std::string quoted(const std::string& s) {
             case '\n': out += "\\n";  break;
             case '\t': out += "\\t";  break;
             case '\r': out += "\\r";  break;
-            default:   out += c;      break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char u[8];
+                    std::snprintf(u, sizeof u, "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
+                    out += u;
+                } else {
+                    out += c;
+                }
+                break;
         }
     }
     return out + "\"";
+}
+
+// Characters, not bytes: a UTF-8 continuation byte is part of the character before it. The 90-character line a
+// list may take is counted as Black and Grey count it.
+size_t characters(const std::string& s) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.size(); ++i)
+        if ((static_cast<unsigned char>(s[i]) & 0xC0) != 0x80) ++n;
+    return n;
 }
 
 }
@@ -267,6 +284,15 @@ void Json::set(const std::string& key, const Json& value) {
     members_.push_back(std::make_pair(key, value));
 }
 
+void Json::remove(const std::string& key) {
+    for (size_t i = 0; i < members_.size(); ++i) {
+        if (members_[i].first == key) {
+            members_.erase(members_.begin() + static_cast<long>(i));
+            return;
+        }
+    }
+}
+
 Json Json::parse(const std::string& text, std::string& error) {
     Reader reader(text);
     Json out;
@@ -286,41 +312,69 @@ Json Json::parse(const std::string& text, std::string& error) {
     return out;
 }
 
+const char* Json::lineEnd() {
+#ifdef _WIN32
+    return "\r\n";
+#else
+    return "\n";
+#endif
+}
+
+std::string Json::document() const {
+    return write() + lineEnd();
+}
+
 std::string Json::write(int depth) const {
     std::string pad(static_cast<size_t>(depth) * 2, ' ');
     std::string inner(static_cast<size_t>(depth + 1) * 2, ' ');
+    const std::string nl = lineEnd();
 
     switch (type_) {
         case Null:   return "null";
         case Bool:   return bool_ ? "true" : "false";
         case String: return quoted(text_);
         case Number: {
-            char buffer[32];
+            char buffer[40];
 
-            if (number_ == static_cast<double>(static_cast<long>(number_)))
+            if (number_ == static_cast<double>(static_cast<long>(number_))) {
                 std::snprintf(buffer, sizeof buffer, "%ld", static_cast<long>(number_));
-            else
-                std::snprintf(buffer, sizeof buffer, "%g", number_);
+            } else {
+                // The shortest that reads back the same, as Black's and Grey's "R" writes it: 15 digits, else 17.
+                std::snprintf(buffer, sizeof buffer, "%.15g", number_);
+                if (std::strtod(buffer, 0) != number_) std::snprintf(buffer, sizeof buffer, "%.17g", number_);
+            }
             return buffer;
         }
         case Array: {
             if (items_.empty()) return "[]";
-            std::string out = "[\n";
+            bool plain = true;
+            for (size_t i = 0; i < items_.size() && plain; ++i)
+                plain = !items_[i].is(Array) && !items_[i].is(Object);
+            if (plain) {
+                std::string line = "[";
+                for (size_t i = 0; i < items_.size(); ++i) {
+                    if (i > 0) line += ", ";
+                    line += items_[i].write(0);
+                }
+                line += "]";
+                if (characters(line) <= 90) return line;
+            }
+            std::string out = "[" + nl;
             for (size_t i = 0; i < items_.size(); ++i) {
                 out += inner + items_[i].write(depth + 1);
                 if (i + 1 < items_.size()) out += ",";
-                out += "\n";
+                out += nl;
             }
             return out + pad + "]";
         }
         case Object: {
             if (members_.empty()) return "{}";
-            std::string out = "{\n";
+            std::string out = "{" + nl;
             for (size_t i = 0; i < members_.size(); ++i) {
                 out += inner + quoted(members_[i].first) + ": " +
                        members_[i].second.write(depth + 1);
                 if (i + 1 < members_.size()) out += ",";
-                out += "\n";
+                out += nl;
             }
             return out + pad + "}";
         }

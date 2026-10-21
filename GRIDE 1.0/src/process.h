@@ -28,7 +28,9 @@ public:
     // Two more ways to start, each taking the child into a group of its own (a job on Windows) so
     // kill() ends it and whatever it started: a command whose output is kept, with no input and
     // its two streams as one; and a program a person talks to, with a real input. README.md, "Input".
-    bool startCaptured(const std::string& command);
+    // On Windows a command is one program and its quoted arguments, started in directory when one
+    // is named - there is no cmd (runCaptured runs a line's "cd" and "&&" itself); elsewhere a shell line.
+    bool startCaptured(const std::string& command, const std::string& directory = std::string());
     bool startInteractive(const std::string& command);
 
     // Bytes to an interactive child's input, as they are; the end of that input.

@@ -655,7 +655,7 @@ namespace Gride { namespace Model {
             for each (XmlNode^ r in project->SelectNodes("/projectDescription/projects/project"))
                 if (r->InnerText->Trim()->Length > 0) out->References->Add(r->InnerText->Trim());
             for each (String^ r in out->References)
-                out->Notes->Add("depends on project " + r + ", which RIDE does not build - build it in CCS, or open it in RIDE first");
+                out->Notes->Add("depends on project " + r + ", which GRIDE does not build - build it in CCS, or open it in GRIDE first");
 
             out->Device = Attr(ccsproject->SelectSingleNode("//deviceVariant"), "value");
             out->Family = Attr(ccsproject->SelectSingleNode("//deviceFamily"), "value");
@@ -668,14 +668,14 @@ namespace Gride { namespace Model {
             // only the C674x: the C6747 is what the toolchain is built for; GRIDEd notes and reads on
             if (out->Family != cd->DeviceFamily || !out->Device->Contains(cd->DeviceVariant))
                 out->Refusals->Add(out->Name + " is for " + (out->Device->Length == 0 ? "an unnamed device" : out->Device) +
-                                   (out->Family->Length == 0 ? String::Empty : " (" + out->Family + ")") + ", and RIDE builds only C6000 C674x/C6747 projects");
-            if (!out->Elf) out->Refusals->Add(out->Name + " builds COFF, and RIDE's C6000 toolchain makes ELF only");
-            if (endianness == "big") out->Refusals->Add(out->Name + " is big-endian, and RIDE's C6000 toolchain is little-endian only");
+                                   (out->Family->Length == 0 ? String::Empty : " (" + out->Family + ")") + ", and GRIDE builds only C6000 C674x/C6747 projects");
+            if (!out->Elf) out->Refusals->Add(out->Name + " builds COFF, and GRIDE's C6000 toolchain makes ELF only");
+            if (endianness == "big") out->Refusals->Add(out->Name + " is big-endian, and GRIDE's C6000 toolchain is little-endian only");
 
             out->CgToolRoot = CgToolRootFor(ccsRootSetting, out->CgtVersion);
             CcsOptionDefs^ defs = gcnew CcsOptionDefs();
             String^ why;
-            if (!defs->Load(out->CgtVersion, why)) out->Notes->Add(why + "; options CCS left unstored take RIDE's defaults");
+            if (!defs->Load(out->CgtVersion, why)) out->Notes->Add(why + "; options CCS left unstored take GRIDE's defaults");
             out->DefinitionsFile = defs->File;
 
             // .project: the linked resources - a file, or a folder walked like the project's own
@@ -708,7 +708,7 @@ namespace Gride { namespace Model {
                 String^ parent = Attr(configuration, "parent");
                 if (parent->EndsWith(".Debug") || (parent->Length == 0 && config->Name == "Debug")) config->IsDebug = true;
                 else if (parent->EndsWith(".Release") || (parent->Length == 0 && config->Name == "Release")) config->IsDebug = false;
-                else { out->Notes->Add("configuration " + config->Name + " is neither Debug nor Release, and RIDE builds those two"); continue; }
+                else { out->Notes->Add("configuration " + config->Name + " is neither Debug nor Release, and GRIDE builds those two"); continue; }
                 if (out->Config(config->IsDebug) != nullptr) { out->Notes->Add("configuration " + config->Name + " is a second " + (config->IsDebug ? "Debug" : "Release") + " one, and the first is taken"); continue; }
 
                 for each (XmlNode^ m in cc->SelectNodes(".//stringMacro"))
@@ -726,10 +726,10 @@ namespace Gride { namespace Model {
                 if (tags != nullptr)
                     for each (String^ tag in tags->Items)
                     {
-                        if (tag == "OUTPUT_FORMAT=COFF") out->Refusals->Add(out->Name + " (" + config->Name + ") builds COFF, and RIDE's C6000 toolchain makes ELF only");
-                        else if (tag == "DEVICE_ENDIANNESS=big") out->Refusals->Add(out->Name + " (" + config->Name + ") is big-endian, and RIDE's C6000 toolchain is little-endian only");
+                        if (tag == "OUTPUT_FORMAT=COFF") out->Refusals->Add(out->Name + " (" + config->Name + ") builds COFF, and GRIDE's C6000 toolchain makes ELF only");
+                        else if (tag == "DEVICE_ENDIANNESS=big") out->Refusals->Add(out->Name + " (" + config->Name + ") is big-endian, and GRIDE's C6000 toolchain is little-endian only");
                         else if (tag->StartsWith("OUTPUT_TYPE=") && tag != "OUTPUT_TYPE=executable")
-                            out->Notes->Add(config->Name + " builds " + tag->Substring(12) + ", and RIDE builds an executable of it");
+                            out->Notes->Add(config->Name + " builds " + tag->Substring(12) + ", and GRIDE builds an executable of it");
                     }
                 XmlNode^ compilerTool = ToolNamed(toolChain, ".compiler");
                 XmlNode^ linkerTool = ToolNamed(toolChain, ".linker");
@@ -738,17 +738,17 @@ namespace Gride { namespace Model {
                 CcsStored^ silicon = Stored(compiler, "compilerID.SILICON_VERSION");
                 if (silicon != nullptr)
                 {
-                    // CCS stores the core as a string; a project written with it enumerated (the ImuDriver of the INS_Suite test fixture) means its suffix
+                    // CCS stores the core as a string; a project written with it enumerated (as one of the CCS test projects is) means its suffix
                     String^ core = silicon->Value->StartsWith("com.ti.") ? CcsOptionDefs::EnumSuffix(String::Empty, silicon->Value) : silicon->Value;
                     if (core != cd->SiliconVersion)
-                        out->Refusals->Add(out->Name + " (" + config->Name + ") is built for -mv" + core + ", and RIDE's C6000 toolchain is the C674x's (-mv" + cd->SiliconVersion + ")");
+                        out->Refusals->Add(out->Name + " (" + config->Name + ") is built for -mv" + core + ", and GRIDE's C6000 toolchain is the C674x's (-mv" + cd->SiliconVersion + ")");
                 }
                 CcsStored^ abi = Stored(compiler, "compilerID.ABI");
                 if (abi != nullptr && CcsOptionDefs::EnumSuffix(String::Empty, abi->Value) == "coffabi")
-                    out->Refusals->Add(out->Name + " (" + config->Name + ") uses the COFF ABI, and RIDE's C6000 toolchain makes ELF only");
+                    out->Refusals->Add(out->Name + " (" + config->Name + ") uses the COFF ABI, and GRIDE's C6000 toolchain makes ELF only");
                 CcsStored^ big = Stored(compiler, "compilerID.BIG_ENDIAN");
                 if (big != nullptr && big->Value == "true")
-                    out->Refusals->Add(out->Name + " (" + config->Name + ") is big-endian, and RIDE's C6000 toolchain is little-endian only");
+                    out->Refusals->Add(out->Name + " (" + config->Name + ") is big-endian, and GRIDE's C6000 toolchain is little-endian only");
 
                 out->MapConfig(compiler, linker, defs, config);
                 for each (XmlNode^ fi in configuration->SelectNodes(".//fileInfo")) PerFileOptions(fi, compiler, defs, config);
@@ -791,9 +791,9 @@ namespace Gride { namespace Model {
             if (config == nullptr) return head + ": no " + (debug ? "Debug" : "Release") + " configuration in it";
             head += " (" + config->Name + "): ";
             String^ said = config->Unsupported->Count == 0 ? "no unsupported options"
-                         : String::Format("{0} {1} not supported, using RIDE's defaults: {2}", config->Unsupported->Count,
+                         : String::Format("{0} {1} not supported, using GRIDE's defaults: {2}", config->Unsupported->Count,
                                           config->Unsupported->Count == 1 ? "option" : "options", String::Join(", ", config->Unsupported));
-            if (config->OwnInstead->Count > 0) said += "; RIDE's own instead of: " + String::Join(", ", config->OwnInstead);
+            if (config->OwnInstead->Count > 0) said += "; GRIDE's own instead of: " + String::Join(", ", config->OwnInstead);
             return head + said;
         }
 
@@ -804,7 +804,7 @@ namespace Gride { namespace Model {
             for each (String^ l in Linked) if (!System::IO::File::Exists(l)) gone->Add(l);
             String^ said = String::Empty;
             if (gone->Count > 0) said += "linked " + (gone->Count == 1 ? "file" : "files") + " not on this machine: " + String::Join(", ", gone);
-            if (NotBuilt->Count > 0) said += (said->Length == 0 ? String::Empty : "; ") + "not built by RIDE: " + String::Join(", ", NotBuilt);
+            if (NotBuilt->Count > 0) said += (said->Length == 0 ? String::Empty : "; ") + "not built by GRIDE: " + String::Join(", ", NotBuilt);
             for each (String^ n in Notes) said += (said->Length == 0 ? String::Empty : "; ") + n;
             return said->Length == 0 ? said : "CCS project " + Name + ": " + said;
         }
@@ -816,14 +816,14 @@ namespace Gride { namespace Model {
             StringBuilder^ text = gcnew StringBuilder();
             text->Append("CCS project " + Name + ", read from " + Dir + "\n");
             text->Append("device " + Device + ", compiler " + CgtVersion + (CcsVersion->Length == 0 ? " (CCS 5.5)" : " (CCS " + CcsVersion + ")") + "\n");
-            for each (String^ r in Refusals) text->Append("RIDE would refuse this project: " + r + "\n");
+            for each (String^ r in Refusals) text->Append("GRIDE would refuse this project: " + r + "\n");
             if (config == nullptr) return text->ToString() + "no " + (debug ? "Debug" : "Release") + " configuration\n";
-            text->Append("\n" + config->Name + " - what CCS set, and what RIDE builds with:\n");
+            text->Append("\n" + config->Name + " - what CCS set, and what GRIDE builds with:\n");
             for each (String^ m in config->Mapped) text->Append("  " + m + "\n");
             if (config->Link->CmdFiles->Count > 0) text->Append("  linker command file: " + String::Join(", ", config->Link->CmdFiles) + "\n");
             if (config->Unsupported->Count > 0)
             {
-                text->Append("\nnot supported, RIDE's defaults instead:\n");
+                text->Append("\nnot supported, GRIDE's defaults instead:\n");
                 for each (String^ u in config->Unsupported) text->Append("  " + u + "\n");
             }
             if (config->OwnInstead->Count > 0)
@@ -903,7 +903,7 @@ namespace Gride { namespace Model {
             return nullptr;
         }
         // the linker tool is the one whose superClass says so; the compiler the same. A hand-made project
-        // (the ImuDriver of the INS_Suite test fixture) may leave superClass out: then the id, else the tool's name, says it
+        // (as one of the CCS test projects is) may leave superClass out: then the id, else the tool's name, says it
         static XmlNode^ ToolNamed(XmlNode^ toolChain, String^ word)
         {
             for each (XmlNode^ t in toolChain->SelectNodes("tool"))
@@ -1031,7 +1031,7 @@ namespace Gride { namespace Model {
                         AddUnique(out->Includes, d);
                     }
                     out->Mapped->Add(flag + " -> -I" + String::Join(" -I", out->Includes) +
-                                     (dropped->Count == 0 ? String::Empty : " (" + String::Join(", ", dropped) + " is the compiler's own: RIDE's headers instead)"));
+                                     (dropped->Count == 0 ? String::Empty : " (" + String::Join(", ", dropped) + " is the compiler's own: GRIDE's headers instead)"));
                 }
                 else if (t == "compilerID.NO_COMPRESS")
                 {
@@ -1051,7 +1051,7 @@ namespace Gride { namespace Model {
                 if (level == "off" || level == "0") out->Opt = "-O0";
                 else if (level == "1") out->Opt = "-O1";
                 else if (level == "2" || level == "3") out->Opt = "-O2";
-                out->Mapped->Add(level->Length == 0 ? "optimization not set in CCS -> RIDE's default" : "-O" + level + " (CCS's default for " + out->Name + ") -> " + out->Opt);
+                out->Mapped->Add(level->Length == 0 ? "optimization not set in CCS -> GRIDE's default" : "-O" + level + " (CCS's default for " + out->Name + ") -> " + out->Opt);
             }
 
             out->Link->Given = true;
@@ -1073,7 +1073,7 @@ namespace Gride { namespace Model {
                         AddUnique(out->Link->SearchPaths, d);
                     }
                     out->Mapped->Add(flag + " -> -i " + String::Join(" -i ", out->Link->SearchPaths) +
-                                     (dropped->Count == 0 ? String::Empty : " (" + String::Join(", ", dropped) + " is the compiler's own: RIDE's runtime directory instead)"));
+                                     (dropped->Count == 0 ? String::Empty : " (" + String::Join(", ", dropped) + " is the compiler's own: GRIDE's runtime directory instead)"));
                 }
                 else if (t == "linkerID.LIBRARY")
                 {

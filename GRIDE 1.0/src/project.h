@@ -94,7 +94,7 @@ public:
     std::vector<std::string> absoluteTargetArgs() const;
     void setTargetArgs(const std::vector<std::string>& args) { target_.args = args; }
     // The program's command line as one line of text - an argument with a space in it in quotes - and back:
-    // kept in the .pro, or for a CCS project in RIDE's own state, never in CCS's files.
+    // kept in the .pro, or for a CCS project in GRIDE's own state, never in CCS's files.
     std::string argumentsText() const;
     bool rememberArguments(const std::string& line, std::string& error);
     static std::vector<std::string> splitArguments(const std::string& line);
@@ -128,7 +128,7 @@ public:
     void setCompilerOptions(const options::Store& store) { options_ = store; }
 
     // **A CCS project opened as it is** (ccs/ccsproject.h): read afresh at every open and every
-    // build, never written - save() keeps RIDE's own state in settings.json - and its options
+    // build, never written - save() keeps GRIDE's own state in settings.json - and its options
     // read-only. isCcs() says so; the rest answer what was read.
     bool isCcs() const { return ccs_; }
     // The CCS workspace the project was opened from through <workspace>/<project>.pro, or "".
@@ -144,14 +144,6 @@ public:
     bool rememberConfiguration(Configuration config);
     // Reads the three CCS files again; a .pro project is left as it is. False, with the reason, when they no longer read.
     bool reloadIfCcs(std::string& error);
-
-    // **A GRIDE project opened as it is**: GRIDEd's .pro ("gride", "folders") or GRIDE 2.0's
-    // ("formatVersion", "sourceFiles"). Its .pro is never rewritten: save() keeps RIDE's own state -
-    // the open file, the arguments, the target - in settings.json, as for a CCS project, and refuses
-    // a change to its files; Save As makes a RIDE project of it.
-    bool isGride() const { return gride_; }
-    // Whose project it is when isGride(): "GRIDE" or "Visual Studio".
-    const std::string& foreignKind() const { return foreign_; }
 
     void setIndent(const IndentStyle& style) { indent_ = style; indentSaid_ = true; }
     void setToolchain(ToolchainKind kind) { toolchain_ = kind; }
@@ -197,20 +189,16 @@ private:
     // installation's settings.json answers and nothing is written.
     bool indentSaid_ = false;
     options::Store options_;
+    // **The file as it was read** (2026-10-20): the .pro is the one format of the three outlooks, and
+    // what Black and Grey keep in it beside White's keys (their configurations, language ...) is
+    // written back as read.
+    Json read_;
     bool ccs_ = false;
     ccs::Reading ccsReading_;
     std::string ccsWorkspace_;
     bool loadCcs(const std::string& dir, std::string& error, const std::string& workspace = std::string());
     // A .pro of one CCS workspace project: { "ccs": { "workspace": ".", "project": "<name>" } }.
     bool loadWorkspacePro(const std::string& pro, const Json& ccs, std::string& error);
-    bool gride_ = false;
-    // The GRIDE project's files and build as read, to tell RIDE's own state from a change to them.
-    std::string grideShape_;
-    bool loadGride(const Json& root, const std::string& pro, const std::string& dir, std::string& error);
-    std::string shape() const;
-    std::string foreign_;
-    bool loadVs(const std::string& file, std::string& error);
-    void finishForeign(const char* kind);
 };
 
 }

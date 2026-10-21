@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 //  GdbDebugger.h - RIDE's debugger core (src/debugger.cpp) for GRIDEd
 //
 //    DebuggerKind     lldb, gdb, cdb, and the C6x kind: vm6747 --debug and sim6747
@@ -1080,91 +1080,19 @@ namespace Gride { namespace Services {
         virtual List<DebugVariable^>^ Locals() override
         {
             if (state != DebugState::Break) return gcnew List<DebugVariable^>();
-            if (dialect == DebuggerKind::Cdb)
-            {
-                List<DebugVariable^>^ vars = DebugTranscript::ReadVariables(dialect, Ask(session->Command("locals")), session->Marker);
-                // a Shalimar array: cdb shows the pointer to the runtime's record; its contents are read here
-                for each (DebugVariable^ v in vars)
-                    if (ShalimarArrayType(v->Type))
-                    {
-                        UInt64 at;
-                        if (HexValue(v->Value, at)) v->Value = ShalimarArray(at, ShalimarRank(v->Type), ShalimarScalar(v->Type), 0);
-                    }
-                return vars;
-            }
+            if (dialect == DebuggerKind::Cdb) return DebugTranscript::ReadVariables(dialect, Ask(session->Command("locals")), session->Marker);
             if (dialect == DebuggerKind::Lldb) return DebugTranscript::ReadVariables(dialect, Ask(session->Command("locals")), session->Marker);
             // gdb lists no addresses, so each variable is asked where it is
             List<DebugVariable^>^ found = gcnew List<DebugVariable^>();
             if (session->Has("args")) found->AddRange(DebugTranscript::ReadVariables(dialect, Ask(session->Command("args")), session->Marker));
             found->AddRange(DebugTranscript::ReadVariables(dialect, Ask(session->Command("locals")), session->Marker));
-            for each (DebugVariable^ v in found)
-            {
-                v->Address = AddressOf(v->Name);
-                // sim6747 and vm6747 know each variable's type from the compilers' .dwtag: whatis says it
-                if (kind == DebuggerKind::C6x && String::IsNullOrEmpty(v->Type)) v->Type = TypeOf(v->Name);
-            }
+            for each (DebugVariable^ v in found) v->Address = AddressOf(v->Name);
             return found;
-        }
-
-        // ---- Shalimar's arrays on Windows: a pointer to the runtime's {int32 count, int32 element, data} (x64:
-        //      data at +8), cdb's type "struct real[][] *"; a row of a 2-D array is a pointer to another record ----
-        static bool ShalimarArrayType(String^ type)
-        {
-            if (String::IsNullOrEmpty(type)) return false;
-            String^ t = type->Replace(" ", "");
-            return t->EndsWith("[]*") && (t->StartsWith("structreal[]") || t->StartsWith("structint[]") || t->StartsWith("structchar[]"));
-        }
-        static int ShalimarRank(String^ type)
-        {
-            int rank = 0;
-            for (int i = type->IndexOf("[]"); i >= 0; i = type->IndexOf("[]", i + 2)) rank++;
-            return rank;
-        }
-        static String^ ShalimarScalar(String^ type)
-        {
-            String^ t = type->Replace("struct", "")->Trim();
-            return t->Substring(0, t->IndexOf(L'['))->Trim();
-        }
-        static bool HexValue(String^ s, UInt64% value)
-        {
-            String^ a = DebugTranscript::AddressIn(s == nullptr ? String::Empty : s);
-            value = 0;
-            return a->Length > 2 && UInt64::TryParse(a->Substring(2), System::Globalization::NumberStyles::HexNumber, System::Globalization::CultureInfo::InvariantCulture, value);
-        }
-        // {1, 2, 0} - or {{...}, {...}} a rank deeper - as the C6747's simulators print the same array
-        String^ ShalimarArray(UInt64 record, int rank, String^ scalar, int depth)
-        {
-            if (record == 0) return "0x0";
-            array<Byte>^ head = ReadMemory(record, 16);
-            if (head->Length < 16 || depth > 4) return "{...}";
-            int count = BitConverter::ToInt32(head, 0);
-            UInt64 data = BitConverter::ToUInt64(head, 8);
-            if (count < 0) count = 0;
-            int shown = Math::Min(count, 100);
-            if (rank == 1 && scalar == "char")
-            {
-                array<Byte>^ b = ReadMemory(data, Math::Max(shown, 1));
-                System::Text::StringBuilder^ s = gcnew System::Text::StringBuilder("\"");
-                for (int i = 0; i < b->Length && i < count && b[i] != 0; i++) s->Append(b[i] >= 32 && b[i] < 127 ? (wchar_t)b[i] : L'?');
-                return s->Append("\"")->ToString();
-            }
-            int size = rank > 1 ? 8 : scalar == "real" ? 8 : 4;
-            array<Byte>^ body = shown == 0 ? gcnew array<Byte>(0) : ReadMemory(data, shown * size);
-            System::Text::StringBuilder^ out = gcnew System::Text::StringBuilder("{");
-            for (int i = 0; i < shown && (i + 1) * size <= body->Length; i++)
-            {
-                if (i > 0) out->Append(", ");
-                if (rank > 1) out->Append(ShalimarArray(BitConverter::ToUInt64(body, i * size), rank - 1, scalar, depth + 1));
-                else if (scalar == "real") out->Append(BitConverter::ToDouble(body, i * size).ToString("G6", System::Globalization::CultureInfo::InvariantCulture));
-                else out->Append(BitConverter::ToInt32(body, i * size));
-            }
-            if (count > shown) out->Append("...");
-            return out->Append("}")->ToString();
         }
 
         virtual String^ WhyNoLocals() override
         {
-            if (kind == DebuggerKind::C6x) return "no locals here: a Debug build (-g) names each function's variables - this function has none, or was built without -g";
+            if (kind == DebuggerKind::C6x) return "no locals: the emulator has none - the assembly carries no variable information";
             return String::Empty;
         }
 
@@ -1234,7 +1162,7 @@ namespace Gride { namespace Services {
             return DebugTranscript::ReadRegisters(dialect, Ask(session->Command("registers")), session->Marker);
         }
 
-        virtual array<Byte>^ ReadMemory(UInt64 address, int length) override
+        virtual array<Byte>^ ReadMemory(UInt32 address, int length) override
         {
             if (state != DebugState::Break || !session->Has("memory")) return gcnew array<Byte>(0);
             String^ said = Ask(session->Command("memory")->Replace("$(Count)", length.ToString())->Replace("$(Address)", String::Format("0x{0:x}", address)));
@@ -1322,8 +1250,25 @@ namespace Gride { namespace Services {
             {
                 if (state != DebugState::Running) state = DebugState::Running;
                 DebugStop^ origin = last;
-                DebugStop^ stop = commandId == "stepInto" && dialect == DebuggerKind::Cdb ? CdbStepInto(origin)
-                                : stepping ? AfterStepping(commandId) : AfterMoving(commandId);
+                DebugStop^ stop = stepping ? AfterStepping(commandId) : AfterMoving(commandId);
+                // an incrementally linked program calls through a thunk (cdemo!ILT+5725(printf)): one
+                // more step reaches the function itself
+                String^ fresh = stop->Said;
+                for (int thunk = 0; thunk < 4 && commandId == "stepInto" && dialect == DebuggerKind::Cdb &&
+                                    !stop->Stopped && !stop->Exited && fresh->Contains("!ILT+"); thunk++)
+                {
+                    String^ said = stop->Said;
+                    stop = AfterMoving(commandId);
+                    fresh = stop->Said;
+                    stop->Said = said + "\n" + stop->Said;
+                }
+                if (commandId == "stepInto" && dialect == DebuggerKind::Cdb && stop->Stopped && AtFunctionEntry(stop->Said))
+                {
+                    DebugStop^ first = AfterStepping("stepOver");
+                    first->Said = stop->Said + "\n" + first->Said;
+                    stop = first;
+                }
+                if (commandId == "stepInto" && dialect == DebuggerKind::Cdb) stop = OutOfNoSource(stop, origin);
                 Announce(stop);
                 return stop;
             }
@@ -1391,73 +1336,22 @@ namespace Gride { namespace Services {
             try { return File::Exists(ResolveFile(stop->File)); } catch (Exception^) { return false; }
         }
 
-        static bool SamePlace(DebugStop^ a, DebugStop^ b)
+        DebugStop^ OutOfNoSource(DebugStop^ stop, DebugStop^ origin)
         {
-            return a != nullptr && b != nullptr && a->Stopped && b->Stopped && a->Line == b->Line &&
-                   String::Compare(Path::GetFileName(a->File), Path::GetFileName(b->File), true) == 0;
-        }
-
-        // the source line cdb echoes at a stop (">   16: Shape *make_rect(...) { return ...; }")
-        static String^ EchoedLine(String^ said)
-        {
-            array<String^>^ all = DebugTranscript::Lines(said);
-            for (int i = all->Length - 1; i >= 0; i--)
+            if (stop->Exited || HasSource(stop)) return stop;
+            String^ said = stop->Said;
+            for (int up = 0; up < 8 && !stop->Exited && !HasSource(stop); up++)
             {
-                String^ bare = DebugTranscript::WithoutPrompt(all[i])->Trim();
-                if (!bare->StartsWith(">")) continue;
-                int colon = bare->IndexOf(L':');
-                if (colon > 1) return bare->Substring(colon + 1);
+                if (proc == nullptr || !proc->Running) break;
+                stop = AfterMoving("stepOut");
+                said += "\n" + stop->Said;
             }
-            return String::Empty;
-        }
-
-        // cdb's Step Into as Visual Studio does it: each call on the line is entered in turn; one
-        // with no source here (an incremental-link thunk's target in the CRT, Shalimar's shm_line,
-        // printf) is stepped back out of, and the step ends in the first function with source, or
-        // on the next line when the line has none
-        DebugStop^ CdbStepInto(DebugStop^ origin)
-        {
-            String^ said = String::Empty;
-            DebugStop^ stop = gcnew DebugStop();
-            for (int call = 0; call < 24; call++)
+            // back on the line the step began from, part way through it: finish it
+            if (HasSource(stop) && origin != nullptr && origin->Stopped && stop->Line == origin->Line &&
+                String::Compare(Path::GetFileName(stop->File), Path::GetFileName(origin->File), true) == 0)
             {
-                stop = AfterMoving("stepInto");
-                String^ fresh = stop->Said;
-                said += "\n" + fresh;
-                // an incrementally linked program calls through a thunk (cdemo!ILT+11090(greet)): it has no
-                // frame of its own, so stepping out of it would run the whole call - one more step reaches
-                // the function itself
-                for (int thunk = 0; thunk < 4 && !stop->Stopped && !stop->Exited && fresh->Contains("!ILT+"); thunk++)
-                {
-                    stop = AfterMoving("stepInto");
-                    fresh = stop->Said;
-                    said += "\n" + fresh;
-                }
-                if (stop->Exited || proc == nullptr || !proc->Running) break;
-                if (HasSource(stop))
-                {
-                    if (SamePlace(stop, origin) && stop->Function == origin->Function) continue;
-                    // at a function's entry its prologue is stepped past, unless the whole body is on
-                    // the entry line (make_rect's "{ return new Rect(w, h); }"): stepping would run it
-                    String^ echoed = EchoedLine(fresh);
-                    int brace = echoed->IndexOf(L'{');
-                    bool oneLine = brace >= 0 && echoed->Substring(brace + 1)->Trim()->Length > 0;
-                    if (AtFunctionEntry(fresh) && !oneLine)
-                    {
-                        stop = AfterStepping("stepOver");
-                        said += "\n" + stop->Said;
-                    }
-                    break;
-                }
-                // no source here: back out to a frame with source
-                for (int up = 0; up < 8 && !stop->Exited && !HasSource(stop) && proc != nullptr && proc->Running; up++)
-                {
-                    stop = AfterMoving("stepOut");
-                    said += "\n" + stop->Said;
-                }
-                if (stop->Exited || !HasSource(stop)) break;
-                // back part way through the line the step began on: enter its next call
-                if (!SamePlace(stop, origin)) break;
+                stop = AfterStepping("stepOver");
+                said += "\n" + stop->Said;
             }
             stop->Said = said;
             return stop;
@@ -1491,16 +1385,6 @@ namespace Gride { namespace Services {
                 ReadWatches();
                 Print(DebugTranscript::StopLine(file, stop->Line, stop->Function));
                 StopAt(file, stop->Line, stop->Said->Contains("Breakpoint") || stop->Said->Contains("breakpoint") ? "breakpoint" : "step", stop->Function);
-                return;
-            }
-            // cdb answered and the program is still there, stopped where there is no line to show (a
-            // Step Out from main into the runtime): the session goes on, F5 or Shift+F11 carry on from it
-            if (!stop->Exited && dialect == DebuggerKind::Cdb && proc != nullptr && proc->Running)
-            {
-                Print("stopped where there is no source to show - F5 continues, Shift+F11 steps out");
-                ReadWatches();
-                location = nullptr;
-                SetState(DebugState::Break);
                 return;
             }
             exited = stop->Exited;

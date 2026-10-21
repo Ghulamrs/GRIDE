@@ -744,8 +744,8 @@ namespace Gride { namespace Settings {
                 else
                 {
                     PathUtil::EnsureDirectory(Path::GetDirectoryName(UserFile));
+                    // Settings only: what the file is and how it overrides is the Help's to say (Settings_Files.html).
                     if (!UserJson->Has("format")) UserJson->SetNumber("format", Format > 0 ? Format : 1);
-                    if (!UserJson->Has("description")) UserJson->SetString("description", "the user's overrides of the shipped " + FileName + ": a field named here wins, every other field keeps the shipped value");
                     JsonWriter::WriteFile(UserFile, UserJson);
                 }
                 return true;

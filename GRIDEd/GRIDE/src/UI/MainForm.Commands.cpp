@@ -138,8 +138,8 @@ namespace Gride { namespace UI {
         c = Cmd("Debug.Start", "&Start Debugging", "F5", "debug", DO(DebugStart)); c->CanExecute = WHEN(CanStartDebug);
         c = Cmd("Debug.StartNoDebug", "Start &Without Debugging", "Ctrl+F5", "run", DO(DebugStartNoDebug)); c->CanExecute = WHEN(CanBuild);
         // RIDE's Build > Emulate on vm6747 and Build > Verify (tms6747), and the stop of a program running in the Output pane
-        c = Cmd("Debug.Emulate", "&Emulate on VM6747", nullptr, "run", DO(DebugEmulate)); c->CanExecute = WHEN(CanEmulate);
-        c = Cmd("Debug.Verify", "&Verify (vm6747 against sim6747)", nullptr, nullptr, DO(DebugVerify)); c->CanExecute = WHEN(CanEmulate);
+        c = Cmd("Debug.Emulate", "&Emulate on VM6747", nullptr, "run", DO(DebugEmulate)); c->CanExecute = WHEN(CanBuild);
+        c = Cmd("Debug.Verify", "&Verify (vm6747 against sim6747)", nullptr, nullptr, DO(DebugVerify)); c->CanExecute = WHEN(CanBuild);
         c = Cmd("Debug.StopProgram", "Stop &Program", nullptr, "stop", DO(StopProgram)); c->CanExecute = WHEN(IsRunning);
         c = Cmd("Debug.Stop", "S&top Debugging", "Shift+F5", "stop", DO(DebugStop)); c->CanExecute = WHEN(IsDebugging);
         c = Cmd("Debug.Restart", "&Restart", "Ctrl+Shift+F5", "restart", DO(DebugRestart)); c->CanExecute = WHEN(IsDebugging);
@@ -195,7 +195,6 @@ namespace Gride { namespace UI {
         // ------------------------------------------------------------- Help
         commands->BeginCategory("Help");
         Cmd("Help.ViewHelp", "View &Help", "F1", "help", DO(HelpView));
-        Cmd("Help.UserGuide", "GRIDE &User Guide", nullptr, nullptr, DO(HelpUserGuide));
         array<String^>^ refIds = gcnew array<String^>{ "Help.RefC90", "Help.RefCpp11", "Help.RefShalimar",
                                                         "Help.RefMasm", "Help.RefAsm6x", "Help.RefRts", "Help.RefVm" };
         array<String^>^ refText = gcnew array<String^>{ "C90", "C++11", "Shalimar",
@@ -318,7 +317,7 @@ namespace Gride { namespace UI {
 
         // ---- Help
         ToolStripMenuItem^ help = TopMenu("&Help");
-        AddItems(help, gcnew array<String^>{ "Help.ViewHelp", "Help.UserGuide" });
+        AddItems(help, gcnew array<String^>{ "Help.ViewHelp" });
         AddItems(SubMenu(help, "&Language Reference"), gcnew array<String^>{ "Help.RefC90", "Help.RefCpp11", "Help.RefShalimar" });
         AddItems(SubMenu(help, "&Toolchain Reference"), gcnew array<String^>{ "Help.RefMasm", "Help.RefAsm6x", "Help.RefRts", "Help.RefVm" });
         AddItems(help, gcnew array<String^>{ "Help.Shortcuts", "-", "Help.ReleaseNotes", "Help.About" });
@@ -634,15 +633,7 @@ namespace Gride { namespace UI {
     bool MainForm::HasProject() { return ContextProject() != nullptr; }
     bool MainForm::HasWritableProject() { GrideProject^ p = ContextProject(); return p != nullptr && !p->IsReadOnly; }
     bool MainForm::HasSelectedFile() { return explorer->SelectedFile != nullptr; }
-    // something to build: a workspace with a project in it, or - none open - the file in the editor with main() in it
-    bool MainForm::CanBuild()
-    {
-        if (engine->IsBuilding || debugger->IsActive || runner->IsRunning) return false;
-        if (workspace != nullptr) return workspace->Projects->Count > 0;
-        return ActiveFileHasMain();
-    }
-    // Emulate and Verify: vm6747 and sim6747 are for the TMS320C6747 target alone
-    bool MainForm::CanEmulate() { return CanBuild() && RideToolchain::IsEmulated(CurrentTarget()); }
+    bool MainForm::CanBuild() { return workspace != nullptr && workspace->Projects->Count > 0 && !engine->IsBuilding && !debugger->IsActive && !runner->IsRunning; }
     bool MainForm::IsBuilding() { return engine->IsBuilding || runner->IsRunning; }
     bool MainForm::IsRunning() { return runner->IsRunning; }
     bool MainForm::IsDebugging() { return debugger->IsActive; }

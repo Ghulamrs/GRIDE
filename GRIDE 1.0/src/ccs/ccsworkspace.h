@@ -8,7 +8,7 @@
 namespace editor {
 namespace ccs {
 
-// **A CCS workspace: a folder of projects, never a project itself.** RIDE opens one of its
+// **A CCS workspace: a folder of projects, never a project itself.** GRIDE opens one of its
 // projects at a time, through <workspace>/<project>.pro, which holds only
 // { "ccs": { "workspace": ".", "project": "<name>" } }. What is read here, as CCS 7.4 writes it
 // (measured on the Windows box, 02-10-2026): the projects Eclipse has registered under

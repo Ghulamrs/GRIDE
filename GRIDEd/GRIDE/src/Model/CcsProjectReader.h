@@ -148,7 +148,7 @@ namespace Gride { namespace Model {
             for each (CcsConfig^ c in r->Configs) p->Ccs->ReportLines->Add(r->Report(c->IsDebug));
             String^ sources = r->SourceReport();
             if (sources->Length > 0) p->Ccs->ReportLines->Add(sources);
-            for each (String^ refusal in r->Refusals) p->Ccs->ReportLines->Add("CCS project " + r->Name + ": RIDE would refuse it - " + refusal + "; read all the same, the build stands on what was read");
+            for each (String^ refusal in r->Refusals) p->Ccs->ReportLines->Add("CCS project " + r->Name + ": GRIDE would refuse it - " + refusal + "; read all the same, the build stands on what was read");
             p->IsDirty = false;
             return p;
         }

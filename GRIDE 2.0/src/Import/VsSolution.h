@@ -437,7 +437,7 @@ namespace Gride
                 {
                     List<String^>^ said = gcnew List<String^>();
                     for each (KeyValuePair<String^, String^> kv in c->ClSettings) said->Add(kv.Key + " " + kv.Value);
-                    t->Append("  cl's own settings (shown; RIDE's compilers take none of them): " + String::Join("; ", said) + "\n");
+                    t->Append("  cl's own settings (shown; GRIDE's compilers take none of them): " + String::Join("; ", said) + "\n");
                 }
                 if (c->Libs->Count > 0) t->Append("  libraries: " + String::Join(";", c->Libs) + "\n");
                 if (c->LibDirs->Count > 0) t->Append("  library directories: " + String::Join("; ", c->LibDirs) + "\n");

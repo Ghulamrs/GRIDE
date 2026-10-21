@@ -13,7 +13,7 @@ namespace editor {
 
 namespace {
 
-// "<<ride-done>>": what each debugger is asked to say once a command has finished. cdb and lldb
+// "<<gride-done>>": what each debugger is asked to say once a command has finished. cdb and lldb
 // are asked in pieces, so that the command echoed back is not itself the marker.
 // **Functions, not std::string globals**: in the mixed-mode window a native global with a destructor corrupted the heap before main - settings.cpp and the README say how.
 std::string markerStart() { return std::string("<<") + product::kLower; }
@@ -395,11 +395,11 @@ bool dbg_imageHasLines(const std::string& out, std::string* why) {
 std::string dbg_c6xBackend(const std::string& executable, std::string* why) {
     if (why) why->clear();
     const std::string out = tiProgramOf(executable), sim = simulatorProgram();
-    if (envSet("RIDE_DEBUG_VM6747")) { if (why) *why = "RIDE_DEBUG_VM6747 asks for the emulator"; return "vm6747"; }
-    if (envSet("RIDE_DEBUG_SIM6747")) {
+    if (envSet("GRIDE_DEBUG_VM6747")) { if (why) *why = "GRIDE_DEBUG_VM6747 asks for the emulator"; return "vm6747"; }
+    if (envSet("GRIDE_DEBUG_SIM6747")) {
         if (!sim.empty() && path::exists(out)) return "sim6747";
-        if (why) *why = sim.empty() ? "RIDE_DEBUG_SIM6747 asks for sim6747, and none is beside " + std::string(product::kName)
-                                    : "RIDE_DEBUG_SIM6747 asks for sim6747, and the build left no " + path::filename(out);
+        if (why) *why = sim.empty() ? "GRIDE_DEBUG_SIM6747 asks for sim6747, and none is beside " + std::string(product::kName)
+                                    : "GRIDE_DEBUG_SIM6747 asks for sim6747, and the build left no " + path::filename(out);
         return "vm6747";
     }
     if (sim.empty()) { if (why) *why = "no sim6747 beside " + std::string(product::kName); return "vm6747"; }
@@ -416,7 +416,7 @@ std::string dbg_c6xBackend(const std::string& executable, std::string* why) {
 
 const char* dbg_program(DebuggerKind kind) {
     if (kind == DebuggerC6x) {
-        // The emulator beside RIDE or named by $VM6747 (toolchain.h); sim6747 is chosen at start() for a .out.
+        // The emulator beside GRIDE or named by $VM6747 (toolchain.h); sim6747 is chosen at start() for a .out.
         static std::string* emulator = 0;
         if (!emulator) emulator = new std::string(emulatorProgram());
         return emulator->c_str();
@@ -426,8 +426,8 @@ const char* dbg_program(DebuggerKind kind) {
     static std::string* found = 0;
     if (found) return found->c_str();
 
-    // RIDE_CDB names a cdb.exe outside the Windows Kits, for a machine whose SDK left the debuggers out.
-    const char* named = std::getenv("RIDE_CDB");
+    // GRIDE_CDB names a cdb.exe outside the Windows Kits, for a machine whose SDK left the debuggers out.
+    const char* named = std::getenv("GRIDE_CDB");
     if (named && *named && path::exists(named)) {
         found = new std::string(named);
         return found->c_str();
@@ -477,7 +477,7 @@ DebuggerKind dbg_for(ToolchainKind kind, const std::string& arch) {
     if (kind == ToolMsvc || arch == "x86_64-windows")
         return path::exists(dbg_program(DebuggerCdb)) ? DebuggerCdb : DebuggerNone;
 
-    // tms6747: vm6747 --debug on the .s cpp11 -g wrote, with its .dwpsn positions (RIDE_DEBUG_SIM6747=1 asks
+    // tms6747: vm6747 --debug on the .s cpp11 -g wrote, with its .dwpsn positions (GRIDE_DEBUG_SIM6747=1 asks
     // for sim6747 --run --debug on the .out beside it instead - which stops on a line only where the image
     // carries a .debug_line, which ASM6x and LNK6x do not write yet).
     if (isEmulated(arch)) {
@@ -944,7 +944,7 @@ size_t dbg_watchOnLine(const std::vector<Watch>& watches, const std::string& lin
 namespace {
 bool cdbRefused(const std::string& line) {
     return line.find("Couldn't resolve") != std::string::npos ||
-           line.find("<<ride") != std::string::npos || line.find("rror") != std::string::npos;
+           line.find("<<gride") != std::string::npos || line.find("rror") != std::string::npos;
 }
 }
 

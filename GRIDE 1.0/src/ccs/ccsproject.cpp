@@ -240,8 +240,8 @@ std::string resolveMacros(const std::string& text, const Reading& reading) {
 
 namespace {
 
-// The mapping of one configuration's stored options onto RIDE's toolchain. Every stored option
-// lands in exactly one of: mapped, RIDE's own instead, unsupported.
+// The mapping of one configuration's stored options onto GRIDE's toolchain. Every stored option
+// lands in exactly one of: mapped, GRIDE's own instead, unsupported.
 void mapConfig(const XmlNode& toolChain, const std::vector<Stored>& compiler,
                const std::vector<Stored>& linker, const OptionDefs& defs, Reading& reading, Config& out) {
     const bool release = out.which == ConfigRelease;
@@ -281,7 +281,7 @@ void mapConfig(const XmlNode& toolChain, const std::vector<Stored>& compiler,
                 addUnique(out.includes, dir);
             }
             out.mapped.push_back(flag + " -> -I" + joinedList(out.includes, " -I") +
-                                 (dropped.empty() ? std::string() : " (" + joinedList(dropped) + " is the compiler's own: RIDE's headers instead)"));
+                                 (dropped.empty() ? std::string() : " (" + joinedList(dropped) + " is the compiler's own: GRIDE's headers instead)"));
         } else if (t == "compilerID.NO_COMPRESS") {
             out.noCompress = o.value == "true";
             out.mapped.push_back(flag + " -> " + (out.noCompress ? "--no_compress" : "compact instructions kept"));
@@ -300,7 +300,7 @@ void mapConfig(const XmlNode& toolChain, const std::vector<Stored>& compiler,
         if (level == "off" || level == "0") out.opt = "-O0";
         else if (level == "1") out.opt = "-O1";
         else if (level == "2" || level == "3") out.opt = "-O2";
-        out.mapped.push_back(level.empty() ? "optimization not set in CCS -> RIDE's default"
+        out.mapped.push_back(level.empty() ? "optimization not set in CCS -> GRIDE's default"
                                            : "-O" + level + " (CCS's default for " + out.name + ") -> " + out.opt);
     }
 
@@ -322,7 +322,7 @@ void mapConfig(const XmlNode& toolChain, const std::vector<Stored>& compiler,
                 addUnique(out.link.searchPaths, dir);
             }
             out.mapped.push_back(flag + " -> -i " + joinedList(out.link.searchPaths, " -i ") +
-                                 (dropped.empty() ? std::string() : " (" + joinedList(dropped) + " is the compiler's own: RIDE's runtime directory instead)"));
+                                 (dropped.empty() ? std::string() : " (" + joinedList(dropped) + " is the compiler's own: GRIDE's runtime directory instead)"));
         } else if (t == "linkerID.LIBRARY") {
             std::vector<std::string> said;
             for (size_t k = 0; k < o.items.size(); ++k) {
@@ -393,7 +393,7 @@ bool read(const std::string& where, Reading& out, std::string& error, const Work
     out.name = name ? name->text : path::filename(dir);
     if (out.name.empty()) out.name = path::filename(dir);
 
-    // .project's referenced projects: CCS builds them first, and RIDE builds one project only.
+    // .project's referenced projects: CCS builds them first, and GRIDE builds one project only.
     std::vector<const XmlNode*> referenced;
     if (const XmlNode* projects = project.child("projects")) {
         referenced = projects->all("project");
@@ -401,7 +401,7 @@ bool read(const std::string& where, Reading& out, std::string& error, const Work
             if (!referenced[i]->text.empty()) out.references.push_back(referenced[i]->text);
     }
     for (size_t i = 0; i < out.references.size(); ++i)
-        out.notes.push_back("depends on project " + out.references[i] + ", which RIDE does not build - build it in CCS, or open it in RIDE first");
+        out.notes.push_back("depends on project " + out.references[i] + ", which GRIDE does not build - build it in CCS, or open it in GRIDE first");
 
     // .ccsproject: the device, and the compiler version ${CG_TOOL_ROOT} stands for.
     std::vector<const XmlNode*> options;
@@ -422,17 +422,17 @@ bool read(const std::string& where, Reading& out, std::string& error, const Work
     // Only the C674x: the C6747 is what cpp11, c90, asm6x, lnk6x and vm6747 are built for.
     if (out.family != "C6000" || out.device.find("C674") == std::string::npos) {
         error = out.name + " is for " + (out.device.empty() ? "an unnamed device" : out.device) +
-                (out.family.empty() ? "" : " (" + out.family + ")") + ", and RIDE builds only C6000 C674x/C6747 projects";
+                (out.family.empty() ? "" : " (" + out.family + ")") + ", and GRIDE builds only C6000 C674x/C6747 projects";
         return false;
     }
-    if (!out.elf) { error = out.name + " builds COFF, and RIDE's C6000 toolchain makes ELF only"; return false; }
-    if (endianness == "big") { error = out.name + " is big-endian, and RIDE's C6000 toolchain is little-endian only"; return false; }
+    if (!out.elf) { error = out.name + " builds COFF, and GRIDE's C6000 toolchain makes ELF only"; return false; }
+    if (endianness == "big") { error = out.name + " is big-endian, and GRIDE's C6000 toolchain is little-endian only"; return false; }
 
     out.cgToolRoot = path::withSlashes(cgToolRootFor(settings::ccsRoot(), out.cgtVersion));
 
     OptionDefs defs;
     std::string why;
-    if (!defs.load(out.cgtVersion, why)) out.notes.push_back(why + "; options CCS left unstored take RIDE's defaults");
+    if (!defs.load(out.cgtVersion, why)) out.notes.push_back(why + "; options CCS left unstored take GRIDE's defaults");
 
     // .project: the linked resources - a file, or a folder walked like the project's own.
     std::vector<const XmlNode*> links;
@@ -469,7 +469,7 @@ bool read(const std::string& where, Reading& out, std::string& error, const Work
         std::string parent = configuration.attribute("parent");
         if (endsWith(parent, ".Debug") || (parent.empty() && config.name == "Debug")) config.which = ConfigDebug;
         else if (endsWith(parent, ".Release") || (parent.empty() && config.name == "Release")) config.which = ConfigRelease;
-        else { out.notes.push_back("configuration " + config.name + " is neither Debug nor Release, and RIDE builds those two"); continue; }
+        else { out.notes.push_back("configuration " + config.name + " is neither Debug nor Release, and GRIDE builds those two"); continue; }
         if (out.config(config.which)) { out.notes.push_back("configuration " + config.name + " is a second " + configName(config.which) + " one, and the first is taken"); continue; }
 
         // Build variables: per configuration in the file, one set here, the first's kept.
@@ -493,10 +493,10 @@ bool read(const std::string& where, Reading& out, std::string& error, const Work
         if (const Stored* tags = stored(chain, "core.OPT_TAGS"))
             for (size_t k = 0; k < tags->items.size(); ++k) {
                 const std::string& tag = tags->items[k];
-                if (tag == "OUTPUT_FORMAT=COFF") { error = out.name + " (" + config.name + ") builds COFF, and RIDE's C6000 toolchain makes ELF only"; return false; }
-                if (tag == "DEVICE_ENDIANNESS=big") { error = out.name + " (" + config.name + ") is big-endian, and RIDE's C6000 toolchain is little-endian only"; return false; }
+                if (tag == "OUTPUT_FORMAT=COFF") { error = out.name + " (" + config.name + ") builds COFF, and GRIDE's C6000 toolchain makes ELF only"; return false; }
+                if (tag == "DEVICE_ENDIANNESS=big") { error = out.name + " (" + config.name + ") is big-endian, and GRIDE's C6000 toolchain is little-endian only"; return false; }
                 if (tag.compare(0, 12, "OUTPUT_TYPE=") == 0 && tag != "OUTPUT_TYPE=executable")
-                    out.notes.push_back(config.name + " builds " + tag.substr(12) + ", and RIDE builds an executable of it");
+                    out.notes.push_back(config.name + " builds " + tag.substr(12) + ", and GRIDE builds an executable of it");
             }
 
         const XmlNode* compilerTool = toolNamed(toolChain, ".compiler");
@@ -505,13 +505,13 @@ bool read(const std::string& where, Reading& out, std::string& error, const Work
         std::vector<Stored> linker = linkerTool ? optionsOf(*linkerTool) : std::vector<Stored>();
         if (const Stored* silicon = stored(compiler, "compilerID.SILICON_VERSION"))
             if (silicon->value != "6740") {
-                error = out.name + " (" + config.name + ") is built for -mv" + silicon->value + ", and RIDE's C6000 toolchain is the C674x's (-mv6740)";
+                error = out.name + " (" + config.name + ") is built for -mv" + silicon->value + ", and GRIDE's C6000 toolchain is the C674x's (-mv6740)";
                 return false;
             }
         if (const Stored* abi = stored(compiler, "compilerID.ABI"))
-            if (enumSuffix(std::string(), abi->value) == "coffabi") { error = out.name + " (" + config.name + ") uses the COFF ABI, and RIDE's C6000 toolchain makes ELF only"; return false; }
+            if (enumSuffix(std::string(), abi->value) == "coffabi") { error = out.name + " (" + config.name + ") uses the COFF ABI, and GRIDE's C6000 toolchain makes ELF only"; return false; }
         if (const Stored* big = stored(compiler, "compilerID.BIG_ENDIAN"))
-            if (big->value == "true") { error = out.name + " (" + config.name + ") is big-endian, and RIDE's C6000 toolchain is little-endian only"; return false; }
+            if (big->value == "true") { error = out.name + " (" + config.name + ") is big-endian, and GRIDE's C6000 toolchain is little-endian only"; return false; }
 
         mapConfig(toolChain, compiler, linker, defs, out, config);
 
@@ -564,8 +564,8 @@ std::string report(const Reading& reading, Configuration which) {
     std::string said;
     if (config->unsupported.empty()) said = "no unsupported options";
     else said = std::to_string(config->unsupported.size()) + (config->unsupported.size() == 1 ? " option" : " options") +
-                " not supported, using RIDE's defaults: " + joinedList(config->unsupported);
-    if (!config->ownInstead.empty()) said += "; RIDE's own instead of: " + joinedList(config->ownInstead);
+                " not supported, using GRIDE's defaults: " + joinedList(config->unsupported);
+    if (!config->ownInstead.empty()) said += "; GRIDE's own instead of: " + joinedList(config->ownInstead);
     return head + said;
 }
 
@@ -575,7 +575,7 @@ std::string sourceReport(const Reading& reading) {
         if (!path::exists(reading.linked[i])) gone.push_back(reading.linked[i]);
     std::string said;
     if (!gone.empty()) said += "linked " + std::string(gone.size() == 1 ? "file" : "files") + " not on this machine: " + joinedList(gone);
-    if (!reading.notBuilt.empty()) said += (said.empty() ? "" : "; ") + std::string("not built by RIDE: ") + joinedList(reading.notBuilt);
+    if (!reading.notBuilt.empty()) said += (said.empty() ? "" : "; ") + std::string("not built by GRIDE: ") + joinedList(reading.notBuilt);
     for (size_t i = 0; i < reading.notes.size(); ++i) said += (said.empty() ? "" : "; ") + reading.notes[i];
     return said.empty() ? said : "CCS project " + reading.name + ": " + said;
 }
@@ -585,15 +585,15 @@ std::string mappingText(const Reading& reading, Configuration which) {
     std::string text = "CCS project " + reading.name + ", read from " + reading.dir + "\n";
     text += "device " + reading.device + ", compiler " + reading.cgtVersion + (reading.ccsVersion.empty() ? " (CCS 5.5)" : " (CCS " + reading.ccsVersion + ")") + "\n";
     if (!config) return text + "no " + configName(which) + " configuration\n";
-    text += "\n" + config->name + " - what CCS set, and what RIDE builds with:\n";
+    text += "\n" + config->name + " - what CCS set, and what GRIDE builds with:\n";
     for (size_t i = 0; i < config->mapped.size(); ++i) text += "  " + config->mapped[i] + "\n";
     if (!config->link.cmdFiles.empty()) text += "  linker command file: " + joinedList(config->link.cmdFiles) + "\n";
     if (!config->unsupported.empty()) {
-        text += "\nnot supported, RIDE's defaults instead:\n";
+        text += "\nnot supported, GRIDE's defaults instead:\n";
         for (size_t i = 0; i < config->unsupported.size(); ++i) text += "  " + config->unsupported[i] + "\n";
     }
     if (!config->ownInstead.empty()) {
-        text += "\nRIDE's own instead of:\n";
+        text += "\nGRIDE's own instead of:\n";
         for (size_t i = 0; i < config->ownInstead.size(); ++i) text += "  " + config->ownInstead[i] + "\n";
     }
     if (!config->excluded.empty()) text += "\nexcluded from the build: " + joinedList(config->excluded) + "\n";

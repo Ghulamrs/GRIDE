@@ -7,6 +7,14 @@
 //      Project1\inc\*.h
 //  A read-only project imported from Code Composer Studio 7.4 uses the same
 //  class (Kind = "ccs7", IsReadOnly = true) - see CcsProjectReader.h.
+//
+//  **One .pro format for the three outlooks** (2026-10-20): White's, which is
+//  RIDE's - "groups" (a folder each, a list of files or { files, toolchain }),
+//  "include", "libraries", "arch", "build" { target, groups, args } - and the
+//  keys only GRIDEd has beside them (configurations, excludeFromBuild,
+//  dependsOn, language, template, targets), which White leaves alone. A .pro
+//  GRIDEd wrote before ("folders", "folderToolchains", "programArgs") is read
+//  and saved in the one format.
 // =============================================================================
 #pragma once
 #include "../Core/Json.h"
@@ -91,6 +99,10 @@ namespace Gride { namespace Model {
             ProgramArgs = gcnew List<String^>();
             Options = gcnew CompilerOptionStore();
             FolderToolchains = gcnew Dictionary<String^, String^>(StringComparer::OrdinalIgnoreCase);
+            Includes = gcnew List<String^>();
+            Libraries = gcnew List<String^>();
+            BuildGroups = nullptr;
+            TargetName = String::Empty;
             Kind = "gride";
             IsReadOnly = false;
             Ccs = nullptr;
@@ -129,6 +141,27 @@ namespace Gride { namespace Model {
         property List<String^>^ ProgramArgs;
         // RIDE's Compiler Options, per configuration (the .pro's "options"); a CCS project's stay at the defaults
         property CompilerOptionStore^ Options;
+        // the one format's own: header folders and libraries for every configuration ("include", "libraries",
+        // relative to the project), the folders the program is built from ("build" "groups"; nullptr: every
+        // folder) and the program's name ("build" "target"; empty: the project's)
+        property List<String^>^ Includes;
+        property List<String^>^ Libraries;
+        property List<String^>^ BuildGroups;
+        property String^ TargetName;
+
+        // the program's name when the configuration does not give one
+        String^ ProgramName() { return String::IsNullOrWhiteSpace(TargetName) ? Name : TargetName; }
+
+        // a file goes into the program when its folder is one the build names (every folder when it names none)
+        bool IsBuilt(String^ abs)
+        {
+            if (BuildGroups == nullptr) return true;
+            String^ folder = FolderOfFile(abs);
+            if (folder == nullptr) return true;
+            for each (String^ g in BuildGroups)
+                if (String::Compare(g, folder, true) == 0) return true;
+            return false;
+        }
 
         // the compiler word in force for a file in a folder: the folder's, else the project's
         String^ ToolchainFor(String^ folderName)
@@ -224,7 +257,12 @@ namespace Gride { namespace Model {
         ProjectFolder^ GetOrAddFolder(String^ name)
         {
             ProjectFolder^ f = FindFolder(name);
-            if (f == nullptr) { f = gcnew ProjectFolder(name); Folders->Add(f); IsDirty = true; }
+            if (f == nullptr)
+            {
+                f = gcnew ProjectFolder(name); Folders->Add(f); IsDirty = true;
+                // a folder made here is built, as every folder of a GRIDEd project is
+                if (BuildGroups != nullptr) BuildGroups->Add(name);
+            }
             return f;
         }
 
@@ -300,62 +338,38 @@ namespace Gride { namespace Model {
         }
 
         // ---- load / save --------------------------------------------------------
-        // GRIDE 2.0's own .pro ("formatVersion" and no "gride"): read here, never written back
-        static bool IsGrey(JsonValue^ j) { return !j->Has("gride") && j->Has("formatVersion"); }
-
-        // the Visual Studio solution a GRIDE 2.0 .pro stands for ("visualStudio"), else null
-        static String^ GreySolution(String^ path)
-        {
-            JsonValue^ j = JsonParser::ParseFile(path);
-            if (!IsGrey(j)) return nullptr;
-            String^ sln = j->GetString("visualStudio", String::Empty);
-            return sln->Length > 0 ? PathUtil::MakeAbsolute(Path::GetDirectoryName(Path::GetFullPath(path)), sln) : nullptr;
-        }
-
-        static GrideProject^ FromGrey(String^ path, JsonValue^ j)
-        {
-            GrideProject^ p = gcnew GrideProject();
-            p->FilePath = Path::GetFullPath(path);
-            p->Name = j->GetString("name", Path::GetFileNameWithoutExtension(path));
-            p->Lang = LanguageInfo::Parse(j->GetString("language", "C90"));
-            p->Template = "Program";
-            p->Targets->Add(Target::Windows); p->Targets->Add(Target::C6747);
-            ProjectFolder^ f = gcnew ProjectFolder("Sources");
-            f->Files = j->GetStringList("sourceFiles");
-            p->Folders->Add(f);
-            JsonValue^ cfgs = j->Get("configurations");
-            bool listed = cfgs != nullptr && cfgs->IsArray && cfgs->Count > 0;
-            for each (Target t in p->Targets)
-            {
-                if (!listed) { p->Configurations->Add(gcnew BuildConfiguration("Debug", t)); p->Configurations->Add(gcnew BuildConfiguration("Release", t)); continue; }
-                for (int i = 0; i < cfgs->Count; i++)
-                {
-                    BuildConfiguration^ c = gcnew BuildConfiguration(cfgs->At(i)->GetString("name", "Debug"), t);
-                    c->Defines = cfgs->At(i)->GetStringList("defines");
-                    p->Configurations->Add(c);
-                }
-            }
-            p->Toolchain = j->GetString("toolchain", "auto");
-            if (j->Has("programArgs")) p->ProgramArgs = j->GetStringList("programArgs");
-            p->IsReadOnly = true;
-            p->IsDirty = false;
-            return p;
-        }
-
         static GrideProject^ Load(String^ path)
         {
             JsonValue^ j = JsonParser::ParseFile(path);
-            if (IsGrey(j)) return FromGrey(path, j);
             GrideProject^ p = gcnew GrideProject();
             p->FilePath = Path::GetFullPath(path);
             p->raw = j;
             p->Name = j->GetString("name", Path::GetFileNameWithoutExtension(path));
-            p->Lang = LanguageInfo::Parse(j->GetString("language", "C90"));
             p->Template = j->GetString("template", "Empty");
 
             for each (String^ t in j->GetStringList("targets")) p->Targets->Add(TargetInfo::Parse(t));
+            // the one format's "arch" is the platform built for (White's Target menu)
+            String^ arch = j->GetString("arch", String::Empty);
+            if (!String::IsNullOrWhiteSpace(arch) && !p->Targets->Contains(TargetOfArch(arch))) p->Targets->Insert(0, TargetOfArch(arch));
 
-            JsonValue^ folders = j->GetObject("folders");
+            // the folders: the one format's "groups" - a list of files, or { "files", "toolchain" } for a group
+            // with its own compiler - else the "folders" GRIDEd wrote before it
+            JsonValue^ groups = j->GetObject("groups");
+            if (groups != nullptr)
+                for each (String^ name in groups->KeyNames)
+                {
+                    ProjectFolder^ f = gcnew ProjectFolder(name);
+                    JsonValue^ g = groups->Get(name);
+                    if (g != nullptr && g->IsObject)
+                    {
+                        f->Files = g->GetStringList("files");
+                        String^ w = g->GetString("toolchain", String::Empty);
+                        if (!String::IsNullOrWhiteSpace(w) && String::Compare(w, "auto", true) != 0) p->FolderToolchains[name] = w;
+                    }
+                    else f->Files = groups->GetStringList(name);
+                    p->Folders->Add(f);
+                }
+            JsonValue^ folders = groups == nullptr ? j->GetObject("folders") : nullptr;
             if (folders != nullptr)
                 for each (String^ name in folders->KeyNames)
                 {
@@ -363,6 +377,10 @@ namespace Gride { namespace Model {
                     f->Files = folders->GetStringList(name);
                     p->Folders->Add(f);
                 }
+            // the language a .pro of the one format does not say, from its files
+            p->Lang = j->Has("language") ? LanguageInfo::Parse(j->GetString("language", "C90")) : LanguageOfFiles(p->Folders);
+            p->Includes = j->GetStringList("include");
+            p->Libraries = j->GetStringList("libraries");
 
             JsonValue^ cfgs = j->GetObject("configurations");
             if (cfgs != nullptr)
@@ -374,6 +392,20 @@ namespace Gride { namespace Model {
             p->Toolchain = j->GetString("toolchain", "auto");
             p->EmulateOnly = j->GetBool("emulateOnly", false);
             if (j->Has("programArgs")) p->ProgramArgs = j->GetStringList("programArgs");
+            // "build": the program's name, the groups it is built from and its arguments
+            JsonValue^ build = j->GetObject("build");
+            if (build != nullptr)
+            {
+                p->TargetName = build->GetString("target", String::Empty);
+                if (build->Has("groups")) p->BuildGroups = build->GetStringList("groups");
+                if (build->Has("args")) p->ProgramArgs = build->GetStringList("args");
+            }
+            // White's rule for a .pro of the one format with no "build" at all: its Sources group is the program
+            else if (groups != nullptr && !j->Has("build") && p->FindFolder("Sources") != nullptr)
+            {
+                p->BuildGroups = gcnew List<String^>();
+                p->BuildGroups->Add(p->FindFolder("Sources")->Name);
+            }
             p->Options->FromJson(j->GetObject("options"));
             JsonValue^ ft = j->GetObject("folderToolchains");
             if (ft != nullptr)
@@ -388,44 +420,99 @@ namespace Gride { namespace Model {
 
         JsonValue^ ToJson()
         {
-            // start from the file we loaded so unknown keys survive a save
+            // start from the file we loaded so unknown keys survive a save (White's "indent", "tabs", "open")
             JsonValue^ j = raw != nullptr ? raw : JsonValue::MakeObject();
-            j->SetString("gride", "1.0");
-            j->SetString("type", "project");
+            bool saidLanguage = j->Has("language");
+            // GRIDEd's own spellings before the one format, said in its words below
+            for each (String^ k in gcnew array<String^> { "gride", "type", "folders", "folderToolchains", "programArgs" }) j->Remove(k);
+
+            // ---- the one format: White's keys, in White's order
             j->SetString("name", Name);
-            j->SetString("language", LanguageInfo::Name(Lang));
-            j->SetString("template", Template);
-            List<String^>^ t = gcnew List<String^>();
-            for each (Target x in Targets) t->Add(TargetInfo::Name(x));
-            j->SetList("targets", t);
-
-            JsonValue^ folders = JsonValue::MakeObject();
-            for each (ProjectFolder^ f in Folders) folders->SetList(f->Name, f->Files);
-            j->SetValue("folders", folders);
-
-            JsonValue^ cfgs = JsonValue::MakeObject();
-            for each (BuildConfiguration^ c in Configurations) cfgs->SetValue(c->Key, c->ToJson());
-            j->SetValue("configurations", cfgs);
-
-            j->SetList("excludeFromBuild", ExcludedFiles);
-            j->SetList("dependsOn", DependsOn);
-            // written only when they say something, so a file written before the port is unchanged
-            if (!String::IsNullOrWhiteSpace(Toolchain) && String::Compare(Toolchain, "auto", true) != 0) j->SetString("toolchain", Toolchain);
-            else if (j->Has("toolchain")) j->Remove("toolchain");
-            if (FolderToolchains->Count > 0)
+            j->SetString("toolchain", String::IsNullOrWhiteSpace(Toolchain) ? "auto" : Toolchain);
+            if (Targets->Count > 0) j->SetString("arch", ArchOf(Targets[0]));
+            JsonValue^ groups = JsonValue::MakeObject();
+            for each (ProjectFolder^ f in Folders)
             {
-                JsonValue^ ft = JsonValue::MakeObject();
-                for each (KeyValuePair<String^, String^> kv in FolderToolchains) ft->SetString(kv.Key, kv.Value);
-                j->SetValue("folderToolchains", ft);
+                String^ w;
+                if (FolderToolchains->TryGetValue(f->Name, w) && !String::IsNullOrWhiteSpace(w))
+                {
+                    JsonValue^ g = JsonValue::MakeObject();
+                    g->SetList("files", f->Files);
+                    g->SetString("toolchain", w);
+                    groups->SetValue(f->Name, g);
+                }
+                else groups->SetList(f->Name, f->Files);
             }
-            else if (j->Has("folderToolchains")) j->Remove("folderToolchains");
+            j->SetValue("groups", groups);
+            if (Includes->Count > 0) j->SetList("include", Includes); else j->Remove("include");
+            if (Libraries->Count > 0) j->SetList("libraries", Libraries); else j->Remove("libraries");
             if (EmulateOnly) j->SetBool("emulateOnly", true);
-            else if (j->Has("emulateOnly")) j->Remove("emulateOnly");
-            if (ProgramArgs->Count > 0) j->SetList("programArgs", ProgramArgs);
-            else if (j->Has("programArgs")) j->Remove("programArgs");
+            else j->Remove("emulateOnly");
             if (!Options->Empty) j->SetValue("options", Options->ToJson());
-            else if (j->Has("options")) j->Remove("options");
+            else j->Remove("options");
+            JsonValue^ build = JsonValue::MakeObject();
+            build->SetString("target", ProgramName());
+            List<String^>^ built = BuildGroups;
+            if (built == nullptr) { built = gcnew List<String^>(); for each (ProjectFolder^ f in Folders) built->Add(f->Name); }
+            build->SetList("groups", built);
+            if (ProgramArgs->Count > 0) build->SetList("args", ProgramArgs);
+            j->SetValue("build", build);
+
+            // ---- GRIDEd's own, which the one format has no word for; each written only when it says something
+            if (saidLanguage || Lang != LanguageOfFiles(Folders)) j->SetString("language", LanguageInfo::Name(Lang));
+            if (!String::IsNullOrEmpty(Template) && Template != "Empty") j->SetString("template", Template); else j->Remove("template");
+            if (Targets->Count > 1)
+            {
+                List<String^>^ t = gcnew List<String^>();
+                for each (Target x in Targets) t->Add(TargetInfo::Name(x));
+                j->SetList("targets", t);
+            }
+            else j->Remove("targets");
+            if (Configurations->Count > 0)
+            {
+                JsonValue^ cfgs = JsonValue::MakeObject();
+                for each (BuildConfiguration^ c in Configurations) cfgs->SetValue(c->Key, c->ToJson());
+                j->SetValue("configurations", cfgs);
+            }
+            else j->Remove("configurations");
+            if (ExcludedFiles->Count > 0) j->SetList("excludeFromBuild", ExcludedFiles); else j->Remove("excludeFromBuild");
+            if (DependsOn->Count > 0) j->SetList("dependsOn", DependsOn); else j->Remove("dependsOn");
             return j;
+        }
+
+        // ---- the one format's words for what GRIDEd holds otherwise
+        // "arch", as toolchain.json names the four targets
+        static String^ ArchOf(Target t)
+        {
+            switch (t)
+            {
+            case Target::Linux:  return "x86_64-linux";
+            case Target::MacOS:  return "arm64-darwin";
+            case Target::C6747:  return "tms6747";
+            default:             return "x86_64-windows";
+            }
+        }
+        static Target TargetOfArch(String^ arch)
+        {
+            String^ a = arch->Trim()->ToLowerInvariant();
+            if (a->EndsWith("-linux")) return Target::Linux;
+            if (a->EndsWith("-darwin")) return Target::MacOS;
+            if (a->Contains("6747") || a->StartsWith("tms")) return Target::C6747;
+            if (a->EndsWith("-windows")) return Target::Windows;
+            return TargetInfo::Parse(arch);
+        }
+        // the language of a project that does not say one: C++ when a file is C++, else Shalimar when one is, else C
+        static Language LanguageOfFiles(List<ProjectFolder^>^ folders)
+        {
+            bool shalimar = false;
+            for each (ProjectFolder^ f in folders)
+                for each (String^ rel in f->Files)
+                {
+                    String^ e = Path::GetExtension(rel)->ToLowerInvariant();
+                    if (e == ".cpp" || e == ".cc" || e == ".cxx" || e == ".hpp" || e == ".hh") return Language::Cpp11;
+                    if (e == ".shl") shalimar = true;
+                }
+            return shalimar ? Language::Shalimar : Language::C90;
         }
 
         void Save()
