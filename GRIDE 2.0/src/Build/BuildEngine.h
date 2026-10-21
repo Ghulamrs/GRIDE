@@ -27,6 +27,17 @@ namespace Gride
         property String^ Code;
         property String^ Text;
         property String^ Tool;
+        // a tool's line about itself: held back until the tool exits - an error when it fails, else a message
+        property bool AboutItself;
+
+        // the last part of a name read from a tool's output; never throws, as Path::GetFileName does
+        // on a character no path may hold ('"', '<', '|' ...), which a tool's line may well carry
+        static String^ Leaf(String^ name)
+        {
+            if (String::IsNullOrEmpty(name)) return String::Empty;
+            int slash = name->LastIndexOfAny(gcnew array<wchar_t>{ L'\\', L'/' });
+            return slash < 0 ? name : name->Substring(slash + 1);
+        }
     };
 
     // The shapes a tool's lines take, read as RIDE's parseDiagnostic reads a build's output
@@ -125,7 +136,7 @@ namespace Gride
             if (String::IsNullOrEmpty(toolName) || String::IsNullOrEmpty(line)) return nullptr;
             int at = line->IndexOf(": ");
             if (at <= 0) return nullptr;
-            String^ who = Path::GetFileName(line->Substring(0, at)->Trim())->ToLowerInvariant();
+            String^ who = BuildMessage::Leaf(line->Substring(0, at)->Trim())->ToLowerInvariant();
             String^ name = toolName->ToLowerInvariant();
             if (who != name && who != String::Concat(name, ".exe")) return nullptr;
             String^ text = line->Substring(at + 2)->Trim();
@@ -136,6 +147,7 @@ namespace Gride
             b->Line = 0; b->Column = 0;
             b->Code = String::Empty;
             b->Text = text;
+            b->AboutItself = true;
             return b;
         }
 
@@ -512,6 +524,7 @@ namespace Gride
         // tool currently running (read by the output callback)
         String^ currentTool;
         String^ currentToolName;    // the program's own name, for its lines about itself
+        List<BuildMessage^>^ itself = gcnew List<BuildMessage^>();   // those lines, until the tool exits
         Regex^ currentRegex;        // pre-compiled custom error pattern of the running tool
         String^ currentDir;
         String^ currentSource;      // the file being compiled (shalimar's diagnostic names none)
@@ -593,6 +606,13 @@ namespace Gride
             finally { System::Threading::Monitor::Exit(parser); }
             if (m == nullptr) return;
             m->Tool = currentTool;
+            if (m->AboutItself)
+            {
+                System::Threading::Monitor::Enter(itself);
+                try { itself->Add(m); }
+                finally { System::Threading::Monitor::Exit(itself); }
+                return;
+            }
             Count(m);
             if (message != nullptr) message->Invoke(m);
         }
@@ -915,7 +935,15 @@ namespace Gride
             currentSource = vars->TryGetValue("in", in) ? in : nullptr;
             previousLine = nullptr;
             int before = errors;
+            itself->Clear();
             int rc = ToolRunner::Run(exe, args, projectDir, gcnew Action<String^>(this, &BuildEngine::OnToolLine), token, tool, env);
+            for each (BuildMessage^ m in itself)
+            {
+                m->Severity = rc != 0 && rc != ToolRunner::ExitCancelled ? "error" : "info";
+                Count(m);
+                if (message != nullptr) message->Invoke(m);
+            }
+            itself->Clear();
             if (rc != 0 && rc != ToolRunner::ExitCancelled && errors == before)
                 AddMessage("error", String::Format("{0} exited with code {1}.", tool->DisplayName, rc), nullptr, 0);
             return rc;

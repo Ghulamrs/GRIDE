@@ -82,8 +82,12 @@ private:
     System::Collections::Generic::List<String^>^ files_;
     int errors_;
 
+    // Never throws: the name comes from the Output tab's text, which may hold characters no path may
+    // (Path::GetFileName threw on them, EndedRunning never finished, and White stayed "running").
     static String^ Leaf(String^ file) {
-        return String::IsNullOrEmpty(file) ? "" : System::IO::Path::GetFileName(file);
+        if (String::IsNullOrEmpty(file)) return "";
+        int slash = file->LastIndexOfAny(gcnew array<wchar_t>{L'\\', L'/'});
+        return slash < 0 ? file : file->Substring(slash + 1);
     }
 
     bool Read(String^ line, Utf8% source) {

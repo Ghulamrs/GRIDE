@@ -288,7 +288,7 @@ namespace Gride { namespace UI {
             it->SubItems->Add(m->Code);
             it->SubItems->Add(m->Text);
             it->SubItems->Add(m->Project);
-            it->SubItems->Add(String::IsNullOrEmpty(m->File) ? String::Empty : Path::GetFileName(m->File));
+            it->SubItems->Add(BuildMessage::Leaf(m->File));
             it->SubItems->Add(m->Line > 0 ? m->Line.ToString() : String::Empty);
             it->Tag = m;
             return it;

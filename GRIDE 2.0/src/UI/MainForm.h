@@ -2671,7 +2671,7 @@ namespace Gride
             Color color = Color::DimGray;
             if (String::Equals(m->Severity, "error")) { type = "Error"; color = Color::Firebrick; errorCount++; }
             else if (String::Equals(m->Severity, "warning")) { type = "Warning"; color = Color::DarkOrange; warningCount++; }
-            String^ file = String::IsNullOrEmpty(m->FilePath) ? String::Empty : Path::GetFileName(m->FilePath);
+            String^ file = BuildMessage::Leaf(m->FilePath);
             String^ line = m->Line > 0 ? Convert::ToString(m->Line) : String::Empty;
             ListViewItem^ it = gcnew ListViewItem(gcnew array<String^>{
                 type, m->Code, m->Text, file, line, m->Tool == nullptr ? String::Empty : m->Tool });

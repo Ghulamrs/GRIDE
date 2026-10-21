@@ -35,7 +35,16 @@ namespace Gride { namespace Services {
         virtual String^ ToString() override
         {
             Severity s = Sev;
-            return String::Format("{0}({1}): {2} {3}: {4}", Path::GetFileName(File), Line, s.ToString()->ToLower(), Code, Text);
+            return String::Format("{0}({1}): {2} {3}: {4}", Leaf(File), Line, s.ToString()->ToLower(), Code, Text);
+        }
+
+        // the last part of a name read from a tool's output; never throws, as Path::GetFileName does
+        // on a character no path may hold ('"', '<', '|' ...), which a tool's line may well carry
+        static String^ Leaf(String^ name)
+        {
+            if (String::IsNullOrEmpty(name)) return String::Empty;
+            int slash = name->LastIndexOfAny(gcnew array<wchar_t>{ L'\\', L'/' });
+            return slash < 0 ? name : name->Substring(slash + 1);
         }
     };
 
@@ -234,9 +243,13 @@ namespace Gride { namespace Services {
             this->workDir = workDir; this->custom = custom; this->source = source;
             this->toolName = toolName == nullptr ? String::Empty : toolName->ToLowerInvariant();
             previous = nullptr; First = nullptr;
+            Itself = gcnew List<BuildMessage^>();
         }
 
         property BuildMessage^ First;
+        // the tool's lines about itself, held back until it exits: an error when it fails, else a message
+        // ("shalimar: also compiled linalg.shl", "LINK : ... performing full link" are not errors)
+        property List<BuildMessage^>^ Itself;
         property String^ Source { String^ get() { return source; } }
 
         BuildMessage^ Feed(String^ line)
@@ -247,7 +260,17 @@ namespace Gride { namespace Services {
                 m = BuildMessageParser::TryParse(line, workDir, custom);
                 if (m == nullptr) m = BuildMessageParser::TryParseShalimar(line, source);
                 if (m == nullptr) m = BuildMessageParser::TryParseCaret(previous, line, workDir);
-                if (m == nullptr) m = OwnLine(line);
+                if (m == nullptr)
+                {
+                    m = OwnLine(line);
+                    if (m != nullptr)
+                    {
+                        System::Threading::Monitor::Enter(Itself);
+                        try { Itself->Add(m); }
+                        finally { System::Threading::Monitor::Exit(Itself); }
+                        m = nullptr;
+                    }
+                }
             }
             previous = line;
             if (m != nullptr && m->Sev == Severity::Error && First == nullptr) First = m;
@@ -267,7 +290,7 @@ namespace Gride { namespace Services {
             if (toolName->Length == 0 || String::IsNullOrEmpty(line)) return nullptr;
             int at = line->IndexOf(": ");
             if (at <= 0) return nullptr;
-            String^ who = Path::GetFileName(line->Substring(0, at)->Trim())->ToLowerInvariant();
+            String^ who = BuildMessage::Leaf(line->Substring(0, at)->Trim())->ToLowerInvariant();
             if (who != toolName && who != toolName + ".exe") return nullptr;
             String^ text = line->Substring(at + 2)->Trim();
             if (text->Length == 0) return nullptr;

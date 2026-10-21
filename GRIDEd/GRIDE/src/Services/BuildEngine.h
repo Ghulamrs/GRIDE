@@ -315,6 +315,16 @@ namespace Gride { namespace Services {
                 options = o;
             }
             int rc = runner->Run(command, workDir, options);
+            DiagnosticReader^ r = reader;
+            if (r != nullptr)
+                for each (BuildMessage^ m in r->Itself)
+                {
+                    m->Sev = rc != 0 && rc != ToolRunner::ExitCancelled ? Severity::Error : Severity::Info;
+                    if (m->Sev == Severity::Error && r->First == nullptr) r->First = m;
+                    if (currentProject != nullptr) m->Project = currentProject->Name;
+                    summary->Count(m);
+                    Message(m);
+                }
             if (rc == ToolRunner::ExitStartFailed)
                 Report(Severity::Error, source, toolName + " could not be run - name it under Tools > Options > Toolchains > " + targetName + ", or put it on PATH");
             return rc;
