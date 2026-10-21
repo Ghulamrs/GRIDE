@@ -26,14 +26,19 @@ GRIDEx3 rearranged, 2026-10-22): the tree as its README.md lays it out -
     installer\\   windows\\ (the MSI's scripts) and macos\\
     macos\\       the editor's Mac build (RIDE's Window.xcodeproj)
 
-The tree goes whole: every file git tracks in it, as it is on disk (a change not yet committed included),
-and a tracked file missing from the disk as git has it. No file is left out for its kind - tests, scripts,
-docs, binaries git tracks all go. What git does not track does not: x64\\, obj\\, the tools' build\\,
-installer\\dist\\, .vs\\, what building an example leaves beside it are what building and testing made. .git
-does not. The three outlooks go. The tool trees under toolchain\\ are the minimal copies this tree keeps
-(toolchain\\MANIFEST.md), not repositories of their own: they go as the tree has them, and washout does not
-reach for the old tool repositories (the Compilers\\, TI\\ and Windows\\ a working folder may still keep
-beside the outlooks).
+The source goes, and only the source: every file git tracks in it, as it is on disk (a change not yet
+committed included), and a tracked file missing from the disk as git has it - less what a build makes, even
+where git tracks it (BUILT_FILES: the example programs committed beside their projects, *.exe), and less
+washout.py itself, which is the Mac's tool and no part of what is handed on. Tests, scripts, docs, icons, a
+library an example links against (mathx.lib) and every configuration file - .json (toolchain.json,
+settings.json), .pro, .grws, .sln, .vcxproj, .props, .targets, CCS's .project / .cproject / .ccsproject -
+are source and go: only the extensions BUILT_FILES names are ever left out. What git does not track does not: x64\\,
+obj\\, the tools' build\\, installer\\dist\\, .vs\\, what building an example leaves beside it are what
+building and testing made. .git does not. The three outlooks go. The tool trees under toolchain\\ are the
+minimal copies this tree keeps (toolchain\\MANIFEST.md), not repositories of their own: they go as the tree
+has them, and washout does not reach for the old tool repositories (the Compilers\\, TI\\ and Windows\\ a
+working folder may still keep beside the outlooks). A folder named like a build's is left out where building
+makes it; GRIDE 2.0\\src\\Debug\\ is source (Grey's debugger) and always goes (SOURCE).
 
 A tree that is not a git working copy (a copy brought to the Mac without .git) is taken from the disk
 instead, less what building makes (BUILT) and the file system's own litter (LITTER); washout says so.
@@ -64,6 +69,10 @@ BUILT = [
     re.compile(r"^(Compilers|TI|Windows)(/|$)"),               # the old tool repositories beside the outlooks
 ]
 SOURCE = re.compile(r"^GRIDE 2\.0/src/Debug(/|$)")             # GRIDE 2.0's debugger, named like a build folder
+# Files a build makes, left out wherever they are and whether or not git tracks them: a program, its
+# objects, its debugger's and linker's side files, an installer
+BUILT_FILES = re.compile(r"\.(exe|dll|obj|o|pdb|ilk|exp|idb|ipch|pch|out|msi|tlog|lastbuildstate)$", re.I)
+SELF = os.path.basename(os.path.abspath(__file__))              # washout.py: the Mac's tool, not handed on
 LITTER = {".DS_Store", "Thumbs.db", "desktop.ini"}
 # and Visual Studio's per-user files and Python's caches, as the .gitignore names them
 LITTER_ENDS = (".user", ".suo", ".aps", ".VC.db", ".VC.opendb", ".pyc")
@@ -217,6 +226,9 @@ def main(argv):
     else:
         entries = on_disk(tree)
         print("washout: %s is not a git working copy - its files from the disk, less what building made" % tree)
+    # not source: what a build made (a program git tracks beside its example included), and washout itself
+    left = [e[2] for e in entries if BUILT_FILES.search(e[2]) or e[2] == SELF]
+    entries = [e for e in entries if not (BUILT_FILES.search(e[2]) or e[2] == SELF)]
     copied, restored, submodules = wash(tree, dest, entries)
     for top in sorted(copied):
         print("  %-36s %5d files" % (top, copied[top]))
@@ -224,6 +236,8 @@ def main(argv):
         print("    restored from git %s" % r)
     for s in submodules:
         print("    submodule not copied: %s" % s)
+    for l in left:
+        print("    not source, left out: %s" % l)
     print("washout: %d files in %s" % (sum(copied.values()), dest))
 
     missing, listed, outside = check(dest)
