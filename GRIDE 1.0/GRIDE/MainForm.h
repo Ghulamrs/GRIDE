@@ -1032,7 +1032,7 @@ private:
 
         ToolStripMenuItem^ build = gcnew ToolStripMenuItem("&Build");
         ToolStripMenuItem^ compile = gcnew ToolStripMenuItem(
-            "Compile", nullptr, gcnew EventHandler(this, &MainForm::OnCompile));
+            "Build", nullptr, gcnew EventHandler(this, &MainForm::OnCompile));
         compileItem_ = compile;
 
         compile->ShortcutKeys = static_cast<Keys>(Keys::Control | Keys::B);
@@ -3595,7 +3595,7 @@ private:
         if (ProjectMode()) return true;
         bool project = project_ != nullptr && gride_project_loaded(project_) != 0;
         if (!project) {
-            what_->Text = "no project is open - Compile (Ctrl+B) or Run (F5) builds this file";
+            what_->Text = "no project is open - Build (Ctrl+B) or Run (F5) builds this file";
             return false;
         }
         String^ name = "this file";
@@ -4389,63 +4389,77 @@ private:
         return job;
     }
 
+    // **Build (Ctrl+B): the file in front made into its program** - compiled, assembled and linked as Run
+    // makes it, the program kept as out\<Config>\Win\<name>.exe beside the file, and the assembly between
+    // neither shown nor put on the Assembly tab (the user, 2026-10-21: "go up to linking and done").
     void OnCompile(Object^, EventArgs^) {
         if (!InFileMode()) return;
         int kind = 0, language = 0;
         if (!SingleFileReady(kind, language)) return;
 
         String^ source = path_;
-        Job^ job = SingleFileJob(Job::Build, kind, language);
-        console_->Text = "$ " + FromUtf8(gride_shown_command(project_, job->tools->cc1(), job->tools->cl(),
-                                                            job->tools->shc(), job->tools->cxx1(), kind,
-                                                            job->source->c(), language,
-                                                            job->tools->arch(), config_)) + "\r\n";
+        String^ name = System::IO::Path::GetFileName(source);
+        Job^ job = SingleFileJob(Job::BuildProgram, kind, language);
+        console_->Text = "$ " + FromUtf8(gride_shown_run_command(project_, job->tools->cc1(), job->tools->cl(),
+                                                                job->tools->shc(), job->tools->cxx1(), kind,
+                                                                job->source->c(), language,
+                                                                job->tools->arch(), config_)) + "\r\n";
         panel_->SelectedIndex = 0;
-        what_->Text = "compiling " + System::IO::Path::GetFileName(source) + " ...";
+        what_->Text = "building " + name + " ...";
 
         bool finished = WhileBusy(job);
-        GRIDEBuild* built = job->build;
+        GRIDEProgram* made = job->made;
         delete job;
-        if (built == nullptr) { what_->Text = finished ? "nothing was built" : "stopped"; return; }
+        if (made == nullptr) { what_->Text = finished ? "nothing was built" : "stopped"; return; }
 
-        Say(FromUtf8(gride_build_output(built)));
+        Say(FromUtf8(gride_program_output(made)));
         CollectIssues(source);
         if (!finished) {
-            gride_build_free(built);
+            gride_program_free(made);
             Say("\n[stopped]\n");
             what_->Text = "stopped";
             return;
         }
 
-        if (gride_build_has_error(built) != 0) {
-            int line = gride_build_error_line(built);
-            int column = gride_build_error_column(built);
-            String^ message = FromUtf8(gride_build_error_message(built));
-            String^ where = FromUtf8(gride_build_error_file(built));
-            gride_build_free(built);
+        if (gride_program_has_error(made) != 0) {
+            int line = gride_program_error_line(made);
+            int column = gride_program_error_column(made);
+            String^ message = FromUtf8(gride_program_error_message(made));
+            String^ where = FromUtf8(gride_program_error_file(made));
+            gride_program_free(made);
             ShowError(line, column, message, where, source);
             return;
         }
 
-        if (gride_build_ok(built) == 0) {
+        if (gride_program_ok(made) == 0) {
             what_->Text = FromUtf8(gride_toolchain_name(kind)) + " failed - see the console";
-            gride_build_free(built);
+            gride_program_free(made);
             return;
         }
 
-        String^ produced = FromUtf8(gride_build_assembly(built));
-        assembly_->Text = produced->Replace("\n", "\r\n");
-        SayDebugTab(produced);
-        int lines = gride_build_assembly_lines(built);
-        gride_build_free(built);
+        // The program is made in the temporary folder and removed with the build: a Windows program is
+        // kept beside the file first. A C6747 one (an assembly, a .vm) is Run's to make and run.
+        String^ madeAt = FromUtf8(gride_program_path(made));
+        String^ kept = nullptr;
+        if (madeAt->EndsWith(".exe", StringComparison::OrdinalIgnoreCase) && System::IO::File::Exists(madeAt)) {
+            try {
+                String^ dir = System::IO::Path::Combine(System::IO::Path::GetDirectoryName(source),
+                                                        System::IO::Path::Combine("out", System::IO::Path::Combine(
+                                                            config_ == GRIDE_CONFIG_RELEASE ? "Release" : "Debug", "Win")));
+                System::IO::Directory::CreateDirectory(dir);
+                kept = System::IO::Path::Combine(dir, System::IO::Path::GetFileNameWithoutExtension(source) + ".exe");
+                System::IO::File::Copy(madeAt, kept, true);
+            } catch (Exception^ e) {
+                Say("\n[the program could not be kept beside the file: " + e->Message + "]\n");
+                kept = nullptr;
+            }
+        }
+        gride_program_free(made);
 
-        // Said in so many words, as Visual Studio and CCS do, and on the Console tab where it is looked for;
-        // the listing is on the Assembly tab beside it.
-        String^ name = System::IO::Path::GetFileName(source);
-        Say("\n========== Compilation succeeded: " + name + " - 0 errors ==========\n" +
-            lines + " lines of assembly, on the Assembly tab\n");
+        Say("\n========== Build succeeded: " + name + " - 0 errors ==========\n" +
+            (kept != nullptr ? "[built " + kept + "]\n" : "[built - Run (F5) runs it]\n"));
         panel_->SelectedIndex = 0;
-        what_->Text = "Compilation succeeded: " + name + " - 0 errors, " + lines + " lines of assembly";
+        what_->Text = "Build succeeded: " + (kept != nullptr ? System::IO::Path::GetFileName(kept) : name);
     }
 
     // ---- Build > Command-line arguments --------------------------------------------

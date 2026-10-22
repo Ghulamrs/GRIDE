@@ -36,8 +36,13 @@ bool hasInternalLinkage(const sema::Symbol* s)
     if (!s) return false;
     if (s->isStatic && !s->ownerClass && !s->isLocal) return true;
     if (s->kind == sema::Symbol::Variable && !s->isMember && !s->isLocal && !s->isParam && !s->isExtern && s->type && s->type->kind != sema::Type::Reference && s->type->isConst && !s->type->isVolatile) return true;
-    for (const sema::Scope* sc = s->scope; sc; sc = sc->parent)
+    // a local class and its members have no linkage (9.8): internal, as cl emits them
+    bool local = s->kind == sema::Symbol::Class;
+    for (const sema::Scope* sc = s->scope; sc; sc = sc->parent) {
         if (sc->kind == sema::Scope::Namespace && sc->owner && sc->owner->name.empty()) return true;
+        if (sc->kind == sema::Scope::Class) local = true;
+        if ((sc->kind == sema::Scope::Function || sc->kind == sema::Scope::Block) && local && !s->isLocal) return true;
+    }
     return false;
 }
 
@@ -2129,6 +2134,19 @@ void IrGen::runCleanup(const Cleanup& c, bool guarded, int line)
         const sema::Type* vp = m_semaTypes.pointer(m_semaTypes.basic(sema::Type::Void));
         LValue pl; pl.kind = LValue::Local; pl.local = c.slot; pl.type = vp;
         const int p = load(pl, vp, line);
+        if (c.freeKind == 3) {
+            // the placement operator delete matching the new-expression's operator new, with the arguments that one got
+            IrInst d = make(IrInst::Call, m_semaTypes.basic(sema::Type::Void), line);
+            d.sub = irName(c.freeCls);
+            d.args.push_back(IrOperand::temp(p, oldType(vp)));
+            for (size_t k = 0; k < c.argSlots.size(); ++k) {
+                LValue sl; sl.kind = LValue::Local; sl.local = c.argSlots[k]; sl.type = c.argTypes[k];
+                d.args.push_back(IrOperand::temp(load(sl, c.argTypes[k], line), oldType(c.argTypes[k])));
+            }
+            emit(d);
+            if (guarded) { br(next, line); m_block = next; }
+            return;
+        }
         if (c.freeKind == 2) {
             // the global operator delete[] too gets the size allocated, as cl
             int count = -1;
@@ -2281,6 +2299,76 @@ int IrGen::registerFree(int ptr, Symbol* cls, bool array, int count, int elemSiz
     c.freeSize = elemSize;
     if (array && countSlot < 0) c.freeCls = 0;
     return k;
+}
+
+// the placement operator delete that matches a placement operator new (5.3.4/19): declared in the same scope (the class
+// or the global namespace), with the same parameters after the first (void* for size_t); 0 when there is none
+Symbol* IrGen::matchingPlacementDelete(Symbol* opNew) const
+{
+    const sema::Type* nt = opNew ? opNew->type : 0;
+    if (!nt || nt->kind != sema::Type::Function) return 0;
+    std::vector<Symbol*> cands;
+    if (opNew->ownerClass) {
+        // the first class up the hierarchy that declares the name, as lookup finds it
+        std::vector<Symbol*> todo(1, opNew->ownerClass);
+        for (size_t i = 0; i < todo.size() && cands.empty() && i < 64; ++i) {
+            Symbol* c = todo[i];
+            if (!c || !c->members) continue;
+            const std::vector<Symbol*>* v = c->members->find("operator delete");
+            if (v && !v->empty()) { cands = *v; break; }
+            for (size_t b = 0; b < c->bases.size(); ++b) todo.push_back(c->bases[b].cls);
+        }
+    } else {
+        const std::vector<Symbol*>* v = m_prog.global->find("operator delete");
+        if (v) cands = *v;
+    }
+    for (size_t i = 0; i < cands.size(); ++i) {
+        Symbol* d = cands[i];
+        const sema::Type* dt = d->kind == Symbol::Function ? d->type : 0;
+        if (!dt || dt->kind != sema::Type::Function || dt->params.size() != nt->params.size() || dt->params.empty() || (d->ownerClass != 0) != (opNew->ownerClass != 0)) continue;
+        bool same = true;
+        for (size_t k = 1; k < nt->params.size() && same; ++k) same = dt->params[k] == nt->params[k] || dt->params[k]->text() == nt->params[k]->text();
+        if (same) return d;
+    }
+    return 0;
+}
+
+// a placement new whose operator new sema resolved into a call (new (arena) T with operator new(size_t, Arena&), new
+// (std::nothrow) T): the call, with its arguments evaluated once into locals so that the matching placement operator
+// delete gets the same ones when the constructor throws (5.3.4/17-19), as cl calls it; the address converted to the
+// object's pointer type. With no matching delete, or an argument that is a class by value, the call as it is
+int IrGen::placementNew(cxx::Expr* callE, const sema::Type* pt, bool wantFree, int& freeK, int line)
+{
+    Symbol* opNew = callE->semaSym;
+    const sema::Type* ft = opNew->type;
+    const sema::Type* vp = m_semaTypes.pointer(m_semaTypes.basic(sema::Type::Void));
+    Symbol* opDel = wantFree ? matchingPlacementDelete(opNew) : 0;
+    bool saveable = opDel != 0 && ft && ft->kind == sema::Type::Function && callE->kids.size() == ft->params.size() + 1;
+    for (size_t k = 1; ft && k < ft->params.size() && saveable; ++k) if (!isReference(ft->params[k]) && (isClassType(ft->params[k]) || mpKind(ft->params[k]) == 3)) saveable = false;
+    if (!saveable) return convert(value(callE), m_semaTypes.decay(exprType(callE)), pt, line);
+    need(opNew);
+    IrInst n = make(IrInst::Call, vp, line);
+    n.sub = irName(opNew);
+    std::vector<int> slots; std::vector<const sema::Type*> types;
+    for (size_t a = 1; a < callE->kids.size(); ++a) {   // kids[0] is the callee; kids[1] the size, then the placement arguments
+        const size_t pi = a - 1;
+        const sema::Type* ptype = ft->params[pi];
+        const int v = argument(callE->kids[a], ptype, line);
+        const sema::Type* ot = argOperandType(ptype, callE->kids[a]);
+        if (pi > 0) {
+            const int slot = newLocal("tmp.place", ot, false);
+            LValue sl; sl.kind = LValue::Local; sl.local = slot; sl.type = ot;
+            store(sl, v, ot, line);
+            slots.push_back(slot); types.push_back(ot);
+        }
+        n.args.push_back(IrOperand::temp(v, oldType(ot)));
+    }
+    const int p = emit(n);
+    freeK = registerFree(p, 0, false, -1, 1, line);
+    Cleanup& c = m_flagged[static_cast<size_t>(freeK)];
+    c.freeKind = 3; c.freeCls = opDel; c.argSlots = slots; c.argTypes = types;
+    need(opDel);
+    return convert(p, vp, pt, line);
 }
 
 void IrGen::clearFlag(int index, int line)
@@ -2750,12 +2838,22 @@ int IrGen::value(cxx::Expr* e)
             cxx::Expr* countExpr = e->type->decl->parts.back().arraySize;
             const sema::Type* lng = m_semaTypes.basic(sema::Type::LongLong);
             int count = countExpr ? convert(value(countExpr), exprType(countExpr), lng, line) : constant(1, lng, line);
-            int bytes = binary("*", count, lng, constant(sizeOf(elem) > 0 ? sizeOf(elem) : 1, lng, line), lng, lng, line);
-            bool header = needsDtor(elem);   // the element count is kept in front of the elements for delete[]
-            if (header) bytes = binary("+", bytes, lng, constant(8, lng, line), lng, lng, line);   // an 8-byte cookie, as MSVC
-            n.sub = classNew ? irName(classNew) : std::string("__new_array");
-            n.args.push_back(IrOperand::temp(bytes, oldType(lng)));
-            int p = emit(n);
+            // placement new of an array ("new (buf) T[n]"): the elements at the given address, no cookie (as cl: such an
+            // array is destroyed by hand, never by delete[]); the standard placement delete[] frees nothing when an
+            // element's constructor throws
+            const bool placed = !e->placement.empty();
+            bool header = needsDtor(elem) && !placed;   // the element count is kept in front of the elements for delete[]
+            int p;
+            if (placed) {
+                p = convert(value(e->placement[0]), m_semaTypes.decay(exprType(e->placement[0])), pt, line);
+                for (size_t k = 1; k < e->placement.size(); ++k) value(e->placement[k]);
+            } else {
+                int bytes = binary("*", count, lng, constant(sizeOf(elem) > 0 ? sizeOf(elem) : 1, lng, line), lng, lng, line);
+                if (header) bytes = binary("+", bytes, lng, constant(8, lng, line), lng, lng, line);   // an 8-byte cookie, as MSVC
+                n.sub = classNew ? irName(classNew) : std::string("__new_array");
+                n.args.push_back(IrOperand::temp(bytes, oldType(lng)));
+                p = emit(n);
+            }
             if (header) {
                 LValue hl; hl.kind = LValue::Mem; hl.addr = p; hl.type = lng;
                 store(hl, count, lng, line);
@@ -2776,7 +2874,8 @@ int IrGen::value(cxx::Expr* e)
                     emit(z);
                 }
             }
-            if (needsDefaultCtor(elem)) {
+            if (needsDefaultCtor(elem) && placed) forEachElement(elem, p, count, true, line);
+            else if (needsDefaultCtor(elem)) {
                 // an element's constructor that throws: the elements built are destroyed (forEachElement), then
                 // the memory is freed through the matching operator delete[] (C++98 5.3.4/17), as cl does
                 Symbol* fc = !e->globalScope && isClassType(elem) && elem->decl ? elem->decl : 0;
@@ -2791,7 +2890,14 @@ int IrGen::value(cxx::Expr* e)
             return p;
         }
         int p;
-        if (!e->placement.empty()) {
+        // a constructor (or initializer) that throws: the memory is freed through the matching operator delete
+        // (C++98 5.3.4/17), as cl does; the standard placement new's (one address) matching operator delete frees
+        // nothing, the placement operator new sema resolved (new (arena) T, new (std::nothrow) T) has its own
+        const bool wantFree = (e->semaSym && e->semaSym->isConstructor) || !e->kids.empty() || (isClassType(elem) && needsDefaultCtor(elem));
+        int freeK = -1;
+        const bool resolvedCall = e->placement.size() == 1 && e->placement[0]->kind == cxx::Expr::Call && e->placement[0]->semaSym && e->placement[0]->semaSym->name == "operator new";
+        if (resolvedCall) p = placementNew(e->placement[0], pt, wantFree, freeK, line);
+        else if (!e->placement.empty()) {
             // placement new: the object is built at the given address
             p = convert(value(e->placement[0]), m_semaTypes.decay(exprType(e->placement[0])), pt, line);
             for (size_t k = 1; k < e->placement.size(); ++k) value(e->placement[k]);
@@ -2799,12 +2905,8 @@ int IrGen::value(cxx::Expr* e)
             n.sub = classNew ? irName(classNew) : std::string("__new");
             n.args.push_back(IrOperand::imm(sizeOf(elem) > 0 ? sizeOf(elem) : 1, oldType(m_semaTypes.sizeType())));
             p = emit(n);
+            if (wantFree) freeK = registerFree(p, !e->globalScope && isClassType(elem) && elem->decl ? elem->decl : 0, false, -1, sizeOf(elem), line);
         }
-        // a constructor (or initializer) that throws: the memory is freed through the matching operator delete
-        // (C++98 5.3.4/17), as cl does; a placement new's matching operator delete frees nothing
-        int freeK = -1;
-        if (e->placement.empty() && ((e->semaSym && e->semaSym->isConstructor) || !e->kids.empty() || (isClassType(elem) && needsDefaultCtor(elem))))
-            freeK = registerFree(p, !e->globalScope && isClassType(elem) && elem->decl ? elem->decl : 0, false, -1, sizeOf(elem), line);
         if (e->hasInit && e->kids.empty() && isClassType(elem)) valueInit(e->semaSym && e->semaSym->isConstructor ? e->semaSym : 0, elem, p, true, line);   // new T(); new T stays uninitialised
         else if (e->semaSym && e->semaSym->isConstructor) construct(e->semaSym, p, e->kids, 0, line);
         else if (!e->kids.empty()) { LValue lv; lv.kind = LValue::Mem; lv.addr = p; lv.type = elem; store(lv, convert(value(e->kids[0]), exprType(e->kids[0]), elem, line), elem, line); }
@@ -2945,11 +3047,44 @@ bool IrGen::coversAll(const sema::Type* t, const std::vector<cxx::Expr*>& elems)
     if (elems.size() < want) return false;
     for (size_t i = 0; i < elems.size(); ++i) {
         if (elems[i]->kind == cxx::Expr::Error) return false;
-        if (elems[i]->kind != cxx::Expr::InitList) continue;
         const sema::Type* et = u->kind == sema::Type::Array ? u->inner : (i < u->decl->fields.size() ? u->decl->fields[i]->type : 0);
+        if (elems[i]->kind == cxx::Expr::StringLit && et && m_semaTypes.unref(et)->kind == sema::Type::Array) {
+            // a char array member from a literal: covered when the literal (with its terminator) fills it
+            const sema::Type* lt = m_semaTypes.unref(exprType(elems[i]));
+            if (!lt || lt->kind != sema::Type::Array || lt->arraySize < m_semaTypes.unref(et)->arraySize) return false;
+            continue;
+        }
+        if (elems[i]->kind != cxx::Expr::InitList) continue;
         if (!et || !coversAll(et, elems[i]->kids)) return false;
     }
     return true;
+}
+
+// char s[N] = "...", wchar_t w[N] = L"..." (lit of type const char[M]): the literal's units with its terminator into the
+// array at addr; the rest of a longer array is zeroed when zeroTail (static storage is zero already)
+void IrGen::copyLiteral(const sema::Type* u, int addr, cxx::Expr* lit, bool zeroTail, int line)
+{
+    const sema::Type* lt = m_semaTypes.unref(exprType(lit));
+    const int elem = sizeOf(u->inner);
+    if (!lt || lt->kind != sema::Type::Array) return;
+    const long units = u->arraySize < lt->arraySize ? u->arraySize : lt->arraySize;
+    const long bytes = units * elem;
+    const sema::Type* vp = m_semaTypes.pointer(m_semaTypes.basic(sema::Type::Void));
+    if (zeroTail && u->arraySize > units) {
+        IrInst z = make(IrInst::Call, m_semaTypes.basic(sema::Type::Void), line);
+        z.sub = "__zero";
+        z.args.push_back(IrOperand::temp(addr, oldType(vp)));
+        z.args.push_back(IrOperand::imm(0, m_types.intType()));
+        z.args.push_back(IrOperand::imm(u->arraySize * elem, m_types.builtin(Type::LongLong)));
+        emit(z);
+    }
+    const int src = value(lit);
+    IrInst c = make(IrInst::Call, m_semaTypes.basic(sema::Type::Void), line);
+    c.sub = "__copy";
+    c.args.push_back(IrOperand::temp(addr, oldType(vp)));
+    c.args.push_back(IrOperand::temp(src, oldType(vp)));
+    c.args.push_back(IrOperand::imm(bytes, m_types.builtin(Type::LongLong)));
+    emit(c);
 }
 
 // brace initialisation of an aggregate whose braces sema made explicit: an InitList element is a nested
@@ -2985,6 +3120,7 @@ void IrGen::initAggregate(const sema::Type* t, int addr, const std::vector<cxx::
         cxx::Expr* x = elems[i];
         if (x->kind == cxx::Expr::Error) continue;
         if (x->kind == cxx::Expr::InitList) { initAggregate(et, eaddr, x->kids, false, line); continue; }
+        if (x->kind == cxx::Expr::StringLit && m_semaTypes.unref(et)->kind == sema::Type::Array) { copyLiteral(m_semaTypes.unqualified(m_semaTypes.unref(et)), eaddr, x, false, line); continue; }   // the tail was zeroed with the object
         if (isClassType(et)) { materialize(x, et, eaddr, line); continue; }
         LValue el; el.kind = LValue::Mem; el.addr = eaddr; el.type = et;
         if (u->kind == sema::Type::Class) bitField(el, u->decl->fields[i]);
@@ -3079,24 +3215,7 @@ void IrGen::initObject(const LValue& lv, const sema::Type* t, Symbol* var, cxx::
         if (id.init.kind != cxx::Initializer::Brace && lt && lt->kind == sema::Type::Array && lt->inner && sizeOf(lt->inner) == elem && (elem == 1 || elem == 2)) {
             // char s[N] = "...", wchar_t w[N] = L"...": the literal's units with its terminator; the rest of a
             // longer local array is zero (static storage is zero already)
-            const long units = u->arraySize < lt->arraySize ? u->arraySize : lt->arraySize;
-            const long bytes = units * elem;
-            const sema::Type* vp = m_semaTypes.pointer(m_semaTypes.basic(sema::Type::Void));
-            if (lv.kind == LValue::Local && u->arraySize > units) {
-                IrInst z = make(IrInst::Call, m_semaTypes.basic(sema::Type::Void), line);
-                z.sub = "__zero";
-                z.args.push_back(IrOperand::temp(addr, oldType(vp)));
-                z.args.push_back(IrOperand::imm(0, m_types.intType()));
-                z.args.push_back(IrOperand::imm(u->arraySize * elem, m_types.builtin(Type::LongLong)));
-                emit(z);
-            }
-            const int src = value(id.init.args[0]);
-            IrInst c = make(IrInst::Call, m_semaTypes.basic(sema::Type::Void), line);
-            c.sub = "__copy";
-            c.args.push_back(IrOperand::temp(addr, oldType(vp)));
-            c.args.push_back(IrOperand::temp(src, oldType(vp)));
-            c.args.push_back(IrOperand::imm(bytes, m_types.builtin(Type::LongLong)));
-            emit(c);
+            copyLiteral(u, addr, id.init.args[0], lv.kind == LValue::Local, line);
             return;
         }
         if (id.init.kind != cxx::Initializer::Brace) { constructDefault(u, addr, line); return; }
@@ -4917,10 +5036,12 @@ void IrGen::registerMetadata(X86Module& x86, bool msvc)
             }
         }
         if (s->kind == Symbol::Variable && !s->isLocal && !s->isParam && (!s->isMember || s->isStatic) && s->scope && !s->isDependentContext) {
-            // a static const member with a constant initializer is folded where it is used and not emitted
-            if (s->isMember && s->isStatic && s->hasConstValue && s->init && s->init->semaConst) continue;
+            // a static const member with a constant initializer is folded where it is used; without an out-of-class
+            // definition it is not emitted, with one it is the object a reference or a pointer needs (9.4.2/4), in
+            // .rdata as cl puts it
+            const bool foldedMember = s->isMember && s->isStatic && s->hasConstValue && s->init && s->init->semaConst;
             std::string name = s->qualifiedName();
-            if (msvc) x86.registerGlobalName(name, msvcMangleVariableSymbol(*s));
+            if (msvc) x86.registerGlobalName(name, msvcMangleVariableSymbol(*s));   // a reference to another unit's definition too
             if (!s->isDefinition) continue;   // "extern T x;" only, or a static member without its out-of-line definition
             IrGlobal g;
             g.name = name;
@@ -4938,13 +5059,16 @@ void IrGen::registerMetadata(X86Module& x86, bool msvc)
             // constantData, which converts it exactly as cl does ("double d = 0xFFFFFFFFu;", "bool b = 0.5;")
             const sema::Type* st = m_semaTypes.unqualified(m_semaTypes.unref(s->type));
             const sema::Type* it0 = s->init ? m_semaTypes.unqualified(m_semaTypes.unref(exprType(s->init))) : 0;
-            if (s->init && s->init->semaConst && scalar && st && !st->isFloating() && st->kind != sema::Type::Bool && st->kind != sema::Type::MemberPointer && it0 && (it0->isIntegral() || it0->isPointer())) g.init = numText(s->init->semaValue);
+            if (s->init && s->init->semaConst && scalar && st && !st->isFloating() && st->kind != sema::Type::Bool && st->kind != sema::Type::MemberPointer && it0 && (it0->isIntegral() || it0->isPointer())) { g.init = numText(s->init->semaValue); if (foldedMember) g.readOnly = true; }
             else if (staticInit(s, g)) {}   // constants and addresses: static data, as cl emits a constant table
             else if ((isClassType(s->type) || m_semaTypes.unref(s->type)->kind == sema::Type::Array) && !isReference(s->type)) dynamic = s->initCtor != 0 || s->init != 0 || needsDefaultCtor(s->type);   // an array of classes too (`Leaf2 g2[2]`)
             else dynamic = s->init != 0;
             // zero-initialised static storage that holds pointers to members: cl writes their null values
             if (!dynamic && !s->init && g.init.empty() && g.data.empty() && !isReference(s->type)) { std::vector<IrDataItem> items; if (nullMemberPointerData(st, items, true)) g.data = items; }
-            if (dynamic) m_dynamicGlobals.push_back(s);
+            // a COMDAT variable (the static data member of a class template instantiation) gets a COMDAT initialiser of
+            // its own, so that one unit's runs for the program (14.7.1), as cl emits it; the rest go in the module's
+            if (dynamic && g.linkOnce) m_comdatGlobals.push_back(s);
+            else if (dynamic) m_dynamicGlobals.push_back(s);
             x86.addGlobal(g);
         }
         if (msvc && s->kind == Symbol::Function && !s->isExternC) x86.registerSymbolName(irName(s), msvcMangleSymbol(*s));
@@ -4962,30 +5086,61 @@ void IrGen::registerMetadata(X86Module& x86, bool msvc)
         m_initSymbol->hasBody = true;
         x86.addInitializer(irName(m_initSymbol));
     }
+    for (size_t i = 0; i < m_comdatGlobals.size(); ++i) {
+        // cl's "dynamic initializer for 'Box<int>::made'" (??__E...@@YAXXZ), a COMDAT function whose .CRT$XCU entry is a
+        // COMDAT too; an inline function with a C++ name (its IR name has a parameter list), so that it is a COMDAT
+        Symbol* g = m_comdatGlobals[i];
+        std::string base = g->qualifiedName();
+        for (size_t k = 0; k < base.size(); ++k) if (!isalnum(static_cast<unsigned char>(base[k]))) base[k] = '_';
+        Symbol* f = m_prog.newSymbol(Symbol::Function, "cppparse_init_" + base, m_prog.global);
+        f->type = m_semaTypes.function(m_semaTypes.basic(sema::Type::Void), std::vector<const sema::Type*>(), false, false);
+        f->isInline = true;
+        f->hasBody = true;
+        f->loc = g->loc;
+        m_comdatInits.push_back(f);
+        if (msvc) x86.registerSymbolName(irName(f), msvcMangleDynamicInitializer(*g));
+        x86.addComdatInitializer(irName(f), msvc ? msvcMangleInitializerEntry(*g) : std::string(), g->qualifiedName());
+    }
 }
 
-// the module initialiser: constructs the globals that need code, in declaration order
+// the module initialiser: constructs the globals that need code, in declaration order; then one initialiser per COMDAT
+// variable
 void IrGen::genInitializer()
 {
-    if (!m_initSymbol) return;
-    m_out = new IrFunction;
-    m_fn = m_initSymbol;
-    m_slots.clear(); m_loops.clear(); m_tryStack.clear(); m_tryCount = 0;
-    prologue(m_initSymbol);
-    for (size_t i = 0; i < m_dynamicGlobals.size(); ++i) {
-        Symbol* g = m_dynamicGlobals[i];
-        const int line = g->loc.line;
-        LValue lv; lv.kind = LValue::Global; lv.global = g->qualifiedName(); lv.type = m_semaTypes.unref(g->type);
-        cxx::InitDeclarator* id = 0;
-        if (g->declAst) for (size_t k = 0; k < g->declAst->declarators.size(); ++k) if (g->declAst->declarators[k].decl && g->declAst->declarators[k].decl->semaSym == g) id = &g->declAst->declarators[k];
-        if (id) initObject(lv, g->type, g, *id, line);
-        else constructDefault(g->type, addressOf(lv, line), line);
-        endFullExpr(line);
-        if (!isReference(g->type) && needsDtor(g->type)) registerAtExit(lv.global, lv.type, line);
+    if (m_initSymbol) {
+        m_out = new IrFunction;
+        m_fn = m_initSymbol;
+        m_slots.clear(); m_loops.clear(); m_tryStack.clear(); m_tryCount = 0;
+        prologue(m_initSymbol);
+        for (size_t i = 0; i < m_dynamicGlobals.size(); ++i) initGlobal(m_dynamicGlobals[i]);
+        returnSequence(m_initSymbol->loc.line);
+        emit(make(IrInst::Ret, 0, m_initSymbol->loc.line));
+        finishFunction(m_initSymbol->loc.line);
     }
-    returnSequence(m_initSymbol->loc.line);
-    emit(make(IrInst::Ret, 0, m_initSymbol->loc.line));
-    finishFunction(m_initSymbol->loc.line);
+    for (size_t i = 0; i < m_comdatGlobals.size() && i < m_comdatInits.size(); ++i) {
+        Symbol* f = m_comdatInits[i];
+        m_out = new IrFunction;
+        m_fn = f;
+        m_slots.clear(); m_loops.clear(); m_tryStack.clear(); m_tryCount = 0;
+        prologue(f);
+        initGlobal(m_comdatGlobals[i]);
+        returnSequence(f->loc.line);
+        emit(make(IrInst::Ret, 0, f->loc.line));
+        finishFunction(f->loc.line);
+    }
+}
+
+// the code that builds one global in an initialiser, and registers its destructor with atexit
+void IrGen::initGlobal(Symbol* g)
+{
+    const int line = g->loc.line;
+    LValue lv; lv.kind = LValue::Global; lv.global = g->qualifiedName(); lv.type = m_semaTypes.unref(g->type);
+    cxx::InitDeclarator* id = 0;
+    if (g->declAst) for (size_t k = 0; k < g->declAst->declarators.size(); ++k) if (g->declAst->declarators[k].decl && g->declAst->declarators[k].decl->semaSym == g) id = &g->declAst->declarators[k];
+    if (id) initObject(lv, g->type, g, *id, line);
+    else constructDefault(g->type, addressOf(lv, line), line);
+    endFullExpr(line);
+    if (!isReference(g->type) && needsDtor(g->type)) registerAtExit(lv.global, lv.type, line);
 }
 
 // a global initialised by constants, string literals and addresses of globals and functions is emitted as static

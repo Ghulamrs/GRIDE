@@ -64,6 +64,10 @@ void Driver::usage() const {
         "  --version          say which shc this is, and stop\n"
         "  -g                 write debug information, so lldb, gdb or cdb can stop on\n"
         "                     a line and show the variables; nothing else changes\n"
+        "  -masm=<spelling>   with -g on x86_64-windows: gnu (the default), the GNU\n"
+        "                     spelling clang assembles with CodeView; or masm, the MASM\n"
+        "                     spelling with the .FILE and .LINE directives GRIDE's masm\n"
+        "                     makes CodeView of (SHALIMAR_AS, or the one beside shc)\n"
         "  --debug            link the runtime a debugger can stop, which\n"
         "                     changes nothing about what is compiled\n"
         "\n"
@@ -401,6 +405,8 @@ bool Driver::parseArguments(const std::vector<std::string> &arguments) {
             debug_ = true;
         } else if (a == "-g") {
             debugInfo_ = true;
+        } else if (a == "-masm=masm" || a == "-masm=gnu") {
+            masmDebug_ = a == "-masm=masm";
         } else if (a == "--version") {
             std::cout << bannerLine() << "\n";
             answered_ = true;
@@ -483,6 +489,7 @@ int Driver::run(const std::vector<std::string> &arguments) {
     std::vector<std::string> names;
     for (const std::string &path : files) names.push_back(leafOf(path));
     diagnostics.nameUnits(names);
+    diagnostics.pathUnits(files);
 
     std::vector<Unit> units;
     for (size_t i = 0; i < files.size(); ++i) {
@@ -492,6 +499,7 @@ int Driver::run(const std::vector<std::string> &arguments) {
             return 2;
         }
 
+        diagnostics.sourceOf(static_cast<int>(i), source);
         LexResult lexed = tokenize(source);
         if (lexed.failed) {
 
@@ -499,7 +507,7 @@ int Driver::run(const std::vector<std::string> &arguments) {
                 std::cerr << program::kName << ": ignoring " << names[i] << ": " << lexed.error << "\n";
                 continue;
             }
-            diagnostics.error(static_cast<int>(i), lexed.errorLine, lexed.error);
+            diagnostics.error(static_cast<int>(i), lexed.errorLine, lexed.errorCol, lexed.error);
             std::string text;
             diagnostics.writeTo(text);
             std::cout << text;
@@ -590,7 +598,9 @@ int Driver::run(const std::vector<std::string> &arguments) {
         return 1;
     }
 
-    std::unique_ptr<Emitter> emitter = debugInfo_ ? target->newDebugEmitter() : target->newEmitter();
+    // -g's GNU spelling for clang, unless -masm=masm keeps the MASM one, with its line directives
+    const bool gnuDebug = debugInfo_ && !masmDebug_;
+    std::unique_ptr<Emitter> emitter = gnuDebug ? target->newDebugEmitter() : target->newEmitter();
     emitter->setOptimize(optimize_);
     if (debugInfo_) emitter->setDebugInfo(files, workingDirectory());
     CodeGen generator(*emitter);
@@ -608,8 +618,8 @@ int Driver::run(const std::vector<std::string> &arguments) {
     }
 
     const std::string assemblyPath =
-        assemblyOnly_ ? output_ : output_ + (debugInfo_ ? target->debugAssemblyExtension()
-                                                        : target->assemblyExtension());
+        assemblyOnly_ ? output_ : output_ + (gnuDebug ? target->debugAssemblyExtension()
+                                                      : target->assemblyExtension());
     if (!writeFile(assemblyPath, emitter->text())) {
         std::cerr << program::kName << ": cannot write " << assemblyPath << "\n";
         return 2;
@@ -635,12 +645,18 @@ int Driver::run(const std::vector<std::string> &arguments) {
     // command line - the project's own does, and RIDE names it this way, as
     // it names c90's and cpp11's through C90_AS and CPP11_AS.
     const char *as = std::getenv(program::env("AS").c_str());
-    const std::string assembler = (as != nullptr && as[0] != '\0') ? shellQuote(as) : "ml64";
+    std::string assembler = (as != nullptr && as[0] != '\0') ? shellQuote(as) : "ml64";
+    // -g in the MASM spelling: .FILE and .LINE are GRIDE's masm's, which ml64 refuses - the one
+    // beside this program, when SHALIMAR_AS names none
+    if (debugInfo_ && masmDebug_ && (as == nullptr || as[0] == '\0')) {
+        const std::string own = programDirectory(program_) + "\\masm.exe";
+        if (exists(own)) assembler = shellQuote(own);
+    }
     std::string command = assembler + " /nologo /c /Fo" + shellQuote(objectPath) + " " +
                           shellQuote(assemblyPath);
     // **-g is the GNU spelling, and clang assembles it** - the road cpp11 took: MASM has no words
     // for a line table, and clang's COFF assembler writes the CodeView that link.exe /DEBUG makes a PDB of.
-    if (debugInfo_) {
+    if (gnuDebug) {
         const std::string clang = windowsClang();
         if (clang.empty()) {
             std::cerr << program::kName << ": -g on this target needs clang to assemble the debug information,\n"

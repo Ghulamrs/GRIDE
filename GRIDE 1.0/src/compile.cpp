@@ -653,6 +653,13 @@ Built buildProgramOnce(const Toolchain& tool, ToolchainKind kind, const std::str
         return result;
     }
 
+
+    const std::string noLines = lineTableNote(kind, arch, config);
+    if (!noLines.empty()) {
+        result.output += noLines + "\n";
+        if (sink) sink(context, noLines);
+    }
+
     Recipe recipe = programRecipe(tool, kind, sourcePath, lang, arch, config);
     result.program = recipe.assemblyPath;
     result.leftovers = recipe.leftovers;
@@ -966,6 +973,13 @@ Built buildTargetOnce(const Toolchain& tool, ToolchainKind kind,
         return result;
     }
 
+
+    const std::string noLines = lineTableNote(kind, arch, config);
+    if (!noLines.empty()) {
+        result.output += noLines + "\n";
+        if (sink) sink(context, noLines);
+    }
+
     Recipe recipe = targetRecipe(tool, kind, sources, lang, arch, config, program);
     result.program = recipe.assemblyPath;
     result.shalimar = kind == ToolShc;
@@ -1033,6 +1047,14 @@ Built buildPartsOnce(const Toolchain& tool, const std::vector<Part>& parts,
         if (tool.libraries.empty() || isEmulated(arch) || only == ToolShc)
             return buildTargetOnce(tool, only, parts[0].sources, parts[0].lang, arch, config,
                                    program, sink, context);
+    }
+
+    for (size_t i = 0; i < parts.size(); ++i) {
+        const std::string noLines = lineTableNote(toolchainOf(tool, parts[i]), arch, config);
+        if (noLines.empty()) continue;
+        result.output += noLines + "\n";
+        if (sink) sink(context, noLines);
+        break;
     }
 
     bool withCpp = false;

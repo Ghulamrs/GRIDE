@@ -129,7 +129,7 @@ namespace Gride { namespace UI {
         c = Cmd("Build.Compile", "Compile", "Ctrl+F7", nullptr, DO(CompileFile)); c->CanExecute = WHEN(CanBuild);
         c = Cmd("Build.AssembleOnly", "Assemble Only (ASM6x / MASM)", nullptr, nullptr, DO(AssembleOnly)); c->CanExecute = WHEN(CanBuild);
         c = Cmd("Build.LinkOnly", "Link Only (LNK6x / LINK)", nullptr, nullptr, DO(LinkOnly)); c->CanExecute = WHEN(CanBuild);
-        c = Cmd("Build.Batch", "Batch B&uild...", nullptr, nullptr, DO(BatchBuild)); c->CanExecute = WHEN(CanBuild);
+        c = Cmd("Build.Batch", "Batch B&uild...", nullptr, nullptr, DO(BatchBuild)); c->CanExecute = WHEN(CanBatch);
         c = Cmd("Build.ConfigManager", "Configuration &Manager...", nullptr, "settings", DO(ConfigurationManager)); c->CanExecute = WHEN(HasWorkspace);
         c = Cmd("Build.Cancel", "Cance&l Build", "Ctrl+Break", "stop", DO(CancelBuild)); c->CanExecute = WHEN(IsBuilding);
 
@@ -536,7 +536,7 @@ namespace Gride { namespace UI {
 
     void MainForm::OnBuildMenuOpening(Object^ sender, EventArgs^ e)
     {
-        GrideProject^ p = ContextProject();
+        GrideProject^ p = BuildContextProject();
         String^ name = "Project";
         if (p != nullptr) name = p->Name;
         commands->Get("Build.BuildProject")->Text = "Build " + name;
@@ -633,7 +633,8 @@ namespace Gride { namespace UI {
     bool MainForm::HasProject() { return ContextProject() != nullptr; }
     bool MainForm::HasWritableProject() { GrideProject^ p = ContextProject(); return p != nullptr && !p->IsReadOnly; }
     bool MainForm::HasSelectedFile() { return explorer->SelectedFile != nullptr; }
-    bool MainForm::CanBuild() { return workspace != nullptr && workspace->Projects->Count > 0 && !engine->IsBuilding && !debugger->IsActive && !runner->IsRunning; }
+    bool MainForm::CanBuild() { Workspace^ w = BuildSpace(); return w != nullptr && w->Projects->Count > 0 && !engine->IsBuilding && !debugger->IsActive && !runner->IsRunning; }
+    bool MainForm::CanBatch() { return workspace != nullptr && CanBuild(); }     // a lone file has no batch
     bool MainForm::IsBuilding() { return engine->IsBuilding || runner->IsRunning; }
     bool MainForm::IsRunning() { return runner->IsRunning; }
     bool MainForm::IsDebugging() { return debugger->IsActive; }

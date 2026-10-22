@@ -345,7 +345,12 @@ const Member *Type::findMember(const std::string &name) const {
     // **members(), not members_**: the qualified copy has none of its own, so a
     // `const X` interned before X closed would forever see an empty list.
     // **Backwards**: the list is base-first, and a derived member hides a base's.
+    // **The class's own first of all**: a virtual base is laid out after them, so the backward
+    // walk reached its `t` before the class's own `t` (1.27, 2026-10-21, review of 1.25, item 3 -
+    // `B1() : t("b1")` was refused as naming the base's member).
     const std::vector<Member> &all = members();
+    for (std::size_t i = all.size(); i > 0; i--)
+        if (all[i - 1].name == name && all[i - 1].declaredIn == nullptr) return &all[i - 1];
     for (std::size_t i = all.size(); i > 0; i--)
         if (all[i - 1].name == name) return &all[i - 1];
     return nullptr;

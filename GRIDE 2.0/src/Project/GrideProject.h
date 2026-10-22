@@ -21,6 +21,64 @@
 
 namespace Gride
 {
+    // Which source defines main, as GRIDE 1.0 reads it (src\project.cpp, definesMain and mainFile): C and C++
+    // spell it `main(` - not after a letter, digit or underscore, not a declaration ending in ';', not in a comment -
+    // and Shalimar `fun <> = main()`. The first such file, in the project's order, or null.
+    public ref class MainSource abstract sealed
+    {
+    public:
+        static String^ Find(System::Collections::Generic::IEnumerable<String^>^ files)
+        {
+            for each (String^ f in files)
+            {
+                String^ ext = System::IO::Path::GetExtension(f)->ToLowerInvariant();
+                bool shalimar = ext == ".shl";
+                if (!shalimar && ext != ".c" && ext != ".cpp" && ext != ".cc" && ext != ".cxx") continue;
+                if (!System::IO::File::Exists(f)) continue;
+                bool inComment = false;
+                try
+                {
+                    for each (String^ line in System::IO::File::ReadLines(f))
+                        if (Defines(Uncommented(line, shalimar, inComment), shalimar)) return f;
+                }
+                catch (Exception^) { }
+            }
+            return nullptr;
+        }
+
+    private:
+        // the line with its comments taken out, a block comment carried across lines by inComment
+        static String^ Uncommented(String^ line, bool shalimar, bool% inComment)
+        {
+            System::Text::StringBuilder^ out = gcnew System::Text::StringBuilder();
+            for (int i = 0; i < line->Length; i++)
+            {
+                if (inComment)
+                {
+                    if (i + 1 < line->Length && line[i] == L'*' && line[i + 1] == L'/') { inComment = false; i++; }
+                    continue;
+                }
+                if (!shalimar && i + 1 < line->Length && line[i] == L'/' && line[i + 1] == L'*') { inComment = true; i++; continue; }
+                if (!shalimar && i + 1 < line->Length && line[i] == L'/' && line[i + 1] == L'/') break;
+                out->Append(line[i]);
+            }
+            return out->ToString();
+        }
+
+        static bool Defines(String^ line, bool shalimar)
+        {
+            int at = line->IndexOf("main", StringComparison::Ordinal);
+            if (at < 0) return false;
+            if (shalimar) return line->IndexOf("fun", StringComparison::Ordinal) >= 0 && String::CompareOrdinal(line, at, "main()", 0, 6) == 0;
+            if (at > 0 && (Char::IsLetterOrDigit(line[at - 1]) || line[at - 1] == L'_')) return false;
+            int paren = at + 4;
+            while (paren < line->Length && (line[paren] == L' ' || line[paren] == L'\t')) paren++;
+            if (paren >= line->Length || line[paren] != L'(') return false;
+            String^ t = line->TrimEnd(gcnew array<wchar_t>{ L' ', L'\t', L'\r' });
+            return t->Length == 0 || t[t->Length - 1] != L';';
+        }
+    };
+
     [DataContract(Name = "configuration", Namespace = "")]
     public ref class BuildConfiguration
     {
@@ -242,6 +300,20 @@ namespace Gride
 
         String^ ResolvePath(String^ rel) { return PathUtil::Resolve(ProjectDir, rel); }
         String^ RelativePath(String^ full) { return PathUtil::MakeRelative(ProjectDir, full); }
+
+        // the file the project brings to the front when it opens, as GRIDE 1.0 chooses it (Project::fileToOpen):
+        // the one the .pro names under "open", else the first that defines main, else the first there is; null for none
+        String^ FileToOpen()
+        {
+            String^ named = raw != nullptr && raw->IsObject ? raw->GetString("open", String::Empty) : String::Empty;
+            if (!String::IsNullOrWhiteSpace(named) && File::Exists(ResolvePath(named))) return ResolvePath(named);
+            List<String^>^ files = gcnew List<String^>();
+            if (SourceFiles != nullptr) for each (String^ s in SourceFiles) files->Add(ResolvePath(s));
+            String^ main = MainSource::Find(files);
+            if (main != nullptr) return main;
+            for each (String^ f in files) if (File::Exists(f)) return f;
+            return nullptr;
+        }
 
         int IndexOfFile(String^ full)
         {

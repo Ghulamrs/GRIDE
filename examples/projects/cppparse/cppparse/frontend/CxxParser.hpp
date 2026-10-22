@@ -87,7 +87,7 @@ private:
     bool  isNamespaceName(const std::string& n) const;
     bool  looksLikeTypeStart() const;                 // the current token can start a type-specifier
     bool  qualifiedNameAhead(size_t& endPos, bool& hasTemplate) const;
-    const NamedScope* findNamedScope(const QualifiedName& qualifier, size_t parts) const;
+    const NamedScope* findNamedScope(const QualifiedName& qualifier, size_t parts, std::string* key = 0) const;   // key: the scope's full name
     std::string currentClassName() const;
 
     // declarations

@@ -119,7 +119,7 @@ static void split_items(const std::vector<Token> &t, size_t from, std::vector<si
 }
 
 X64Target::X64Target() : done(false), pass(0), proc(-1), anon(0), jn(0), grew(false), proc_private(false), frame(false),
-    frame_start(0), frame_reg(0), frame_off(0), prolog_end(-1), xdatasym(-1)
+    frame_start(0), frame_reg(0), frame_off(0), prolog_end(-1), frame_alloc(0), frame_pushes(0), frame_set(false), xdatasym(-1)
 {
 }
 
@@ -301,6 +301,10 @@ bool X64Target::directive(Unit &u, std::vector<Token> &t)
     if (w == ".PUSHREG" || w == ".ALLOCSTACK" || w == ".SETFRAME" || w == ".SAVEREG" ||
         w == ".SAVEXMM128" || w == ".PUSHFRAME" || w == ".ENDPROLOG") {
         unwind(u, t, w);
+        return true;
+    }
+    if (w == ".FILE" || w == ".LINE") {
+        source_line(u, t, w);
         return true;
     }
     if (w == "INCLUDELIB") {
@@ -519,14 +523,32 @@ bool X64Target::directive(Unit &u, std::vector<Token> &t)
         frame_reg = 0;
         frame_off = 0;
         prolog_end = -1;
+        frame_alloc = 0;
+        frame_pushes = 0;
+        frame_set = false;
         codes.clear();
         return true;
     }
     if (w2 == "ENDP") {
         if (proc < 0 || u.symbols[proc].name != t[0].text)
             u.error("ENDP does not match PROC");
-        else if (frame)
-            end_frame(u);
+        else {
+            /* what CodeView says of it: S_GPROC32 and S_FRAMEPROC (codeview.cpp) */
+            ProcInfo p;
+            p.symbol = proc;
+            p.section = u.current;
+            p.start = frame_start;
+            p.end = u.here();
+            p.prolog = frame && prolog_end >= 0 ? (unsigned long)prolog_end : 0;
+            p.alloc = frame_alloc;
+            p.pushes = frame_pushes;
+            p.frame_reg = frame_set ? frame_reg : -1;
+            u.procs.push_back(p);
+            if (frame)
+                end_frame(u);
+        }
+        u.src_file = 0;
+        u.src_line = 0;
         proc = -1;
         frame = false;
         return true;
@@ -629,6 +651,7 @@ void X64Target::unwind(Unit &u, const std::vector<Token> &t, const std::string &
     } else if (w == ".ALLOCSTACK") {
         if (!eval_const(u, t, 1, t.size(), n, err)) { u.error(err); return; }
         if (n <= 0 || n % 8) { u.error(".ALLOCSTACK needs a positive multiple of 8"); return; }
+        frame_alloc += (unsigned long)n;
         if (n <= 128) {
             e.push_back((unsigned char)(2 | ((n / 8 - 1) << 4)));
         } else if (n / 8 <= 0xFFFF) {
@@ -642,6 +665,7 @@ void X64Target::unwind(Unit &u, const std::vector<Token> &t, const std::string &
     } else if (w == ".PUSHREG") {
         if (t.size() != 2 || !r || r->size != 64) { u.error(".PUSHREG needs a 64-bit register"); return; }
         e.push_back((unsigned char)(r->num << 4));
+        frame_pushes++;
     } else if (w == ".SETFRAME") {
         if (t.size() < 4 || !r || r->size != 64 || !is_punct(t, 2, ',')) { u.error(".SETFRAME needs a 64-bit register and an offset"); return; }
         if (!eval_const(u, t, 3, t.size(), n, err)) { u.error(err); return; }
@@ -649,6 +673,7 @@ void X64Target::unwind(Unit &u, const std::vector<Token> &t, const std::string &
         e.push_back((unsigned char)(3 | (r->num << 4)));
         frame_reg = r->num;
         frame_off = (int)(n / 16);
+        frame_set = true;
     } else if (w == ".SAVEREG" || w == ".SAVEXMM128") {
         bool xmm = w == ".SAVEXMM128";
         int num = -1;
@@ -673,6 +698,47 @@ void X64Target::unwind(Unit &u, const std::vector<Token> &t, const std::string &
         }
     }
     codes.push_back(e);
+}
+
+/* The source a compiler assembled this file from, for the debugger - a directive of this
+   assembler's own (ml64 has no words for it; documented in docs\MASM_LINK_Reference.html):
+
+       .FILE n, "path"        source file n (1, 2, ...) is path
+       .LINE line [, n]       the instructions that follow come from that line of file n - the file
+                              of the .LINE before in the PROC when n is left out, else file 1
+
+   A .LINE stays in force until the next one or the PROC's ENDP. A file that has any is described
+   by them alone: the .asm's own lines are not recorded for it, though /Zi asked */
+void X64Target::source_line(Unit &u, const std::vector<Token> &t, const std::string &w)
+{
+    std::string err;
+    if (w == ".FILE") {
+        size_t comma = 1;
+        while (comma < t.size() && !is_punct(t, comma, ',')) comma++;
+        long long n = 0;
+        if (comma + 2 != t.size() || t[comma + 1].kind != T_STR) { u.error(".FILE takes a number and a quoted path"); return; }
+        if (!eval_const(u, t, 1, comma, n, err)) { u.error(err); return; }
+        if (n < 1 || n > 65535) { u.error(".FILE number must be from 1 to 65535"); return; }
+        const std::string &path = t[comma + 1].text;
+        if (path.empty()) { u.error(".FILE needs a path"); return; }
+        if ((size_t)n >= u.files.size()) u.files.resize((size_t)n + 1);
+        if (!u.files[(size_t)n].empty() && u.files[(size_t)n] != path) { u.error(".FILE " + std::to_string(n) + " already names " + u.files[(size_t)n]); return; }
+        u.files[(size_t)n] = path;
+        return;
+    }
+    size_t comma = 1;
+    while (comma < t.size() && !is_punct(t, comma, ',')) comma++;
+    long long line = 0, file = u.src_file > 0 ? u.src_file : 1;
+    if (comma == 1) { u.error(".LINE needs a line number"); return; }
+    if (!eval_const(u, t, 1, comma, line, err)) { u.error(err); return; }
+    if (comma < t.size() && !eval_const(u, t, comma + 1, t.size(), file, err)) { u.error(err); return; }
+    if (line < 1 || line > 0xFFFFFF) { u.error(".LINE number must be from 1 to 16777215"); return; }
+    if (file < 1 || (size_t)file >= u.files.size() || u.files[(size_t)file].empty()) {
+        u.error(".LINE names file " + std::to_string(file) + ", which no .FILE has named");
+        return;
+    }
+    u.src_file = (int)file;
+    u.src_line = (int)line;
 }
 
 /* ENDP of a PROC FRAME: the UNWIND_INFO into .xdata (version 1, codes last-first, padded to an
@@ -726,6 +792,10 @@ void X64Target::segment(Unit &u, const std::vector<Token> &t)
     int align = 16;
     int comdat = -1;
     bool associative = false;
+    /* .debug$S and .debug$T: CodeView a compiler writes itself - records and types it describes
+       its variables by; masm adds its line tables, files and strings after what .debug$S holds */
+    const bool debug = name == ".debug$S" || name == ".debug$T";
+    if (debug) { readonly = true; align = 4; }
     if (up == "_TEXT") { name = ".text$mn"; code = true; }
     else if (up == "_DATA") name = ".data";
     else if (up == "CONST") { name = ".rdata"; readonly = true; }
@@ -763,6 +833,7 @@ void X64Target::segment(Unit &u, const std::vector<Token> &t)
     segs.push_back(u.current);
     segnames.push_back(t[0].text);
     u.section(name, code, bss, readonly, align, comdat, associative);
+    if (debug) u.sections[u.current].debug = true;
 }
 
 static size_t dup_at(const std::vector<Token> &t, size_t a, size_t b)
@@ -858,6 +929,13 @@ void X64Target::data(Unit &u, const std::vector<Token> &t, size_t from, int widt
             /* a label difference: written once both labels are known */
             u.difference(u.here(), v.sym, v.sub, width);
             put(u, width, v.v);
+            continue;
+        }
+        if (v.sym >= 0 && (v.secrel || v.secidx)) {
+            if (v.secrel && width != 4) { u.error("SECTIONREL needs DD"); return; }
+            if (v.secidx && width != 2) { u.error("SECTION needs DW"); return; }
+            u.fixup(u.here(), v.sym, v.secrel ? R_SECREL : R_SECTION, v.v);
+            put(u, width, v.secrel ? v.v : 0);
             continue;
         }
         if (v.sym >= 0) {
@@ -1020,6 +1098,7 @@ bool X64Target::memory(Unit &u, const std::vector<Token> &t, const std::vector<s
     o.kind = O_MEM;
     Value acc;
     acc.v = 0; acc.sym = -1; acc.sub = -1; acc.sec = -1; acc.imagerel = false; acc.offset = false; acc.wide = false;
+    acc.secrel = false; acc.secidx = false;
     for (size_t r = 0; r + 1 < ranges.size(); r += 2) {
         size_t a = ranges[r];
         size_t b = ranges[r + 1];
@@ -1097,7 +1176,7 @@ bool X64Target::memory(Unit &u, const std::vector<Token> &t, const std::vector<s
                     u.error(err);
                     return false;
                 }
-                if (v.imagerel || v.offset || v.sub >= 0) {
+                if (v.imagerel || v.offset || v.sub >= 0 || v.secrel || v.secidx) {
                     u.error("bad label term in address");
                     return false;
                 }

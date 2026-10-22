@@ -74,6 +74,7 @@ public:
     LexResult run() {
         while (i_ < src_.size()) {
             tokenLine_ = line_;
+            tokenCol_ = static_cast<int>(i_ - lineStart_) + 1;
             if (!step()) return result_;
         }
         return result_;
@@ -84,6 +85,8 @@ private:
     size_t i_ = 0;
     int line_ = 1;
     int tokenLine_ = 1;
+    int tokenCol_ = 1;
+    size_t lineStart_ = 0;  // where the current line starts in src_
     LexResult result_;
 
     char at(size_t k) const { return k < src_.size() ? src_[k] : '\0'; }
@@ -93,6 +96,7 @@ private:
     bool fail(const std::string& text) {
         result_.failed = true;
         result_.errorLine = tokenLine_;
+        result_.errorCol = tokenCol_;
         result_.error = text;
         return false;
     }
@@ -100,14 +104,14 @@ private:
     void push(Tok kind) {
         Token t;
         t.kind = kind;
-        t.line = tokenLine_;
+        t.line = tokenLine_; t.col = tokenCol_;
         result_.tokens.push_back(t);
     }
 
     void pushOperator(const char* spelling) {
         Token t;
         t.kind = Tok::Operator;
-        t.line = tokenLine_;
+        t.line = tokenLine_; t.col = tokenCol_;
         t.text = spelling;
         result_.tokens.push_back(t);
     }
@@ -120,7 +124,7 @@ private:
             return true;
         }
         if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
-            if (c == '\n') ++line_;
+            if (c == '\n') { ++line_; lineStart_ = i_ + 1; }
             ++i_;
             return true;
         }
@@ -136,7 +140,7 @@ private:
         if (j >= src_.size() || src_[j] != '"') return fail("Unclosed string - add '\"'");
         Token t;
         t.kind = Tok::StringLiteral;
-        t.line = tokenLine_;
+        t.line = tokenLine_; t.col = tokenCol_;
         t.text = src_.substr(i_ + 1, j - i_ - 1);
         result_.tokens.push_back(t);
         i_ = j + 1;
@@ -167,7 +171,7 @@ private:
 
         Token t;
         t.kind = Tok::Identifier;
-        t.line = tokenLine_;
+        t.line = tokenLine_; t.col = tokenCol_;
         t.text = raw;
         result_.tokens.push_back(t);
         return true;
@@ -198,7 +202,7 @@ private:
             }
             Token t;
             t.kind = Tok::RealLiteral;
-            t.line = tokenLine_;
+            t.line = tokenLine_; t.col = tokenCol_;
             t.realValue = value;
             result_.tokens.push_back(t);
             return true;
@@ -214,7 +218,7 @@ private:
         }
         Token t;
         t.kind = Tok::IntLiteral;
-        t.line = tokenLine_;
+        t.line = tokenLine_; t.col = tokenCol_;
         t.intValue = static_cast<int32_t>(wide);
         result_.tokens.push_back(t);
         return true;

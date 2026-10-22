@@ -164,7 +164,7 @@ namespace Gride { namespace Services {
             return b;
         }
 
-        // a compiler announcing itself, or saying it is done: output, never a message
+        // a compiler announcing itself, naming the other files it compiled, or saying it is done: output, never a message
         static bool IsBanner(String^ line)
         {
             if (String::IsNullOrEmpty(line)) return false;
@@ -205,7 +205,8 @@ namespace Gride { namespace Services {
         static initonly Regex^ location = gcnew Regex(
             "^\\s*(?<file>[^:(]*(?::[\\\\/][^:(]*)?)(?::(?<line>\\d+)(?::(?<col>\\d+))?:|\\((?<line>\\d+)(?:,(?<col>\\d+))?\\)\\s*:)",
             RegexOptions::Compiled);
-        static initonly Regex^ banner = gcnew Regex("^(c90|cpp11|shalimar|shc|cc1|cxx1): compilation completed successfully", RegexOptions::IgnoreCase | RegexOptions::Compiled);
+        // and shalimar naming the program's other files it compiled ("shalimar: also compiled linalg.shl"): output too
+        static initonly Regex^ banner = gcnew Regex("^(c90|cpp11|shalimar|shc|cc1|cxx1): (compilation completed successfully|also compiled )", RegexOptions::IgnoreCase | RegexOptions::Compiled);
         static initonly array<Regex^>^ builtIn = gcnew array<Regex^>{
             // MSVC / MASM / GRIDE:  kalman.c(4,9): error E10: ...
             gcnew Regex("^\\s*(?<file>[^(\"]+?)\\((?<line>\\d+)(,(?<col>\\d+))?\\)\\s*:\\s*(?<sev>fatal error|error|warning|remark|note)\\s*(?<code>[A-Za-z#]*\\d*)\\s*:?\\s*(?<msg>.*)$",

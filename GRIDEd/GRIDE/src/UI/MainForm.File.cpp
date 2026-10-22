@@ -20,6 +20,44 @@ namespace Gride { namespace UI {
         return workspace->StartupProject;
     }
 
+    // the workspace a build or a run takes: the open one; with none open, the C, C++ or Shalimar file
+    // in the editor as a one-file program of its own - built beside it (obj\<Config>\Win, out\<Config>\Win),
+    // never written as a .pro
+    Workspace^ MainForm::BuildSpace()
+    {
+        if (workspace != nullptr) return workspace;
+        EditorDocument^ d = docs->Active;
+        if (d == nullptr || d->IsUntitled || !LanguageInfo::IsCompiled(d->Lang)) return nullptr;
+        if (lone != nullptr && lone->StartupProject != nullptr && lone->StartupProject->ContainsFile(d->FilePath)) return lone;
+        GrideProject^ p = gcnew GrideProject();
+        p->Name = Path::GetFileNameWithoutExtension(d->FilePath);
+        p->FilePath = Path::Combine(Path::GetDirectoryName(d->FilePath), p->Name + ".pro");
+        p->Lang = d->Lang;
+        p->AddFile(d->FilePath, "src");
+        p->IsReadOnly = true;       // nothing of it is saved
+        lone = Workspace::ForSingleProject(p);
+        return lone;
+    }
+
+    // a project opened brings its main file to the front (the user, 2026-10-21), as GRIDE 1.0 does: the file the
+    // .pro names under "open", else the first that defines main, else its first file - unless one of its files is open
+    void MainForm::OpenProjectEntry()
+    {
+        if (workspace == nullptr || workspace->StartupProject == nullptr) return;
+        GrideProject^ p = workspace->StartupProject;
+        for each (EditorDocument^ d in docs->Documents) if (d->Project == p) return;
+        String^ entry = p->FileToOpen();
+        if (entry != nullptr) OpenDocument(entry, 0);
+    }
+
+    // the project a Build, Rebuild or Clean of one project takes: the context's, else the lone file's
+    GrideProject^ MainForm::BuildContextProject()
+    {
+        if (workspace != nullptr) return ContextProject();
+        Workspace^ w = BuildSpace();
+        return w == nullptr ? nullptr : w->StartupProject;
+    }
+
     // =========================================================================
     //  opening workspaces / projects / files
     // =========================================================================
@@ -33,18 +71,21 @@ namespace Gride { namespace UI {
             {
                 if (!CloseWorkspace()) return;
                 SetWorkspace(Workspace::Load(path, settings->Env->CcsCompilerRoot()));
+                OpenProjectEntry();
                 AddRecentWorkspace(path);
             }
             else if (ext == ".pro")
             {
                 if (!CloseWorkspace()) return;
                 SetWorkspace(Workspace::ForSingleProject(GrideProject::Load(path)));
+                OpenProjectEntry();
                 AddRecentWorkspace(path);
             }
             else if (CcsProjectReader::IsCcsProject(path) && (Directory::Exists(path) || ext == ".project" || ext == ".ccsproject" || ext == ".cproject"))
             {
                 if (!CloseWorkspace()) return;
                 SetWorkspace(Workspace::ForSingleProject(CcsProjectReader::Read(path, settings->Env->CcsCompilerRoot())));
+                OpenProjectEntry();
                 AddRecentWorkspace(CcsProjectReader::ResolveFolder(path));
             }
             // a Visual Studio solution is a workspace of read-only projects; a project alone is one of them
@@ -52,12 +93,14 @@ namespace Gride { namespace UI {
             {
                 if (!CloseWorkspace()) return;
                 SetWorkspace(Workspace::ForSolution(VsSolution::Read(path)));
+                OpenProjectEntry();
                 AddRecentWorkspace(Path::GetFullPath(path));
             }
             else if (VsProjectReader::IsVsProject(path))
             {
                 if (!CloseWorkspace()) return;
                 SetWorkspace(Workspace::ForSingleProject(VsProjectReader::Read(path, nullptr)));
+                OpenProjectEntry();
                 AddRecentWorkspace(Path::GetFullPath(path));
             }
             else if (File::Exists(path)) OpenDocument(path, 0);

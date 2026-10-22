@@ -40,6 +40,8 @@ private:
     bool debug_ = false;
     // -g: debug information for the debuggers RIDE drives. It adds sections and changes no code.
     bool debugInfo_ = false;
+    // -masm=masm: on x86_64-windows, -g in the MASM spelling for GRIDE's masm, not the GNU one for clang
+    bool masmDebug_ = false;
     static std::string workingDirectory();
     static std::string windowsClang();
     // -O0, -O1 or -O2: how hard the emitter optimizes what it writes.

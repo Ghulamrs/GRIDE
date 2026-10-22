@@ -1,5 +1,3 @@
-// toolchain.json - the toolchain GRIDE drives: every tool, its arguments, the libraries and where
-// things are looked for. GRIDE reads all of it from here and keeps none of it in its code,
 {
   "format": 1,
 

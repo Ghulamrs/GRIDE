@@ -273,6 +273,11 @@ namespace Gride { namespace Services {
         String^ failedStep;          // compile / assemble / link, when the project failed
         bool placedError;            // a diagnostic naming a file and line was seen: a fault in the source
         bool codeViewWarned;
+        bool codeViewMissing;        // a Debug build with no clang: built the Release way (MASM, masm, the linker), no line table
+        String^ writes;              // the file the running compiler writes: its echo of the path is not shown
+        int toolLines;               // lines the running tool wrote
+        int toolHidden;              // of them, the ones past MaxToolLines: counted, not shown
+        literal int MaxToolLines = 40;
         bool clSettingsSaid;         // the project's own cl settings were named (once a project build)
         bool rideHeadersSaid;        // an installation header directory kept from cl was named (once)
         bool busy;
@@ -294,10 +299,26 @@ namespace Gride { namespace Services {
             return false;
         }
 
+        // a tool's line as the Output pane shows it: a file of the project named by its full path ("C:\...\proj\src\a.c:7:5:
+        // error: ...") from the project's folder ("src\a.c:7:5: error: ..."), so the message stays in view; the Error
+        // List keeps the full path, which double-click navigation uses
+        String^ Shown(String^ line)
+        {
+            if (String::IsNullOrEmpty(line) || String::IsNullOrEmpty(currentWorkDir)) return line;
+            String^ dir = currentWorkDir->TrimEnd(gcnew array<wchar_t>{ L'\\', L'/' });
+            String^ t = line->TrimStart();
+            String^ lead = line->Substring(0, line->Length - t->Length);
+            for each (String^ d in gcnew array<String^>{ dir + "\\", dir->Replace(L'\\', L'/') + "/" })
+                if (t->StartsWith(d, StringComparison::OrdinalIgnoreCase) && t->Length > d->Length) return lead + t->Substring(d->Length);
+            return line;
+        }
+
         // the reader for the next tool: its diagnostics are filed under `source` when they name no file
         void BeginTool(String^ source, String^ toolName)
         {
             reader = gcnew DiagnosticReader(currentWorkDir, currentPattern, source, toolName);
+            toolLines = 0;
+            toolHidden = 0;
         }
 
         // runs one tool through the reader; a tool that could not be started gets RIDE's hint. RIDE's
@@ -315,6 +336,7 @@ namespace Gride { namespace Services {
                 options = o;
             }
             int rc = runner->Run(command, workDir, options);
+            if (toolHidden > 0) Say(String::Format("[{0}: {1} more line(s) not shown]", toolName, toolHidden));
             DiagnosticReader^ r = reader;
             if (r != nullptr)
                 for each (BuildMessage^ m in r->Itself)
@@ -332,10 +354,21 @@ namespace Gride { namespace Services {
 
         void OnToolLine(String^ line)
         {
-            Output(line);
             Keep(line);
             DiagnosticReader^ r = reader;
             BuildMessage^ m = r != nullptr ? r->Feed(line) : BuildMessageParser::TryParse(line, currentWorkDir, currentPattern);
+            // a tool failing on every line (an assembler handed a file it cannot read) would bury the build:
+            // its first MaxToolLines lines are shown and listed, the rest counted
+            if (++toolLines > MaxToolLines)
+            {
+                toolHidden++;
+                if (m != nullptr) summary->Count(m);
+                return;
+            }
+            // the compilers' banner and their echo of the file written say nothing the step's line has not
+            String^ t = line == nullptr ? String::Empty : line->Trim();
+            bool quiet = m == nullptr && (t->StartsWith(L"\u00A9") || (writes != nullptr && String::Compare(t, writes, true) == 0));
+            if (!quiet) Output(Shown(line));
             if (m == nullptr) return;
             if (currentProject != nullptr) m->Project = currentProject->Name;
             if (m->Sev == Severity::Error && m->Line > 0 && !String::IsNullOrEmpty(m->File)) placedError = true;
@@ -538,7 +571,7 @@ namespace Gride { namespace Services {
                     return s;
                 }
             }
-            if (RideToolchain::DebugsWithCodeView(tool, t, debug) && !String::IsNullOrWhiteSpace(tc->DebugAssembler) && !String::IsNullOrWhiteSpace(tc->DebugAssembleCmd))
+            if (!codeViewMissing && RideToolchain::DebugsWithCodeView(tool, t, debug) && !String::IsNullOrWhiteSpace(tc->DebugAssembler) && !String::IsNullOrWhiteSpace(tc->DebugAssembleCmd))
             {
                 String^ path = tc->ResolveFor("debugAssembler", tc->DebugAssembler);
                 if (File::Exists(path))
@@ -640,6 +673,23 @@ namespace Gride { namespace Services {
                 Report(Severity::Warning, nullptr, "the error pattern of toolchain " + tc->Name + " is not a valid regular expression and is ignored");
             ToolRunOptions^ run = RunOptions(tc, t);
             bool viaSetup = !String::IsNullOrWhiteSpace(tc->SetupScript);   // tools may then come from the script's PATH
+
+            // a Debug build's line table goes through clang (Visual Studio's C++ Clang tools); without it the
+            // compilers write MASM and masm and the linker make the program - said once, before anything runs,
+            // so masm is never handed clang's assembly
+            codeViewMissing = false;
+            if (debug && !native && !emulated && !viaSetup && r->Action != BuildAction::Clean && RideToolchain::DebugsWithCodeView(RideTool::C90, t, true))
+            {
+                String^ clang = String::IsNullOrWhiteSpace(tc->DebugAssembler) ? String::Empty : tc->ResolveFor("debugAssembler", tc->DebugAssembler);
+                if (clang->Length == 0 || !File::Exists(clang) || String::IsNullOrWhiteSpace(tc->DebugAssembleCmd))
+                {
+                    codeViewMissing = true;
+                    codeViewWarned = true;
+                    Report(Severity::Warning, nullptr, RoleName(t, "debugAssembler", tc->DebugAssembler) + " not found - this Debug build has no source line table: " +
+                           RoleName(t, "assembler", tc->Assembler) + " and " + RoleName(t, "linker", tc->Linker) + " make the program, the debugger shows no lines " +
+                           "(Visual Studio's \"C++ Clang tools for Windows\" add it; looked in " + tc->LookedIn(tc->DebugAssembler) + ")");
+                }
+            }
 
             if (r->Action == BuildAction::Clean || r->Action == BuildAction::Rebuild)
             {
@@ -758,11 +808,14 @@ namespace Gride { namespace Services {
                         String^ ranName = ran != nullptr ? ran->Name : Path::GetFileNameWithoutExtension(compiler);
                         String^ shownSources = group != nullptr ? String::Join(" ", Leaves(group)) : Path::GetFileName(src);
                         Say(String::Format("[{0}]  {1}  ->  {2}", ranName, shownSources, PathUtil::MakeRelative(p->ProjectDir, writesObject ? objFile : asmFile)));
-                        bool cv = !writesObject && RideToolchain::DebugsWithCodeView(tool, t, debug);
+                        bool cv = !writesObject && !codeViewMissing && RideToolchain::DebugsWithCodeView(tool, t, debug);
                         List<String^>^ optionEnv = RideToolchain::OptionEnvironment(p->Options, RideToolchain::Definition(tool), cfg->Config);
                         // RIDE's own compilers write UTF-8; a program the definitions know is read as they say
                         bool utf8 = ran != nullptr ? String::Compare(ran->OutputEncoding, "utf-8", true) == 0 : tool != RideTool::Cl && tool != RideTool::HostCxx;
-                        if (RunTool(mx->Expand(templ), p->ProjectDir, CompileOptions(run, tc, cv, optionEnv), src, ranName, tc->Name, utf8) != 0)
+                        writes = writesObject ? objFile : asmFile;
+                        int compiled = RunTool(mx->Expand(templ), p->ProjectDir, CompileOptions(run, tc, cv, optionEnv), src, ranName, tc->Name, utf8);
+                        writes = nullptr;
+                        if (compiled != 0)
                         {
                             failedStep = "compile";
                             return -1;
@@ -845,7 +898,7 @@ namespace Gride { namespace Services {
             // cl's objects (a part the project or a folder gives to cl) are Microsoft's: its link.exe links them
             bool clObjects = false, otherObjects = false;
             PartsOf(p, sources, clObjects, otherObjects);
-            Step^ ld = LinkerFor(tc, t, debug, native, codeView || (debug && !emulated && !native && RideToolchain::DebugsWithCodeView(RideTool::C90, t, debug)), clObjects && !emulated);
+            Step^ ld = LinkerFor(tc, t, debug, native, codeView || (debug && !emulated && !native && !codeViewMissing && RideToolchain::DebugsWithCodeView(RideTool::C90, t, debug)), clObjects && !emulated);
             // tms6747 with the named linker gone: TI's stands in, and the console says so (RIDE's tiLinker)
             if (emulated && !native && !viaSetup && !File::Exists(ld->Path))
             {
@@ -1079,9 +1132,18 @@ namespace Gride { namespace Services {
         void SetCompilerMacros(MacroExpander^ mx, RideTool tool, Language lang, GrideProject^ p, BuildConfiguration^ cfg, ToolchainSettings^ tc)
         {
             bool debug = cfg->IsDebug;
+            // no clang: the Release spelling (-masm=masm) and no -g, which only clang's assembly carries
+            bool noLineTable = debug && codeViewMissing && RideToolchain::DebugsWithCodeView(tool, cfg->TargetKind, true);
+            String^ flags = RideToolchain::ConfigFlags(tool, debug, cfg->TargetKind, p->Options);
+            if (noLineTable)
+            {
+                List<String^>^ kept = gcnew List<String^>();
+                for each (String^ f in flags->Split(gcnew array<wchar_t>{ L' ' }, StringSplitOptions::RemoveEmptyEntries)) if (f != "-g") kept->Add(f);
+                flags = String::Join(" ", kept);
+            }
             mx->Set("ArchFlag", RideToolchain::ArchFlag(tool, cfg->TargetKind));
-            mx->Set("ConfigFlags", RideToolchain::ConfigFlags(tool, debug, cfg->TargetKind, p->Options));
-            mx->Set("AsmSyntaxFlag", RideToolchain::AssemblerFlag(tool, cfg->TargetKind, debug, !String::IsNullOrWhiteSpace(tc->Assembler)));
+            mx->Set("ConfigFlags", flags);
+            mx->Set("AsmSyntaxFlag", RideToolchain::AssemblerFlag(tool, cfg->TargetKind, debug && !noLineTable, !String::IsNullOrWhiteSpace(tc->Assembler)));
             mx->Set("LangFlags", RideToolchain::LanguageFlags(tool, lang));
             // the compiler's own spellings; the target's settings stand for the C compiler's family,
             // and a compiler with no include flag (shalimar) takes no -I and no -D

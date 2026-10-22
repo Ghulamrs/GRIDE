@@ -509,6 +509,14 @@ const Type *Parser::readTemplateDeclaration(const TemplateDecl &decl,
         ~Owner() { p->inlineOwner_ = tag; p->inlineOwnerName_ = name; }
     } owner{ this, inlineOwner_, inlineOwnerName_ };
     if (decl.isConstructor) { inlineOwner_ = decl.ownerTag; inlineOwnerName_ = decl.ownerLocal; }
+    // **The signature names things in the namespace the template was declared in**, as its body
+    // does when replayed: `template <class T> int adl(T, Tag)` inside NS reads NS's Tag from a call
+    // outside NS (1.27, 2026-10-21, review of 1.25, item 3 - "expected a type" at the instantiation).
+    struct Where {
+        Parser *p; std::vector<std::string> was;
+        ~Where() { p->namespaceStack_ = was; }
+    } where{ this, namespaceStack_ };
+    if (!decl.ns.empty()) namespaceStack_ = namespacePathStack(decl.ns);
     StorageClass sc;
     Qualifiers quals;
     const Type *base = specifiers(&sc, &quals);
@@ -537,6 +545,20 @@ const Type *Parser::readTemplateDeclaration(const TemplateDecl &decl,
         const Type *written = d.type;
         parameterTypes(params, variadic);
         d.type = types_.functionType(d.type, std::move(params), variadic);
+        // **A bare `noexcept` or `throw()` on the signature is the specialization's too** - std::declval's
+        // - read here, where the pattern's signature is, so that the definition's replay finds the same
+        // promise it makes (1.27, 2026-10-21, review of 1.25, item 3). A `noexcept(e)` with a dependent e
+        // is left to the body's reading, as before.
+        patternNoexcept_ = false;
+        {
+            std::size_t q = at_;
+            while (tokens_[q].is("const") || tokens_[q].is("volatile") || tokens_[q].is("&") ||
+                   tokens_[q].is("&&"))
+                q++;
+            if (tokens_[q].is("noexcept") && !tokens_[q + 1].is("(")) patternNoexcept_ = true;
+            if (tokens_[q].is("throw") && tokens_[q + 1].is("(") && tokens_[q + 2].is(")"))
+                patternNoexcept_ = true;
+        }
         // `template <class T> auto f(T) -> T`: the pattern's return type is the trailing one.
         if (mentionsDeduced(written) && tokens_[skipFunctionQualifiers(at_)].is("->")) {
             at_ = skipFunctionQualifiers(at_);
@@ -1464,6 +1486,8 @@ Parser::instantiate(const TemplateDecl &decl,
     sp.values = values;
     sp.start = decl.afterParams;
     sp.pos = pos;
+    sp.depth = instantiationDepth_ + 1;
+    refuseInstantiationDepth(decl.name, sp.depth, pos);
     specializations_.push_back(sp);
 
     // **Under two keys, on purpose.** "twice<int>" is what the replayed definition
@@ -1486,6 +1510,7 @@ Parser::instantiate(const TemplateDecl &decl,
                                     std::string(), false, Access::Public });
     functions_.back().fromTemplate = true;
     functions_.back().pattern = patternFn;
+    functions_.back().isNoexcept = patternNoexcept_;   // the pattern's bare `noexcept`, read above (1.27)
     // **The defaults the pattern's parameter list just read.**
     if (!pendingDefaults_.empty()) {
         defaultArgs_[symbol] = pendingDefaults_;
@@ -1582,6 +1607,11 @@ void Parser::instantiatePending() {
             const std::string wasOf = instantiationOf_;
             instantiationKey_ = sp.isClass ? std::string() : sp.key;
             instantiationOf_ = sp.isClass ? std::string() : sp.name;
+            // What this body asks for is one deeper than it - and a specialization appended
+            // while this round runs is replayed in this same round, so a chain that never
+            // settles is one round long; the depth, not the round, is what bounds it.
+            const int wasDepth = instantiationDepth_;
+            instantiationDepth_ = sp.depth;
 
             const std::size_t resume = at_;
             // **An instantiated definition has vague linkage** - [basic.link] and [temp.spec]: the
@@ -1612,9 +1642,27 @@ void Parser::instantiatePending() {
 
             instantiationKey_ = wasKey;
             instantiationOf_ = wasOf;
+            instantiationDepth_ = wasDepth;
             unbindTemplateParameters(undo);
         }
     }
+}
+
+// **A chain of instantiations that never settles** - `template <class T> int f(T t) { return f(&t); }`
+// asks for f<T *> from inside f<T>'s body, and that for f<T **> - is refused by name once it is
+// kMaxNesting bodies deep, as cl and clang refuse it ("recursive template instantiation exceeded
+// maximum depth"); until 2026-10-21 (review of 1.25, fix 5) it ran until the stack went, 43 s later.
+// A body is replayed after the one that asked for it, not inside it, so the parser's own nesting
+// never sees the chain: each specialization carries the depth of the body it was asked from. The
+// request comes through deduction's trial, which keeps a failure to itself unless the words say the
+// compiler stopped ("yet", as Source::fail reads them) - and this one must reach the user as the
+// error it is, not as "no function takes these arguments".
+void Parser::refuseInstantiationDepth(const std::string &name, int depth, std::size_t pos) const {
+    if (depth <= kMaxNesting) return;
+    src_.fail(pos, "'" + name + "' is being instantiated from inside its own instantiations more than " +
+                   std::to_string(kMaxNesting) + " levels deep, and the chain has not ended yet - a "
+                   "template that asks for a new specialization of itself each time, with an argument "
+                   "that grows, never settles, and the compiler stops here rather than run out of memory");
 }
 
 bool Parser::mentionsDeduced(const Type *t) {
@@ -1629,9 +1677,12 @@ bool Parser::mentionsDeduced(const Type *t) {
 // The declared type with `auto` replaced, keeping everything written around
 // it: `const auto &` deduced as int is `const int &`.
 const Type *Parser::substituteDeduced(const Type *t, const Type *with) {
-    if (t->kind() == Kind::Deduced) return with;
+    // The qualifier first: a `const auto` is a const copy of the deduced kind, and asking the kind
+    // first answered `with` bare - `const auto e = i;` was an `int` that could be assigned to, and
+    // `const auto &c = gc;` an `int &` that could not bind (1.27, 2026-10-21, review of 1.25, item 3).
     if (t->unqualified() != t)
         return types_.withConst(substituteDeduced(t->unqualified(), with));
+    if (t->kind() == Kind::Deduced) return with;
     if (t->isPointer()) return types_.pointerTo(substituteDeduced(t->pointee(), with));
     if (t->isReference()) {
         const Type *r = substituteDeduced(t->referent(), with);
@@ -1786,6 +1837,12 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
     // **A reference parameter looks *through* itself and keeps the argument's
     // qualifier; everything else decays.** `const T &` binding an `int`
     // deduces T as int, and the const on the parameter is not part of T.
+    // **And where the parameter is `T &` or `auto &`, with nothing qualifying T, the argument's
+    // own qualifiers are part of T** - [temp.deduct.call]/3: `T &` given a `const int` deduces T as
+    // `const int`, and `auto &x = gc;` is `const int &` (1.27, 2026-10-21, review of 1.25, item 3:
+    // T lost the const, the parameter became `int &`, and a const argument found "no function",
+    // `auto &x = gc` "a reference that can write cannot bind to a const").
+    bool keepsQualifiers = false;
     if (nested) {
         // matched as it is - see the top
     } else if (pattern->isReference()) {
@@ -1794,6 +1851,8 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
         if (pattern->unqualified() != pattern) {
             pattern = pattern->unqualified();
             arg = arg->unqualified();
+        } else {
+            keepsQualifiers = true;
         }
     } else {
         arg = decayedType(arg);
@@ -1807,7 +1866,7 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
         const std::size_t i = pattern->kind() == Kind::Deduced
                                   ? 0
                                   : static_cast<std::size_t>(pattern->length());
-        const Type *deduced = arg->unqualified();
+        const Type *deduced = keepsQualifiers ? arg : arg->unqualified();
         if ((*binding)[i] == nullptr) { (*binding)[i] = deduced; return true; }
         if ((*binding)[i] != deduced) {
             *why = "it is '" + (*binding)[i]->describe() + "' in one argument "
@@ -1935,8 +1994,19 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
         return true;
     }
 
-    if (pattern->isPointer() && arg->isPointer())
-        return deduceOne(pattern->pointee(), arg->pointee(), binding, values, why, packs, nested);
+    // **What a pointer or an array holds is matched as it is**, its qualifiers part of T unless the
+    // pattern names them (1.27, as above): `T *` given a `const int *` deduces T as `const int`,
+    // `const T *` given an `int *` T as `int` - [temp.deduct.call]/4's qualification conversion -
+    // and `T (&)[N]` given a `const char[4]` T as `const char`.
+    if (pattern->isPointer() && arg->isPointer()) {
+        const Type *pp = pattern->pointee(), *ap = arg->pointee();
+        if (pp->unqualified() != pp) { pp = pp->unqualified(); ap = ap->unqualified(); }
+        if (pp->kind() == Kind::TemplateParam || pp->kind() == Kind::Deduced)
+            return deduceOne(pp, ap, binding, values, why, packs, true);
+        // A function pointee is matched as it is too - decayed again it would be a pointer, and
+        // `R (*)(A)` below would never see the function.
+        return deduceOne(pp, ap, binding, values, why, packs, nested || pp->isFunction());
+    }
     if (pattern->isArray() && arg->isArray()) {
         // **`T (&)[N]` against an `int[3]` gives N=3**, [temp.deduct.type]/8's `type[i]`; the binding
         // marks N deduced and the value is what is read. Every level here: an element does not decay,
@@ -1960,8 +2030,26 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
             pattern = pattern->pointee();
             arg = arg->pointee();
         }
-        return pattern->isArray() || arg->isArray() ||
-               deduceOne(pattern, arg, binding, values, why, packs);
+        if (pattern->isArray() || arg->isArray()) return true;
+        if (pattern->unqualified() != pattern) { pattern = pattern->unqualified(); arg = arg->unqualified(); }
+        if (pattern->kind() == Kind::TemplateParam || pattern->kind() == Kind::Deduced)
+            return deduceOne(pattern, arg, binding, values, why, packs, true);
+        return deduceOne(pattern, arg, binding, values, why, packs);
+    }
+    // **`R (*)(A)` against a function pointer** - [temp.deduct.type]/8's `T(*)()` and `T(T)`: the
+    // return type and each parameter, matched as they are (1.27, 2026-10-21, review of 1.25, item 3:
+    // `callIt(dbl, 21)` for `R callIt(R (*f)(A), A a)` bound nothing and R "appears in no parameter").
+    if (pattern->isFunction() && arg->isFunction()) {
+        const std::vector<const Type *> &pp = pattern->params(), &ap = arg->params();
+        if (pp.size() != ap.size() || pattern->isVariadicFn() != arg->isVariadicFn()) {
+            *why = "'" + arg->describe() + "' takes a different number of parameters from '" +
+                   pattern->describe() + "'";
+            return false;
+        }
+        if (!deduceOne(pattern->returns(), arg->returns(), binding, values, why, packs, true)) return false;
+        for (std::size_t i = 0; i < pp.size(); i++)
+            if (!deduceOne(pp[i], ap[i], binding, values, why, packs, true)) return false;
+        return true;
     }
     // `T S::*` against `int S::*`: the member's type, and the class when it is
     // a parameter too.
@@ -2746,6 +2834,8 @@ std::vector<std::string> Parser::namespacePathStack(const std::string &ns) {
 // `struct Box { ... };` with the arguments bound, and all the class path had to be
 // told is what tag to take: nested classes had made tag() an arbitrary string.
 const Type *Parser::instantiateClass(const TemplateDecl &decl, std::size_t pos) {
+    // Before the arguments are read: `A<A<A<...>>>` instantiates from the inside out, through here.
+    const Nesting deep(this, pos, "template instantiation");
     std::vector<const Type *> binding;
     std::vector<long long> values;
     std::vector<TemplateArg> args;
@@ -2905,6 +2995,9 @@ const Type *Parser::instantiateClass(const TemplateDecl &decl, std::size_t pos) 
     sp.pos = pos;
     sp.isClass = true;
     sp.bodies = bodies;
+    // Its member bodies, replayed later, ask from one deeper than the body that asked for the class.
+    sp.depth = instantiationDepth_ + 1;
+    refuseInstantiationDepth(decl.name, sp.depth, pos);
     specializations_.push_back(sp);
     return made;
 }
@@ -3184,6 +3277,11 @@ ExprPtr Parser::memberTemplateCall(ExprPtr object, const Type *obj,
         parseArguments(callArgs);
     }
 
+    // **The specialization is odr-used here**, so its definition stays in the unit - resolveOverload
+    // says so for the calls it ranks, and a call with explicit arguments never passes through it, so
+    // `s.m<int>(1)` referred to a function the pruning then dropped (1.28, 2026-10-22, review of
+    // 1.25, item 8: a link error).
+    markUsed(sig);
     // A copy, since applyDefaults and completeCall read it while the arguments
     // can grow functions_ out from under a reference.
     const Signature chosen = *sig;
@@ -3453,6 +3551,10 @@ ExprPtr Parser::templateIdMember(const Type *cls, std::size_t pos) {
         n->setType(e->type != nullptr ? e->type : types_.intType());
         return n;
     }
+    // `Base<T>::v = x` inside a member of a class derived from the specialization: `(*this).Base<T>::v`,
+    // [class.mfct.non-static]/3 (1.27, 2026-10-21, review of 1.25, item 3).
+    if (const Member *m = cls->findMember(member))
+        if (ExprPtr mine = qualifiedMemberThroughThis(cls, *m, member, mpos)) return mine;
     if (unevaluated_ > 0)
         if (const Member *m = cls->findMember(member)) return memberWithoutObject(cls, *m, mpos);
     src_.fail(mpos, "'" + cls->describe() + "' has no static member or "

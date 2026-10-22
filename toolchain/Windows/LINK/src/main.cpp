@@ -34,6 +34,16 @@ static bool is_switch(const std::string &a)
     return true;
 }
 
+/* a path made absolute against the current directory */
+static std::string full_path(const std::string &p)
+{
+#ifdef _WIN32
+    char buf[4096];
+    if (_fullpath(buf, p.c_str(), sizeof buf)) return buf;
+#endif
+    return p;
+}
+
 /* reserve[,commit], decimal or 0x-hex, as link.exe reads /stack: and /heap: */
 static void sizes(const std::string &v, u64 &reserve, u64 &commit)
 {
@@ -66,6 +76,7 @@ bool Link::run()
     if (!address())     return false;
     if (!fix_up())      return false;
     if (!write_image()) return false;
+    if (!write_pdb())   return false;
     return write_map();
 }
 
@@ -94,7 +105,10 @@ int main(int argc, char **argv)
         if (eat(a, "libpath:", v))    { lk.opt.libpath.push_back(v); continue; }
         if (eat(a, "defaultlib:", v)) { lk.opt.defaultlibs.push_back(v); continue; }
         if (eat(a, "nodefaultlib:", v)) { lk.opt.nodefaultlibs.push_back(v); continue; }
-        if (eat(a, "debug", v))       { lk.opt.debug = true; continue; }
+        /* /debug, /debug:full and the rest write a PDB; /debug:none does not */
+        if (eat(a, "debugtype:", v))  continue;
+        if (eat(a, "debug", v))       { lk.opt.debug = v != ":none" && v != ":NONE"; continue; }
+        if (eat(a, "pdb:", v))        { lk.opt.pdb = v; continue; }
         if (eat(a, "include:", v))    { lk.opt.includes.push_back(v); continue; }
         if (eat(a, "opt:", v))        {
             /* /opt:ref,icf and the rest: ref and noref decide something, the others are accepted */
@@ -124,7 +138,7 @@ int main(int argc, char **argv)
         if (eat(a, "nologo", v) || eat(a, "incremental", v) ||
             eat(a, "machine:", v) || eat(a, "ignore:", v) ||
             eat(a, "release", v) || eat(a, "manifest", v) || eat(a, "nxcompat", v) ||
-            eat(a, "largeaddressaware", v) || eat(a, "errorreport:", v) || eat(a, "pdb:", v) ||
+            eat(a, "largeaddressaware", v) || eat(a, "errorreport:", v) || eat(a, "pdbaltpath:", v) ||
             eat(a, "tlbid:", v) || eat(a, "brepro", v)) continue;
         fprintf(stderr, "link: unknown switch %s\n", argv[i]);
         return 2;
@@ -144,8 +158,16 @@ int main(int argc, char **argv)
     if (!lk.opt.have_timestamp) lk.opt.timestamp = (u32)time(0);
     lib_env(lk.opt);                       /* after /libpath:, which is searched first */
     if (lk.opt.debug) {
-        fprintf(stderr, "link: /debug is accepted and does nothing yet - no .pdb is written, and the "
-                        ".debug$S sections are left behind\n");
+        /*  The PDB beside the image unless /pdb: says where, named in the image by its full
+         *  path, which is where a debugger looks first. */
+        std::string p = lk.opt.pdb;
+        if (p.empty()) {
+            p = lk.opt.out;
+            size_t d = p.rfind('.'), sl = p.find_last_of("/\\");
+            if (d != std::string::npos && (sl == std::string::npos || d > sl)) p = p.substr(0, d);
+            p += ".pdb";
+        }
+        lk.pdb_path = full_path(p);
         if (!lk.opt.optref_said) lk.opt.optref = false;     /* link.exe: /debug implies /opt:noref */
         if (!lk.opt.opticf_said) lk.opt.opticf = false;     /* and /opt:noicf, so a debugger sees each function once */
     }

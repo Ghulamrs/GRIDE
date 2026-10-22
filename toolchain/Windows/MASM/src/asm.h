@@ -15,11 +15,14 @@ struct Token {
 };
 
 /* REL32_n: a RIP-relative displacement followed by n bytes of immediate (COFF types 5..9) */
-enum RelKind { R_REL32, R_REL32_1, R_REL32_2, R_REL32_3, R_REL32_4, R_REL32_5, R_REL8, R_ADDR64, R_ADDR32, R_ADDR32NB, R_DIFF };
+/* R_SECREL and R_SECTION: an address as offset-in-its-section and section number, the two halves
+   CodeView names a code or data address by (SECTIONREL label, SECTION label) */
+enum RelKind { R_REL32, R_REL32_1, R_REL32_2, R_REL32_3, R_REL32_4, R_REL32_5, R_REL8, R_ADDR64, R_ADDR32, R_ADDR32NB, R_DIFF,
+               R_SECREL, R_SECTION };
 
 struct Reloc {
     unsigned long offset;
-    int symbol;
+    int symbol;         /* a symbol, or -(n + 1) for section n's own symbol (an offset in place) */
     RelKind kind;
     long long addend;   /* the label's offset, also written in place: COFF reads the field, a RELA
                            writer (TI's ELF) reads this and zeroes the field */
@@ -31,6 +34,7 @@ struct Section {
     bool bss;           /* uninitialised: size only, no bytes in the object */
     bool readonly;
     bool info;          /* linker directives (.drectve): not loaded */
+    bool debug;         /* .debug$S or .debug$T: CodeView, read by the linker and not loaded */
     int align;          /* 1, 2, 4, ... 8192 */
     /* COMDAT: a section of its own, folded by the linker on `comdat`'s symbol (SELECT_ANY), or
        kept with the section that symbol's COMDAT opened (SELECT_ASSOCIATIVE) - what a C++
@@ -84,6 +88,28 @@ struct Value {
     bool imagerel;  /* IMAGEREL label */
     bool offset;    /* OFFSET label */
     bool wide;      /* a literal of 2^32 or more took part */
+    bool secrel;    /* SECTIONREL label: its offset in its section (DD) */
+    bool secidx;    /* SECTION label: its section's number (DW) - CodeView's address halves */
+};
+
+/* CodeView: where an instruction came from, recorded at the offset its bytes start at - a line of
+   the .asm itself (file 0) or the source line a .LINE directive names (file n, from .FILE n) */
+struct LineEntry {
+    int section;
+    unsigned long offset;
+    int file;
+    int line;
+};
+
+/* a PROC as CodeView describes it: its code, and its frame as the unwind directives gave it */
+struct ProcInfo {
+    int symbol;
+    int section;
+    unsigned long start, end;
+    unsigned long prolog;   /* bytes of prologue (.ENDPROLOG), 0 without */
+    unsigned long alloc;    /* .ALLOCSTACK, in total */
+    int pushes;             /* .PUSHREG count */
+    int frame_reg;          /* the .SETFRAME register, -1 without */
 };
 
 class Target;
@@ -100,6 +126,13 @@ public:
     std::vector<Symbol> symbols;
     std::vector<Fixup> fixups;
     std::vector<std::string> errors;
+
+    /* CodeView (codeview.cpp): asked for by /Zi, or by a .FILE or .LINE in the source */
+    bool debug;
+    std::vector<std::string> files;     /* files[n] is .FILE n's path; files[0] is unused */
+    int src_file, src_line;             /* the .LINE in force, file 0 before the first */
+    std::vector<LineEntry> lines;
+    std::vector<ProcInfo> procs;
 
     void begin_pass(int n);
     bool moved() const;
@@ -121,6 +154,7 @@ public:
     void emit64(unsigned long long v);
     void fixup(unsigned long at, int sym, RelKind kind, long long addend = 0);
     void difference(unsigned long at, int sym, int sub, int width);
+    void note_line(int sec, unsigned long at);
 
     void resolve(const Target &t);
 };
@@ -131,6 +165,9 @@ bool is_punct(const std::vector<Token> &t, size_t i, char c);
 bool eval(Unit &u, const std::vector<Token> &t, size_t from, size_t to, Value &v, std::string &err);
 bool eval_const(Unit &u, const std::vector<Token> &t, size_t from, size_t to, long long &v, std::string &err);
 bool located(const Unit &u, const Value &x, int &sec, long long &off);
+
+/* codeview.cpp: the .debug$S sections, added to the unit once its layout has settled */
+bool codeview(Unit &u, const std::string &asm_path, const std::string &obj_path, std::string &err);
 
 /* a target assembles one statement at a time and is run over the source until the layout settles:
    begin_pass resets it, again says whether a choice it made (a jump's width) changed this pass,
@@ -153,7 +190,7 @@ public:
 
 class Assembler {
 public:
-    Assembler(const std::string &input, const std::string &output, Target *t, ObjWriter *w);
+    Assembler(const std::string &input, const std::string &output, Target *t, ObjWriter *w, bool debug);
     ~Assembler();
     bool run();
     const std::vector<std::string> &errors() const;

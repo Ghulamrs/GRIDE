@@ -35,6 +35,7 @@ enum class Tok {
 struct Token {
     Tok kind = Tok::EndOfInput;
     int line = 0;
+    int col = 0;        // 1-based, where the token starts on its line
 
     std::string text;
     int32_t intValue = 0;
@@ -45,6 +46,7 @@ struct LexResult {
     std::vector<Token> tokens;
     bool failed = false;
     int errorLine = 0;
+    int errorCol = 0;
     std::string error;
 };
 

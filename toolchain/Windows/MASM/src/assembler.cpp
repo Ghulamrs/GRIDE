@@ -1,9 +1,10 @@
 #include "asm.h"
 #include <fstream>
 
-Assembler::Assembler(const std::string &in, const std::string &out, Target *t, ObjWriter *w)
+Assembler::Assembler(const std::string &in, const std::string &out, Target *t, ObjWriter *w, bool debug)
     : input(in), output(out), target(t), writer(w)
 {
+    unit.debug = debug;
 }
 
 Assembler::~Assembler()
@@ -46,8 +47,12 @@ bool Assembler::run()
                 unit.error(err);
                 continue;
             }
-            if (!tokens.empty())
+            if (!tokens.empty()) {
+                const int sec = unit.current;
+                const unsigned long at = sec >= 0 ? (unsigned long)unit.sections[sec].bytes.size() : 0;
                 target->statement(unit, tokens);
+                unit.note_line(sec, at);
+            }
         }
         if (!target->finished())
             unit.error("END expected");
@@ -62,6 +67,10 @@ bool Assembler::run()
     if (!unit.errors.empty())
         return false;
     std::string err;
+    if (!codeview(unit, input, output, err)) {
+        unit.errors.push_back(err);
+        return false;
+    }
     if (!writer->write(unit, output, err)) {
         unit.errors.push_back(err);
         return false;

@@ -340,8 +340,12 @@ namespace Gride { namespace Settings {
             }
             s->Assembler = Upgrade(o->GetString("assembler", s->Assembler), old->Assembler, s->Assembler);
             s->Linker = Upgrade(o->GetString("linker", s->Linker), old->Linker, s->Linker);
-            s->DebugAssembler = o->GetString("debugAssembler", s->DebugAssembler);
-            s->DebugLinker = o->GetString("debugLinker", s->DebugLinker);
+            // an empty Debug assembler or linker is the definitions' own (clang, link.exe): an older GRIDE wrote ""
+            // for "found through vcvars", and taken as none it linked every Debug build without its PDB
+            String^ debugAs = o->GetString("debugAssembler", s->DebugAssembler);
+            if (!String::IsNullOrWhiteSpace(debugAs)) s->DebugAssembler = debugAs;
+            String^ debugLd = o->GetString("debugLinker", s->DebugLinker);
+            if (!String::IsNullOrWhiteSpace(debugLd)) s->DebugLinker = debugLd;
             s->Runtime = Upgrade(o->GetString("runtime", s->Runtime), old->Runtime, s->Runtime);
             s->RuntimeDir = o->GetString("runtimeDir", s->RuntimeDir);
             s->Simulator = Upgrade(o->GetString("simulator", s->Simulator), old->Simulator, s->Simulator);

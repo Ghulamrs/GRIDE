@@ -141,7 +141,8 @@ long Sema::braceCount(const Type* t, const std::vector<cxx::Expr*>& items)
 const Type* Sema::completedArray(const Type* t, const cxx::Initializer& init)
 {
     if (!t || t->kind != Type::Array || t->arraySize >= 0) return t;
-    if (isStringInit(t, init)) return m_types.array(t->inner, stringLiteralLength(init.args[0]->text) + 1);   // char s[] = "..."
+    if (isStringInit(t, init) || (init.kind == cxx::Initializer::Brace && init.args.size() == 1 && literalForCharArray(t, init.args[0])))
+        return m_types.array(t->inner, stringLiteralLength(init.args[0]->text) + 1);   // char s[] = "...", char s[] = { "..." }
     if (init.kind != cxx::Initializer::Brace) return t;
     return m_types.array(t->inner, braceCount(t, init.args));
 }
@@ -184,13 +185,22 @@ cxx::Expr* Sema::braceInit(const Type* t, std::vector<cxx::Expr*>& items, size_t
     return list;
 }
 
+// a string literal as the initializer of a char (wchar_t) array element of a brace list: "struct N { char n[6]; } g =
+// { "ab" }", also inside its own braces (8.5.2); it must fit with its terminator
+bool Sema::literalForCharArray(const Type* u, cxx::Expr* it)
+{
+    if (!it || it->kind != cxx::Expr::StringLit || !u || u->kind != Type::Array || !u->inner) return false;
+    const Type::Kind k = m_types.unqualified(u->inner)->kind;
+    return k == Type::Char || k == Type::SChar || k == Type::UChar || k == Type::WChar;
+}
+
 cxx::Expr* Sema::braceElement(const Type* t, std::vector<cxx::Expr*>& items, size_t& pos, Scope* in)
 {
     cxx::Expr* it = items[pos];
     const Type* u = m_types.unqualified(m_types.unref(t));
     if (it->kind == cxx::Expr::InitList) {
         ++pos;
-        if (isAggregate(u)) {
+        if (isAggregate(u) && !(it->kids.size() == 1 && literalForCharArray(u, it->kids[0]))) {
             size_t p = 0;
             cxx::Expr* list = braceInit(u, it->kids, p, in, it->loc, 0);
             if (p < it->kids.size()) error(it->loc, "S105", "too many initialisers for " + u->text());
@@ -200,7 +210,7 @@ cxx::Expr* Sema::braceElement(const Type* t, std::vector<cxx::Expr*>& items, siz
         it = it->kids[0];
     } else {
         if (it->kind != cxx::Expr::Error && !it->semaType) expr(it, in);
-        if (isAggregate(u) && it->kind != cxx::Expr::Error && m_types.unqualified(valueType(it)) != u) {
+        if (isAggregate(u) && it->kind != cxx::Expr::Error && m_types.unqualified(valueType(it)) != u && !literalForCharArray(u, it)) {
             // braces elided: the element takes as many initializers as it needs
             size_t before = pos;
             cxx::Expr* list = braceInit(u, items, pos, in, it->loc, 0);
@@ -211,6 +221,12 @@ cxx::Expr* Sema::braceElement(const Type* t, std::vector<cxx::Expr*>& items, siz
     }
     if (it->kind == cxx::Expr::Error) return it;
     if (!it->semaType) expr(it, in);
+    if (literalForCharArray(u, it)) {
+        const Type* lt = m_types.unref(it->semaType);
+        if (lt && lt->kind == Type::Array && m_types.sizeOf(lt->inner) != m_types.sizeOf(u->inner)) error(it->loc, "S105", "cannot initialise an element of type " + u->text() + " from " + lt->text());
+        else if (u->arraySize >= 0 && stringLiteralLength(it->text) + 1 > u->arraySize) error(it->loc, "S105", "string literal too long for an element of type " + u->text());
+        return it;
+    }
     if (u->kind == Type::Dependent || u->kind == Type::Error) return it;
     Conversion c = convert(it, u, in);
     const Type* vt = valueType(it);
@@ -231,6 +247,15 @@ void Sema::braceDeclInit(Symbol* var, cxx::Initializer& init, Scope* in)
         size_t pos = 0;
         init.args[0] = braceElement(t, init.args, pos, in);
         var->init = init.args[0];
+        return;
+    }
+    if (init.args.size() == 1 && literalForCharArray(t, init.args[0])) {
+        // "char s[4] = { "ab" };": the literal in braces initialises the array as the unbraced form does (8.5.2/1)
+        if (!init.args[0]->semaType) expr(init.args[0], in);
+        if (t->arraySize >= 0 && stringLiteralLength(init.args[0]->text) + 1 > t->arraySize) error(var->loc, "S105", "string literal too long for '" + var->name + "'");
+        init.kind = cxx::Initializer::Assign;
+        var->init = init.args[0];
+        if (t->arraySize < 0) var->type = m_types.array(t->inner, stringLiteralLength(init.args[0]->text) + 1);
         return;
     }
     size_t pos = 0;
@@ -411,6 +436,22 @@ Conversion Sema::convert(cxx::Expr* from, const Type* to, Scope* in)
         if (lit->kind == cxx::Expr::StringLit && dst->kind == Type::Pointer && dst->inner && !dst->inner->isConst && src->kind == Type::Array && src->inner
             && m_types.unqualified(dst->inner) == m_types.unqualified(src->inner)) {
             c.rank = Conversion::Exact; c.qualification = true; c.target = to;
+        }
+        // a converting constructor template of the target class ("template <class U, class W> pair(const pair<U, W>&)":
+        // pair<K, V> to map's pair<const K, V>), deduced from the argument (13.3.1.4; a reference target binds the
+        // temporary it makes)
+        const Type* cls = m_types.unqualified(m_types.unref(to));
+        if (c.rank == Conversion::None && cls->kind == Type::Class && cls->decl && cls->decl->members && (to->kind != Type::Reference || to->inner->isConst)) {
+            std::vector<Symbol*> ctors;
+            lookupMember(cls->decl, cls->decl->ctorName(), ctors);
+            for (size_t i = 0; i < ctors.size() && c.rank == Conversion::None; ++i) {
+                if (ctors[i]->kind != Symbol::FunctionTemplate || ctors[i]->ownerClass != cls->decl) continue;
+                std::vector<cxx::Expr*> one(1, from);
+                Symbol* inst = instantiateFunctionTemplate(ctors[i], one, 0, in, from->loc, 0);
+                if (!inst || inst->isExplicit || inst->params.empty() || inst->requiredParams > 1) continue;
+                Conversion inner = convertType(from->semaType, from->semaLvalue, isNullConstant(from), inst->params[0]->type, in, false);
+                if (inner.rank != Conversion::None) { c.rank = Conversion::UserDefined; c.userFunction = inst; c.target = to; }
+            }
         }
     }
     return c;
@@ -737,6 +778,16 @@ Symbol* Sema::instantiateFunctionTemplate(Symbol* tmpl, const std::vector<cxx::E
         if (!at || at->kind == Type::Error || !deduce(fp->params[a], at, tscope, bind, ints)) { m_fixedTemplateParams = savedFixed; return 0; }
     }
     m_fixedTemplateParams = savedFixed;
+    return instantiateBoundFunctionTemplate(tmpl, bind, ints);
+}
+
+// the specialisation of the function template tmpl for the parameters bound in bind (types) and ints (values):
+// the one made before for them, or a new one, its declaration a copy of the template's in a scope that binds the
+// parameters, with the body queued for analysis
+Symbol* Sema::instantiateBoundFunctionTemplate(Symbol* tmpl, std::map<std::string, const Type*>& bind, std::map<std::string, long>& ints)
+{
+    cxx::Decl* decl = tmpl->declAst;
+    if (!decl) return 0;
     std::string key = "<";
     for (size_t i = 0; i < tmpl->templateParams.size(); ++i) {
         const std::string& pn = tmpl->templateParams[i]->name;
@@ -758,6 +809,9 @@ Symbol* Sema::instantiateFunctionTemplate(Symbol* tmpl, const std::vector<cxx::E
     cxx::Decl* copy = cxx::cloneDecl(decl, nodeArena());   // annotations belong to this instantiation
     if (copy->kind != cxx::Decl::Function) copy->declarators.resize(1);
     cxx::Declarator* dcopy = copy->kind == cxx::Decl::Function ? copy->declarator : copy->declarators[0].decl;
+    // the instantiation is declared in the instantiation scope under the class (or namespace): a member template
+    // defined out of class ("Box<int>::conv") drops the qualifier of its definition
+    if (dcopy->name.parts.size() > 1) { cxx::NameComponent last = dcopy->name.parts.back(); dcopy->name.parts.clear(); dcopy->name.parts.push_back(last); dcopy->name.global = false; }
     dcopy->name.parts.back().ident = tmpl->name + key;
     dcopy->name.parts.back().hasTemplateArgs = false;
     // substitution: a parameter or result type that does not exist for these arguments (typename T::type with no
@@ -1022,8 +1076,12 @@ const Type* Sema::exprCall(cxx::Expr* e, Scope* in)
             if (!fns.empty()) { s = fns[0]; cands = fns; }
         }
         if (s->kind == Symbol::Class || s->kind == Symbol::Typedef || s->kind == Symbol::ClassTemplate) {
-            // T(args): a functional cast / constructor call
+            // T(args): a functional cast / constructor call the parser could not tell from a call ("M::value_type(k, v)"
+            // with M a typedef of a class): the node becomes the functional cast, its operands the arguments
             const Type* t = s->kind == Symbol::Typedef ? s->type : s->kind == Symbol::Class ? m_types.classType(s) : namedType(callee->name, in, "", e->loc);
+            e->kids.erase(e->kids.begin());
+            e->kind = cxx::Expr::FunctionalCast;
+            e->type = 0;
             return exprCast(e, in, t, true);
         }
         if (s->kind == Symbol::Variable) {
@@ -2048,6 +2106,7 @@ void Sema::analyzeFunctionBody(Symbol* fn, cxx::Decl* def, Scope* enclosing)
 bool Sema::isLazyMember(const Symbol* fn) const
 {
     if (fn->kind != Symbol::Function || fn->isVirtual) return false;   // the vtable needs every virtual member
+    if (fn->isExplicitInstantiation) return false;                      // named by an explicit instantiation definition (14.7.2)
     // a function template specialisation exists only because something referred to it, and that something may
     // itself be a member nobody uses (Vector<Vector<double, 3>, 3>::normalized calling operator/)
     if (fn->instantiatedFrom && fn->instantiatedFrom->kind == Symbol::FunctionTemplate) return true;

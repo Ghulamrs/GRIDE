@@ -225,6 +225,8 @@ struct Symbol {
     bool          isLazyInstantiation;    // function analysed tentatively (Sema::isLazyMember): generated only when used
     bool          instantiationFailed;    // such a function whose body has errors: its diagnostics are held back and
                                           // it is never generated; a use of it is an error (14.7.1)
+    bool          isExplicitInstantiation; // function named by an explicit instantiation definition (14.7.2): analysed and
+                                          // generated as any function, so that the unit emits its COMDAT for the others
     std::vector<Symbol*>     partialSpecs;        // class template: its partial specialisations (ClassTemplate symbols)
     std::vector<cxx::TemplateArg> patternArgs;    // partial specialisation: the argument pattern
     bool          isImplicit;             // compiler-generated constructor / destructor / assignment
@@ -260,7 +262,8 @@ struct Scope {
     std::map<std::string, std::vector<Symbol*> > names;     // overload sets
     std::vector<Symbol*>                       order;       // declaration order
     std::vector<Scope*>                        usingDirectives;
-    Scope() : kind(Block), parent(0), owner(0) {}
+    int                                        blockIndex;  // Block: the n-th block scope of its function (0: the body), for the names of local classes
+    Scope() : kind(Block), parent(0), owner(0), blockIndex(0) {}
     void add(Symbol* s) { names[s->name].push_back(s); order.push_back(s); }
     const std::vector<Symbol*>* find(const std::string& name) const { std::map<std::string, std::vector<Symbol*> >::const_iterator it = names.find(name); return it == names.end() ? 0 : &it->second; }
     bool isNamespaceLike() const { return kind == Global || kind == Namespace; }
@@ -288,6 +291,7 @@ struct Program {
     Scope*               global;
     std::vector<Symbol*> symbols;        // every symbol, in creation order (owned)
     std::vector<Scope*>  scopes;         // every scope (owned)
+    std::map<Symbol*, int> blockCounts;  // function -> its block scopes so far (Scope::blockIndex)
     Program();
     ~Program();
     Symbol* newSymbol(Symbol::Kind k, const std::string& name, Scope* in);
@@ -334,6 +338,11 @@ private:
     void   declareAnonymousMember(Symbol* anon, Scope* in, cxx::Access access);
     Symbol* declareEnum(cxx::EnumDecl* e, Scope* in, cxx::Access access);
     void   declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access);
+    void   declareTemplateMemberDefinition(Symbol* tmpl, Symbol* cls, Symbol* mt);
+    void   declareExplicitInstantiation(cxx::Decl* d, Scope* in);
+    void   explicitlyInstantiate(Symbol* fn);
+    void   explicitlyInstantiateMembers(Symbol* cls, int depth);
+    Symbol* classTemplateOfQualifier(const cxx::QualifiedName& n, Scope* in);
     void   completeClass(Symbol* cls);          // layout, vtable, implicit members
     void   layoutClass(Symbol* cls);
     Symbol* findClassSymbolForQualifier(const cxx::QualifiedName& n, Scope* from);
@@ -415,6 +424,7 @@ private:
     long        braceCount(const Type* t, const std::vector<cxx::Expr*>& items);   // elements of an array of unknown bound
     cxx::Expr*  braceInit(const Type* t, std::vector<cxx::Expr*>& items, size_t& pos, Scope* in, const cxx::Loc& loc, long* count);
     cxx::Expr*  braceElement(const Type* t, std::vector<cxx::Expr*>& items, size_t& pos, Scope* in);
+    bool        literalForCharArray(const Type* u, cxx::Expr* it);
     void        braceDeclInit(Symbol* var, cxx::Initializer& init, Scope* in);
     const Type* completedArray(const Type* t, const cxx::Initializer& init);
     bool   completeForSizeof(const Type* t, Scope* in, const cxx::Loc& loc);   // false, with S113, for an incomplete type
@@ -425,6 +435,8 @@ private:
     Conversion convert(cxx::Expr* from, const Type* to, Scope* in);
     Conversion convertType(const Type* from, bool lvalue, bool nullConstant, const Type* to, Scope* in, bool allowUser);
     Symbol* instantiateFunctionTemplate(Symbol* tmpl, const std::vector<cxx::Expr*>& args, size_t firstArg, Scope* in, const cxx::Loc& loc, const std::vector<cxx::TemplateArg>* explicitArgs = 0);
+    Symbol* instantiateBoundFunctionTemplate(Symbol* tmpl, std::map<std::string, const Type*>& bind, std::map<std::string, long>& ints);
+    bool   matchFunctionTemplate(Symbol* tmpl, cxx::Declarator* dcl, const Type* ft, Scope* in, std::map<std::string, const Type*>& bind, std::map<std::string, long>& ints);
     bool   atLeastAsSpecialized(Symbol* a, Symbol* b);   // 14.5.5.2: b's parameters deduce from a's with a's parameters unique types
     static bool typeHasError(const Type* t);
     void   declareFunctionSpecialization(cxx::Decl* d, cxx::Decl* inner, cxx::Declarator* dcl, Scope* in, cxx::Access access);

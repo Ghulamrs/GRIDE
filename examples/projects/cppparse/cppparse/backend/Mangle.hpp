@@ -42,6 +42,9 @@ std::string msvcMangleSymbol(const sema::Symbol& fn);
 void        setMangleUnitId(unsigned long id);
 extern unsigned long g_mangleUnitId;
 std::string msvcMangleVariableSymbol(const sema::Symbol& v);
+// the dynamic initializer function of a COMDAT variable and the symbol of its .CRT$XCU entry, as cl names them
+std::string msvcMangleDynamicInitializer(const sema::Symbol& v);
+std::string msvcMangleInitializerEntry(const sema::Symbol& v);
 // a static local: "?n@?1??counterA@@YAHXZ@4HA", the variable in block <discriminator> (2: the function's body)
 std::string msvcMangleStaticLocal(const sema::Symbol& v, const sema::Symbol& fn, long discriminator);
 // a vftable; forBase names one of several (??_7D@@6BPB@@@: D's vftable for PB), 0 for a class with one

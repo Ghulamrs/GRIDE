@@ -44,6 +44,9 @@ private:
         // **And the same for a floating one.**
         bool isConstantDouble = false;
         long double constantDouble = 0;
+        // A const local of the function around a lambda, read in the lambda's body for its value
+        // and nothing else - [expr.prim.lambda]/12, a use that is no odr-use needs no capture (1.27).
+        bool constantOnly = false;
         // **[class.copy]/31 elides a `return` copy, and excludes a parameter.**
         bool isParameter = false;
         // A by-value class parameter that arrived by address is lowered to a reference, so by its slot alone it looks like `T &t`.
@@ -556,6 +559,9 @@ private:
         Packs packs;   // same index again
         std::size_t start = 0;              // the template's own tokens
         std::size_t pos = 0;                // where it was first asked for
+        // How many replayed bodies deep the request came from: one more than the specialization whose
+        // body asked for this one, 1 from the program itself - bounded by kMaxNesting (2026-10-21, fix 5).
+        int depth = 1;
         bool emitted = false;
         // A class specialization instead of a function one.
         bool isClass = false;
@@ -586,6 +592,9 @@ private:
     // by the declarator that names the function.
     std::string instantiationKey_;
     std::string instantiationOf_;
+    // The depth of the specialization whose body is being replayed, 0 outside one: what a
+    // specialization asked for from inside it is one deeper - see Specialization::depth.
+    int instantiationDepth_ = 0;
     // A `>` inside a template argument list closes it and is not an operator
     // - [temp.names], and the reason a comparison there must be parenthesised.
     // Cleared inside parentheses, where a `>` is an operator again.
@@ -644,6 +653,8 @@ private:
                                  const Packs &packs =
                                      Packs());
     void instantiatePending();
+    // Past kMaxNesting bodies deep, a specialization asked for from inside another's body is refused.
+    void refuseInstantiationDepth(const std::string &name, int depth, std::size_t pos) const;
     bool memberIsUsed(const std::string &key) const;
     // "twice<int>" - the table key and what the diagnostics call it.
     std::string specializationKey(const std::string &name,
@@ -919,6 +930,9 @@ private:
 
     // `(*this).m`, typed as the member is declared.
     ExprPtr thisMember(int thisSlot, const Type *cls, const Member &m);
+    // `PB::v` inside a member function: `(*this).PB::v`, or null where there is no such `this` (1.27).
+    ExprPtr qualifiedMemberThroughThis(const Type *cls, const Member &m,
+                                       const std::string &member, std::size_t pos);
     // Reaching a member that lives in a virtual base.
     void refuseVirtualBaseMember(const Type *staticType, const Member &m,
                                  const std::string &name, std::size_t pos);
@@ -974,9 +988,18 @@ private:
                                      int index, std::size_t pos);
 
     // How well one argument matches one parameter, in the order [over.ics.scs]
-    // ranks them - the values are compared, so do not reorder this enum.
+    // ranks them - the values are compared, so do not reorder this enum. The three
+    // UserDefined values are one rank with its second standard conversion behind it,
+    // [over.ics.rank]/3.3, told apart only through the same conversion function (1.27).
     enum class Rank { Identity, Qualification, Promotion, Conversion,
-                      UserDefined, Ellipsis, None };
+                      UserDefined, UserDefinedPromotion, UserDefinedConversion,
+                      Ellipsis, None };
+    // The UserDefined rank an argument of class `from` has for a scalar `to` reached through
+    // the class's one scalar conversion function; the plain rank for a class target.
+    Rank userDefinedRank(const Type *from, const Type *to);
+    // Two parameters that took one argument of type `given` at the same rank, [over.ics.rank]/3.2
+    // and /4: +1 when a's conversion is the better one, -1 for b's, 0 where nothing tells them apart.
+    int closerTarget(const Type *pa, const Type *pb, const Type *given) const;
     // `ranksObjectA`/`B` say whether that candidate's rank vector opens with an implicit object
     // parameter, which is how a rank position is mapped back to the parameter it came from - a
     // member and a non-member operator are ranked side by side and do not open the same way.
@@ -1440,6 +1463,8 @@ private:
         DynamicSpec pendingSpec;
         bool inNoexceptFunction = false;
         bool replayingInline = false;
+        bool currentFunctionInline = false;
+        int tssSeq = 0;
         // The six a review found still missing, each with a program that
         // reached it: `break` and `case` written in a lambda inside a loop or
         // a switch were accepted and segfaulted the compiler.
@@ -1478,6 +1503,24 @@ private:
         ~Unevaluated() { p->unevaluated_--; }
         Unevaluated(const Unevaluated &) = delete;
         Unevaluated &operator=(const Unevaluated &) = delete;
+    };
+
+    // **How deep the parser's own recursion is**, counted where it re-enters itself for a level of
+    // the program's nesting - a parenthesised expression or declarator, an argument list, a braced
+    // list, a block, a statement under another, a lambda, a class template instantiation - and
+    // refused by name past kMaxNesting, before the stack runs out (2026-10-21, review of 1.25, fix
+    // 5: at the linker's 1 MB, 80 nested parentheses, a 40-deep template recursion, 300 blocks or 50
+    // lambdas overflowed it). The stack ide\cxx1.vcxproj reserves is 256 MB; the costliest level
+    // measured, an instantiation, overflows it between 5000 and 10000 deep - 25 to 50 KB a level -
+    // so 2048 leaves room twice over, and is twice the 1024 [implimits] asks of an instantiation.
+    static const int kMaxNesting = 2048;
+    int nesting_ = 0;
+    struct Nesting {
+        Parser *p;
+        Nesting(Parser *pp, std::size_t pos, const char *what);
+        ~Nesting() { p->nesting_--; }
+        Nesting(const Nesting &) = delete;
+        Nesting &operator=(const Nesting &) = delete;
     };
 
     FunctionState captureFunctionState() const;
@@ -1605,7 +1648,13 @@ private:
     std::size_t initGuardMark_ = 0;
     void staticLocalWithConstructor(Declared &d,
                                     std::vector<StmtPtr> &inits);
-    std::string uniqueStaticSymbol(const std::string &name);
+    // With its type, an inline function's static local takes the ABI's name (1.28).
+    std::string uniqueStaticSymbol(const std::string &name, const Type *type = nullptr);
+    // Whether that symbol is one - the per-unit `owner.name` has a dot, the ABI's names have none -
+    // so that it and its guard are external and in a COMDAT, one object for the program.
+    bool sharedStaticLocal(const std::string &symbol) const {
+        return currentFunctionInline_ && symbol.find('.') == std::string::npos;
+    }
     // A reference with static storage duration: bound statically where the
     // initialiser is the address of a global, and before main otherwise.
     void bindStaticReference(const Declared &d, const std::string &symbol,
@@ -1748,6 +1797,10 @@ private:
     // so its statics, enumerators and nested types are named bare.
     std::map<std::string, const Type *> closureScope_;
     const Type *lambdaScope() const;
+    // The const locals with known values of the function a lambda was written in, by closure tag:
+    // its body reads them without a capture, [expr.prim.lambda]/12 (1.27).
+    std::map<std::string, std::vector<Local> > closureConstants_;
+    std::vector<Local> constantLocals() const;
     // Whether class scope declares the name, so that it hides a global of that name.
     bool classScopeDeclares(const std::string &name);
     bool hasOrdinaryMember(const Type *cls, const std::string &name);
@@ -1832,6 +1885,11 @@ private:
     std::string currentFunction_;
     // The same function's *source* name, which a local class is qualified by.
     std::string currentFunctionName_;
+    // Whether that function is inline - written so, defined in a class, or a template's - so that a
+    // static local of it is one object for the program, in a COMDAT under the ABI's name (1.28).
+    bool currentFunctionInline_ = false;
+    // cl's `$TSS0`, `$TSS1` guards count up within one function.
+    int tssSeq_ = 0;
 
     bool isFriendOf(const Type *cls) const;
 
@@ -1980,6 +2038,8 @@ private:
     std::string unwindTarget(int *ptrSlot, int *selSlot) const;
     // One temporary of a block, released under its guard by a pad.
     void releaseGuarded(std::vector<StmtPtr> &steps, const Temporary &t);
+    // `body` under a cleanup of its own: `onUnwind` runs when an exception leaves it, and the unwinding goes on.
+    StmtPtr cleanupRegion(std::vector<StmtPtr> body, StmtPtr onUnwind);
     // Where each open handler's block begins, telling a `goto` from a jump.
     std::vector<std::size_t> handlerFrom_;
     // Where each open `try` block begins, for the jumps [except.handle]/2 forbids into one.
@@ -2030,6 +2090,9 @@ private:
     const Signature *soleNumericConversion(const Type *from);
     // **Only one user-defined conversion may appear in a sequence**.
     int rankingConversion_ = 0;
+    // The arguments being ranked, by rank position - the object first where there is one, the
+    // operands for an operator - so that closerTarget knows what the parameters took (1.27).
+    std::vector<const Type *> rankingGiven_;
     // The conversion itself, or null when none is needed or possible.
     ExprPtr userConversion(const Type *param, ExprPtr &arg, std::size_t pos);
     // **[over.ics.user] through a conversion *function***: one argument of
@@ -2097,6 +2160,8 @@ private:
     // [class.temporary]/5 - a temporary bound to a reference outlives its full
     // expression and is destroyed with the reference's scope instead.
     bool extendTemporary(const Expr &addr, const std::string &name);
+    // The index in pendingTemps_ of the temporary a bound address names, or -1.
+    int pendingTemporaryOf(const Expr &e) const;
     void flushTemporaries(std::vector<StmtPtr> &into);
     ExprPtr completeCall(const std::string &name, const std::string &symbol,
                          ExprPtr callee, const Type *returns,
@@ -2558,6 +2623,9 @@ private:
     static bool deletedSpecial(const Signature *f) { return f != nullptr && f->deleted; }
     static bool nonPublicDefault(const DefaultedMember &m) { return m.is && m.access != Access::Public; }
     void declareDefaultedMoveAssign(const std::string &tag, const Type *type, std::size_t pos);
+    // [class.copy]/20 - the implicit move assignment, through declareDefaultedMoveAssign where it has work.
+    void declareImplicitMoveAssign(const std::string &tag, const Type *type, std::size_t pos,
+                                   bool userDeclared);
     const Signature *moveAssignOf(const Type *cls) const;
     void refuseConstexprConstructorBody(std::size_t parenAt) const;
     void refuseScopedConversion(const Type *from, const Type *to, std::size_t pos) const;
@@ -2624,6 +2692,16 @@ private:
     ExprPtr boundMemberPointer(const Type *cls, const Signature &f,
                                std::size_t pos, long long vtableCode = 0,
                                const std::string &code = std::string());
+    // The null pointer to a member function, the same pair with a null code word (1.27).
+    ExprPtr nullMemberFunctionPointer(const Type *mp);
+    // `throw e` as an expression - an arm of `?:`, the operand of `noexcept` - of type void, and the
+    // statements a `throw` lowers to, which are all expressions, as one comma chain (1.27).
+    ExprPtr throwExpression();
+    ExprPtr statementsAsExpression(StmtPtr s, std::size_t pos);
+    // How many throw-expressions have been read, which tells a `?:` that an arm is one.
+    int throwsSeen_ = 0;
+    // Whether the function template signature readTemplateDeclaration last read says `noexcept` (1.27).
+    bool patternNoexcept_ = false;
     // **`o.*p` for a member *function* pointer has to carry two things to the call** -
     // the object's address and the code pointer - and no expression holds a pair. The
     // address is left here and the `(` in `postfix` picks it up. One token wide.

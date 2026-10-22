@@ -915,6 +915,39 @@ std::vector<StmtPtr> Parser::wrapCleanups(
     return out;
 }
 
+// **One list of statements under one cleanup action of its own** - `onUnwind` runs when an
+// exception leaves the list, and the unwinding then goes on - for a cleanup that is not a
+// destructor: the guard a static local's initialiser leaves at "being built" when it throws,
+// [stmt.dcl]/4 (2026-10-21, review of 1.25, fix 3). The Microsoft shape is wrapMsCleanups's, a
+// state whose action is a funclet; the Itanium one wrapCleanups's, a pad that resumes - or hands
+// over to the enclosing `try`'s chain, since inside a `try` body the slots are the `try`'s.
+StmtPtr Parser::cleanupRegion(std::vector<StmtPtr> body, StmtPtr onUnwind) {
+    const Type *voidPtr = types_.pointerTo(types_.get(Kind::Void));
+    functionHasPads_ = true;
+    std::vector<StmtPtr> steps;
+    steps.push_back(std::move(onUnwind));
+    if (target_.microsoftNames()) {
+        Block *b = new Block(std::move(steps));
+        b->setScope(-1);
+        Try *t = new Try(std::move(body), nullptr, allocateFrameSlot(voidPtr),
+                         allocateFrameSlot(types_.intType()), std::vector<std::string>());
+        t->setCleanup(StmtPtr(b));
+        t->setUnwindHelpSlot(msUnwindHelp());
+        return StmtPtr(t);
+    }
+    int targetPtr = 0, targetSel = 0;
+    const std::string handOver = unwindTarget(&targetPtr, &targetSel);
+    const bool intoTry = !handOver.empty();
+    const int pointerSlot = intoTry ? targetPtr : allocateFrameSlot(voidPtr);
+    const int selectorSlot = intoTry ? targetSel : allocateFrameSlot(types_.intType());
+    if (intoTry) steps.push_back(StmtPtr(new Goto(handOver)));
+    else         steps.push_back(resumeUnwinding(pointerSlot));
+    Try *seg = new Try(std::move(body), unwindPad(std::move(steps)), pointerSlot, selectorSlot,
+                       std::vector<std::string>());
+    if (intoTry && handOver == tryChainLabel_) tryBodySegments_.push_back(seg);
+    return StmtPtr(seg);
+}
+
 // **One temporary of a block, released on the way out of it, under its
 // guard.**
 void Parser::releaseGuarded(std::vector<StmtPtr> &steps, const Temporary &t) {
@@ -2734,16 +2767,25 @@ void Parser::declareImplicitSpecials(const std::string &tag, const Type *type,
     const Defaulted df = defaulted_.count(tag) != 0 ? defaulted_[tag] : Defaulted();
     // **Read now, for the same reason and at the same moment.** After the three calls
     // below, every one of these answers yes for a class that wrote nothing at all,
-    // and [class.copy]/9 is a question about what the *user* declared.
+    // and [class.copy]/9 is a question about what the *user* declared. A written copy
+    // or move assignment is one of its five (2026-10-21, review of 1.25, fix 4: until
+    // then `X &operator=(const X &)` written by hand left the implicit move constructor
+    // declared, and `X b = std::move(a)` moved where cl copies); copyAssignOf answers
+    // the move assignment too where that is the only one written.
     const bool wroteCopyOrDtor = copyConstructorOf(type) != nullptr ||
                                  moveConstructorOf(type) != nullptr ||
+                                 copyAssignOf(type) != nullptr ||
                                  overloadsOf(destructorKey(tag)) != nullptr ||
                                  df.copyCtor.is || df.copyAssign.is || df.moveAssign.is || df.dtor.is;
     // [class.copy]/7 and /18: a defaulted move constructor or move assignment deletes the implicit copies.
     declareImplicitDestructor(tag, type, pos);
     declareImplicitCopyCtor(tag, type, pos);
     declareImplicitCopyAssign(tag, type, pos);
+    // [class.copy]/20: the implicit move assignment, where none of the five was written - a
+    // defaulted move constructor counts, declared below as it is (2026-10-21, fix 4: there
+    // was none, and `b = std::move(a)` ran the copy assignment).
     if (df.moveAssign.is) declareDefaultedMoveAssign(tag, type, pos);
+    else declareImplicitMoveAssign(tag, type, pos, wroteCopyOrDtor || df.moveCtor.is);
     // Before the `wroteConstructor` return below: writing a constructor of
     // your own costs you the implicit *default* one and nothing else.
     declareImplicitMoveCtor(tag, type, pos, wroteCopyOrDtor && !df.moveCtor.is);
@@ -3139,10 +3181,12 @@ void Parser::declareImplicitCopyAssign(const std::string &tag, const Type *type,
                                        std::size_t pos) {
     if (copyAssignOf(type) != nullptr) return;
     const Defaulted df = defaultedFor(tag);
-    // [class.copy]/18: a move written `= default` deletes the copy - declared, so a use is refused by name.
-    bool deleted = df.moveCtor.is || df.moveAssign.is;
+    // [class.copy]/18: a move written `= default` deletes the copy - declared, so a use is refused by
+    // name. **Not one the class wrote `= default` itself** (2026-10-21, review of 1.25, fix 4): /18
+    // deletes the *implicitly-declared* one, and a defaulted one is user-declared.
+    bool deleted = (df.moveCtor.is || df.moveAssign.is) && !df.copyAssign.is;
     // [class.copy]/23.
-    if (moveConstructorOf(type) != nullptr && !deleted) return;
+    if (moveConstructorOf(type) != nullptr && !deleted && !df.copyAssign.is) return;
 
     // **A const member has no assignment to give**, so the operator the compiler would
     // write is deleted rather than non-trivial and none is declared. Asked over every
@@ -3182,6 +3226,38 @@ void Parser::declareImplicitCopyAssign(const std::string &tag, const Type *type,
                                     false });
     functions_.back().implicit = true;
     functions_.back().deleted = deleted;
+}
+
+// The move assignment the class did not write - [class.copy]/20: declared where none of /9's five
+// is user-declared, and trivial ones are not functions, on the copy assignment's measured line. One
+// /23 would define as deleted - a base or member that can be neither moved nor copied - is one
+// overload resolution ignores (/23, as DR 1402 has it), so it is left undeclared and the copy
+// assignment takes the call; a const member leaves the copy undeclared too, and so this one.
+// (2026-10-21, review of 1.25, fix 4.)
+void Parser::declareImplicitMoveAssign(const std::string &tag, const Type *type, std::size_t pos,
+                                       bool userDeclared) {
+    if (userDeclared) return;
+    if (moveAssignOf(type) != nullptr) return;
+    const std::vector<Member> &ms = type->members();
+    for (std::size_t i = 0; i < ms.size(); i++)
+        if (ms[i].type->isConst()) return;
+    // What each subobject's move would call: its move assignment, or its copy where it has none.
+    bool work = type->polymorphic();
+    const std::vector<Type::BaseSpec> &bs = type->bases();
+    for (std::size_t i = 0; i < bs.size(); i++) {
+        const Signature *op = moveAssignOf(bs[i].type);
+        if (op == nullptr) op = copyAssignOf(bs[i].type);
+        if (deletedSpecial(op)) return;
+        if (op != nullptr) work = true;
+    }
+    for (std::size_t i = 0; i < ms.size(); i++) {
+        const Signature *op = moveAssignOf(memberClass(ms[i].type));
+        if (op == nullptr) op = copyAssignOf(memberClass(ms[i].type));
+        if (deletedSpecial(op)) return;
+        if (op != nullptr) work = true;
+    }
+    if (!work) return;
+    declareDefaultedMoveAssign(tag, type, pos);
 }
 
 // `X &operator=(X &&) = default;` - the move assignment the compiler writes: each subobject's own
@@ -3253,8 +3329,12 @@ void Parser::declareImplicitCopyCtor(const std::string &tag, const Type *type,
     const Defaulted df = defaultedFor(tag);
     // [class.copy]/7: a user-declared move constructor **deletes** the implicit copy constructor;
     // written by hand it is left undeclared, and the copy is refused where the move is not viable.
-    bool deleted = df.moveCtor.is || df.moveAssign.is;
-    if (moveConstructorOf(type) != nullptr && !deleted) return;
+    // **Not a copy the class wrote `= default` itself** (2026-10-21, review of 1.25, fix 4): /7
+    // deletes the *implicitly-declared* one, and `T(const T &) = default;` beside `T(T &&) =
+    // default;` is user-declared, written as the compiler would - until then it was refused as
+    // deleted, and beside a hand-written move it was never declared at all.
+    bool deleted = (df.moveCtor.is || df.moveAssign.is) && !df.copyCtor.is;
+    if (moveConstructorOf(type) != nullptr && !deleted && !df.copyCtor.is) return;
 
     // [class.copy]/11: a base or member whose copy is deleted deletes this one.
     const std::vector<Type::BaseSpec> &bs = type->bases();
@@ -3263,7 +3343,10 @@ void Parser::declareImplicitCopyCtor(const std::string &tag, const Type *type,
         if (deletedSpecial(copyConstructorOf(bs[i].type))) deleted = true;
     for (std::size_t i = 0; i < ms.size(); i++)
         if (deletedSpecial(copyConstructorOf(memberClass(ms[i].type)))) deleted = true;
-    bool work = type->polymorphic() || deleted || nonPublicDefault(df.copyCtor);
+    // A defaulted copy beside a move is declared even where it is trivial, as the move is: an
+    // lvalue call would otherwise find the move alone and have nothing viable.
+    bool work = type->polymorphic() || deleted || nonPublicDefault(df.copyCtor) ||
+                (df.copyCtor.is && (df.moveCtor.is || moveConstructorOf(type) != nullptr));
     for (std::size_t i = 0; i < bs.size() && !work; i++)
         if (copyConstructorOf(bs[i].type) != nullptr) work = true;
     for (std::size_t i = 0; i < ms.size() && !work; i++)
@@ -3644,7 +3727,7 @@ void Parser::synthesizeCopy(std::size_t which, bool assigning) {
     // this had to learn about moves: an implicit constructor whose parameter
     // is `X &&` is the move constructor and there is nothing else it could be.
     const bool moving = srcRef->isRValueReference();
-    const char *kind = assigning ? "copy assignment"
+    const char *kind = assigning ? (moving ? "move assignment" : "copy assignment")
                      : moving    ? "move constructor"
                                  : "copy constructor";
 
@@ -4397,6 +4480,16 @@ void Parser::defineStaticMember(Declared &d, Program &program, bool threadLocal)
                                           s->type, in, owner->isSpecialization());
             stored = true;
         }
+    } else if (s->folded) {
+        // `const int Outer::K;` defines what the class initialised, [class.static.data]/3, so the
+        // object holds the declaration's value - `&Outer::K` read a zero (1.27, 2026-10-21, review
+        // of 1.25, item 3).
+        Init in;
+        in.pos = d.pos;
+        in.value.reset(new Num(s->value));
+        in.value->setType(s->type->unqualified());
+        flattenInit(s->type, in, 0, pieces);
+        hasInit = true;
     }
     expect(";");
 
@@ -4502,6 +4595,11 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
 
     const Type *fn = d.type;
     checkOperatorDeclarable(d.name, fn->params(), true, d.pos);
+    // `explicit operator bool()`: the keyword was read in the class body and reached no Signature,
+    // so `bool b = f` took the function as [class.conv.fct]/2 forbids (1.28, 2026-10-22, review of
+    // 1.25, neg07). Taken here, where the member's Signature is made.
+    const bool explicitConversion = pendingExplicitConversion_ && isConversionName(d.name);
+    pendingExplicitConversion_ = false;
 
     std::string key = cls + "::" + d.name;
     std::vector<std::size_t> &set = functionIndex_[key];
@@ -4605,6 +4703,7 @@ void Parser::declareMember(const std::string &cls, const Declared &d,
     functions_.back().isNoexcept = pendingNoexcept_;
     functions_.back().spec = pendingSpec_;
     functions_.back().refThis = refThis;
+    functions_.back().isExplicit = explicitConversion;
     pendingNoexcept_ = false;
 
     if (!isVirtual) return;

@@ -176,6 +176,7 @@ namespace Gride
         TabControl^ docs;
         System::Windows::Forms::ContextMenuStrip^ docMenu;
         TabPage^ docMenuPage;
+        int closeHot;                   // the tab whose close cross the mouse is over, -1 none
         PropertyGrid^ props;
         TabControl^ bottomTabs;
         TabPage^ pageOutput;
@@ -322,6 +323,14 @@ namespace Gride
             docs->AllowDrop = true;
             docs->SelectedIndexChanged += GRIDE_EH(OnDocChanged);
             docs->MouseUp += gcnew MouseEventHandler(this, &MainForm::OnDocsMouseUp);
+            // each tab draws its own close cross on the right, a click on it closing that file (the user, 2026-10-21)
+            closeHot = -1;
+            docs->DrawMode = TabDrawMode::OwnerDrawFixed;
+            docs->Padding = System::Drawing::Point(20, 4);
+            docs->DrawItem += gcnew DrawItemEventHandler(this, &MainForm::OnDocsDrawItem);
+            docs->MouseDown += gcnew MouseEventHandler(this, &MainForm::OnDocsMouseDown);
+            docs->MouseMove += gcnew MouseEventHandler(this, &MainForm::OnDocsMouseMove);
+            docs->MouseLeave += GRIDE_EH(OnDocsMouseLeave);
             docs->DragEnter += gcnew DragEventHandler(this, &MainForm::OnDragEnter);
             docs->DragDrop += gcnew DragEventHandler(this, &MainForm::OnDragDrop);
             docMenu = gcnew System::Windows::Forms::ContextMenuStrip();
@@ -943,6 +952,9 @@ namespace Gride
                 SetStatus(String::Format("Imported CCS project '{0}' (read-only, {1} files)", project->Name, project->SourceFiles->Count));
             else
                 SetStatus(String::Format("Opened project '{0}'", project->Name));
+            // the project's main file comes to the front (the user, 2026-10-21), chosen as GRIDE 1.0 chooses it
+            String^ entry = project->FileToOpen();
+            if (entry != nullptr && FindTab(entry) == nullptr) OpenFile(entry);
         }
 
         // RIDE's own state for a CCS project lives in the settings (ccs.projects), never in CCS's files: the
@@ -1465,6 +1477,64 @@ namespace Gride
             for (int i = 0; i < docs->TabCount; i++)
                 if (docs->GetTabRect(i).Contains(pt)) return i;
             return -1;
+        }
+
+        // the close cross of tab i: a square at the right end of its rectangle
+        System::Drawing::Rectangle TabCloseRect(int i)
+        {
+            System::Drawing::Rectangle r = docs->GetTabRect(i);
+            int s = 14;
+            return System::Drawing::Rectangle(r.Right - s - 5, r.Top + (r.Height - s) / 2, s, s);
+        }
+
+        int TabCloseAt(System::Drawing::Point pt)
+        {
+            for (int i = 0; i < docs->TabCount; i++)
+                if (TabCloseRect(i).Contains(pt)) return i;
+            return -1;
+        }
+
+        void OnDocsDrawItem(Object^ sender, DrawItemEventArgs^ e)
+        {
+            if (e->Index < 0 || e->Index >= docs->TabCount) return;
+            TabPage^ page = docs->TabPages[e->Index];
+            System::Drawing::Rectangle r = docs->GetTabRect(e->Index);
+            bool selected = e->Index == docs->SelectedIndex;
+            Graphics^ g = e->Graphics;
+            g->FillRectangle(selected ? SystemBrushes::Window : SystemBrushes::Control, r);
+            System::Drawing::Rectangle text(r.Left + 6, r.Top, r.Width - 6 - 24, r.Height);
+            TextRenderer::DrawText(g, page->Text, docs->Font, text, SystemColors::ControlText,
+                                   TextFormatFlags::Left | TextFormatFlags::VerticalCenter | TextFormatFlags::EndEllipsis | TextFormatFlags::NoPrefix);
+            System::Drawing::Rectangle x = TabCloseRect(e->Index);
+            if (e->Index == closeHot) g->FillRectangle(SystemBrushes::ControlDark, x);
+            Pen^ pen = gcnew Pen(e->Index == closeHot ? SystemColors::HighlightText : (selected ? SystemColors::ControlText : SystemColors::GrayText), 1.6f);
+            System::Drawing::Drawing2D::SmoothingMode was = g->SmoothingMode;
+            g->SmoothingMode = System::Drawing::Drawing2D::SmoothingMode::AntiAlias;
+            int m = 4;
+            g->DrawLine(pen, x.Left + m, x.Top + m, x.Right - m - 1, x.Bottom - m - 1);
+            g->DrawLine(pen, x.Right - m - 1, x.Top + m, x.Left + m, x.Bottom - m - 1);
+            g->SmoothingMode = was;
+            delete pen;
+        }
+
+        void OnDocsMouseDown(Object^ sender, MouseEventArgs^ e)
+        {
+            if (e->Button != System::Windows::Forms::MouseButtons::Left) return;
+            int i = TabCloseAt(e->Location);
+            if (i < 0) return;
+            closeHot = -1;
+            CloseTab(docs->TabPages[i]);
+        }
+
+        void OnDocsMouseMove(Object^ sender, MouseEventArgs^ e)
+        {
+            int hot = TabCloseAt(e->Location);
+            if (hot != closeHot) { closeHot = hot; docs->Invalidate(); }
+        }
+
+        void OnDocsMouseLeave(Object^ sender, EventArgs^ e)
+        {
+            if (closeHot != -1) { closeHot = -1; docs->Invalidate(); }
         }
 
         void OnDocsMouseUp(Object^ sender, MouseEventArgs^ e)

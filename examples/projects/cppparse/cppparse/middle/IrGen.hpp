@@ -80,8 +80,10 @@ private:
         bool              baseSubobject;   // a base part: destroyed without its virtual bases
         std::string       abortGuard;  // a static local's initializer: its guard global, handed to _Init_thread_abort
         int               restIndex;   // >= 0: the elements [0, index) of the array at slot (viaPointer), this local the index
-        int               freeKind;    // 1: frees the object whose address slot holds, 2: the array whose cookie it holds
-        sema::Symbol*     freeCls;     // the class whose operator delete frees it (0: the global one)
+        int               freeKind;    // 1: frees the object whose address slot holds, 2: the array whose cookie it holds, 3: calls the placement operator delete freeCls with the saved placement arguments
+        sema::Symbol*     freeCls;     // the class whose operator delete frees it (0: the global one); freeKind 3: the placement operator delete
+        std::vector<int>  argSlots;    // freeKind 3: the locals holding the placement arguments, and their IR types
+        std::vector<const sema::Type*> argTypes;
         int               countSlot;   // freeKind 2: the local holding the element count
         bool              noCookie;    // freeKind 2: an array without a cookie (a sized operator delete[] gets count * size)
         int               freeSize;    // freeKind: the size of the object (of an element), for the sized global operators
@@ -208,6 +210,8 @@ private:
     int  beginTerminateRegion(int& term, int line);
     void endTerminateRegion(int tid, int term, int line);
     int  registerFree(int ptr, sema::Symbol* cls, bool array, int count, int elemSize, int line);
+    int  placementNew(cxx::Expr* callE, const sema::Type* pt, bool wantFree, int& freeK, int line);
+    sema::Symbol* matchingPlacementDelete(sema::Symbol* opNew) const;
     void clearFlag(int index, int line);
     void returnSequence(int line);
     void finishFunction(int line);
@@ -217,6 +221,7 @@ private:
     void genFunction(sema::Symbol* fn);
     void genImplicit(sema::Symbol* fn);
     void genInitializer();
+    void initGlobal(sema::Symbol* g);
     bool staticInit(sema::Symbol* var, IrGlobal& g);
     bool staticData(const sema::Type* t, const cxx::Initializer& init, std::vector<IrDataItem>& out);
     bool constantData(const sema::Type* t, cxx::Expr* x, std::vector<IrDataItem>& out, int depth);
@@ -289,6 +294,7 @@ private:
     void   initObject(const LValue& lv, const sema::Type* t, sema::Symbol* var, cxx::InitDeclarator& id, int line);
     void   abiResult(IrInst& r, int line);
     void   initAggregate(const sema::Type* t, int addr, const std::vector<cxx::Expr*>& elems, bool zeroRest, int line);
+    void   copyLiteral(const sema::Type* u, int addr, cxx::Expr* lit, bool zeroTail, int line);
     bool   coversAll(const sema::Type* t, const std::vector<cxx::Expr*>& elems) const;
     const sema::Type* exprType(cxx::Expr* e) const;
 
@@ -308,6 +314,8 @@ private:
     int                        m_generated;
     std::vector<sema::Symbol*> m_dynamicGlobals;   // globals built by the module's initialiser, in declaration order
     sema::Symbol*              m_initSymbol;
+    std::vector<sema::Symbol*> m_comdatGlobals;    // COMDAT variables (static data members of template instantiations) with a
+    std::vector<sema::Symbol*> m_comdatInits;      // dynamic initialiser, and the COMDAT initialiser function of each
     std::vector<ExitThunk>     m_exitThunks;       // destructor thunks registered with atexit; generated after the functions
     std::set<std::string>      m_rttiDone;         // the RTTI globals emitted so far (by IR name)
     size_t                     m_exitThunksDone;

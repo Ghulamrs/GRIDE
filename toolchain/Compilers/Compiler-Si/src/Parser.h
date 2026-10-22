@@ -41,7 +41,9 @@ private:
 
     void fail(const std::string &text);
     void fail(int line, const std::string &text);
+    void fail(int line, int col, const std::string &text);
     bool expect(Tok kind, const std::string &text);
+    bool expectClose(Tok kind, const Token &open);
 
     std::string unexpected() const;
     void failUnexpected() { fail(unexpected()); }

@@ -56,7 +56,8 @@ static const char *const kWindowsMacros[] = {
 };
 const char *const *X86_64WindowsBackend::identityMacros() const { return kWindowsMacros; }
 
-bool X86_64WindowsBackend::emitsLineTable() const { return syntax_ != WindowsAsm::Masm; }
+// Every spelling carries a line table now: the MASM one as GRIDE's masm reads it (`.FILE`, `.LINE`).
+bool X86_64WindowsBackend::emitsLineTable() const { return true; }
 
 bool windowsAsmIsGnu() { return syntax_ != WindowsAsm::Masm; }
 

@@ -85,12 +85,44 @@ static void fill_own_records(Link &lk)
     wr32(&vol->data[0], 0x18);
     wr32(&vol->data[4], 0x80008000u);
 
-    /* the debug directory: one entry, type 13, pointing at the coffgrp record */
-    wr32(&dbg->data[4],  lk.opt.timestamp);
-    wr32(&dbg->data[12], 13);
-    wr32(&dbg->data[16], (u32)at);             /* the record is the bytes written, not the run */
-    wr32(&dbg->data[20], grp->rva);
-    wr32(&dbg->data[24], grp->fileoff);
+    /* the debug directory: an entry of type 13 pointing at the coffgrp record - after a CODEVIEW
+       entry (type 2) under /debug, whose RSDS record follows the entries: the GUID the PDB carries
+       (filled in once the image is whole), the age, the PDB's path */
+    u32 e = 0;
+    if (lk.opt.debug) {
+        const u32 n = lk.rsds_size();
+        wr32(&dbg->data[4],  lk.opt.timestamp);
+        wr32(&dbg->data[12], 2);
+        wr32(&dbg->data[16], n);
+        wr32(&dbg->data[20], dbg->rva + 56);
+        wr32(&dbg->data[24], dbg->fileoff + 56);
+        memcpy(&dbg->data[56], "RSDS", 4);
+        wr32(&dbg->data[56 + 20], 1);
+        memcpy(&dbg->data[56 + 24], lk.pdb_path.c_str(), lk.pdb_path.size() + 1);
+        e = 28;
+    }
+    wr32(&dbg->data[e + 4],  lk.opt.timestamp);
+    wr32(&dbg->data[e + 12], 13);
+    wr32(&dbg->data[e + 16], (u32)at);         /* the record is the bytes written, not the run */
+    wr32(&dbg->data[e + 20], grp->rva);
+    wr32(&dbg->data[e + 24], grp->fileoff);
+}
+
+u32 Link::rsds_size() const { return 4 + 16 + 4 + (u32)pdb_path.size() + 1; }
+
+/*  The GUID the image and its PDB share: a 128-bit hash of the image as written, with the GUID
+ *  itself still zero - two FNV-1a runs from different bases - marked as a version-4 GUID. */
+static void image_guid(const std::vector<u8> &f, u8 *g)
+{
+    u64 a = 0xcbf29ce484222325ull, b = 0x84222325cbf29ce4ull;
+    for (size_t i = 0; i < f.size(); i++) {
+        a = (a ^ f[i]) * 0x100000001b3ull;
+        b = (b ^ f[i] ^ (u8)i) * 0x100000001b3ull;
+    }
+    wr64(g, a);
+    wr64(g + 8, b);
+    g[7] = (u8)((g[7] & 0x0F) | 0x40);
+    g[8] = (u8)((g[8] & 0x3F) | 0x80);
 }
 
 bool Link::write_image()
@@ -169,7 +201,7 @@ bool Link::write_image()
     if (pi >= 0) { wr32(d + 3 * 8, outs[pi].rva); wr32(d + 3 * 8 + 4, outs[pi].virt_size); }
     int ri = out_index(".reloc");
     if (ri >= 0 && outs[ri].virt_size) { wr32(d + 5 * 8, outs[ri].rva); wr32(d + 5 * 8 + 4, outs[ri].virt_size); }
-    wr32(d + 6 * 8, mods.back().secs[0].rva); wr32(d + 6 * 8 + 4, 28);
+    wr32(d + 6 * 8, mods.back().secs[0].rva); wr32(d + 6 * 8 + 4, opt.debug ? 56 : 28);
     /*  The load-config directory: the CRT's _load_config_used (libcmt's loadcfg.obj), whose
      *  first word is its own size. Without it the loader runs the program all the same, and
      *  the security cookie and CFG checks do not (the review's L15). */
@@ -209,6 +241,7 @@ bool Link::write_image()
         wr32(sh + 20, outs[i].raw_size ? outs[i].fileoff : 0);
         wr32(sh + 36, outs[i].flags);
     }
+    section_headers.assign(d + 16 * 8, d + 16 * 8 + outs.size() * 40);
 
     /* the sections themselves */
     u32 end = size_of_headers;
@@ -234,6 +267,10 @@ bool Link::write_image()
     }
     if (ri >= 0 && !reloc_data.empty())
         memcpy(&f[outs[ri].fileoff], &reloc_data[0], reloc_data.size());
+    if (opt.debug) {
+        image_guid(f, pdb_guid);
+        memcpy(&f[mods.back().secs[0].fileoff + 56 + 4], pdb_guid, 16);
+    }
 
     FILE *out = fopen(opt.out.c_str(), "wb");
     if (!out) { err = opt.out + ": cannot create"; return false; }

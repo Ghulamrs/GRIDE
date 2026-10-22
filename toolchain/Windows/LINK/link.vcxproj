@@ -57,6 +57,7 @@
     <ClCompile Include="src\image.cpp" />
     <ClCompile Include="src\layout.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\pdb.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

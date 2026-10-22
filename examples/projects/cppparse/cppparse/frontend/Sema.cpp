@@ -276,15 +276,38 @@ Symbol::Symbol()
       definition(0), declAst(0), body(0), vtableSlot(-1), thisAdjust(0), vfptrOffset(0), vfptrVbase(0), overrides(0), ownerClass(0), offset(0), index(0), isMember(false), isParam(false),
       isLocal(false), isMutable(false), init(0), initCtor(0), hasConstValue(false), constValue(0), declAlign(0), bitWidth(-1), bitOffset(0),
       anonHost(0), anonOf(0), templateAst(0), instantiatedFrom(0),
-      isDependentContext(false), isImplicitInstantiation(false), isLazyInstantiation(false), instantiationFailed(false), isImplicit(false), requiredParams(0), hasUserCtor(false), hasCopyCtor(false), hasDtor(false),
+      isDependentContext(false), isImplicitInstantiation(false), isLazyInstantiation(false), instantiationFailed(false), isExplicitInstantiation(false), isImplicit(false), requiredParams(0), hasUserCtor(false), hasCopyCtor(false), hasDtor(false),
       hasCopyAssign(false), hasDefaultCtor(false), memberPointerUnspecified(false), defOrder(0), friendsUnknown(false), isUsed(false), isNoreturn(false) {}
+
+// a function with its parameter types, "t4(int)", "Box::get() const": what a local class is qualified by
+static std::string functionSignature(const Symbol* fn)
+{
+    std::string s = fn->qualifiedName() + "(";
+    if (fn->type && fn->type->kind == Type::Function) {
+        for (size_t i = 0; i < fn->type->params.size(); ++i) s += (i ? ", " : "") + fn->type->params[i]->text();
+        if (fn->type->variadic) s += fn->type->params.empty() ? "..." : ", ...";
+    }
+    s += ")";
+    if (fn->type && fn->type->constMethod) s += " const";
+    return s;
+}
 
 std::string Symbol::qualifiedName() const
 {
     std::string s = name;
+    bool local = kind == Class;   // a class declared in a function, or a member of one: qualified by the function
     for (Scope* sc = scope; sc; sc = sc->parent) {
-        if ((sc->kind == Scope::Namespace || sc->kind == Scope::Class) && sc->owner && !sc->owner->name.empty()) s = sc->owner->name + "::" + s;
-        if (sc->kind == Scope::Function || sc->kind == Scope::Block) break;
+        if ((sc->kind == Scope::Namespace || sc->kind == Scope::Class) && sc->owner && !sc->owner->name.empty()) { s = sc->owner->name + "::" + s; if (sc->kind == Scope::Class) local = true; }
+        if (sc->kind == Scope::Function || sc->kind == Scope::Block) {
+            // a local class's names are unique in the unit through the function's ("t4(int)::L::f"), as cl scopes them;
+            // one in a nested block carries the block's number as well
+            if (local) {
+                const Scope* f = sc;
+                while (f && f->kind != Scope::Function) f = f->parent;
+                if (f && f->owner && f->owner != this) s = functionSignature(f->owner) + (sc->kind == Scope::Block && sc->blockIndex > 0 ? "::{" + intToString(sc->blockIndex) + "}" : std::string()) + "::" + s;
+            }
+            break;
+        }
     }
     return s;
 }
@@ -317,6 +340,7 @@ Scope* Program::newScope(Scope::Kind k, Scope* parent, Symbol* owner)
     s->kind = k;
     s->parent = parent;
     s->owner = owner;
+    if (k == Scope::Block && owner) s->blockIndex = blockCounts[owner]++;
     scopes.push_back(s);
     return s;
 }
@@ -814,10 +838,7 @@ void Sema::declare(cxx::Decl* d, Scope* in, cxx::Access access)
         break;
     }
     case cxx::Decl::Template: declareTemplate(d, in, access); break;
-    case cxx::Decl::ExplicitInstantiation: {
-        if (!d->decls.empty() && d->decls[0]->spec.kind == cxx::DeclSpec::Named) typeOf(d->decls[0]->spec, in);   // forces the instantiation
-        break;
-    }
+    case cxx::Decl::ExplicitInstantiation: declareExplicitInstantiation(d, in); break;
     case cxx::Decl::LinkageSpec: {
         for (size_t i = 0; i < d->decls.size(); ++i) {
             declare(d->decls[i], in, access);
@@ -1318,7 +1339,8 @@ void Sema::declareSimple(cxx::Decl* d, Scope* in, cxx::Access access)
                 var->isDependentContext = in->kind == Scope::TemplateParams || (var->ownerClass && var->ownerClass->isDependentContext);
                 ++m_stats.variables;
             }
-            var->isDefinition = var->isDefinition || !d->spec.isExtern;
+            // a static data member's declaration in its class is not its definition (9.4.2/2): the out-of-class one is
+            var->isDefinition = var->isDefinition || (!d->spec.isExtern && !(var->isMember && var->isStatic));
         }
         dcl->semaSym = var;
         if (width >= 0 && var->isMember && !var->isStatic) var->bitWidth = static_cast<int>(width);
@@ -1327,7 +1349,19 @@ void Sema::declareSimple(cxx::Decl* d, Scope* in, cxx::Access access)
         if (id.init.kind != cxx::Initializer::None) {
             var->init = id.init.args.empty() ? 0 : id.init.args[0];
             if (!var->isDependentContext && !var->isMember) { PendingBody pb; pb.fn = var; pb.def = d; pb.scope = in; queueBody(pb); }
-            else if (var->isMember && var->isStatic && var->init && !var->isDependentContext) { PendingBody pb; pb.fn = var; pb.def = d; pb.scope = in; queueBody(pb); }
+            else if (var->isMember && var->isStatic && var->init && !var->isDependentContext) {
+                // a static const integral member's in-class initializer is a constant for the members that follow it
+                // (9.4.2/4: "static const int kN = 4; int arr[kN];"): folded now, quietly; the queued analysis reports
+                // what is wrong with it and converts it
+                if (in->kind == Scope::Class && var->type->isConst && var->type->isIntegral() && id.init.kind == cxx::Initializer::Assign && id.init.args.size() == 1) {
+                    const size_t mark = m_diags.size();
+                    expr(var->init, in);
+                    long v = 0;
+                    if (constantValue(var->init, v)) { var->hasConstValue = true; var->constValue = v; }
+                    m_diags.resize(mark);
+                }
+                PendingBody pb; pb.fn = var; pb.def = d; pb.scope = in; queueBody(pb);
+            }
         }
     }
 }
@@ -1348,7 +1382,26 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
         else ps->type = m_types.dependent(ps);
         tparams.push_back(ps);
     }
-    if (inner->kind == cxx::Decl::Template) { declareTemplate(inner, tscope, access); return; }   // member template of a template
+    if (inner->kind == cxx::Decl::Template) {
+        // "template <class T> template <class U> U Box<T>::conv(U) const": the out-of-class definition of a member template
+        // of a class template, kept on the class template (with the outer parameters) and declared, as a member template,
+        // with each instantiation, where it takes the in-class declaration over
+        cxx::Decl* def = inner->decls.empty() ? 0 : inner->decls[0];
+        cxx::Declarator* mdcl = def ? (def->kind == cxx::Decl::Function ? def->declarator : (def->kind == cxx::Decl::Simple && !def->declarators.empty() ? def->declarators[0].decl : 0)) : 0;
+        Symbol* ct = mdcl ? classTemplateOfQualifier(mdcl->name, in) : 0;
+        if (ct) {
+            Symbol* mt = m_prog.newSymbol(Symbol::FunctionTemplate, mdcl->name.parts.back().ident, tscope);
+            mt->templateAst = d; mt->templateParams = tparams; mt->declAst = inner; mt->isDependentContext = true; mt->ownerClass = ct;
+            ct->partialSpecs.push_back(mt);
+            tscope->owner = mt;
+            d->semaSym = mt;
+            for (std::map<std::string, Symbol*>::iterator it = ct->instantiations.begin(); it != ct->instantiations.end(); ++it)
+                if (it->second->isImplicitInstantiation) declareTemplateMemberDefinition(ct, it->second, mt);
+            return;
+        }
+        declareTemplate(inner, tscope, access);   // member template of a template
+        return;
+    }
 
     // which entity?
     cxx::ClassDecl* classAst = 0;
@@ -1375,6 +1428,21 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
     if (classAst) {
         std::string name = classAst->name.parts.empty() ? std::string("") : classAst->name.parts.back().ident;
         bool specialization = !classAst->name.parts.empty() && classAst->name.parts.back().hasTemplateArgs;
+        if (!specialization && classAst->name.parts.size() == 2 && classAst->name.parts[0].hasTemplateArgs && !d->explicitSpecialization) {
+            // "template <class T> struct Outer<T>::Inner { ... };": the out-of-class definition of a class template's nested
+            // class, kept on the template and declared with each instantiation (where Outer<int>::Inner is declared already)
+            Symbol* ct = classTemplateOfQualifier(classAst->name, in);
+            if (ct) {
+                Symbol* mc = m_prog.newSymbol(Symbol::ClassTemplate, name, tscope);
+                mc->templateAst = d; mc->templateParams = tparams; mc->declAst = inner; mc->isDependentContext = true; mc->ownerClass = ct;
+                ct->partialSpecs.push_back(mc);
+                tscope->owner = mc;
+                d->semaSym = mc;
+                for (std::map<std::string, Symbol*>::iterator it = ct->instantiations.begin(); it != ct->instantiations.end(); ++it)
+                    if (it->second->isImplicitInstantiation) declareTemplateMemberDefinition(ct, it->second, mc);
+                return;
+            }
+        }
         Symbol* primary = 0;
         {
             std::vector<Symbol*> out;
@@ -1450,6 +1518,10 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
                 std::vector<cxx::Param*>& np = dcl->parts.back().params;
                 const std::vector<cxx::Param*>& op = exd->parts.back().params;
                 for (size_t k = 0; k < np.size() && k < op.size(); ++k) if (!np[k]->defaultValue) np[k]->defaultValue = op[k]->defaultValue;
+                // the specifiers only the in-class declaration may carry stay with the member template (a static
+                // member template defined out of class)
+                if (ex->declAst->spec.isStatic) inner->spec.isStatic = true;
+                if (ex->declAst->spec.isExplicit) inner->spec.isExplicit = true;
                 ex->templateAst = d; ex->declAst = inner; ex->templateParams = tparams;
                 tscope->owner = ex;
             }
@@ -1464,7 +1536,79 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
         ++m_stats.symbols;
         return;
     }
-    // other templates (static data members of class templates, typedef templates do not exist in C++98): ignore
+    if (dcl && !dcl->isFunction() && inner->kind == cxx::Decl::Simple && dcl->name.parts.size() > 1 && !d->explicitSpecialization) {
+        // "template <class T> Log Box<T>::made(7);": the definition of a static data member of a class template (14.7.1),
+        // kept on the template like its out-of-line member functions and declared with each instantiation, where its
+        // initialiser is analysed; the instantiations made before this definition get it now
+        Symbol* ct = 0;
+        std::vector<Symbol*> out;
+        cxx::QualifiedName q = dcl->name; q.parts.pop_back();
+        if (q.parts.size() == 1) { lookupUnqualified(q.parts[0].ident, in, false, &out); for (size_t i = 0; i < out.size() && !ct; ++i) if (out[i]->kind == Symbol::ClassTemplate) ct = out[i]; }
+        if (ct) {
+            Symbol* mv = m_prog.newSymbol(Symbol::Variable, dcl->name.parts.back().ident, tscope);
+            mv->templateAst = d; mv->templateParams = tparams; mv->declAst = inner; mv->isDependentContext = true; mv->ownerClass = ct; mv->isMember = true; mv->isStatic = true;
+            ct->partialSpecs.push_back(mv);
+            tscope->owner = mv;
+            d->semaSym = mv;
+            for (std::map<std::string, Symbol*>::iterator it = ct->instantiations.begin(); it != ct->instantiations.end(); ++it)
+                if (it->second->isImplicitInstantiation) declareTemplateMemberDefinition(ct, it->second, mv);
+            return;
+        }
+    }
+    // other templates (typedef templates do not exist in C++98): ignore
+}
+
+// an out-of-line member definition of a class template ("template <class T> void Stack<T>::push(...)", "template <class
+// T> int Stack<T>::count = 0;") declared for the instantiation cls: a copy of the definition in a scope that binds the
+// template's parameters to cls's arguments, with "Stack<T>::" rewritten to the instantiation's name so that the member
+// is found
+void Sema::declareTemplateMemberDefinition(Symbol* tmpl, Symbol* cls, Symbol* mt)
+{
+    cxx::Decl* def = mt->declAst;
+    if (!def || !cls->members) return;
+    Scope* iscope = cls->scope;
+    Scope* mscope = m_prog.newScope(Scope::Instantiation, iscope, cls);
+    for (size_t i = 0; i < cls->templateArgs.size() && i < mt->templateParams.size(); ++i) {
+        const Type* ta = cls->templateArgs[i];
+        Symbol* b = m_prog.newSymbol(ta ? Symbol::Typedef : Symbol::Enumerator, mt->templateParams[i]->name, mscope);
+        if (ta) b->type = ta; else { b->type = m_types.basic(Type::Int); b->hasConstValue = true; b->constValue = i < cls->templateIntArgs.size() ? cls->templateIntArgs[i] : 0; }
+    }
+    Symbol* inj2 = m_prog.newSymbol(Symbol::Typedef, tmpl->name, mscope); inj2->type = cls->type;
+    if (def->kind == cxx::Decl::Function && def->declarator) {
+        cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
+        cxx::Declarator* dcopy = copy->declarator;
+        if (dcopy->name.parts.size() >= 2) { dcopy->name.parts[dcopy->name.parts.size() - 2].ident = cls->name; dcopy->name.parts[dcopy->name.parts.size() - 2].hasTemplateArgs = false; }
+        declare(copy, mscope, cxx::AccessPublic);
+    } else if (def->kind == cxx::Decl::Simple && !def->declarators.empty() && def->declarators[0].decl) {
+        cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
+        cxx::Declarator* dcopy = copy->declarators[0].decl;
+        if (dcopy->name.parts.size() >= 2) { dcopy->name.parts[dcopy->name.parts.size() - 2].ident = cls->name; dcopy->name.parts[dcopy->name.parts.size() - 2].hasTemplateArgs = false; }
+        declare(copy, mscope, cxx::AccessPublic);
+    } else if (def->kind == cxx::Decl::Template && !def->decls.empty()) {
+        // a member template: the copy is declared as a template of the instantiation's class (declareTemplate takes the
+        // in-class declaration over, so that the member template's instantiations get this body)
+        cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
+        cxx::Decl* m = copy->decls[0];
+        cxx::Declarator* dcopy = m->kind == cxx::Decl::Function ? m->declarator : (m->kind == cxx::Decl::Simple && !m->declarators.empty() ? m->declarators[0].decl : 0);
+        if (dcopy && dcopy->name.parts.size() >= 2) { dcopy->name.parts[dcopy->name.parts.size() - 2].ident = cls->name; dcopy->name.parts[dcopy->name.parts.size() - 2].hasTemplateArgs = false; }
+        declare(copy, mscope, cxx::AccessPublic);
+    } else if (def->kind == cxx::Decl::Class || (def->kind == cxx::Decl::Simple && def->spec.classDef)) {
+        // a nested class defined out of class: declareClass finds the nested class declared in the instantiation
+        cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
+        cxx::ClassDecl* k = copy->kind == cxx::Decl::Class ? copy->classDef : copy->spec.classDef;
+        if (k && k->name.parts.size() >= 2) { k->name.parts[k->name.parts.size() - 2].ident = cls->name; k->name.parts[k->name.parts.size() - 2].hasTemplateArgs = false; }
+        declare(copy, mscope, cxx::AccessPublic);
+    }
+}
+
+// the class template a qualified member name "Box<T>::m" belongs to (its first component names one in scope), or 0
+Symbol* Sema::classTemplateOfQualifier(const cxx::QualifiedName& n, Scope* in)
+{
+    if (n.parts.size() != 2 || n.global) return 0;
+    std::vector<Symbol*> out;
+    lookupUnqualified(n.parts[0].ident, in, false, &out);
+    for (size_t i = 0; i < out.size(); ++i) if (out[i]->kind == Symbol::ClassTemplate && out[i]->patternArgs.empty() && !out[i]->instantiatedFrom) return out[i];
+    return 0;
 }
 
 
@@ -1504,36 +1648,15 @@ void Sema::declareFunctionSpecialization(cxx::Decl* d, cxx::Decl* inner, cxx::De
     if (primaries.empty()) { error(d->loc, "S111", "explicit specialisation of unknown function template '" + name + "'"); return; }
     for (size_t t = 0; t < primaries.size(); ++t) {
         Symbol* tmpl = primaries[t];
-        cxx::Decl* tdecl = tmpl->declAst;
-        cxx::Declarator* tdcl = tdecl ? (tdecl->kind == cxx::Decl::Function ? tdecl->declarator : (tdecl->declarators.empty() ? 0 : tdecl->declarators[0].decl)) : 0;
-        if (!tdcl || !tdcl->isFunction()) continue;
-        const cxx::DeclaratorPart* fp = tdcl->functionPart();
-        if (fp->params.size() != ft->params.size()) continue;
-        Scope* tscope = tmpl->templateParams.empty() ? 0 : tmpl->templateParams[0]->scope;
         std::map<std::string, const Type*> bind; std::map<std::string, long> ints;
-        const std::set<std::string> savedFixed = m_fixedTemplateParams;
-        m_fixedTemplateParams.clear();
-        bool ok = true;
-        if (dcl->name.parts.back().hasTemplateArgs) {
-            std::vector<const Type*> etypes; std::vector<long> eints; std::string etext;
-            if (dcl->name.parts.back().templateArgs.size() > tmpl->templateParams.size() || !templateArgText(dcl->name.parts.back().templateArgs, in, etypes, eints, etext)) ok = false;
-            for (size_t i = 0; ok && i < etypes.size(); ++i) {
-                const std::string& pn = tmpl->templateParams[i]->name;
-                if (etypes[i]) bind[pn] = etypes[i]; else ints[pn] = eints[i];
-                m_fixedTemplateParams.insert(pn);
-            }
-        }
-        for (size_t k = 0; ok && k < fp->params.size(); ++k) if (!deduce(fp->params[k], ft->params[k], tscope, bind, ints)) ok = false;
-        m_fixedTemplateParams = savedFixed;
+        if (!matchFunctionTemplate(tmpl, dcl, ft, in, bind, ints)) continue;
         std::string key = "<";
-        for (size_t i = 0; ok && i < tmpl->templateParams.size(); ++i) {
+        for (size_t i = 0; i < tmpl->templateParams.size(); ++i) {
             const std::string& pn = tmpl->templateParams[i]->name;
             if (i) key += ", ";
             if (bind.count(pn)) key += bind[pn]->text();
-            else if (ints.count(pn)) { std::ostringstream vs; vs << ints[pn]; key += vs.str(); }
-            else ok = false;
+            else { std::ostringstream vs; vs << ints[pn]; key += vs.str(); }
         }
-        if (!ok) continue;
         key += ">";
         Scope* iscope = m_prog.newScope(Scope::Instantiation, in, tmpl);
         for (size_t i = 0; i < tmpl->templateParams.size(); ++i) {
@@ -1563,6 +1686,129 @@ void Sema::declareFunctionSpecialization(cxx::Decl* d, cxx::Decl* inner, cxx::De
         return;
     }
     error(d->loc, "S111", "no function template '" + name + "' matches the explicit specialisation");
+}
+
+// the function template tmpl matches a declaration with the declarator dcl and the function type ft (an explicit
+// specialisation, 14.7.3, or an explicit instantiation, 14.7.2): the template arguments written on the name bind
+// the first parameters, the rest are deduced from the declared parameter types; every parameter must be bound
+bool Sema::matchFunctionTemplate(Symbol* tmpl, cxx::Declarator* dcl, const Type* ft, Scope* in, std::map<std::string, const Type*>& bind, std::map<std::string, long>& ints)
+{
+    cxx::Decl* tdecl = tmpl->declAst;
+    cxx::Declarator* tdcl = tdecl ? (tdecl->kind == cxx::Decl::Function ? tdecl->declarator : (tdecl->declarators.empty() ? 0 : tdecl->declarators[0].decl)) : 0;
+    if (!tdcl || !tdcl->isFunction()) return false;
+    const cxx::DeclaratorPart* fp = tdcl->functionPart();
+    if (fp->params.size() != ft->params.size()) return false;
+    Scope* tscope = tmpl->templateParams.empty() ? 0 : tmpl->templateParams[0]->scope;
+    const std::set<std::string> savedFixed = m_fixedTemplateParams;
+    m_fixedTemplateParams.clear();
+    bool ok = true;
+    if (dcl->name.parts.back().hasTemplateArgs) {
+        std::vector<const Type*> etypes; std::vector<long> eints; std::string etext;
+        if (dcl->name.parts.back().templateArgs.size() > tmpl->templateParams.size() || !templateArgText(dcl->name.parts.back().templateArgs, in, etypes, eints, etext)) ok = false;
+        for (size_t i = 0; ok && i < etypes.size(); ++i) {
+            const std::string& pn = tmpl->templateParams[i]->name;
+            if (etypes[i]) bind[pn] = etypes[i]; else ints[pn] = eints[i];
+            m_fixedTemplateParams.insert(pn);
+        }
+    }
+    for (size_t k = 0; ok && k < fp->params.size(); ++k) if (!deduce(fp->params[k], ft->params[k], tscope, bind, ints)) ok = false;
+    m_fixedTemplateParams = savedFixed;
+    for (size_t i = 0; ok && i < tmpl->templateParams.size(); ++i) if (!bind.count(tmpl->templateParams[i]->name) && !ints.count(tmpl->templateParams[i]->name)) ok = false;
+    return ok;
+}
+
+// an explicit instantiation definition (14.7.2). "template struct Box<int>;" instantiates the class and marks every
+// member it has (its member functions and those of its nested classes) as explicitly instantiated: analysed with its
+// errors reported and generated as any function (Sema::isLazyMember), where a member of an implicit instantiation is
+// generated only when the unit uses it. "template int twice<int>(int);" (the arguments deduced from the parameter
+// types when not written) instantiates the one specialisation, "template Box<double>::Box(double);" marks the one
+// member. Each is a COMDAT with cl's name (IrGen), so that the units that use the template without its definition
+// link against this one. A static data member's form ("template int Box<int>::n;") instantiates the class only:
+// its definition is emitted with every instantiation
+void Sema::declareExplicitInstantiation(cxx::Decl* d, Scope* in)
+{
+    if (d->decls.empty() || d->decls[0]->kind != cxx::Decl::Simple) return;
+    cxx::Decl* inner = d->decls[0];
+    if (inner->declarators.empty()) {
+        if (inner->spec.kind != cxx::DeclSpec::Named) return;
+        const Type* t = typeOf(inner->spec, in);        // forces the instantiation
+        if (t && t->kind == Type::Class && t->decl && t->decl->isDefinition && t->decl->instantiatedFrom) explicitlyInstantiateMembers(t->decl, 0);
+        return;
+    }
+    cxx::Declarator* dcl = inner->declarators[0].decl;
+    if (!dcl) return;
+    if (dcl->name.parts.size() > 1) {
+        Scope* q = scopeForQualifier(dcl->name, in);    // a member form: instantiates the class
+        if (!q) { error(d->loc, "S111", "unknown scope in the explicit instantiation '" + dcl->name.text() + "'"); return; }
+        if (q->kind == Scope::Class && q->owner) {
+            if (!dcl->isFunction()) return;             // a static data member: emitted with its class
+            const Type* base = typeOf(inner->spec, q);
+            std::vector<Symbol*> params;
+            const Type* ft = applyDeclarator(base, *dcl, q, &params);
+            Symbol* fn = 0;
+            const std::vector<Symbol*>* v = q->find(dcl->name.parts.back().ident);
+            if (v) for (size_t k = 0; k < v->size() && !fn; ++k) if ((*v)[k]->kind == Symbol::Function && sameSignature((*v)[k]->type, ft)) fn = (*v)[k];
+            if (!fn) { error(dcl->loc, "S116", "'" + dcl->name.text() + "' does not match any member of its class"); return; }
+            explicitlyInstantiate(fn);
+            dcl->semaSym = fn; inner->semaSym = fn; d->semaSym = fn;
+            return;
+        }
+        in = q;                                         // "template int ns::twice<int>(int);"
+    }
+    if (!dcl->isFunction()) return;
+    const std::string name = dcl->name.parts.back().ident;
+    const Type* base = typeOf(inner->spec, in);
+    std::vector<Symbol*> params;
+    const Type* ft = applyDeclarator(base, *dcl, in, &params);
+    if (!ft || ft->kind != Type::Function) return;
+    std::vector<Symbol*> cands;
+    lookupUnqualified(name, in, false, &cands);
+    // every primary template that matches; of several, the most specialised (14.5.5.2)
+    std::vector<Symbol*> matched;
+    std::vector<std::map<std::string, const Type*> > binds;
+    std::vector<std::map<std::string, long> > intss;
+    for (size_t t = 0; t < cands.size(); ++t) {
+        Symbol* tmpl = cands[t];
+        if (tmpl->kind != Symbol::FunctionTemplate || tmpl->ownerClass) continue;
+        std::map<std::string, const Type*> bind; std::map<std::string, long> ints;
+        if (!matchFunctionTemplate(tmpl, dcl, ft, in, bind, ints)) continue;
+        matched.push_back(tmpl); binds.push_back(bind); intss.push_back(ints);
+    }
+    if (matched.empty()) { error(d->loc, "S111", "no function template '" + name + "' matches the explicit instantiation"); return; }
+    size_t best = 0;
+    for (size_t i = 1; i < matched.size(); ++i) if (atLeastAsSpecialized(matched[i], matched[best]) && !atLeastAsSpecialized(matched[best], matched[i])) best = i;
+    for (size_t i = 0; i < matched.size(); ++i) if (i != best && !atLeastAsSpecialized(matched[best], matched[i])) { error(d->loc, "S111", "ambiguous explicit instantiation of '" + name + "'"); return; }
+    Symbol* fn = instantiateBoundFunctionTemplate(matched[best], binds[best], intss[best]);
+    if (!fn) return;
+    explicitlyInstantiate(fn);
+    dcl->semaSym = fn; inner->semaSym = fn; d->semaSym = fn;
+}
+
+// fn is named by an explicit instantiation definition: analysed with its errors reported and generated whether the
+// unit uses it or not. One analysed tentatively before (a member of an implicit instantiation) gives that state up:
+// its held diagnostics are reported, and it is generated unless they were errors
+void Sema::explicitlyInstantiate(Symbol* fn)
+{
+    if (fn->kind != Symbol::Function || fn->isExplicitInstantiation) return;
+    fn->isExplicitInstantiation = true;
+    if (!fn->isLazyInstantiation) return;
+    m_lazyMembers.erase(fn);
+    std::map<Symbol*, std::vector<Diag> >::iterator h = m_held.find(fn);
+    if (h != m_held.end()) { m_diags.insert(m_diags.end(), h->second.begin(), h->second.end()); m_held.erase(h); }
+    else fn->isLazyInstantiation = false;
+}
+
+// every member function of the explicitly instantiated class cls and of the classes nested in it (14.7.2/7); not its
+// member templates, whose specialisations exist only through their uses, and not its implicit members, defined when
+// used (12.1/7)
+void Sema::explicitlyInstantiateMembers(Symbol* cls, int depth)
+{
+    if (!cls->members || depth > 32) return;
+    for (size_t i = 0; i < cls->members->order.size(); ++i) {
+        Symbol* m = cls->members->order[i];
+        if (m->kind == Symbol::Function && !m->isImplicit) explicitlyInstantiate(m);
+        else if (m->kind == Symbol::Class && m->isDefinition && m->members && m->members->owner == m && m->scope == cls->members) explicitlyInstantiateMembers(m, depth + 1);
+    }
 }
 
 bool Sema::derivesFrom(Symbol* derived, Symbol* base, int* offset, int depth)
@@ -2238,25 +2484,11 @@ const Type* Sema::instantiateClassTemplate(Symbol* tmpl, const std::vector<cxx::
     --m_instantiationDepth;
     cls->name = tmpl->name + key;
     m_currentClass = savedClass;
-    // members defined out of line ("template <class T> void Stack<T>::push(...)")
+    // members defined out of line ("template <class T> void Stack<T>::push(...)", "template <class T> int Stack<T>::n = 0;")
     for (size_t p = 0; p < tmpl->partialSpecs.size(); ++p) {
         Symbol* mt = tmpl->partialSpecs[p];
-        if (mt->kind != Symbol::FunctionTemplate || !mt->declAst) continue;
-        Scope* mscope = m_prog.newScope(Scope::Instantiation, iscope, cls);
-        for (size_t i = 0; i < nparams && i < mt->templateParams.size(); ++i) {
-            Symbol* b = m_prog.newSymbol(types[i] ? Symbol::Typedef : Symbol::Enumerator, mt->templateParams[i]->name, mscope);
-            if (types[i]) b->type = types[i]; else { b->type = m_types.basic(Type::Int); b->hasConstValue = true; b->constValue = ints[i]; }
-        }
-        Symbol* inj2 = m_prog.newSymbol(Symbol::Typedef, tmpl->name, mscope); inj2->type = cls->type;
-        cxx::Decl* def = mt->declAst;
-        if (def->kind == cxx::Decl::Function && def->declarator) {
-            // a copy of the definition for this instantiation, with "Stack<T>::push" rewritten to the
-            // instantiation's name so that the member is found
-            cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
-            cxx::Declarator* dcopy = copy->declarator;
-            if (dcopy->name.parts.size() >= 2) { dcopy->name.parts[dcopy->name.parts.size() - 2].ident = cls->name; dcopy->name.parts[dcopy->name.parts.size() - 2].hasTemplateArgs = false; }
-            declare(copy, mscope, cxx::AccessPublic);
-        }
+        if ((mt->kind != Symbol::FunctionTemplate && mt->kind != Symbol::Variable && mt->kind != Symbol::ClassTemplate) || !mt->declAst || mt->classAst) continue;
+        declareTemplateMemberDefinition(tmpl, cls, mt);
     }
     return cls->type;
 }

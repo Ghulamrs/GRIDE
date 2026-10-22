@@ -677,7 +677,9 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             continue;
         }
 
-        // **`explicit` on a conversion function is C++11 and is not built.**
+        // **`explicit` on a conversion function is C++11**: carried to the member's Signature,
+        // where conversionFunction leaves it out of a copy-initialisation (1.28; until then it was
+        // read and recorded nowhere, so `bool b = f` took it).
         if (isExplicit && peek().is("operator") &&
             peekAt(1).kind != TokenKind::Punct) {
             pendingExplicitConversion_ = true;
@@ -1466,8 +1468,17 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
     // Held bodies are read now, with the class complete, so a body may name a member declared below
     // it; taken out of the vector first, since a body may define a class with held bodies of its own.
     // A specialization also takes its nested classes' bodies, which waited for it, [temp.inst]/2.
-    const bool takesNested = !specializationOf.empty() && deferSpecializationBodies_;
+    // **And so does any class** (1.27, 2026-10-21, review of 1.25, item 3): a class nested in one
+    // still being read leaves its bodies waiting for the outermost, since [class.mem]/2 makes the
+    // enclosing class complete inside them too - `Nested::get(const Outer &o)` reads `o.later`,
+    // declared after Nested, where it found "no member" when its body was read at Nested's own end.
+    bool nestedInOpen = false;
+    for (std::size_t i = 0; i < classStack_.size() && !nestedInOpen; i++)
+        for (const Type *e = type->enclosing(); e != nullptr; e = e->enclosing())
+            if (e->unqualified() == classStack_[i]->unqualified() && classStack_[i] != type) nestedInOpen = true;
+    const bool takesNested = !nestedInOpen;
     auto ownBody = [&](const PendingBody &b) {
+        if (nestedInOpen) return false;
         return b.tag == tag || (takesNested && b.tag.compare(0, tag.size() + 2, tag + "::") == 0);
     };
     std::vector<PendingBody> mine;
@@ -2663,6 +2674,7 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
 
     if (peek().is("(")) {
         std::size_t open = at_;
+        const Nesting deep(this, peek().pos, "parenthesised declarator");
         at_++;
         // `int (*p)()` and `int (S::*p)()` are the same shape to this branch: what is
         // inside the parentheses points at something, so what follows them is a parameter
@@ -2674,7 +2686,20 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
         bool wrapsAPointer = peek().is("*") || peek().is("&") || peek().is("&&") ||
                              wrapsMemberPointer;
 
-        declarator(types_.intType(), true, true);
+        // **To the matching ')' by counting brackets**, where the declarator inside was read
+        // once here and once more below, each level of `int (((x)))` doubling the work of the
+        // one in it - 2^N for N parentheses (2026-10-21, review of 1.25, fix 5). What the
+        // parentheses hold is balanced in any declarator that is well-formed; one that never
+        // closes is read the old way, so that it is refused where and as it was.
+        std::size_t close = open;
+        int depth = 0;
+        for (; close < tokens_.size() && tokens_[close].kind != TokenKind::End; close++) {
+            const Token &t = tokens_[close];
+            if (t.is("(") || t.is("[") || t.is("{")) depth++;
+            else if (t.is(")") || t.is("]") || t.is("}")) { if (--depth == 0) break; }
+        }
+        if (depth == 0 && close < tokens_.size() && tokens_[close].is(")")) at_ = close;
+        else declarator(types_.intType(), true, true);
         expect(")");
 
         std::size_t posOuter = peek().pos;

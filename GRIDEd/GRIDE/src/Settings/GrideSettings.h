@@ -121,7 +121,9 @@ namespace Gride { namespace Settings {
             o->SetBool("runInIde", RunInIde);
             o->SetString("defaultProjectLocation", DefaultProjectLocation);
             o->SetString("ccsToolRoot", CcsToolRoot);
-            o->SetString("helpDirectory", HelpDirectory);
+            // only a folder the user named: this copy's own docs folder is no setting, and written down it
+            // would send every other copy (installed, or built in Visual Studio) to this one's Help
+            if (!PathUtil::SamePath(HelpDirectory, Path::Combine(PathUtil::AppDirectory(), "docs"))) o->SetString("helpDirectory", HelpDirectory);
             // GRIDE's names since GRIDEx3: no RIDE in settings.json (FromJson still reads rideRoot ...)
             o->SetString("grideRoot", RideRoot);
             o->SetString("grideIncludeDir", RideIncludeDir);
@@ -157,7 +159,9 @@ namespace Gride { namespace Settings {
             RunInIde = o->GetBool("runInIde", RunInIde);
             DefaultProjectLocation = o->GetString("defaultProjectLocation", DefaultProjectLocation);
             CcsToolRoot = o->GetString("ccsToolRoot", CcsToolRoot);
-            HelpDirectory = o->GetString("helpDirectory", HelpDirectory);
+            // a named folder that is gone (another copy's, written by an older GRIDE) leaves this copy's own
+            String^ help = o->GetString("helpDirectory", HelpDirectory);
+            if (!String::IsNullOrWhiteSpace(help) && Directory::Exists(Environment::ExpandEnvironmentVariables(help))) HelpDirectory = help;
             RideRoot = o->GetString("grideRoot", o->GetString("rideRoot", RideRoot));
             RideIncludeDir = o->GetString("grideIncludeDir", o->GetString("rideIncludeDir", RideIncludeDir));
             RideLibDir = o->GetString("grideLibDir", o->GetString("rideLibDir", RideLibDir));

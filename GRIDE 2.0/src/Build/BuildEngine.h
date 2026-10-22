@@ -74,11 +74,12 @@ namespace Gride
                 gcnew Regex(R"RX(^\s*>*\s*(?<sev>fatal error|error|warning)\s*(?<code>#?[\w-]*)\s*:\s*(?<msg>.*)$)RX", o)
             };
             shalimar = gcnew Regex(R"RX(^Error: line (?<line>\d+):\s*(?<msg>.*)$)RX", RegexOptions::CultureInvariant);
-            banner = gcnew Regex(R"RX(^(c90|cpp11|shalimar|shc|cc1|cxx1): compilation completed successfully)RX", o);
+            // shalimar compiling a program's other files names each one ("shalimar: also compiled linalg.shl"): output too
+            banner = gcnew Regex(R"RX(^(c90|cpp11|shalimar|shc|cc1|cxx1): (compilation completed successfully|also compiled ))RX", o);
             location = gcnew Regex(R"RX(^\s*(?<file>[^:(]*(?::[\\/][^:(]*)?)(?::(?<line>\d+)(?::(?<col>\d+))?:|\((?<line>\d+)(?:,(?<col>\d+))?\)\s*:))RX", RegexOptions::CultureInvariant);
         }
 
-        // a compiler announcing itself, or saying it is done: output, never a message
+        // a compiler announcing itself, naming the other files it compiled, or saying it is done: output, never a message
         bool IsBanner(String^ line)
         {
             if (String::IsNullOrEmpty(line)) return false;
@@ -328,6 +329,7 @@ namespace Gride
             failedStep = String::Empty;
             optionStore = project->OptionStore();
             clSettingsSaid = false; rideHeadersSaid = false; noCrtList = false;
+            clangChecked = false; clangMissing = false;
         }
 
         static String^ OutputFileOf(GrideProject^ p)
@@ -535,6 +537,8 @@ namespace Gride
         bool placedError;           // an error naming a file and a line was seen: a fault in the source
         bool native;                // the vendor's assembler and linker, as the native question asked
         bool codeViewWarned;        // the missing clang is said once
+        bool clangChecked;          // NoClang has looked
+        bool clangMissing;          // and found no clang for this Debug build
         String^ lastPart;           // the part whose "$ group (compiler)" line was said last
         String^ envAssembler;       // what C90_AS ... name (worked out once a build)
         String^ envLinker;
@@ -831,9 +835,35 @@ namespace Gride
             return d;
         }
 
+        // a Debug build on a target carrying CodeView with no clang to assemble it (a Visual Studio without
+        // its "C++ Clang tools"): made the Release way - no -g, the MASM spelling, masm and the target's
+        // linker - and said once, rather than masm being handed clang's assembly (the user, 2026-10-21)
+        bool NoClang()
+        {
+            if (clangChecked) return clangMissing;
+            clangChecked = true;
+            if (native || !IsDebugConfig(config->Name) || !target->CodeView || target->DebugAssemblerId == nullptr) return false;
+            ToolDefinition^ d = settings->GetTool(target->DebugAssemblerId);
+            if (d != nullptr && d->IsConfigured() && d->ResolvedPath() != nullptr) return false;
+            clangMissing = true;
+            codeViewWarned = true;
+            AddMessage("warning", String::Format("{0} not found - this Debug build has no source line table: {1} and {2} make the program, the debugger shows no lines (Visual Studio's \"C++ Clang tools for Windows\" add it){3}",
+                                                 d != nullptr ? ToolName(d) : "clang", ToolName(settings->GetTool(target->AssemblerId)),
+                                                 ToolName(settings->GetTool(target->LinkerId)), d != nullptr ? LookedInPart(d) : String::Empty), nullptr, 0);
+            return true;
+        }
+
+        static String^ WithoutDashG(String^ flags)
+        {
+            List<String^>^ kept = gcnew List<String^>();
+            for each (String^ f in flags->Split(gcnew array<wchar_t>{ L' ' }, StringSplitOptions::RemoveEmptyEntries))
+                if (!String::Equals(f, "-g")) kept->Add(f);
+            return String::Join(" ", kept);
+        }
+
         // the tool's flags for the configuration, as toolchain.json gives them (configFlags, with the
         // target's exception in configFlagsByTarget: shalimar's --debug off the C6747), without -g where
-        // the target carries no debug information (emitsDebugInfo)
+        // the target carries no debug information (emitsDebugInfo), or where no clang assembles it (NoClang)
         String^ ConfigFlags(ToolDefinition^ tool)
         {
             ToolEntry^ e = ToolchainFile::Current->Tool(tool->Definition);
@@ -841,14 +871,17 @@ namespace Gride
             String^ own;
             if (config->ConfigFlagsByRole != nullptr && config->ConfigFlagsByRole->TryGetValue(e->Role, own)) return own;
             bool debug = IsDebugConfig(config->Name);
+            bool codeViewCompiler = e->Role == "cCompiler" || e->Role == "cppCompiler" || e->Role == "shalimarCompiler";
             // RIDE's Compiler Options: a compiler listing options takes the project's (the defaults where it set none)
-            if (CompilerOptionRules::Governs(e)) return CompilerOptionRules::Flags(optionStore, e, debug ? "Debug" : "Release", target->Entry);
+            if (CompilerOptionRules::Governs(e))
+            {
+                String^ chosen = CompilerOptionRules::Flags(optionStore, e, debug ? "Debug" : "Release", target->Entry);
+                return debug && codeViewCompiler && NoClang() ? WithoutDashG(chosen) : chosen;
+            }
             String^ flags = e->ConfigFlagsFor(debug ? "Debug" : "Release", target->Arch);
-            if (!debug || target->EmitsDebugInfo) return flags;
-            List<String^>^ kept = gcnew List<String^>();
-            for each (String^ f in flags->Split(gcnew array<wchar_t>{ L' ' }, StringSplitOptions::RemoveEmptyEntries))
-                if (!String::Equals(f, "-g")) kept->Add(f);
-            return String::Join(" ", kept);
+            if (!debug) return flags;
+            if (!target->EmitsDebugInfo || (codeViewCompiler && NoClang())) return WithoutDashG(flags);
+            return flags;
         }
 
         // the compiler's assembler spelling (RIDE's assemblerFlag, the compiler's asmSyntaxFlags):
@@ -1155,7 +1188,7 @@ namespace Gride
             List<String^>^ names = gcnew List<String^>();
             for each (String^ s in u->Sources) names->Add(Path::GetFileName(s));
             // a Debug build of compiled code on a target carrying CodeView (RIDE's debugsWithCodeView)
-            bool codeView = !isAsm && IsDebugConfig(config->Name) && target->CodeView;
+            bool codeView = !isAsm && IsDebugConfig(config->Name) && target->CodeView && !NoClang();
             if (!isAsm)
             {
                 ToolDefinition^ compiler = RequireTool(u->CompilerId);
@@ -1334,7 +1367,7 @@ namespace Gride
             for each (Unit^ u in units) { objs->Add(u->ObjFile); if (u->WritesObject) clObjects = true; else otherObjects = true; }
             // a Debug build on a target carrying CodeView links with Microsoft's link.exe /DEBUG (the PDB); so do cl's
             // objects in either configuration (they are Microsoft's, with its CRT)
-            ToolDefinition^ linker = clObjects && target->Host ? ClLinker() : LinkerFor(IsDebugConfig(config->Name) && target->CodeView);
+            ToolDefinition^ linker = clObjects && target->Host ? ClLinker() : LinkerFor(IsDebugConfig(config->Name) && target->CodeView && !NoClang());
             if (linker == nullptr) return false;
             noCrtList = clObjects && !otherObjects && target->Host && linker != settings->GetTool(target->LinkerId);
             if (noCrtList) Out(String::Format("[cl's objects name their own C runtime - {0} takes it from them, no CRT list is added]", FileToolName(linker)));

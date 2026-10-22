@@ -178,20 +178,22 @@ std::string Parser::currentClassName() const
 }
 
 // the scope a qualifier (the first 'parts' components of n) denotes, or 0 when unknown
-const Parser::NamedScope* Parser::findNamedScope(const QualifiedName& n, size_t parts) const
+const Parser::NamedScope* Parser::findNamedScope(const QualifiedName& n, size_t parts, std::string* key) const
 {
     std::string rel;
     for (size_t i = 0; i < parts; ++i) { if (i) rel += "::"; rel += n.parts[i].ident; }
     if (n.global) {
         std::map<std::string, NamedScope>::const_iterator it = m_named.find(rel);
+        if (it != m_named.end() && key) *key = it->first;
         return it == m_named.end() ? 0 : &it->second;
     }
     // relative to each enclosing named scope, innermost first, then global
     for (size_t q = m_qualifierStack.size(); q > 0; --q) {
         std::map<std::string, NamedScope>::const_iterator it = m_named.find(m_qualifierStack[q - 1] + "::" + rel);
-        if (it != m_named.end()) return &it->second;
+        if (it != m_named.end()) { if (key) *key = it->first; return &it->second; }
     }
     std::map<std::string, NamedScope>::const_iterator it = m_named.find(rel);
+    if (it != m_named.end() && key) *key = it->first;
     return it == m_named.end() ? 0 : &it->second;
 }
 
@@ -825,6 +827,20 @@ Decl* Parser::classSpecifier(DeclSpec& spec, Loc here)
     }
     if (!expect("{", "after the class head")) return 0;
     c->isDefinition = true;
+    // a nested class defined out of its class ("struct Outer<T>::Inner { ... }"): the body sees the enclosing class's
+    // type names and its own names are registered under the enclosing class, as in the in-class form
+    bool pushedOwner = false;
+    if (c->name.parts.size() > 1) {
+        std::string ownerKey;
+        const NamedScope* owner = findNamedScope(c->name, c->name.parts.size() - 1, &ownerKey);
+        if (owner) {
+            Scope s; s.name = ""; s.isClass = true;
+            s.types = owner->types; s.templates = owner->templates; s.namespaces = owner->namespaces;
+            m_scopes.push_back(s);
+            m_qualifierStack.push_back(ownerKey);
+            pushedOwner = true;
+        }
+    }
     // members: inside the class the simple name is a named scope
     std::string scopeName = simple.empty() ? "(anonymous)" : simple;
     pushScope(scopeName, true);
@@ -842,7 +858,25 @@ Decl* Parser::classSpecifier(DeclSpec& spec, Loc here)
                 else if (depth == 0 && (t.text == ")" || t.text == "]")) { if (parens > 0) --parens; }
                 continue;
             }
-            if (depth != 0 || parens != 0 || t.kind != PpToken::Ident || p + 1 >= m_toks.size() || !m_toks[p + 1].is("(") || p == 0) continue;
+            if (depth != 0 || parens != 0 || t.kind != PpToken::Ident || p + 1 >= m_toks.size() || p == 0) continue;
+            // the names of the nested types declared anywhere in the body (3.3.6: a member body sees them all): a nested
+            // class or enum, and a typedef's name (the identifier before its ';' or '[', or before the ')' of "(*Fn)")
+            if ((t.text == "struct" || t.text == "class" || t.text == "union" || t.text == "enum") && p + 2 < m_toks.size() && m_toks[p + 1].kind == PpToken::Ident && !isKeyword(m_toks[p + 1].text) && (m_toks[p + 2].is("{") || m_toks[p + 2].is(";") || m_toks[p + 2].is(":"))) declareType(m_toks[p + 1].text);
+            if (t.text == "typedef") {
+                int d2 = 0, p2 = 0;
+                for (size_t q = p + 1; q < m_toks.size(); ++q) {
+                    const PpToken& u = m_toks[q];
+                    if (u.kind == PpToken::Punct) {
+                        if (u.text == "{") ++d2; else if (u.text == "}") { if (d2 == 0) break; --d2; } else if (u.text == "(") ++p2; else if (u.text == ")") { if (p2 > 0) --p2; }
+                        else if (u.text == ";" && d2 == 0 && p2 == 0) break;
+                        continue;
+                    }
+                    if (d2 != 0 || u.kind != PpToken::Ident || isKeyword(u.text) || q + 1 >= m_toks.size()) continue;
+                    const PpToken& after = m_toks[q + 1];
+                    if ((p2 == 0 && (after.is(";") || after.is("["))) || (p2 == 1 && after.is(")") && (m_toks[q - 1].is("*") || m_toks[q - 1].is("&")))) declareType(u.text);
+                }
+            }
+            if (!m_toks[p + 1].is("(")) continue;
             if (t.text == simple || t.text == "operator" || isKeyword(t.text)) continue;
             const PpToken& prev = m_toks[p - 1];
             const bool afterDeclaratorPrefix = prev.kind == PpToken::Ident ? !(prev.text == "return" || prev.text == "new" || prev.text == "throw" || prev.text == "sizeof" || prev.text == "case" || prev.text == "typedef" || prev.text == "class" || prev.text == "struct" || prev.text == "union" || prev.text == "enum" || prev.text == "typename" || prev.text == "template" || prev.text == "namespace" || prev.text == "operator")
@@ -867,6 +901,7 @@ Decl* Parser::classSpecifier(DeclSpec& spec, Loc here)
         if (m) { m->access = access; c->members.push_back(m); }
     }
     popScope();
+    if (pushedOwner) { m_qualifierStack.pop_back(); m_scopes.pop_back(); }
     if (!expect("}", "here the end of the class")) return 0;
     spec.kind = DeclSpec::Class;
     spec.classDef = c;
@@ -1090,10 +1125,16 @@ Decl* Parser::declaration(bool inClass, Access& access)
             else if (atIdent() || at("::")) {
                 size_t e; bool ht;
                 if (qualifiedNameAhead(e, ht)) {
-                    // "X(" where X is the class, or "A::X(" / "A::~X(" / "A::X<T>::X("
+                    // "X(" where X is the class, or "A::X(" / "A::~X(" / "A::X<T>::X(": the names outside template
+                    // argument lists ("Box<T>::Box(" is a constructor of the class template Box)
                     size_t last = e; (void)last;
                     std::string lastName; std::string prevName;
-                    for (size_t p = m_pos; p < e; ++p) if (m_toks[p].kind == PpToken::Ident) { prevName = lastName; lastName = m_toks[p].text; }
+                    int depth = 0;
+                    for (size_t p = m_pos; p < e; ++p) {
+                        const PpToken& tk = m_toks[p];
+                        if (tk.kind == PpToken::Punct) { if (tk.text == "<") ++depth; else if (tk.text == ">") --depth; else if (tk.text == ">>") depth -= 2; continue; }
+                        if (depth == 0 && tk.kind == PpToken::Ident) { prevName = lastName; lastName = tk.text; }
+                    }
                     if (m_toks[e].text == "(" && (lastName == cls || (!prevName.empty() && (prevName == lastName)))) ctorLike = true;
                     if (m_toks[e].text == "::" && m_toks[e + 1].text == "~") ctorLike = true;
                     if (m_toks[e].text == "::" && m_toks[e + 1].text == "operator") ctorLike = true;
@@ -1689,6 +1730,7 @@ Expr* Parser::primary()
             if (!callArguments(e->kids)) return 0;
             return e;
         }
+        if (t.text == "operator") break;   // "operator new[](n)", "operator delete(p)": the allocation functions called by name
         if (isKeyword(t.text)) { error("unexpected keyword"); return 0; }
         break;
     default:

@@ -766,7 +766,10 @@ static void add_linker_module(Link &lk, size_t ncontrib_names)
         c.flags = SCN_CNT_INITDATA | SCN_MEM_READ | 0x00300000u;   /* 4-byte align */
         c.dropped = false; c.out = -1; c.rva = 0; c.fileoff = 0; c.module = -1; c.serial = 0;
     }
-    m.secs[0].name = ".rdata";        m.secs[0].size = 28; m.secs[0].data.assign(28, 0);
+    /* the debug directory: the coffgrp entry, and under /debug a CODEVIEW entry before it with its
+       RSDS record after the two, as link.exe lays them out */
+    const u32 dir = lk.opt.debug ? 56 + align_up(lk.rsds_size(), 4) : 28;
+    m.secs[0].name = ".rdata";        m.secs[0].size = dir; m.secs[0].data.assign(dir, 0);
     m.secs[1].name = ".rdata$voltmd"; m.secs[1].size = 24; m.secs[1].data.assign(24, 0);
     m.secs[2].name = ".rdata$zzzdbg"; m.secs[2].size = (u32)ncontrib_names;
     m.secs[2].data.assign(m.secs[2].size, 0);

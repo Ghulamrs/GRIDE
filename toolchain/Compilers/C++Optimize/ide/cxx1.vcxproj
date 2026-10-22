@@ -45,7 +45,14 @@
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;CXX1_INCLUDE_DIR="$([System.String]::Copy('$(ProjectDir)..\lib').Replace('\','/'))";CXX1_CXX_INCLUDE_DIR="$([System.String]::Copy('$(ProjectDir)..\include').Replace('\','/'))";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
-    <Link><SubSystem>Console</SubSystem></Link>
+    <!-- **A 256 MB stack reserve** (2026-10-21, review of 1.25, fix 5). The parser follows the
+         program's nesting with its own recursion, and a template instantiation re-enters the
+         whole of it: at the linker's default 1 MB, 80 nested parentheses, a 40-deep class
+         template recursion, 300 nested blocks or a 300-arm else-if chain overflowed it (exit
+         0xC00000FD). A reserve is address space, not memory - pages are committed as they are
+         touched - and the threads the driver starts take the same size, as Windows gives a
+         thread asking for size 0 the header's. Parser::Nesting bounds the depth below it, by name. -->
+    <Link><SubSystem>Console</SubSystem><StackReserveSize>268435456</StackReserveSize></Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>

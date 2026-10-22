@@ -14,6 +14,7 @@ class SemaMangler {
 public:
     std::string function(const sema::Symbol& f, long thunk = 0, const sema::Type* resultOverride = 0, bool vtordisp = false);
     std::string variable(const sema::Symbol& v);
+    std::string initializerEntry(const sema::Symbol& v);
     std::string staticLocal(const sema::Symbol& v, const sema::Symbol& fn, long discriminator);
     std::string staticGuard(const sema::Symbol& fn, long discriminator, int index);
     std::string vtable(const sema::Symbol& c, const sema::Symbol* forBase);
@@ -27,7 +28,7 @@ public:
     std::string baseClassDescriptor(const sema::Symbol& c, long mdisp, long pdisp, long vdisp, long attributes);
     std::string completeObjectLocator(const sema::Symbol& c, const sema::Symbol* forBase) { std::string v = vtable(c, forBase); return "??_R4" + v.substr(4); }
 private:
-    std::string classScoped(const sema::Symbol& c) { return symbolName(&c) + scopesOf(c.scope) + "@"; }
+    std::string classScoped(const sema::Symbol& c) { return symbolName(&c) + scopesOf(c.scope, true) + "@"; }
     std::string storageType(const sema::Type* t);
     std::string memberPointerType(const sema::Type* t);
     std::string memberClass(const sema::Type* t);
@@ -35,7 +36,7 @@ private:
     std::string name(const std::string& component);
     std::string symbolName(const sema::Symbol* s);
     std::string templateName(const sema::Symbol* inst, const std::string& base, bool baseIsOperatorCode, bool isFunction);
-    std::string scopesOf(const sema::Scope* s);
+    std::string scopesOf(const sema::Scope* s, bool ofClass = false);   // ofClass: the scopes of a class symbol itself
     std::string type(const sema::Type* t);
     std::string resultType(const sema::Type* t);
     std::string templateArgType(const sema::Type* t);
@@ -111,12 +112,27 @@ std::string SemaMangler::symbolName(const sema::Symbol* s)
     return name(s->name);
 }
 
-std::string SemaMangler::scopesOf(const sema::Scope* s)
+std::string SemaMangler::scopesOf(const sema::Scope* s, bool ofClass)
 {
     std::string out;
+    bool local = ofClass;   // the scopes of a class itself: declared in a function, it is a local class
     for (; s; s = s->parent) {
-        if ((s->kind == sema::Scope::Namespace || s->kind == sema::Scope::Class) && s->owner) out += symbolName(s->owner);
-        if (s->kind == sema::Scope::Function || s->kind == sema::Scope::Block) break;
+        if ((s->kind == sema::Scope::Namespace || s->kind == sema::Scope::Class) && s->owner) { out += symbolName(s->owner); if (s->kind == sema::Scope::Class) local = true; }
+        if (s->kind == sema::Scope::Function || s->kind == sema::Scope::Block) {
+            // a local class (the scopes of a class were passed): cl's local scope, "?<block>?<the function's name>", whose
+            // closing "@" the caller supplies ("?f@L@?1??t4@@YAHH@Z@SAHH@Z"); the body is block 2, a nested block gets
+            // 2 plus its number (unique in the function, cl's own numbering only for the body)
+            if (local) {
+                const sema::Scope* f = s;
+                while (f && f->kind != sema::Scope::Function) f = f->parent;
+                if (f && f->owner) {
+                    std::string fn = function(*f->owner);
+                    if (fn.empty() || fn[0] != '?') fn = "?" + fn + "@@9";
+                    out += "?" + number(2 + (s->kind == sema::Scope::Block ? s->blockIndex : 0)) + "?" + fn;
+                }
+            }
+            break;
+        }
     }
     return out;
 }
@@ -128,7 +144,7 @@ std::string SemaMangler::classType(const sema::Type* t)
     if (!c) return std::string(1, letter) + "unknown@@";
     std::string out(1, letter);
     out += symbolName(c);          // before the scopes: the back-reference table follows the call order
-    out += scopesOf(c->scope);
+    out += scopesOf(c->scope, true);
     return out + "@";
 }
 
@@ -325,6 +341,18 @@ std::string SemaMangler::variable(const sema::Symbol& v)
     return out;
 }
 
+// the symbol of the .CRT$XCU entry of a COMDAT variable's dynamic initializer, as cl spells it:
+// ??made$initializer$@?$Box@H@@2P6AXXZEA@@3P6AXXZEA (the name with "$initializer$", the scopes, the member's access, a
+// pointer to a function)
+std::string SemaMangler::initializerEntry(const sema::Symbol& v)
+{
+    std::string out = "??" + v.name + "$initializer$@";
+    out += scopesOf(v.scope);
+    out += "@";
+    out += v.isMember ? (v.access == cxx::AccessPrivate ? "0" : v.access == cxx::AccessProtected ? "1" : "2") : "3";
+    return out + "P6AXXZEA@@3P6AXXZEA";
+}
+
 // as cl spells a static local: the name, then a scope made of the block's number and the function's own
 // decorated name (whose names join this name's back-reference table; a C function is "?name@@9"), then
 // storage class 4 and the type as for a global
@@ -407,11 +435,11 @@ std::string SemaMangler::vtable(const sema::Symbol& c, const sema::Symbol* forBa
 {
     std::string out = "??_7";
     out += symbolName(&c);
-    out += scopesOf(c.scope);
+    out += scopesOf(c.scope, true);
     if (!forBase) return out + "@6B@";
     out += "@6B";
     out += symbolName(forBase);
-    out += scopesOf(forBase->scope);
+    out += scopesOf(forBase->scope, true);
     return out + "@@";
 }
 
@@ -421,6 +449,16 @@ std::string SemaMangler::rttiTypeName(const sema::Type* t)
 {
     if (t && t->kind == sema::Type::Reference) t = t->inner;
     if (t && (t->kind == sema::Type::Class || t->kind == sema::Type::Enum)) return ".?A" + type(t);
+    if (t && t->kind == sema::Type::Array) {
+        // an array type as cl's descriptor spells it: "$$BY" + the rank + each dimension + the element (".$$BY02H" for
+        // int[3], ".$$BY113US@@" for S[2][4]), which undecorates to "int [3]"; a parameter's array would be a pointer
+        std::vector<long> dims;
+        const sema::Type* e = t;
+        while (e && e->kind == sema::Type::Array) { dims.push_back(e->arraySize > 0 ? e->arraySize : 0); e = e->inner; }
+        std::string s = ".$$BY" + number(static_cast<long>(dims.size()));
+        for (size_t i = 0; i < dims.size(); ++i) s += number(dims[i]);
+        return s + type(e);
+    }
     return "." + type(t);
 }
 
@@ -441,11 +479,11 @@ std::string SemaMangler::vbtable(const sema::Symbol& c, const std::vector<sema::
 {
     std::string out = "??_8";
     out += symbolName(&c);
-    out += scopesOf(c.scope);
+    out += scopesOf(c.scope, true);
     out += "@7B";
     for (size_t p = 0; p < path.size(); ++p) {
         out += symbolName(path[p]);
-        out += scopesOf(path[p]->scope);
+        out += scopesOf(path[p]->scope, true);
         out += "@";
     }
     return out + "@";
@@ -455,7 +493,7 @@ std::string SemaMangler::vcallThunk(const sema::Symbol& c, long slotOffset)
 {
     std::string out = "??_9";
     out += symbolName(&c);
-    out += scopesOf(c.scope);
+    out += scopesOf(c.scope, true);
     out += "@$B";
     out += number(slotOffset);
     return out + "AA";
@@ -468,6 +506,10 @@ unsigned long g_mangleUnitId = 0;
 void setMangleUnitId(unsigned long id) { g_mangleUnitId = id; }
 
 std::string msvcMangleVariableSymbol(const sema::Symbol& v) { SemaMangler m; return m.variable(v); }
+// cl's dynamic initializer of a COMDAT variable ("void `dynamic initializer for 'Box<int>::made''(void)"), ??__E<the
+// variable's name without its '?'>@@YAXXZ, and the symbol of its .CRT$XCU entry, ??made$initializer$@?$Box@H@@2P6AXXZEA@@3P6AXXZEA
+std::string msvcMangleDynamicInitializer(const sema::Symbol& v) { SemaMangler m; return "??__E" + m.variable(v) + "@@YAXXZ"; }
+std::string msvcMangleInitializerEntry(const sema::Symbol& v) { SemaMangler m; return m.initializerEntry(v); }
 std::string msvcMangleStaticLocal(const sema::Symbol& v, const sema::Symbol& fn, long discriminator) { SemaMangler m; return m.staticLocal(v, fn, discriminator); }
 std::string msvcMangleVtableSymbol(const sema::Symbol& c, const sema::Symbol* forBase) { SemaMangler m; return m.vtable(c, forBase); }
 std::string msvcMangleVbtableSymbol(const sema::Symbol& c, const std::vector<sema::Symbol*>& path) { SemaMangler m; return m.vbtable(c, path); }

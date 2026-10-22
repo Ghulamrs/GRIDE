@@ -53,6 +53,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\assembler.cpp" />
+    <ClCompile Include="src\codeview.cpp" />
     <ClCompile Include="src\expr.cpp" />
     <ClCompile Include="src\lexer.cpp" />
     <ClCompile Include="src\main.cpp" />

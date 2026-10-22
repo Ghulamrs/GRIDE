@@ -17,7 +17,18 @@ public:
     void endFunction(int slots) override;
     void label(int id) override;
 
+    // -g in the MASM spelling (-masm=masm): the lines as GRIDE's masm reads them, `.FILE` and
+    // `.LINE`, and each described function a PROC FRAME, so a debugger can walk the stack
+    void sourceLine(int unit, int line) override;
+    void describeFunction(const DebugFunction &function) override;
+    void describeGlobals(const std::vector<DebugGlobal> &globals) override { debugGlobals_ = globals; }
+
 private:
+    std::string afterPush() const override;
+    std::string afterSetFrame() const override;
+    std::string afterAlloc(int bytes) const override;
+    std::string endPrologue() const override;
+    std::string localLabel(const std::string &name) const override;
 
     std::string labelName(int id) const override { return "Lshm" + std::to_string(id); }
     std::string bytesLabel(int id) const override { return "Lshmb" + std::to_string(id); }
@@ -30,6 +41,8 @@ private:
     std::string sourceName_;
     std::string openProcedure_;
     int globalSlots_ = 0;
+    int lastUnit_ = -1;        // the last .LINE, so a line is entered once per run of it
+    int lastLine_ = -1;
 };
 
 }

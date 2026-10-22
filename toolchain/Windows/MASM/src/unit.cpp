@@ -1,7 +1,7 @@
 #include "asm.h"
 #include <cstdio>
 
-Unit::Unit() : line(0), pass(0), current(-1)
+Unit::Unit() : line(0), pass(0), current(-1), debug(false), src_file(0), src_line(0)
 {
 }
 
@@ -23,6 +23,11 @@ void Unit::begin_pass(int n)
     current = -1;
     fixups.clear();
     errors.clear();
+    files.clear();
+    lines.clear();
+    procs.clear();
+    src_file = 0;
+    src_line = 0;
     line = 0;
     for (size_t i = 0; i < symbols.size(); i++) {
         symbols[i].prev_section = symbols[i].section;
@@ -69,6 +74,7 @@ int Unit::section(const std::string &name, bool code, bool bss, bool readonly, i
     s.bss = bss;
     s.readonly = readonly;
     s.info = false;
+    s.debug = false;
     s.align = align;
     s.comdat = comdat;
     s.associative = associative;
@@ -218,6 +224,26 @@ void Unit::difference(unsigned long at, int sym, int sub, int width)
     fixup(at, sym, R_DIFF);
     fixups.back().sub = sub;
     fixups.back().width = width;
+}
+
+/* after a statement that started at offset `at` of section `sec`: if it put code there, the
+   position it came from - the .LINE in force, else this line of the .asm - starts a line entry,
+   unless the entry before it in that section already says the same */
+void Unit::note_line(int sec, unsigned long at)
+{
+    if (sec < 0 || sec != current || !sections[sec].code || sections[sec].bytes.size() <= at)
+        return;
+    LineEntry e;
+    e.section = sec;
+    e.offset = at;
+    e.file = src_file;
+    e.line = src_file > 0 ? src_line : line;
+    for (size_t i = lines.size(); i-- > 0; ) {
+        if (lines[i].section != sec) continue;
+        if (lines[i].file == e.file && lines[i].line == e.line) return;
+        break;
+    }
+    lines.push_back(e);
 }
 
 void Unit::resolve(const Target &t)

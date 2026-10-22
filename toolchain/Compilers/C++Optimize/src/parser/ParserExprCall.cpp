@@ -12,6 +12,8 @@
 
 void Parser::parseArguments(std::vector<ExprPtr> &args) {
     OverloadTarget none(*this, nullptr);
+    // `f(f(f(...)))` re-enters the whole expression grammar per call.
+    const Nesting deep(this, peek().pos, "argument list");
     if (consume(")")) return;
     for (;;) {
         // **`rest...` - one thing written, one argument per member.** The names
@@ -338,38 +340,60 @@ bool Parser::releaseTemporary(const Expr &value) {
     return false;
 }
 
+// **The pending temporary a bound address names, if it names one** - its index in
+// pendingTemps_, or -1. The walk down to the object passes what binding and lowering
+// wrapped it in: a comma's right side (`*(ctor(&tmp), &tmp)`), a dereference and an
+// address-of, a cast - the base pointer [conv.ptr] makes of a derived temporary's -
+// and, since 2026-10-21 (review of 1.25, fix 2), a member access: [class.temporary]/5
+// binds a reference to a subobject of a temporary and the *whole* temporary lives on,
+// `const T &m = Pair().b;`. Before that the walk stopped at the member, nothing was
+// extended, the Pair stayed pending with its guard, and the next full-expression
+// cleared that guard in front of itself, as every statement does - so the Pair was
+// never destroyed at all. A comma whose right side is the arithmetic `convert` does
+// on a base pointer it first saved in a slot of its own - `(.bp = (char *)&tmp, .bp ?
+// .bp + off : 0)`, or the vbtable walk - is asked on that store, where the object is.
+int Parser::pendingTemporaryOf(const Expr &e) const {
+    if (const Comma *c = dynamic_cast<const Comma *>(&e)) {
+        const int right = pendingTemporaryOf(c->right());
+        if (right >= 0) return right;
+        if (dynamic_cast<const Conditional *>(&c->right()) != nullptr ||
+            dynamic_cast<const Cast *>(&c->right()) != nullptr)
+            if (const Assign *a = dynamic_cast<const Assign *>(&c->left()))
+                return pendingTemporaryOf(a->value());
+        return -1;
+    }
+    if (const Unary *u = dynamic_cast<const Unary *>(&e))
+        return u->op() == '*' || u->op() == '&' ? pendingTemporaryOf(u->operand()) : -1;
+    if (const Cast *c = dynamic_cast<const Cast *>(&e)) return pendingTemporaryOf(c->value());
+    if (const MemberAccess *m = dynamic_cast<const MemberAccess *>(&e))
+        return pendingTemporaryOf(m->object());
+    int slot = 0;
+    if (const Var *v = dynamic_cast<const Var *>(&e)) {
+        if (!v->isLocal()) return -1;
+        slot = v->offset();
+    } else if (const Call *c = dynamic_cast<const Call *>(&e)) {
+        slot = c->resultSlot();
+    } else {
+        return -1;
+    }
+    if (slot == 0) return -1;
+    for (std::size_t i = 0; i < pendingTemps_.size(); i++)
+        if (pendingTemps_[i].slot == slot) return static_cast<int>(i);
+    return -1;
+}
+
 // **[class.temporary]/5: a temporary bound to a reference lives as long as the
 // reference does**, not to the end of the full expression that made it.
 bool Parser::extendTemporary(const Expr &addr, const std::string &name) {
-    const Expr *at = &addr;
-    for (;;) {
-        if (const Comma *c = dynamic_cast<const Comma *>(at)) { at = &c->right(); continue; }
-        if (const Unary *u = dynamic_cast<const Unary *>(at))
-            if (u->op() == '*' || u->op() == '&') { at = &u->operand(); continue; }
-        break;
-    }
-
-    int slot = 0;
-    if (const Var *v = dynamic_cast<const Var *>(at)) {
-        if (!v->isLocal()) return false;
-        slot = v->offset();
-    } else if (const Call *c = dynamic_cast<const Call *>(at)) {
-        if (c->resultSlot() == 0) return false;
-        slot = c->resultSlot();
-    } else {
-        return false;
-    }
-
-    for (std::size_t i = 0; i < pendingTemps_.size(); i++)
-        if (pendingTemps_[i].slot == slot) {
-            const Type *cls = pendingTemps_[i].type;
-            pendingTemps_.erase(pendingTemps_.begin() + i);
-            // The guard flag goes with the entry.
-            if (destructorOf(cls) != nullptr)
-                alive_.push_back(Alive{ name, slot, cls });
-            return true;
-        }
-    return false;
+    const int i = pendingTemporaryOf(addr);
+    if (i < 0) return false;
+    const int slot = pendingTemps_[i].slot;
+    const Type *cls = pendingTemps_[i].type;
+    pendingTemps_.erase(pendingTemps_.begin() + i);
+    // The guard flag goes with the entry.
+    if (destructorOf(cls) != nullptr)
+        alive_.push_back(Alive{ name, slot, cls });
+    return true;
 }
 
 ExprPtr Parser::endFullExpression(ExprPtr e) {
@@ -909,6 +933,14 @@ bool Parser::insideAccessOf(const Type *cls, Access access) const {
     // The class's own body reaches everything it declares - [class.access]/1.
     for (std::size_t i = 0; i < classStack_.size(); i++)
         if (classStack_[i] == want) return true;
+    // **And so does a class nested in it** - [class.access.nest]/1, C++11's rule: a nested class is a
+    // member, and a member has the access of any other (1.27, 2026-10-21, review of 1.25, item 3:
+    // `Outer::Inner::peek(const Outer &o)` reading `o.secret` found "no member").
+    for (std::size_t i = 0; i <= classStack_.size(); i++) {
+        const Type *here = i < classStack_.size() ? classStack_[i] : currentClass_;
+        for (const Type *e = here != nullptr ? here->enclosing() : nullptr; e != nullptr; e = e->enclosing())
+            if (e->unqualified() == want) return true;
+    }
     if (currentClass_ == nullptr) return false;
     if (currentClass_ == want) return true;
     if (access == Access::Protected && derivesFrom(currentClass_, want))

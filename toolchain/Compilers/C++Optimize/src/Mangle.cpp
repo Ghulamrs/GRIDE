@@ -1227,7 +1227,9 @@ public:
     void dataType(const Type *t) {
         const Type *u = t->unqualified();
         if (u->isArray()) {
-            out += "PA";
+            // An array of const is `QB`, measured: cl's `?cs@@3QBDB` for `const char cs[]`, and
+            // `?cs@?1??f@@YAHXZ@4QBDB` for the same as a static local (1.28, 2026-10-22).
+            out += t->isConst() ? "QB" : "PA";
             type(u->pointee());
             out += t->isConst() ? "B" : "A";
             return;

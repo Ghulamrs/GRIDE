@@ -39,13 +39,38 @@ std::string Parser::unexpected() const {
 }
 
 void Parser::fail(const std::string &text) {
-    fail(current().line, text);
+    if (current().kind == Tok::EndOfInput) { fail(current().line, text); return; }
+    fail(current().line, current().col, text);
 }
 
 void Parser::fail(int line, const std::string &text) {
     if (failed_) return;
     diag_.error(unit_, line > 0 ? line : lastLine(), text);
     failed_ = true;
+}
+
+void Parser::fail(int line, int col, const std::string &text) {
+    if (failed_) return;
+    if (line <= 0) { fail(line, text); return; }
+    diag_.error(unit_, line, col, text);
+    failed_ = true;
+}
+
+// A ')' or ']' that does not come names the bracket it would close: said just after what was read when the
+// next token starts a new line (the bracket was left open there), else at the token found instead.
+bool Parser::expectClose(Tok kind, const Token &open) {
+    if (match(kind)) return true;
+    const std::string closing = kind == Tok::BracketClose ? "]" : ")";
+    const std::string opening = kind == Tok::BracketClose ? "[" : "(";
+    const std::string where = std::to_string(open.line) + ":" + std::to_string(open.col);
+    if (index_ > 0 && (current().kind == Tok::EndOfInput || startsLine(index_))) {
+        const Token &before = tokens_[index_ - 1];
+        int width = static_cast<int>(spellingOf(before).size());
+        fail(before.line, before.col + (width > 0 ? width : 1), "missing '" + closing + "' to close the '" + opening + "' at " + where);
+    } else {
+        fail("expected '" + closing + "' to close the '" + opening + "' at " + where + ", found '" + spellingOf(current()) + "'");
+    }
+    return false;
 }
 
 bool Parser::expect(Tok kind, const std::string &text) {
@@ -155,6 +180,7 @@ bool Parser::parsePrototype(Prototype &proto) {
     if (!at(Tok::Identifier)) { failUnexpected(); return false; }
     proto.name = advance().text;
 
+    const Token params = current();
     if (!expect(Tok::ParensOpen, unexpected())) return false;
     while (!at(Tok::ParensClose)) {
         Param parameter;
@@ -180,7 +206,7 @@ bool Parser::parsePrototype(Prototype &proto) {
         proto.inputs.push_back(parameter);
         if (!match(Tok::Comma)) break;
     }
-    if (!expect(Tok::ParensClose, unexpected())) return false;
+    if (!expectClose(Tok::ParensClose, params)) return false;
 
     proto.unit = unit_;
     return true;
@@ -382,14 +408,14 @@ StmtPtr Parser::parseReturn() {
     }
 
     if (at(Tok::ParensOpen) && parenGroupHasTopLevelComma(index_)) {
-        advance();
+        const Token group = advance();
         while (true) {
             ExprPtr value = parseExpression();
             if (failed_) return nullptr;
             node->add(std::move(value));
             if (!match(Tok::Comma)) break;
         }
-        if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+        if (!expectClose(Tok::ParensClose, group)) return nullptr;
         return StmtPtr(node.release());
     }
 
@@ -721,15 +747,16 @@ ExprPtr Parser::parsePrimary() {
     if ((at(Tok::Int) || at(Tok::Real) || at(Tok::Char)) && peek(1).kind == Tok::ParensOpen) {
         const Type *target = scalarTypeHere();
         advance();
+        const Token paren = peek(0);
         ExprPtr inner = parseExpression();
         if (failed_) return nullptr;
-        if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+        if (!expectClose(Tok::ParensClose, paren)) return nullptr;
         return parsePostfix(ExprPtr(new Convert(std::move(inner), target)));
     }
     if (at(Tok::Identifier)) {
         const Token &t = advance();
         if (at(Tok::ParensOpen)) {
-            advance();
+            const Token paren = advance();
             std::unique_ptr<Call> call(new Call(t.text, t.line));
             while (!at(Tok::ParensClose)) {
                 ExprPtr argument = parseExpression();
@@ -737,16 +764,16 @@ ExprPtr Parser::parsePrimary() {
                 call->add(std::move(argument));
                 if (!match(Tok::Comma)) break;
             }
-            if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+            if (!expectClose(Tok::ParensClose, paren)) return nullptr;
             return parsePostfix(ExprPtr(call.release()));
         }
         return parsePostfix(ExprPtr(new Var(t.text)));
     }
     if (at(Tok::ParensOpen)) {
-        advance();
+        const Token paren = advance();
         ExprPtr inner = parseExpression();
         if (failed_) return nullptr;
-        if (!expect(Tok::ParensClose, unexpected())) return nullptr;
+        if (!expectClose(Tok::ParensClose, paren)) return nullptr;
         return parsePostfix(std::move(inner));
     }
     failUnexpected();

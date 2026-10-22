@@ -1051,6 +1051,7 @@ struct DataPiece {
     Encoder* enc;
     int      kind;       // 2 data, 3 rdata, 4 CRT initialisers
     bool     comdat;
+    std::string assoc;   // ";@comdat assoc <symbol>": kept or dropped with the COMDAT data item of that symbol
     DataPiece(int k, bool c) : enc(0), kind(k), comdat(c) { enc = new Encoder(chunk); }
     ~DataPiece() { delete enc; }
 };
@@ -1230,6 +1231,7 @@ static bool assembleCoffNamed(const std::string& masmText, const std::string& ob
     CodeBlock* current = 0;
     bool comdatNext = false;    // ";@comdat any" was seen: the next PROC or data item is a COMDAT
     unsigned long comdatAlign = 0;   // ";@comdat any align N": the alignment of that item's section
+    std::string comdatAssoc;    // ";@comdat assoc <symbol>": the data item goes with that symbol's COMDAT section
     std::vector<std::string> globalErrors;
 
     size_t lineStart = 0;
@@ -1258,6 +1260,8 @@ static bool assembleCoffNamed(const std::string& masmText, const std::string& ob
             comdatNext = true;
             size_t al = marker.find(" align ");                  // ";@comdat any align 32": the item's section alignment
             comdatAlign = al == std::string::npos ? 0UL : static_cast<unsigned long>(atol(marker.c_str() + al + 7));
+            size_t as = marker.find(" assoc ");                  // ";@comdat assoc <symbol>": an associative data item
+            comdatAssoc = as == std::string::npos ? std::string() : marker.substr(as + 7, marker.find(' ', as + 7) == std::string::npos ? std::string::npos : marker.find(' ', as + 7) - (as + 7));
             continue;
         }
         size_t sc = raw.find(';');
@@ -1312,7 +1316,8 @@ static bool assembleCoffNamed(const std::string& masmText, const std::string& ob
             if (comdatNext) {
                 pieces.push_back(new DataPiece(section, true)); currentPiece = pieces.back(); comdatNext = false;
                 if (comdatAlign > currentPiece->chunk.maxAlign) currentPiece->chunk.maxAlign = comdatAlign;
-                comdatAlign = 0;
+                currentPiece->assoc = comdatAssoc;
+                comdatAlign = 0; comdatAssoc.clear();
             }
             if (!currentPiece) {
                 if (!plain[section]) { pieces.push_back(new DataPiece(section, false)); plain[section] = pieces.back(); }
@@ -1455,6 +1460,7 @@ static bool assembleCoffNamed(const std::string& masmText, const std::string& ob
         }
     }
     result.functions = static_cast<int>(blocks.size());
+    std::map<std::string, int> dataSectionOf;   // a data symbol -> its section (for the associative items that follow it)
     for (size_t p = 0; p < pieces.size(); ++p) {
         DataPiece& dp = *pieces[p];
         Chunk& c = dp.chunk;
@@ -1462,7 +1468,13 @@ static bool assembleCoffNamed(const std::string& masmText, const std::string& ob
         Section* target;
         int sectionNumber;
         if (dp.comdat) {
-            Section s; s.name = dp.kind == 2 ? ".data" : ".rdata"; s.characteristics = (dp.kind == 2 ? kDataFlags : kRdataFlags) | kComdat; s.selection = kSelectAny;
+            // a COMDAT item of .data, .rdata or .CRT$XCU (the entry of a COMDAT variable's dynamic initializer, kept or
+            // dropped with the variable's own section, as cl emits it, so that /OPT:REF keeps the one the program uses)
+            Section s; s.name = dp.kind == 2 ? ".data" : dp.kind == 4 ? ".CRT$XCU" : ".rdata"; s.characteristics = (dp.kind == 2 ? kDataFlags : dp.kind == 4 ? kCrtFlags : kRdataFlags) | kComdat; s.selection = kSelectAny;
+            if (!dp.assoc.empty()) {
+                if (dataSectionOf.count(dp.assoc)) { s.selection = kSelectAssociative; s.associated = dataSectionOf[dp.assoc]; }
+                else result.errors.push_back("associative COMDAT item: no COMDAT data item named " + dp.assoc + " before it");
+            }
             secs.push_back(s);
             comdatSymbols.push_back(std::vector<SymbolEntry>());
             target = &secs.back(); sectionNumber = static_cast<int>(secs.size());
@@ -1478,7 +1490,7 @@ static bool assembleCoffNamed(const std::string& masmText, const std::string& ob
             f.storageClass = publics.count(f.name) ? 2 : 3; f.isSection = false; f.selection = 0;
             if (symbolIndex.count(f.name)) { result.errors.push_back("duplicate symbol " + f.name); continue; }
             symbolIndex[f.name] = 0;
-            if (dp.comdat) comdatSymbols.back().push_back(f); else plainSymbols.push_back(f);
+            if (dp.comdat) { comdatSymbols.back().push_back(f); dataSectionOf[f.name] = sectionNumber; } else plainSymbols.push_back(f);
             CoffSymbolInfo mi; mi.name = f.name; mi.section = sectionNumber; mi.offset = f.value; mi.size = symbolSize(c, k);
             mi.isFunction = false; mi.external = f.storageClass == 2;
             result.symbolList.push_back(mi);

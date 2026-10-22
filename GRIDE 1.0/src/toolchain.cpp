@@ -476,9 +476,40 @@ bool emitsDebugInfo(ToolchainKind kind, const std::string& arch) {
     return arch == "x86_64-linux" || arch == "arm64-darwin" || arch == "x86_64-windows";
 }
 
-bool debugsWithCodeView(ToolchainKind kind, const std::string& arch, Configuration config) {
+// The CodeView path wants clang (the user, 2026-10-21: a Debug build on a Visual Studio without the
+// Clang tools had cpp11 refuse -masm=gnu): without it the build is the Release spelling, without -g,
+// masm and the linker making the program - and the debugger sees no lines.
+static bool wantsCodeView(ToolchainKind kind, const std::string& arch, Configuration config) {
     return config == ConfigDebug && arch == "x86_64-windows" &&
            (kind == ToolCc1 || kind == ToolCxx1 || kind == ToolShc) && emitsDebugInfo(kind, arch);
+}
+
+bool clangAvailable() {
+#ifdef _WIN32
+    static int known = -1;
+    if (known >= 0) return known == 1;
+    bool found = false;
+    const std::string vs = findVisualStudio();
+    if (!vs.empty()) found = path::exists(path::join(vs, "VC\\Tools\\Llvm\\x64\\bin\\clang.exe"));
+    const char* pf = std::getenv("ProgramFiles");
+    if (!found && pf) found = path::exists(path::join(pf, "LLVM\\bin\\clang.exe"));
+    char onPath[MAX_PATH];
+    if (!found) found = SearchPathA(nullptr, "clang.exe", nullptr, MAX_PATH, onPath, nullptr) > 0;
+    known = found ? 1 : 0;
+    return found;
+#else
+    return true;
+#endif
+}
+
+bool debugsWithCodeView(ToolchainKind kind, const std::string& arch, Configuration config) {
+    return wantsCodeView(kind, arch, config) && clangAvailable();
+}
+
+std::string lineTableNote(ToolchainKind kind, const std::string& arch, Configuration config) {
+    if (!wantsCodeView(kind, arch, config) || clangAvailable()) return std::string();
+    return "warning: clang not found - this Debug build has no source line table: masm and link make the "
+           "program, the debugger shows no lines (Visual Studio's \"C++ Clang tools for Windows\" add it)";
 }
 
 std::string configFlags(ToolchainKind kind, Configuration config,
@@ -487,8 +518,25 @@ std::string configFlags(ToolchainKind kind, Configuration config,
     // **c90, cpp11 and shalimar take what Compiler Options set** (options.h), whose defaults are
     // the flags this function wrote before the dialog: -O2 -DNDEBUG=1 or -g -D_DEBUG=1, and --debug
     // for shalimar off the emulator, where the runtime beside it is the release one.
-    if (kind == ToolShc || kind == ToolCc1 || kind == ToolCxx1)
-        return options::flags(options::active(), kind, config, arch);
+    if (kind == ToolShc || kind == ToolCc1 || kind == ToolCxx1) {
+        std::string flags = options::flags(options::active(), kind, config, arch);
+        // -g is CodeView here, which only clang's spelling carries: not without clang
+        if (wantsCodeView(kind, arch, config) && !clangAvailable()) {
+            std::string kept;
+            size_t at = 0;
+            while (at < flags.size()) {
+                size_t from = flags.find_first_not_of(' ', at);
+                if (from == std::string::npos) break;
+                size_t to = flags.find(' ', from);
+                if (to == std::string::npos) to = flags.size();
+                std::string word = flags.substr(from, to - from);
+                if (word != "-g") kept += " " + word;
+                at = to;
+            }
+            flags = kept;
+        }
+        return flags;
+    }
 
     // **cxx1's own -O2, not cl's.** This line passed -O2 while cxx1 had no -O flag at all, so every
     // Release C++ build failed, unseen because the editor defaults to Debug; cxx1 implements -O1

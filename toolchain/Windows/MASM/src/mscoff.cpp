@@ -46,12 +46,13 @@ static void section_name8(Bytes &b, const std::string &name, Bytes &strings)
 }
 
 /* IMAGE_SCN_* flags as ml64 sets them: code 60000020, data C0000040, read-only 40000040,
-   uninitialised C0000080, plus the alignment field */
+   uninitialised C0000080, CodeView 42000040 (discardable), plus the alignment field */
 static unsigned long characteristics(const Section &s)
 {
     if (s.info)
         return 0x00000A00UL;
-    unsigned long c = s.code ? 0x60000020UL : s.bss ? 0xC0000080UL : s.readonly ? 0x40000040UL : 0xC0000040UL;
+    unsigned long c = s.code ? 0x60000020UL : s.bss ? 0xC0000080UL : s.debug ? 0x42000040UL
+                    : s.readonly ? 0x40000040UL : 0xC0000040UL;
     int a = 0;
     while ((1 << a) < s.align)
         a++;
@@ -64,6 +65,8 @@ static unsigned reloc_type(RelKind k)
     if (k == R_ADDR32) return 0x0002;
     if (k == R_ADDR32NB) return 0x0003;
     if (k >= R_REL32_1 && k <= R_REL32_5) return 0x0005 + (k - R_REL32_1);
+    if (k == R_SECTION) return 0x000A;
+    if (k == R_SECREL) return 0x000B;
     return 0x0004;
 }
 
@@ -74,7 +77,8 @@ bool CoffWriter::write(const Unit &u, const std::string &path, std::string &err)
     std::vector<bool> referenced(u.symbols.size(), false);
     for (size_t i = 0; i < nsec; i++)
         for (size_t r = 0; r < u.sections[i].relocs.size(); r++)
-            referenced[u.sections[i].relocs[r].symbol] = true;
+            if (u.sections[i].relocs[r].symbol >= 0)
+                referenced[u.sections[i].relocs[r].symbol] = true;
     /* a COMDAT's key symbol is always written, and right after its section's symbol, which is
        where the linker looks for the symbol a COMDAT folds on; an ASSOCIATIVE section names
        the section its key's COMDAT opened */
@@ -94,7 +98,9 @@ bool CoffWriter::write(const Unit &u, const std::string &path, std::string &err)
         }
     }
     long count = 0;
+    std::vector<long> section_symbol(nsec);
     for (size_t i = 0; i < nsec; i++) {
+        section_symbol[i] = count;
         count += 2;
         if (keyOf[i] >= 0) index[keyOf[i]] = count++;
     }
@@ -155,8 +161,10 @@ bool CoffWriter::write(const Unit &u, const std::string &path, std::string &err)
                 u16(out, 0);
             }
             for (size_t r = 0; r < s.relocs.size(); r++) {
+                /* a negative symbol is -(n + 1): section n's own symbol (CodeView's code outside a PROC) */
+                const int sym = s.relocs[r].symbol;
                 u32(out, s.relocs[r].offset);
-                u32(out, (unsigned long)index[s.relocs[r].symbol]);
+                u32(out, (unsigned long)(sym < 0 ? section_symbol[(size_t)(-sym - 1)] : index[sym]));
                 u16(out, reloc_type(s.relocs[r].kind));
             }
         }

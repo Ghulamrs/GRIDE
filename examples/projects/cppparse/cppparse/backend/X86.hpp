@@ -73,6 +73,9 @@ public:
     void        addVtordispThunk(const std::string& irName, const std::string& target, int adjust);
     void        addGlobal(const IrGlobal& g) { m_globals.push_back(g); }
     void        addInitializer(const std::string& irName) { m_initializers.push_back(irName); }   // run by the CRT before main
+    // the dynamic initializer of a COMDAT variable (a static data member of a class template instantiation): its .CRT$XCU
+    // entry is a COMDAT of its own under entrySymbol, so that one unit's initializer runs for the program, as cl's does
+    void        addComdatInitializer(const std::string& irName, const std::string& entrySymbol, const std::string& globalName);
     void        registerSymbolName(const std::string& irName, const std::string& decorated);   // MSVC name of a function
     void        registerGlobalName(const std::string& irGlobalName, const std::string& decorated);
     // a function whose IR name is a plain C name (extern "C", main): an address of that name is the function's
@@ -113,6 +116,8 @@ private:
     std::set<std::string>              m_thunkNames;
     std::vector<IrGlobal>              m_globals;
     std::vector<std::string>           m_initializers;
+    struct ComdatInit { std::string irName, entry, global; };   // the initializer, the symbol of its entry, the variable's IR name
+    std::vector<ComdatInit>            m_comdatInitializers;
     std::string floatLabel(double v);
     std::string stringLabel(const std::string& text);
     void        useGlobal(const std::string& name) { Lock l(m_mutex); m_globalsUsed.insert(name); }

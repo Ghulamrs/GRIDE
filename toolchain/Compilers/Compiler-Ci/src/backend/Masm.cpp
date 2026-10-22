@@ -1,6 +1,9 @@
 #include "../Name.h"
+#include "../Source.h"
 #include "Masm.h"
+#include "CodeView.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <ostream>
@@ -252,7 +255,8 @@ void MasmSpelling::ins(const std::string &m, const Op &a, const Op &b) {
 void MasmSpelling::defLabel(const std::string &l) {
     if (seg_ == Code) {
 
-        if (l.compare(0, 3, ".L.") != 0)
+        // internal: the walker's own (.L.), and under -g the function's bounds (.Lfunc.)
+        if (l.compare(0, 3, ".L.") != 0 && l.compare(0, 7, ".Lfunc.") != 0)
             give_up(l, "a label in code that is not an internal one");
         defined_.insert(l);
         o_ += mangle(l); o_ += ":\n";
@@ -264,6 +268,11 @@ void MasmSpelling::defLabel(const std::string &l) {
 }
 
 void MasmSpelling::functionBegin(const std::string &name, bool exported) {
+    inFunction_ = true;
+    function_ = name;
+    lastLoc_.clear();
+    lastLocFile_ = lastLocLine_ = 0;
+    linesRun_.clear();
     defined_.insert(name);
     if (exported) exported_.insert(name);
     flushPending();
@@ -283,10 +292,145 @@ void MasmSpelling::prologue(int frameSize) {
         o_ += "  .ALLOCSTACK "; appendNum(o_, frameSize); o_ += '\n';
     }
     o_ += "  .ENDPROLOG\n";
+    if (debug_) { o_ += mangle(CoffSpelling::prologEnd(function_)); o_ += ":\n"; }
 }
 
 void MasmSpelling::functionEnd(const std::string &name) {
+    inFunction_ = false;
+    if (debug_) { o_ += mangle(CoffSpelling::codeEnd(name)); o_ += ":\n"; }
     o_ += mangle(name); o_ += " ENDP\n\n";
+}
+
+// `.FILE n, "path"` names source file n for GRIDE's masm, which writes the CodeView line table
+// from the `.LINE`s; the path arrives absolute (debugFileName).
+void MasmSpelling::fileEntry(int n, const std::string &name) {
+    debug_ = true;
+    o_ += ".FILE "; appendNum(o_, n); o_ += ", \""; o_ += name; o_ += "\"\n";
+}
+
+// Every name in an expression as this spelling writes it: `.Lcv.r3.e-.Lcv.r3.b` and the like.
+std::string MasmSpelling::mangleNames(const std::string &expr) {
+    std::string out;
+    for (std::size_t i = 0; i < expr.size();) {
+        const char c = expr[i];
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '$' || c == '?' || c == '@') {
+            std::size_t j = i;
+            while (j < expr.size() && (std::isalnum(static_cast<unsigned char>(expr[j])) || expr[j] == '_' ||
+                                       expr[j] == '.' || expr[j] == '$' || expr[j] == '?' || expr[j] == '@'))
+                j++;
+            out += mangle(expr.substr(i, j - i));
+            i = j;
+        } else {
+            out += c;
+            i++;
+        }
+    }
+    return out;
+}
+
+// **The CodeView writeCodeView makes for clang, in MASM** - one writer of the records, two
+// spellings of them. `.section .debug$S` and `.debug$T` become SEGMENTs GRIDE's masm carries
+// into the object; `.long`, `.short`, `.byte` and `.asciz` its DD, DW and DB; `.secrel32` and
+// `.secidx` SECTIONREL and SECTION; a label its MASM name. The line table, the file checksums and
+// the string table are left to masm, which makes them from the `.LINE`s after these records.
+void MasmSpelling::codeView(const std::string &gnu) {
+    flushPending();
+    std::string open;
+    for (std::size_t at = 0; at < gnu.size();) {
+        std::size_t nl = gnu.find('\n', at);
+        if (nl == std::string::npos) nl = gnu.size();
+        const std::string line = gnu.substr(at, nl - at);
+        at = nl + 1;
+        std::size_t b = line.find_first_not_of(" \t");
+        if (b == std::string::npos) continue;
+        const std::string t = line.substr(b);
+        if (b == 0 && t[t.size() - 1] == ':') {
+            o_ += mangle(t.substr(0, t.size() - 1)); o_ += ":\n";
+            continue;
+        }
+        const std::size_t sp = t.find_first_of(" \t");
+        const std::string d = t.substr(0, sp);
+        const std::string rest = sp == std::string::npos ? std::string() : t.substr(t.find_first_not_of(" \t", sp));
+        if (d == ".section") {
+            if (!open.empty()) o_ += open + " ENDS\n";
+            open = rest.compare(0, 8, ".debug$T") == 0 ? ".debug$T" : ".debug$S";
+            o_ += "\n" + open + " SEGMENT\n";
+        } else if (d == ".p2align") {
+            o_ += "  ALIGN "; appendNum(o_, 1LL << std::atoi(rest.c_str())); o_ += '\n';
+        } else if (d == ".long") {
+            o_ += "  DD " + mangleNames(rest) + "\n";
+        } else if (d == ".short") {
+            o_ += "  DW " + mangleNames(rest) + "\n";
+        } else if (d == ".byte") {
+            o_ += "  DB " + rest + "\n";
+        } else if (d == ".asciz") {
+            // the GNU string's escapes undone, MASM's one escape - a doubled quote - made
+            std::string s;
+            for (std::size_t k = 1; k + 1 < rest.size(); k++) {
+                if (rest[k] == '\\' && k + 2 < rest.size()) k++;
+                if (rest[k] == '"') s += '"';
+                s += rest[k];
+            }
+            o_ += s.empty() ? "  DB 0\n" : "  DB \"" + s + "\", 0\n";
+        } else if (d == ".secrel32") {
+            o_ += "  DD SECTIONREL " + mangleNames(rest) + "\n";
+        } else if (d == ".secidx") {
+            o_ += "  DW SECTION " + mangleNames(rest) + "\n";
+        } else if (d != ".cv_linetable" && d != ".cv_filechecksums" && d != ".cv_stringtable") {
+            give_up(line, "a CodeView directive the MASM spelling has no words for");
+        }
+    }
+    if (!open.empty()) o_ += open + " ENDS\n";
+}
+
+void MasmCodeGen::writeDebug(const std::vector<DwarfFunction> &fns,
+                             const std::vector<DwarfGlobal> &globals) {
+    std::string gnu;
+    writeCodeView(gnu, masmTarget_, codeViewPath(compDir(), lineSource()->files().front() + ".obj"),
+                  fns, globals, *enums_);
+    masm_.codeView(gnu);
+}
+
+// Whether text holds an instruction: a line indented, and not a directive.
+static bool holdsInstruction(const std::string &text) {
+    for (std::size_t at = 0; at < text.size();) {
+        if (text.compare(at, 2, "  ") == 0 && at + 2 < text.size() && text[at + 2] != '.') return true;
+        const std::size_t nl = text.find('\n', at);
+        if (nl == std::string::npos) break;
+        at = nl + 1;
+    }
+    return false;
+}
+
+// `.LINE line, file` before the instructions of a line, as CoffSpelling writes `.cv_loc`: one entry
+// per run of a line, no second run of it in a function (cdb refuses `bp` on a line entered twice),
+// and one no instruction follows replaced by the next.
+void MasmSpelling::location(int file, int line, int) {
+    if (!inFunction_) return;
+    if (file == lastLocFile_ && line == lastLocLine_) return;
+    if (!linesRun_.insert(std::make_pair(file, line)).second) return;
+    lastLocFile_ = file;
+    lastLocLine_ = line;
+    if (!lastLoc_.empty() && lastLocAt_ + lastLoc_.size() <= o_.size() &&
+        o_.compare(lastLocAt_, lastLoc_.size(), lastLoc_) == 0 &&
+        !holdsInstruction(o_.substr(lastLocAt_ + lastLoc_.size())))
+        o_.erase(lastLocAt_, lastLoc_.size());
+    lastLocAt_ = o_.size();
+    o_ += "  .LINE "; appendNum(o_, line); o_ += ", "; appendNum(o_, file); o_ += '\n';
+    lastLoc_ = o_.substr(lastLocAt_);
+}
+
+std::string MasmCodeGen::debugFileName(const std::string &name) const {
+    const bool absolute = (name.size() > 1 && name[1] == ':') ||
+                          (!name.empty() && (name[0] == '/' || name[0] == '\\'));
+    const std::string full = absolute || compDir().empty() ? name : compDir() + "\\" + name;
+    std::string out;
+    for (char c : full) {
+        if (c == '/') c = '\\';
+        if (c == '"') out += '"';
+        out += c;
+    }
+    return out;
 }
 
 void MasmSpelling::globl(const std::string &name) { exported_.insert(name); }

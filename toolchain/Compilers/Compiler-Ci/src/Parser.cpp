@@ -18,8 +18,18 @@ bool Parser::consume(const char *s) {
 }
 
 void Parser::expect(const char *s) {
-    if (!peek().is(s))
-        src_.fail(peek().pos, std::string("expected '") + s + "'");
+    if (!peek().is(s)) {
+        // A missing ';' is said where it belongs - just after the token before it, when that token ends its line
+        // (as cpp11 says it) - not at the start of the next statement, a line further down.
+        std::size_t pos = peek().pos;
+        if (std::strcmp(s, ";") == 0 && at_ > 0) {
+            const Token &before = tokens_[at_ - 1];
+            Source::Place a = src_.locate(before.pos), b = src_.locate(pos);
+            if (a.file != b.file || a.line != b.line)
+                pos = before.pos + (before.text.empty() ? 1 : before.text.size());
+        }
+        src_.fail(pos, std::string("expected '") + s + "'");
+    }
     at_++;
 }
 

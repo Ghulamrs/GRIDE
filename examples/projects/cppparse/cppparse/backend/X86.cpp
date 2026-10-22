@@ -157,6 +157,13 @@ void X86Module::registerGlobalName(const std::string& irGlobalName, const std::s
     if (!m_globalNames.count(irGlobalName)) m_globalNames[irGlobalName] = decorated;
 }
 
+void X86Module::addComdatInitializer(const std::string& irName, const std::string& entrySymbol, const std::string& globalName)
+{
+    ComdatInit c;
+    c.irName = irName; c.entry = entrySymbol; c.global = globalName;
+    m_comdatInitializers.push_back(c);
+}
+
 namespace {
 
 } // namespace
@@ -1745,10 +1752,18 @@ std::string X86Module::finish()
         }
     }
     s << m_rdata;   // after the literals: sign_mask keeps the section's 16-byte alignment
-    if (!m_initializers.empty()) {
-        // pointers to the dynamic initialisers of this module's globals: the CRT calls them before main
+    if (!m_initializers.empty() || !m_comdatInitializers.empty()) {
+        // pointers to the dynamic initialisers of this module's globals: the CRT calls them before main; a COMDAT
+        // variable's initialiser has an entry of its own in a COMDAT (after the module's: the COFF writer appends an
+        // unlabelled item to the piece before it)
         s << "\nCRT$XCU SEGMENT ALIGN(8) ALIAS('.CRT$XCU') READ\n";
         for (size_t i = 0; i < m_initializers.size(); ++i) s << "        DQ OFFSET " << symbol(m_initializers[i]) << "\n";
+        for (size_t i = 0; i < m_comdatInitializers.size(); ++i) {
+            // the entry goes with the variable's own COMDAT (associative): the linker keeps it when it keeps the variable
+            const ComdatInit& c = m_comdatInitializers[i];
+            const std::string entry = c.entry.empty() ? symbol(c.irName) + "$initializer" : c.entry;
+            s << ";@comdat assoc " << globalSymbol(c.global) << " align 8\n" << entry << " DQ OFFSET " << symbol(c.irName) << "\n";
+        }
         s << "CRT$XCU ENDS\n";
     }
     s << "\n.code\n";

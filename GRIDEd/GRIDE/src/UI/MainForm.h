@@ -114,6 +114,7 @@ namespace Gride { namespace UI {
         array<String^>^ startArgs;
         GrideSettings^ settings;
         Workspace^ workspace;
+        Workspace^ lone;                // a source built with no workspace open: its own one-file program (BuildSpace)
         Dictionary<String^, SortedSet<int>^>^ looseBreakpoints;   // used when no workspace is open
         BuildEngine^ engine;
         ProgramRunner^ runner;          // the program of Start Without Debugging / Emulate, running in the Output pane
@@ -242,6 +243,7 @@ namespace Gride { namespace UI {
         bool HasWritableProject();
         bool HasSelectedFile();
         bool CanBuild();
+        bool CanBatch();
         bool IsBuilding();
         bool IsDebugging();
         bool IsInBreak();
@@ -256,6 +258,9 @@ namespace Gride { namespace UI {
 
         // ================================================== MainForm.File.cpp
         GrideProject^ ContextProject();
+        Workspace^ BuildSpace();
+        GrideProject^ BuildContextProject();
+        void OpenProjectEntry();
         void OpenPath(String^ path);
         void SetWorkspace(Workspace^ w);
         bool CloseWorkspace();

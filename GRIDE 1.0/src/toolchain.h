@@ -35,6 +35,11 @@ bool emitsDebugInfo(ToolchainKind kind, const std::string& arch);
 // **A c90 or cpp11 Debug build for x86_64-windows (M10)**: -g's CodeView, the GNU spelling clang
 // assembles, link.exe /DEBUG for the PDB, and cdb to read it - whatever masm and LINK settings name.
 bool debugsWithCodeView(ToolchainKind kind, const std::string& arch, Configuration config);
+// **Whether clang is here to assemble that CodeView** - Visual Studio's "C++ Clang tools", an LLVM
+// installation, or PATH, where cpp11 looks. Without it a Debug build is made the Release way.
+bool clangAvailable();
+// The line a Debug build says first when clang is not here, "" otherwise.
+std::string lineTableNote(ToolchainKind kind, const std::string& arch, Configuration config);
 
 std::vector<std::string> debugNote(ToolchainKind kind, const std::string& arch);
 

@@ -32,17 +32,19 @@ static void clear(Value &v)
     v.imagerel = false;
     v.offset = false;
     v.wide = false;
+    v.secrel = false;
+    v.secidx = false;
 }
 
 static bool is_const(const Value &v)
 {
-    return v.sym < 0 && v.sub < 0 && v.sec < 0 && !v.imagerel && !v.offset;
+    return v.sym < 0 && v.sub < 0 && v.sec < 0 && !v.imagerel && !v.offset && !v.secrel && !v.secidx;
 }
 
 /* a defined label, or $, as a section and an offset */
 bool located(const Unit &u, const Value &x, int &sec, long long &off)
 {
-    if (x.sub >= 0 || x.imagerel || x.offset)
+    if (x.sub >= 0 || x.imagerel || x.offset || x.secrel || x.secidx)
         return false;
     if (x.sec >= 0) {
         sec = x.sec;
@@ -97,7 +99,8 @@ static bool sub(ExprState &e, Value &a, const Value &b)
         a.wide = a.wide || b.wide;
         return true;
     }
-    if (a.imagerel || a.offset || b.imagerel || b.offset || b.sub >= 0 || a.sub >= 0) {
+    if (a.imagerel || a.offset || b.imagerel || b.offset || b.sub >= 0 || a.sub >= 0 ||
+        a.secrel || a.secidx || b.secrel || b.secidx) {
         e.err = "bad address arithmetic";
         return false;
     }
@@ -156,13 +159,15 @@ static bool prefix(ExprState &e, char op, Value &v)
 {
     if (op == '+')
         return true;
-    if (op == 'I' || op == 'O') {
-        if (v.sym < 0 || v.sub >= 0 || v.imagerel || v.offset) {
-            e.err = std::string(op == 'I' ? "IMAGEREL" : "OFFSET") + " needs a label";
+    if (op == 'I' || op == 'O' || op == 'R' || op == 'X') {
+        if (v.sym < 0 || v.sub >= 0 || v.imagerel || v.offset || v.secrel || v.secidx) {
+            e.err = std::string(op == 'I' ? "IMAGEREL" : op == 'O' ? "OFFSET" : op == 'R' ? "SECTIONREL" : "SECTION") + " needs a label";
             return false;
         }
         if (op == 'I') v.imagerel = true;
-        else v.offset = true;
+        else if (op == 'O') v.offset = true;
+        else if (op == 'R') v.secrel = true;
+        else v.secidx = true;
         return true;
     }
     if (not_const(e, v)) return false;
@@ -222,6 +227,10 @@ static bool prefix_op(const Token &k, Op &op)
     std::string w = upper(k.text);
     if (w == "OFFSET") { op.prec = 9; op.c = 'O'; return true; }
     if (w == "IMAGEREL") { op.prec = 9; op.c = 'I'; return true; }
+    /* SECTIONREL is ml64's; SECTION, a label's section number, is this assembler's own - the two
+       halves CodeView names an address by, which a compiler writing its own .debug$S needs */
+    if (w == "SECTIONREL") { op.prec = 9; op.c = 'R'; return true; }
+    if (w == "SECTION") { op.prec = 9; op.c = 'X'; return true; }
     if (w == "NOT") { op.prec = 3; op.c = '~'; return true; }
     if (w == "LOW") { op.prec = 9; op.c = 'w'; return true; }
     if (w == "HIGH") { op.prec = 9; op.c = 'W'; return true; }

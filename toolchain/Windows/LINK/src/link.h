@@ -160,7 +160,8 @@ struct Options {
     u32  file_align;
     u64  stack_reserve, stack_commit;    /* /stack:reserve[,commit] */
     u64  heap_reserve, heap_commit;      /* /heap:reserve[,commit] */
-    bool debug;                          /* /debug: accepted, and said to be ignored */
+    bool debug;                          /* /debug: a PDB beside the image, and the image's CODEVIEW record naming it */
+    std::string pdb;                     /* /pdb:file - where the PDB goes; else the image's name with .pdb */
     bool verbose;
     Options();
 };
@@ -185,8 +186,14 @@ struct Link {
     u32 size_of_headers;
     u32 lfanew;
     std::string err;
+    /*  /debug: the PDB's path as the image's RSDS record names it (absolute), the GUID both carry -
+     *  a hash of the image, so the same link makes the same pair - and the image's section
+     *  headers, which the PDB keeps a copy of for a debugger to turn section:offset into an RVA. */
+    std::string pdb_path;
+    u8 pdb_guid[16];
+    std::vector<u8> section_headers;
 
-    Link() : entry_rva(0), size_of_image(0), size_of_headers(0), lfanew(0) {}
+    Link() : entry_rva(0), size_of_image(0), size_of_headers(0), lfanew(0) { for (int i = 0; i < 16; i++) pdb_guid[i] = 0; }
 
     bool run();
     bool read_inputs();
@@ -195,6 +202,8 @@ struct Link {
     bool fix_up();
     bool write_image();
     bool write_map();
+    bool write_pdb();                    /* pdb.cpp */
+    u32  rsds_size() const;              /* the CODEVIEW record's length: RSDS, GUID, age, path */
     /*  /OPT:ICF. Run after the references are settled and before anything is
      *  placed: a COMDAT whose bytes and whose relocation targets match another's
      *  is folded into it. Folding one pair can make a second pair identical -

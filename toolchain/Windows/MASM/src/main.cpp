@@ -35,8 +35,10 @@ static void job(Assembler *a, bool *ok)
 
 static int usage()
 {
-    fprintf(stderr, "usage: asm -t x64 file.asm... [-o out.obj]\n"
-                    "       asm /c [/nologo] [/Fo out.obj] file.asm      (ml64's spelling, x64)\n");
+    fprintf(stderr, "usage: asm -t x64 [-g] file.asm... [-o out.obj]\n"
+                    "       asm /c [/nologo] [/Zi] [/Fo out.obj] file.asm      (ml64's spelling, x64)\n"
+                    "  -g, /Zi or /Zd: CodeView line records for the .asm's own lines; a file with .FILE\n"
+                    "  and .LINE directives gets the source lines they name without being asked\n");
     return 2;
 }
 
@@ -45,9 +47,11 @@ int main(int argc, char **argv)
     std::string target;
     std::string output;
     std::vector<std::string> inputs;
+    bool debug = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) target = argv[++i];
         else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) output = argv[++i];
+        else if (strcmp(argv[i], "-g") == 0) debug = true;
         else if (argv[i][0] == '/' && !std::ifstream(argv[i]).good() &&
                  ((strchr(argv[i] + 1, '/') == 0 && strchr(argv[i] + 1, '\\') == 0) ||
                   strncmp(argv[i], "/Fo", 3) == 0)) {
@@ -55,8 +59,10 @@ int main(int argc, char **argv)
                runs this instead: /c and /nologo say nothing here, /Fo names the object, the
                listing and warning switches are taken and ignored. A Unix path also starts
                with a slash, and is one when it has another slash in it or exists - except
-               that /Fo with the path attached, as shalimar writes it, has slashes of its own */
+               that /Fo with the path attached, as shalimar writes it, has slashes of its own.
+               /Zi and /Zd ask for CodeView, as ml64's do */
             target = "x64";
+            if (strcmp(argv[i], "/Zi") == 0 || strcmp(argv[i], "/Zd") == 0) debug = true;
             if (strncmp(argv[i], "/Fo", 3) == 0) {
                 if (argv[i][3] != '\0') output = argv[i] + 3;
                 else if (i + 1 < argc) output = argv[++i];
@@ -93,7 +99,7 @@ int main(int argc, char **argv)
     }
     std::vector<Assembler *> jobs(n);
     for (size_t i = 0; i < n; i++)
-        jobs[i] = new Assembler(inputs[i], outputs[i], new X64Target(), new CoffWriter());
+        jobs[i] = new Assembler(inputs[i], outputs[i], new X64Target(), new CoffWriter(), debug);
 
     bool *ok = new bool[n];
     std::vector<std::thread> threads;

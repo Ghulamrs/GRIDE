@@ -32,6 +32,7 @@
   <tr><td><code>settings.json</code></td><td><code>%APPDATA%\GRIDE\settings.json</code></td><td>Black, Grey, White</td><td>Your settings - the editor, the build, the paths, the recent projects. One file for whichever outlook is installed.</td></tr>
   <tr><td><code>*.pro</code></td><td>the project's folder</td><td>Black, Grey, White</td><td>A project: its groups of files, what the build makes, its include and library paths, its target. One format for the three outlooks.</td></tr>
 </table>
+<p>A C++ project's three files side by side, and where they are for a GRIDE started from Visual Studio: <a href="#sample">section 4</a>.</p>
 <p>The format itself - each field's type, what is required, how the two copies are merged and checked - is in <a href="TOOLCHAIN-FORMAT.md">TOOLCHAIN-FORMAT.md</a>.</p>
 <h2 id="toolchain">2. toolchain.json, entry by entry</h2>
 <p>Each section in the order the file has them; an entry is named by its path - <code>tools.cpp11.operations.compileAndLink</code> is the <code>compileAndLink</code> operation of the <code>cpp11</code> tool.</p>
@@ -218,11 +219,100 @@
   <tr><td><code>build</code></td><td>what the build makes: <code>target</code> is the program (<code>mathx-demo</code>, or <code>mathx-demo.exe</code> on Windows), <code>groups</code> the groups compiled into it, <code>args</code> the program's arguments when it runs. Every Shalimar file has a <code>main()</code>, so for Shalimar the target says which is the program</td></tr>
   <tr><td><code>emulateOnly</code></td><td>a TMS320C6747 build that only runs on the emulator (vm6747), not linked for the simulator</td></tr>
   <tr><td><code>options</code></td><td>the Compiler Options this project sets, by option id</td></tr>
-  <tr><td><code>open</code></td><td>the file White opens with the project</td></tr>
+  <tr><td><code>open</code></td><td>the file the editor shows when the project opens. Without it, all three open the first source that defines <code>main</code> (Shalimar's <code>fun &lt;&gt; = main()</code>), else the project's first file</td></tr>
   <tr><td><code>indent, tabs</code></td><td>the project's own indentation, over the editor's</td></tr>
   <tr><td><code>configurations, excludeFromBuild, dependsOn, language, template, targets</code></td><td>Black's own: its build configurations, files left out of the build, projects built first, the language, the template it was made from, and several targets</td></tr>
   <tr><td><code>language, buildConfigurations, activeConfiguration</code></td><td>Grey's own: the language, its Debug / Release configurations and the one in force</td></tr>
 </table>
+<h2 id="sample">4. A C++ project's three files - one example</h2>
+<p>A C++ project needs only its <code>.pro</code> and its sources. <code>toolchain.json</code> comes with GRIDE and <code>settings.json</code> is GRIDE's own memory; neither is copied into a project, and a project builds the same with either of them fresh. The example is <code>examples\projects\showcase\solve3-cpp11</code>.</p>
+<table>
+  <tr><th>File</th><th>GRIDE built and started in Visual Studio</th><th>GRIDE installed by Setup</th></tr>
+  <tr><td><code>toolchain.json</code></td><td><code>GRIDEd\x64\&lt;Config&gt;\toolchain.json</code> - the build copies <code>GRIDEd\GRIDE\toolchain.json</code> there, beside <code>GRIDE.exe</code> and the programs the same build made (c90, cpp11, shalimar, masm, link ...)</td><td>the installation folder, beside <code>GRIDE.exe</code></td></tr>
+  <tr><td><code>toolchain.json</code> (yours)</td><td colspan="2"><code>%APPDATA%\GRIDE\toolchain.json</code> - only once Tools &gt; Options has changed a tool; otherwise there is none</td></tr>
+  <tr><td><code>settings.json</code></td><td colspan="2"><code>%APPDATA%\GRIDE\settings.json</code> - one per Windows user, the same file for a GRIDE started from Visual Studio and an installed one, and for GRIDE, GRIDE 2.0 and GRIDE 1.0. Written when GRIDE closes; a missing one is written afresh</td></tr>
+  <tr><td><code>solve3-cpp11.pro</code></td><td colspan="2">the project's folder</td></tr>
+</table>
+
+<h3 id="sample-pro">The project: solve3-cpp11.pro</h3>
+<pre><code>{
+  "name": "solve3-cpp11",
+  "groups": {
+    "Sources": ["src/main.cpp", "src/check.cpp"],
+    "Headers": ["src/check.h", "src/CMatrix.h", "src/CVector.h"]
+  },
+  "build": {
+    "target": "solve3-cpp11",
+    "groups": ["Sources"]
+  },
+  "toolchain": "auto"
+}</code></pre>
+<p>The folder, and what GRIDE's Build adds to it (Release; Debug the same under <code>Debug</code>):</p>
+<pre><code>solve3-cpp11\
+  solve3-cpp11.pro
+  src\main.cpp  src\check.cpp  src\check.h  src\CMatrix.h  src\CVector.h
+  obj\Release\Win\main.s  main.obj  check.s  check.obj      the compilers' assembly and masm's objects
+  out\Release\Win\solve3-cpp11.exe                         link's program</code></pre>
+<p>Build (<kbd>F7</kbd>) runs each source through cpp11 (<code>"toolchain": "auto"</code>: C++ goes to cpp11), masm and link, and stops; Start Without Debugging (<kbd>Ctrl+F5</kbd>) builds what is out of date and runs the program in the Output pane:</p>
+<pre><code>------ Build started: Project solve3-cpp11, Configuration Release | Windows ------
+$ Sources (cpp11)
+[cpp11]  main.cpp  -&gt;  obj/Release/Win/main.s
+cpp11: compilation completed successfully - 0 errors
+[masm]  main.s  -&gt;  obj/Release/Win/main.obj
+[cpp11]  check.cpp  -&gt;  obj/Release/Win/check.s
+cpp11: compilation completed successfully - 0 errors
+[masm]  check.s  -&gt;  obj/Release/Win/check.obj
+$ linking with link
+[LINK] out/Release/Win/solve3-cpp11.exe
+========== Build: 1 succeeded, 0 failed, 0 up-to-date, 0 skipped ==========</code></pre>
+<p>The assembly is a step on the way: it is written to <code>obj</code> and not opened. A failed build puts the caret on the first error in one of the project's own files, never in a generated <code>.s</code>; a tool that fails on every line shows its first 40 and counts the rest.</p>
+
+<h3 id="sample-settings">settings.json: GRIDE's memory, not the project's</h3>
+<p>What GRIDE keeps there - the editor, the build, the paths, the recent projects, the window. GRIDE 2.0 and GRIDE 1.0 keep their own keys beside GRIDE's in the same file. GRIDE's part of a fresh file:</p>
+<pre><code>{
+  "environment": {
+    "theme": "Dark", "font": "Consolas", "fontSize": 10, "tabSize": 4, "insertSpaces": false,
+    "lineNumbers": true, "reopenLastWorkspace": true, "saveBeforeBuild": true,
+    "jumpToFirstError": true, "askNativeTools": true, "runInIde": true,
+    "defaultProjectLocation": "C:\\Users\\you\\Documents\\GRIDE Projects",
+    "grideRoot": "", "vcvars": "", "defaultCompiler": "auto", "c6747Debugger": "auto"
+  },
+  "recent": { "files": [], "workspaces": ["...\\solve3-cpp11\\solve3-cpp11.pro"] },
+  "keySet": "visualstudio",
+  "compilerOptions": {}
+}</code></pre>
+<p>Nothing in it says where this copy of GRIDE is: the programs and <code>toolchain.json</code> are found beside the running <code>GRIDE.exe</code> (before a RIDE installation, then PATH), so one <code>settings.json</code> serves a GRIDE started from Visual Studio and an installed one alike. A help folder is written only when one is named under Tools &gt; Options, and a named folder that no longer exists is passed over. A recent project that is gone is skipped.</p>
+
+<h3 id="sample-toolchain">toolchain.json: the part a C++ build on Windows uses</h3>
+<p>The Windows target names the program for each role; cpp11's entry says how it is called. Shortened - the whole file is described entry by entry in <a href="#toolchain">section 2</a>:</p>
+<pre><code>"targets": {
+  "x86_64-windows": {
+    "debugInfo": "codeview",
+    "assemblyExtension": ".s", "objectExtension": ".obj", "programExtension": ".exe",
+    "roles": { "cCompiler": "c90", "cppCompiler": "cpp11", "shalimarCompiler": "shalimar",
+               "assembler": "masm", "linker": "link", "debugAssembler": "clang", "debugLinker": "mslink", ... }
+  }
+},
+"tools": {
+  "cpp11": {
+    "role": "cppCompiler", "exe": "cpp11.exe",
+    "configFlags": { "Debug": "-g -D_DEBUG=1", "Release": "-O2 -DNDEBUG=1" },
+    "asmSyntaxFlags": { "codeview": "-masm=gnu", "assemblerNamed": "-masm=masm" },
+    "operations": {
+      "compileToAssembly": { "args": "-S \"$(Source)\" -o \"$(AsmFile)\" $(ArchFlag) $(ConfigFlags) $(AsmSyntaxFlag) $(IncludeFlags) ..." }
+    }
+  },
+  ...
+}</code></pre>
+
+<h3 id="sample-vs">From Visual Studio to a running program</h3>
+<ol>
+  <li>Open <code>GRIDEd\GRIDE.sln</code> and Build &gt; Build Solution - every project, so the eleven programs land beside <code>GRIDE.exe</code> in <code>x64\&lt;Config&gt;</code>; a build of the GRIDE project alone leaves them out.</li>
+  <li>Debug &gt; Start Without Debugging: GRIDE starts from <code>x64\&lt;Config&gt;</code>, reads the <code>toolchain.json</code> beside it and <code>%APPDATA%\GRIDE\settings.json</code>.</li>
+  <li>File &gt; Open: <code>solve3-cpp11.pro</code> - <code>main.cpp</code> comes into the editor with it; Build (<kbd>F7</kbd>); Start Without Debugging (<kbd>Ctrl+F5</kbd>) runs it.</li>
+  <li>A C, C++ or Shalimar file open with no project is a program of its own: Build and Start make it in <code>out\&lt;Config&gt;\Win</code> beside the file, and no <code>.pro</code> is written. GRIDE 1.0's Build (<kbd>Ctrl+B</kbd>) does the same for its file in front.</li>
+</ol>
+<p><strong>Debug without clang.</strong> A Debug build's source line table goes through clang, which Visual Studio installs only with its "C++ Clang tools for Windows" component (Visual Studio Installer &gt; Modify &gt; Individual components). Without it GRIDE says so once and builds the Debug configuration as Release builds it - cpp11 writes MASM, masm and link make the program - so the program runs and the debugger shows no source lines. Release needs no clang.</p>
 </main>
 </body>
 </html>

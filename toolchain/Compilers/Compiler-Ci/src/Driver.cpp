@@ -142,8 +142,10 @@ void Driver::usage(char *file) {
         "         object, which clang assembles; 'gnu-elf' for the same code in\n"
         "         an ELF object, as the Linux suites run the Microsoft convention\n"
         "       -g writes a line table, so a debugger can stop on a line of C\n"
-        "         and step through it: DWARF, or CodeView for cdb with -masm=gnu\n"
-        "         on x86_64-windows; not in the MASM spelling\n"
+        "         and step through it: DWARF; on x86_64-windows CodeView for cdb -\n"
+        "         with -masm=gnu through clang, in the MASM spelling as the .FILE and\n"
+        "         .LINE directives GRIDE's masm reads (C90_AS, or the one beside\n"
+        "         this program; ml64 has no such words)\n"
         "       -time reports how long each phase took\n", program::kName, cc1Version(), file);
 }
 
@@ -545,11 +547,19 @@ std::vector<std::pair<std::string, std::string> > Driver::macrosFor() const {
 }
 
 // One assembly file to one object: clang for the GNU spelling, ml64 for MASM.
-std::string Driver::windowsAssemble(const std::string &source, const std::string &object) {
+std::string Driver::windowsAssemble(const std::string &source, const std::string &object) const {
     if (windowsAsmIsGnu())
         return shellQuote(hostGnuAssembler()) + " -target x86_64-pc-windows-msvc -c " +
                shellQuote(source) + " -o " + shellQuote(object);
-    return shellQuote(hostAssembler()) + " /nologo /c /Fo " + shellQuote(object) + " " +
+    // -g in the MASM spelling writes .FILE and .LINE, which GRIDE's masm reads and ml64 refuses:
+    // C90_AS, else the masm beside this program
+    std::string assembler = hostAssembler();
+    const char *env = std::getenv(program::env("AS").c_str());
+    if (debug_ && (env == nullptr || env[0] == '\0')) {
+        const std::string own = besideProgram(program_, "masm.exe");
+        if (!own.empty()) assembler = own;
+    }
+    return shellQuote(assembler) + " /nologo /c /Fo " + shellQuote(object) + " " +
            shellQuote(source);
 }
 

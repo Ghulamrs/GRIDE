@@ -61,6 +61,9 @@ private:
     int frame_reg;                      /* .SETFRAME register and offset/16 */
     int frame_off;
     int prolog_end;                     /* bytes of prologue, or -1 until .ENDPROLOG */
+    unsigned long frame_alloc;          /* .ALLOCSTACK and .PUSHREG so far, and whether .SETFRAME */
+    int frame_pushes;                   /*   came: CodeView's S_FRAMEPROC is made of them */
+    bool frame_set;
     std::vector<std::vector<unsigned char> > codes;  /* unwind codes, in the order written */
     int xdatasym;                       /* the $xdatasym symbol ml64 relocates .pdata against, or -1 */
     std::string directives;             /* INCLUDELIB: the .drectve text, written at END */
@@ -73,6 +76,7 @@ private:
     void typed(Unit &u, Operand &o);
     int jump_width(Unit &u, const Operand &o);
     void unwind(Unit &u, const std::vector<Token> &t, const std::string &w);
+    void source_line(Unit &u, const std::vector<Token> &t, const std::string &w);
     void end_frame(Unit &u);
     void data(Unit &u, const std::vector<Token> &t, size_t from, int width);
     bool operand(Unit &u, const std::vector<Token> &t, size_t a, size_t b, Operand &o);

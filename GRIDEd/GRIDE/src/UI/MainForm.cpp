@@ -12,6 +12,7 @@ namespace Gride { namespace UI {
         String^ warning;
         settings = SettingsManager::Load(warning);
         workspace = nullptr;
+        lone = nullptr;
         looseBreakpoints = gcnew Dictionary<String^, SortedSet<int>^>(StringComparer::OrdinalIgnoreCase);
         afterBuild = AfterBuild::Nothing;
         pendingChord = Keys::None;
