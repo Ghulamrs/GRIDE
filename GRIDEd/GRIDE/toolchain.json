@@ -132,7 +132,7 @@
       "emulatedProgramExtension": "",
       "libraryDirFlag": "/LIBPATH:",
       "libraryFlag": "",
-      "roles": { "cCompiler": "c90", "cppCompiler": "cpp11", "shalimarCompiler": "shalimar", "hostCompiler": "cl", "assembler": "masm", "linker": "link", "debugAssembler": "clang", "debugLinker": "mslink", "nativeAssembler": "ml64", "nativeLinker": "mslink", "debugger": "cdb", "fallbackDebugger": "lldbWindows" },
+      "roles": { "cCompiler": "c90", "cppCompiler": "cpp11", "shalimarCompiler": "shalimar", "hostCompiler": "cl", "assembler": "masm", "linker": "link", "debugAssembler": "clang", "debugLinker": "mslink", "nativeAssembler": "ml64", "nativeLinker": "mslink", "ownDebugger": "grideDbg", "debugger": "cdb", "fallbackDebugger": "lldbWindows" },
       "runtime": "hostCrt",
       "run": "program",
       "debug": "debugger",
@@ -222,7 +222,7 @@
       "configFlags": { "Debug": "-g -D_DEBUG=1", "Release": "-O2 -DNDEBUG=1" },
       "configFlagsByTarget": {},
       "options": ["c90.opt", "c90.g", "c90.defines", "c90.undefines", "general.nologo", "general.jobs", "general.time"],
-      "asmSyntaxFlags": { "codeview": "-masm=gnu", "assemblerNamed": "" },
+      "asmSyntaxFlags": { "codeview": "-masm=gnu", "assemblerNamed": "", "ownCodeView": "-masm=masm" },
       "operations": {
         "compileToAssembly": {
           "description": "C to assembly, the step every GRIDE build runs",
@@ -282,7 +282,7 @@
       "configFlags": { "Debug": "-g -D_DEBUG=1", "Release": "-O2 -DNDEBUG=1" },
       "configFlagsByTarget": {},
       "options": ["cpp11.opt", "cpp11.g", "cpp11.compress", "cpp11.defines", "cpp11.undefines", "general.nologo", "general.jobs", "general.time", "cpp11.declines"],
-      "asmSyntaxFlags": { "codeview": "-masm=gnu", "assemblerNamed": "-masm=masm" },
+      "asmSyntaxFlags": { "codeview": "-masm=gnu", "assemblerNamed": "-masm=masm", "ownCodeView": "-masm=masm" },
       "operations": {
         "compileToAssembly": {
           "description": "C++ to assembly",
@@ -354,7 +354,7 @@
       "configFlags": { "Debug": "--debug -g", "Release": "" },
       "configFlagsByTarget": { "tms6747": { "Debug": "-g", "Release": "" } },
       "options": ["shc.opt", "shc.debugrt", "shc.g", "shc.search", "general.nologo"],
-      "asmSyntaxFlags": { "codeview": "", "assemblerNamed": "" },
+      "asmSyntaxFlags": { "codeview": "", "assemblerNamed": "", "ownCodeView": "-masm=masm" },
       "operations": {
         "compileToAssembly": {
           "description": "Shalimar to assembly",
@@ -840,6 +840,46 @@
       "operations": {
         "convertToShalimar": { "description": "C to Shalimar", "args": "--to-shalimar \"$(Source)\" -o \"$(Output)\"", "output": "$(Output)", "arguments": { "--to-shalimar": "the direction", "-o": "the file to write (.shl)" } },
         "convertToC": { "description": "Shalimar to C", "args": "--to-c \"$(Source)\" -o \"$(Output)\"", "output": "$(Output)", "arguments": { "--to-c": "the direction", "-o": "the file to write (.c)" } }
+      }
+    },
+    "grideDbg": {
+      "name": "gride-dbg",
+      "description": "GRIDE's own console debugger: breakpoints, steps into, over and out, locals, watches and the call stack from the PDB GRIDE's link writes (the Win32 debug API and dbghelp); it answers in cdb's words",
+      "role": "ownDebugger",
+      "languages": [],
+      "targets": ["x86_64-windows"],
+      "exe": "gride-dbg.exe",
+      "aliases": ["gride-dbg"],
+      "words": [],
+      "lookup": { "env": "GRIDE_DBG", "installDir": "bin", "path": false, "vcvars": false },
+      "version": { "args": "--version" },
+      "outputEncoding": "utf-8",
+      "diagnostics": "none",
+      "environment": {},
+      "session": {
+        "dialect": "cdb",
+        "console": false,
+        "preamble": [".step_filter \"*!shm_*;*!shm::*;*!std::*\""],
+        "marker": "<<gride-done>>",
+        "markerCommand": ".printf \"<<gride%cdone>>\\n\", 0x2d",
+        "commands": {
+          "break": "bp `$(File):$(Line)`", "clearBreakpoints": "bc *", "run": "g", "continue": "g", "stepOver": "p", "stepInto": "t", "stepOut": "gu",
+          "afterMove": ".lastevent", "where": "ln", "runToLine": "bp /1 `$(File):$(Line)`",
+          "locals": "dv /t /V", "evaluate": "?? $(Expr)", "address": "?? &($(Expr))", "type": "?? $(Expr)", "set": "?? $(Name) = $(Value)",
+          "frames": "k", "frame": ".frame $(N)", "registers": "r", "memory": "db $(Address) L$(Count)", "quit": "q",
+          "input": ".input $(Text)"
+        }
+      },
+      "archFlag": "",
+      "includeFlag": "",
+      "defineFlag": "",
+      "installIncludeDirs": [],
+      "languageFlags": {},
+      "configFlags": { "Debug": "", "Release": "" },
+      "configFlagsByTarget": {},
+      "asmSyntaxFlags": { "codeview": "", "assemblerNamed": "" },
+      "operations": {
+        "debug": { "description": "start the program under gride-dbg, its PDB found through the program", "args": "-y \"$(OutDir)\" \"$(Program)\"", "output": "", "shown": "$(Program)", "arguments": { "-y": "where else to look for the PDB (the output folder)" } }
       }
     },
     "cdb": {

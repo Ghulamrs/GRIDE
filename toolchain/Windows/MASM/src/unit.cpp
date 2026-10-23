@@ -1,7 +1,7 @@
 #include "asm.h"
 #include <cstdio>
 
-Unit::Unit() : line(0), pass(0), current(-1), debug(false), src_file(0), src_line(0)
+Unit::Unit() : line(0), pass(0), current(-1), debug(false), src_file(0), src_line(0), src_again(false)
 {
 }
 
@@ -28,6 +28,7 @@ void Unit::begin_pass(int n)
     procs.clear();
     src_file = 0;
     src_line = 0;
+    src_again = false;
     line = 0;
     for (size_t i = 0; i < symbols.size(); i++) {
         symbols[i].prev_section = symbols[i].section;
@@ -99,10 +100,8 @@ unsigned long Unit::here()
 
 int Unit::find(const std::string &name) const
 {
-    for (size_t i = 0; i < symbols.size(); i++)
-        if (symbols[i].name == name)
-            return (int)i;
-    return -1;
+    std::unordered_map<std::string, int>::const_iterator i = symbol_index.find(name);
+    return i == symbol_index.end() ? -1 : i->second;
 }
 
 int Unit::ref(const std::string &name)
@@ -124,6 +123,7 @@ int Unit::ref(const std::string &name)
     s.prev_value = 0;
     s.common = false;
     s.externdef = false;
+    symbol_index[name] = (int)symbols.size();
     symbols.push_back(s);
     return (int)symbols.size() - 1;
 }
@@ -228,7 +228,8 @@ void Unit::difference(unsigned long at, int sym, int sub, int width)
 
 /* after a statement that started at offset `at` of section `sec`: if it put code there, the
    position it came from - the .LINE in force, else this line of the .asm - starts a line entry,
-   unless the entry before it in that section already says the same */
+   unless the entry before it in that section already says the same and no .LINE came since (a
+   compiler writes a line again where a one-line function's body starts, after its prologue) */
 void Unit::note_line(int sec, unsigned long at)
 {
     if (sec < 0 || sec != current || !sections[sec].code || sections[sec].bytes.size() <= at)
@@ -238,7 +239,9 @@ void Unit::note_line(int sec, unsigned long at)
     e.offset = at;
     e.file = src_file;
     e.line = src_file > 0 ? src_line : line;
-    for (size_t i = lines.size(); i-- > 0; ) {
+    const bool again = src_again && src_file > 0;
+    src_again = false;
+    for (size_t i = lines.size(); i-- > 0 && !again; ) {
         if (lines[i].section != sec) continue;
         if (lines[i].file == e.file && lines[i].line == e.line) return;
         break;

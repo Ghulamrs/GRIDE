@@ -274,6 +274,20 @@ namespace Gride { namespace Services {
         bool placedError;            // a diagnostic naming a file and line was seen: a fault in the source
         bool codeViewWarned;
         bool codeViewMissing;        // a Debug build with no clang: built the Release way (MASM, masm, the linker), no line table
+        bool ownCodeView;            // a file of this build wrote its own CodeView: GRIDE's link /DEBUG writes the PDB
+
+        // whether a Debug build has a file whose compiler cannot write its own CodeView, which clang must then carry
+        bool NeedsClang(GrideProject^ p, BuildConfiguration^ cfg, Target t)
+        {
+            for each (String^ src in BuildableFiles(p, cfg->Config))
+            {
+                Language lang = settings->DetectLanguage(src, p->Lang);
+                if (lang == Language::Assembly) continue;
+                RideTool tool = RideToolchain::Resolve(RideToolchain::FromWord(p->ToolchainFor(p->FolderOfFile(src))), lang);
+                if (RideToolchain::DebugsWithCodeView(tool, t, true) && !RideToolchain::OwnCodeView(tool, t, true)) return true;
+            }
+            return false;
+        }
         String^ writes;              // the file the running compiler writes: its echo of the path is not shown
         int toolLines;               // lines the running tool wrote
         int toolHidden;              // of them, the ones past MaxToolLines: counted, not shown
@@ -571,7 +585,8 @@ namespace Gride { namespace Services {
                     return s;
                 }
             }
-            if (!codeViewMissing && RideToolchain::DebugsWithCodeView(tool, t, debug) && !String::IsNullOrWhiteSpace(tc->DebugAssembler) && !String::IsNullOrWhiteSpace(tc->DebugAssembleCmd))
+            if (!codeViewMissing && RideToolchain::DebugsWithCodeView(tool, t, debug) && !RideToolchain::OwnCodeView(tool, t, debug) &&
+                !String::IsNullOrWhiteSpace(tc->DebugAssembler) && !String::IsNullOrWhiteSpace(tc->DebugAssembleCmd))
             {
                 String^ path = tc->ResolveFor("debugAssembler", tc->DebugAssembler);
                 if (File::Exists(path))
@@ -678,7 +693,9 @@ namespace Gride { namespace Services {
             // compilers write MASM and masm and the linker make the program - said once, before anything runs,
             // so masm is never handed clang's assembly
             codeViewMissing = false;
-            if (debug && !native && !emulated && !viaSetup && r->Action != BuildAction::Clean && RideToolchain::DebugsWithCodeView(RideTool::C90, t, true))
+            ownCodeView = false;
+            if (debug && !native && !emulated && !viaSetup && r->Action != BuildAction::Clean && RideToolchain::DebugsWithCodeView(RideTool::C90, t, true) &&
+                NeedsClang(p, cfg, t))
             {
                 String^ clang = String::IsNullOrWhiteSpace(tc->DebugAssembler) ? String::Empty : tc->ResolveFor("debugAssembler", tc->DebugAssembler);
                 if (clang->Length == 0 || !File::Exists(clang) || String::IsNullOrWhiteSpace(tc->DebugAssembleCmd))
@@ -808,7 +825,9 @@ namespace Gride { namespace Services {
                         String^ ranName = ran != nullptr ? ran->Name : Path::GetFileNameWithoutExtension(compiler);
                         String^ shownSources = group != nullptr ? String::Join(" ", Leaves(group)) : Path::GetFileName(src);
                         Say(String::Format("[{0}]  {1}  ->  {2}", ranName, shownSources, PathUtil::MakeRelative(p->ProjectDir, writesObject ? objFile : asmFile)));
-                        bool cv = !writesObject && !codeViewMissing && RideToolchain::DebugsWithCodeView(tool, t, debug);
+                        bool own = !writesObject && RideToolchain::OwnCodeView(tool, t, debug);
+                        bool cv = !writesObject && !own && !codeViewMissing && RideToolchain::DebugsWithCodeView(tool, t, debug);
+                        if (own) ownCodeView = true;
                         List<String^>^ optionEnv = RideToolchain::OptionEnvironment(p->Options, RideToolchain::Definition(tool), cfg->Config);
                         // RIDE's own compilers write UTF-8; a program the definitions know is read as they say
                         bool utf8 = ran != nullptr ? String::Compare(ran->OutputEncoding, "utf-8", true) == 0 : tool != RideTool::Cl && tool != RideTool::HostCxx;
@@ -898,7 +917,16 @@ namespace Gride { namespace Services {
             // cl's objects (a part the project or a folder gives to cl) are Microsoft's: its link.exe links them
             bool clObjects = false, otherObjects = false;
             PartsOf(p, sources, clObjects, otherObjects);
-            Step^ ld = LinkerFor(tc, t, debug, native, codeView || (debug && !emulated && !native && !codeViewMissing && RideToolchain::DebugsWithCodeView(RideTool::C90, t, debug)), clObjects && !emulated);
+            bool clangCodeView = codeView || (debug && !emulated && !native && !codeViewMissing && !ownCodeView && NeedsClang(p, cfg, t) &&
+                                              RideToolchain::DebugsWithCodeView(RideTool::C90, t, debug));
+            Step^ ld = LinkerFor(tc, t, debug, native, clangCodeView, clObjects && !emulated);
+            // the PDB of GRIDE's own link: /DEBUG, which it writes beside the program
+            if (ownCodeView && !clangCodeView && !emulated && ld->Role == "linker")
+            {
+                String^ flags;
+                if (!mx->Values->TryGetValue("LinkFlags", flags)) flags = String::Empty;
+                if (flags->IndexOf("/DEBUG", StringComparison::OrdinalIgnoreCase) < 0) mx->Set("LinkFlags", (flags + " /DEBUG")->Trim());
+            }
             // tms6747 with the named linker gone: TI's stands in, and the console says so (RIDE's tiLinker)
             if (emulated && !native && !viaSetup && !File::Exists(ld->Path))
             {
@@ -1133,7 +1161,8 @@ namespace Gride { namespace Services {
         {
             bool debug = cfg->IsDebug;
             // no clang: the Release spelling (-masm=masm) and no -g, which only clang's assembly carries
-            bool noLineTable = debug && codeViewMissing && RideToolchain::DebugsWithCodeView(tool, cfg->TargetKind, true);
+            bool noLineTable = debug && codeViewMissing && RideToolchain::DebugsWithCodeView(tool, cfg->TargetKind, true) &&
+                               !RideToolchain::OwnCodeView(tool, cfg->TargetKind, true);
             String^ flags = RideToolchain::ConfigFlags(tool, debug, cfg->TargetKind, p->Options);
             if (noLineTable)
             {

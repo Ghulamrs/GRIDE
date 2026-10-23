@@ -256,12 +256,23 @@ namespace Gride { namespace Services {
             return debug && d != nullptr && String::Compare(d->DebugInfo, "codeview", true) == 0 && UsesArch(t);
         }
 
-        // the compiler's asmSyntaxFlags: codeview for a CodeView Debug build, assemblerNamed for a host
-        // build with an assembler named; "" otherwise (assemblerFlag)
+        // a Debug build of a compiler that writes its CodeView in the MASM spelling itself (toolchain.json's
+        // asmSyntaxFlags.ownCodeView: c90, shalimar, cpp11 from 1.29): GRIDE's masm carries it and GRIDE's
+        // link /DEBUG writes the PDB - no clang, no Microsoft link.exe
+        static bool OwnCodeView(RideTool t, Target target, bool debug)
+        {
+            if (!DebugsWithCodeView(t, target, debug)) return false;
+            ToolDefinition^ d = Definition(t);
+            return d != nullptr && !String::IsNullOrEmpty(d->AsmSyntaxFlag("ownCodeView"));
+        }
+
+        // the compiler's asmSyntaxFlags: ownCodeView or codeview for a CodeView Debug build, assemblerNamed for
+        // a host build with an assembler named; "" otherwise (assemblerFlag)
         static String^ AssemblerFlag(RideTool t, Target target, bool debug, bool assemblerNamed)
         {
             ToolDefinition^ d = Definition(t);
             if (d == nullptr) return String::Empty;
+            if (OwnCodeView(t, target, debug)) return d->AsmSyntaxFlag("ownCodeView");
             if (DebugsWithCodeView(t, target, debug)) return d->AsmSyntaxFlag("codeview");
             TargetDefinition^ td = TargetDef(target);
             if (td != nullptr && td->Host && assemblerNamed) return d->AsmSyntaxFlag("assemblerNamed");

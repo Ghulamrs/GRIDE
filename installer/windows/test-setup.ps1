@@ -4,8 +4,8 @@
 # GRIDE.exe starts and answers and cpp11 runs; a deleted program comes back with msiexec /fa; msiexec /x
 # takes the folder, the shortcut and the registry values away again.
 #
-#   test-setup.ps1 [-Msi <GRIDE-Setup-ver.msi>] [-Choices Black,Grey,White] [-Cpp11Version 1.28]
-param([string]$Msi = "", [string[]]$Choices = @("Black", "Grey", "White"), [string]$Cpp11Version = "1.28")
+#   test-setup.ps1 [-Msi <GRIDE-Setup-ver.msi>] [-Choices Black,Grey,White] [-Cpp11Version 1.29]
+param([string]$Msi = "", [string[]]$Choices = @("Black", "Grey", "White"), [string]$Cpp11Version = "1.29")
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Msi-Com.ps1")
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)

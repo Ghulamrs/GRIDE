@@ -15,6 +15,7 @@ namespace Gride { namespace UI {
         lone = nullptr;
         looseBreakpoints = gcnew Dictionary<String^, SortedSet<int>^>(StringComparer::OrdinalIgnoreCase);
         afterBuild = AfterBuild::Nothing;
+        programLineLast = false;
         pendingChord = Keys::None;
         fullScreen = false;
         autoHidden = false;

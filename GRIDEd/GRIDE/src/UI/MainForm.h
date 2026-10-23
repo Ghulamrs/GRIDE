@@ -90,7 +90,7 @@ namespace Gride { namespace UI {
     };
 
     // what a build was started for: nothing more, a run, the debugger, RIDE's Emulate on vm6747, RIDE's Verify
-    public enum class AfterBuild { Nothing, Run, Debug, Emulate, Verify };
+    public enum class AfterBuild { Nothing, Run, Debug, DebugAtEntry, Emulate, Verify };
 
     // =========================================================================
     public ref class MainForm : public Form
@@ -121,6 +121,7 @@ namespace Gride { namespace UI {
         DebugEngine^ debugger;
         CommandRegistry^ commands;
         AfterBuild afterBuild;
+        bool programLineLast;     // the Debug output's last line is the program's, which its rest may go on
         Keys pendingChord;
         bool fullScreen;
         FormWindowState savedState;
@@ -417,6 +418,7 @@ namespace Gride { namespace UI {
         void DebugBreakAll();
         void DebugStepInto();
         void DebugStepOver();
+        void DebugStartAtEntry();
         void DebugStepOut();
         void DebugRunToCursor();
         void DebugUpStack();
@@ -433,6 +435,7 @@ namespace Gride { namespace UI {
         void DebugConnect();
         void DebugLoadProgram();
         void LaunchDebugger(String^ program);
+        void LaunchDebugger(String^ program, bool atEntry);
         void AttachDebugger(DebugEngine^ engine);
         String^ AssemblyProgramFor(GrideProject^ p, BuildConfiguration^ cfg, ToolchainSettings^ tc);
         void OnDebugProgramOutput(String^ line);

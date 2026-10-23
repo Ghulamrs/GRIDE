@@ -97,6 +97,9 @@ namespace Gride { namespace Services {
 
         // program = linked output, entryFile/entryLine = where main() starts
         virtual bool Start(String^ program, Target target, String^ entryFile, int entryLine) abstract;
+        // F10 / F11 started the session: Start stops at main's first line, as Visual Studio does (F5 runs on
+        // to a breakpoint or the end)
+        property bool StopAtEntry;
         virtual void Stop() abstract;
         virtual void Continue() abstract;
         virtual void BreakAll() abstract;
@@ -148,6 +151,21 @@ namespace Gride { namespace Services {
         virtual String^ WhyNoLocals() { return String::Empty; }
         // why another frame cannot be looked at, when the engine walks no stack (RIDE's saysHowDeepOnly)
         virtual String^ WhyNoStackWalk() { return String::Empty; }
+        // the program's own input: whether a line typed for it reaches it, and the line handed over (the
+        // program's console echoes it, so it comes back among the program's lines)
+        property bool TakesInput { virtual bool get() { return false; } }
+        virtual bool SendInput(String^ line) { return false; }
+
+        // a program line that goes on with the line before it, told unfinished ("Enter n: " at a stop, then
+        // "5" once typed): the rest, after the engine's mark; false for a line of its own
+        literal String^ ContinuedMark = "<<more>>";
+        static bool Continues(String^ line, String^% rest)
+        {
+            rest = line;
+            if (line == nullptr || !line->StartsWith(ContinuedMark)) return false;
+            rest = line->Substring(ContinuedMark->Length);
+            return true;
+        }
 
         // breakpoints: full path -> 1-based lines (shared with the editors, read by the engine)
         void SetBreakpoints(Dictionary<String^, SortedSet<int>^>^ bps) { if (bps != nullptr) breakpoints = bps; }
@@ -178,6 +196,7 @@ namespace Gride { namespace Services {
             sources = gcnew List<String^>();
             watches = gcnew List<DebugWatch^>();
             currentFrame = 0; exitStatus = 0; exited = false;
+            StopAtEntry = false;
         }
 
         DebugState state;
@@ -198,6 +217,7 @@ namespace Gride { namespace Services {
             location = gcnew StopInfo(file, line, reason, function);
             currentFrame = 0;
             state = DebugState::Break;
+            ReadWatches();      // read stopped, so the Watch pane shows values, not "not running"
             StateChanged(state);
             Stopped(location);
         }

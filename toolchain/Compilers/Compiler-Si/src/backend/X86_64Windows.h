@@ -43,6 +43,7 @@ private:
     int globalSlots_ = 0;
     int lastUnit_ = -1;        // the last .LINE, so a line is entered once per run of it
     int lastLine_ = -1;
+    bool atEntry_ = false;     // the function's own line was the last entered, nothing since: a statement on it is the body's start
 };
 
 }

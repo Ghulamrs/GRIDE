@@ -273,6 +273,7 @@ void MasmSpelling::functionBegin(const std::string &name, bool exported) {
     lastLoc_.clear();
     lastLocFile_ = lastLocLine_ = 0;
     linesRun_.clear();
+    entries_ = 0;
     defined_.insert(name);
     if (exported) exported_.insert(name);
     flushPending();
@@ -404,11 +405,19 @@ static bool holdsInstruction(const std::string &text) {
 
 // `.LINE line, file` before the instructions of a line, as CoffSpelling writes `.cv_loc`: one entry
 // per run of a line, no second run of it in a function (cdb refuses `bp` on a line entered twice),
-// and one no instruction follows replaced by the next.
+// and one no instruction follows replaced by the next. **But the body's start**: a first statement
+// on the entry's own `{` line (a one-line function) is entered again after the prologue and the
+// parameters' stores, so a debugger stops where the parameters are stored (gride-dbg's bodyStart
+// takes a function's second entry of its first line as its body).
 void MasmSpelling::location(int file, int line, int) {
     if (!inFunction_) return;
-    if (file == lastLocFile_ && line == lastLocLine_) return;
-    if (!linesRun_.insert(std::make_pair(file, line)).second) return;
+    const bool bodyStart = entries_ == 1 && file == lastLocFile_ && line == lastLocLine_ &&
+                           lastLocAt_ + lastLoc_.size() <= o_.size() && holdsInstruction(o_.substr(lastLocAt_ + lastLoc_.size()));
+    if (!bodyStart) {
+        if (file == lastLocFile_ && line == lastLocLine_) return;
+        if (!linesRun_.insert(std::make_pair(file, line)).second) return;
+    }
+    entries_++;
     lastLocFile_ = file;
     lastLocLine_ = line;
     if (!lastLoc_.empty() && lastLocAt_ + lastLoc_.size() <= o_.size() &&

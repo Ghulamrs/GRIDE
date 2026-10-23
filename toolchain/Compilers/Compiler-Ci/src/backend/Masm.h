@@ -59,12 +59,14 @@ private:
     std::set<std::string> defined_, exported_, referenced_, unreserved_;
 
     // The line entries of the function being written: the last `.LINE` and where it went (one no
-    // instruction follows is replaced by the next), and every (file, line) given a run already.
+    // instruction follows is replaced by the next), and every (file, line) given a run already;
+    // how many were written, so the second can be the body's start on the entry's own line.
     bool inFunction_ = false;
     std::string lastLoc_;
     std::size_t lastLocAt_ = 0;
     int lastLocFile_ = 0, lastLocLine_ = 0;
     std::set<std::pair<int, int> > linesRun_;
+    int entries_ = 0;
 
     struct Rendered {
         std::string text;

@@ -167,7 +167,14 @@ protected:
     virtual void endCleanupFunclet() {}
 
     // Open a handler funclet and answer its symbol; close it naming the address in the parent to continue at, which a funclet returns in rax. Between the two the body is walked as if inline, the funclet setting rbp from the parent.
-    virtual std::string beginFunclet() { return std::string(); }
+    // `pos` is where the handler is written (the `catch`), the line its entry is named by under -g; `number` counts the function's funclets from 1 (DwarfBlock::funclet); `cleanup` tells a destructor funclet from a catch (1.29).
+    virtual std::string beginFunclet(std::size_t pos, int number, bool cleanup) { (void)pos; (void)number; (void)cleanup; return std::string(); }
+    // The one door to beginFunclet: numbers the funclet and marks the blocks opened inside it as its.
+    std::string openFunclet(std::size_t pos, bool cleanup) {
+        funcletNo_ = ++funcletCount_;
+        return beginFunclet(pos, funcletNo_, cleanup);
+    }
+    void leaveFunclet() { funcletNo_ = 0; }
     // Leave the handler funclet early, the runtime continuing at `label`.
     virtual void funcletLeave(const std::string &label) { (void)label; }
     virtual void endFunclet(const std::string &resume) { (void)resume; }
@@ -199,6 +206,7 @@ protected:
     void clearMsTries() {
         msStates_.clear(); msTryBlocks_.clear(); msIpRows_.clear();
         msFuncletRows_.clear(); msCurState_ = -1; msUnwindHelpSlot_ = 0;
+        funcletCount_ = funcletNo_ = 0;
     }
 
     void resetBlocks(const std::vector<int> &parents);
@@ -225,6 +233,8 @@ private:
     std::vector<MsIpRow> msIpRows_, msFuncletRows_;
     int msCurState_ = -1;
     int msUnwindHelpSlot_ = 0;
+    // The funclets this function has opened, and the one being walked (0 outside any) - see openFunclet.
+    int funcletCount_ = 0, funcletNo_ = 0;
     const Source *lines_ = nullptr;
     std::string compDir_;
     std::vector<DwarfBlock> blocks_;

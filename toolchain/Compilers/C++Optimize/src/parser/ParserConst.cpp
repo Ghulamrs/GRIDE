@@ -758,9 +758,10 @@ bool Parser::instantiateForConstant(const std::string &symbol) const {
             self.bindTemplateParameters(sp.params, sp.binding, sp.values, sp.packs, &undo);
             std::vector<std::vector<ConstexprSlot> > frames;
             frames.swap(constexprFrames_);
-            const std::string wasKey = instantiationKey_, wasOf = instantiationOf_;
+            const std::string wasKey = instantiationKey_, wasOf = instantiationOf_, wasDisplay = instantiationDisplay_;
             self.instantiationKey_.clear();
             self.instantiationOf_.clear();
+            self.instantiationDisplay_.clear();
             const bool wasInline = replayingInline_;
             const std::size_t resume = at_;
             self.replayInlineBodies(std::vector<PendingBody>(1, body));
@@ -768,6 +769,7 @@ bool Parser::instantiateForConstant(const std::string &symbol) const {
             self.replayingInline_ = wasInline;
             self.instantiationKey_ = wasKey;
             self.instantiationOf_ = wasOf;
+            self.instantiationDisplay_ = wasDisplay;
             frames.swap(constexprFrames_);
             self.unbindTemplateParameters(undo);
             return true;

@@ -176,7 +176,9 @@ namespace Gride { namespace Services {
                 // ln says "path\file.c(9)" or "path\file.c(9)+0x2c"; the program's own "greet(4) is 10" is not a place
                 String^ after = line->Substring(close + 1);
                 if (after->Length > 0 && !after->StartsWith("+0x")) continue;
-                if (!Path::HasExtension(line->Substring(0, open))) continue;
+                // a source has an extension, or is a standard header named by its full path (include\string)
+                String^ named = line->Substring(0, open);
+                if (!Path::HasExtension(named) && !Path::IsPathRooted(named)) continue;
                 stop->File = line->Substring(0, open);
                 stop->Line = ParseInt(number, 10);
                 stop->Stopped = true;
@@ -330,11 +332,11 @@ namespace Gride { namespace Services {
                 {
                     if (line[0] == L'?') continue;
                     if (CdbRefused(line)) return String::Empty;
-                    int space = line->LastIndexOf(L' ');
-                    if (space < 0 || space + 1 >= line->Length) continue;
-                    String^ value = line->Substring(space + 1);
+                    int at = CdbValueAt(line);
+                    if (at <= 0 || at >= line->Length) continue;
+                    String^ value = line->Substring(at);
                     if (value->StartsWith("0n")) value = value->Substring(2);
-                    if (!HasDigit(value)) continue;
+                    if (!CdbValue(value)) continue;
                     return value;
                 }
                 int dollar = line->IndexOf(L'$');
@@ -356,11 +358,10 @@ namespace Gride { namespace Services {
                 {
                     if (line[0] == L'?') continue;
                     if (CdbRefused(line)) return String::Empty;
-                    int space = line->LastIndexOf(L' ');
-                    if (space < 0) continue;
-                    String^ value = line->Substring(space + 1);
-                    if (!HasDigit(value)) continue;
-                    return line->Substring(0, space)->Trim();
+                    int at = CdbValueAt(line);
+                    if (at <= 0) continue;
+                    if (!CdbValue(line->Substring(at))) continue;
+                    return line->Substring(0, at)->Trim();
                 }
                 if (GdbLike(kind))
                 {
@@ -391,6 +392,46 @@ namespace Gride { namespace Services {
                 found->Append(c);
             }
             return found->Length > 2 ? found->ToString() : String::Empty;
+        }
+
+        // where the value starts in cdb's answer to "?? x", after the type: the last word, or the whole of a
+        // quoted text or a braced list ending the line, which may hold spaces ("char [12] "Alice Smith"",
+        // "int[] {5, 7, 13}"); -1 when there is no type before it
+        static int CdbValueAt(String^ line)
+        {
+            wchar_t last = line->Length > 0 ? line[line->Length - 1] : L'\0';
+            if (last == L'"' || last == L'}')
+            {
+                wchar_t open = last == L'"' ? L'"' : L'{';
+                for (int i = 1; i < line->Length; i++) if (line[i] == open && line[i - 1] == L' ') return i;
+            }
+            int space = line->LastIndexOf(L' ');
+            return space < 0 ? -1 : space + 1;
+        }
+
+        // whether the words after the type are a value: a number, true or false, a quoted text, a braced list
+        static bool CdbValue(String^ value)
+        {
+            return HasDigit(value) || value == "true" || value == "false" ||
+                   (value->Length >= 2 && ((value[0] == L'"' && value->EndsWith("\"")) || (value[0] == L'{' && value->EndsWith("}"))));
+        }
+
+        // a complaint as GRIDE's panes say it: cdb's "Couldn't resolve error at 'count'" about the
+        // expression's own first name is a name not in scope where the program stopped (gride-dbg says so)
+        static String^ Friendly(String^ complaint, String^ expression)
+        {
+            if (String::IsNullOrEmpty(complaint) || String::IsNullOrEmpty(expression)) return complaint;
+            String^ head = "Couldn't resolve error at '";
+            int at = complaint->IndexOf(head);
+            if (at < 0) return complaint;
+            int end = complaint->IndexOf(L'\'', at + head->Length);
+            if (end < 0) return complaint;
+            String^ name = complaint->Substring(at + head->Length, end - at - head->Length);
+            int i = 0;
+            while (i < expression->Length && (expression[i] == L'*' || expression[i] == L'&' || expression[i] == L'(' || expression[i] == L' ')) i++;
+            int j = i;
+            while (j < expression->Length && (Char::IsLetterOrDigit(expression[j]) || expression[j] == L'_' || expression[j] == L':')) j++;
+            return name->Length > 0 && expression->Substring(i, j - i) == name ? "not in scope here" : complaint;
         }
 
         // the complaint in an answer, or "" (RIDE's complaintIn)
@@ -631,6 +672,10 @@ namespace Gride { namespace Services {
             if (bare->StartsWith("(") && bare->Contains("!")) return true;
             if (bare->Contains("`") && bare->Length > 0 && IsHex(bare[0])) return true;
             if (bare->EndsWith(")") && (bare->Contains(".c(") || bare->Contains(".cpp(") || bare->Contains(".h("))) return true;
+            // ln's place for any source ("matrix.shl(12)", "list.hpp(40)"): a path with an extension and a line number
+            int open = bare->LastIndexOf(L'(');
+            if (open > 0 && bare->EndsWith(")") && Digits(bare->Substring(open + 1, bare->Length - open - 2)) &&
+                (Path::HasExtension(bare->Substring(0, open)) || Path::IsPathRooted(bare->Substring(0, open)))) return true;
             return false;
         }
         static bool CdbRefused(String^ line) { return line->Contains("Couldn't resolve") || line->Contains("<<gride") || line->Contains("rror"); }
@@ -874,12 +919,21 @@ namespace Gride { namespace Services {
             }
             if (td != nullptr && td->Host)
             {
+                // GRIDE's own debugger where it is beside GRIDE: the PDB of GRIDE's link (or link.exe's), read
+                // through dbghelp, driven in cdb's words - first, unless Tools > Options names cdb (then it
+                // stands in where cdb is not installed)
+                String^ choice = s == nullptr ? "auto" : s->Env->EffectiveWindowsDebugger();
+                ToolDefinition^ ownDbg = defs->ToolFor(t, "ownDebugger");
+                String^ ownExe = ownDbg == nullptr ? nullptr : tc->ResolveFor("ownDebugger", ownDbg->Exe);
+                bool ownHere = ownDbg != nullptr && ownDbg->Session != nullptr && ownDbg->Operation("debug") != nullptr && !String::IsNullOrEmpty(ownExe) && File::Exists(ownExe);
+                if (ownHere && choice != "cdb") return OwnDebugger(l, ownDbg, ownExe, program, String::Empty);
                 // cl's PDB, and c90's and cpp11's on x86_64-windows: CodeView, which cdb reads
                 ToolDefinition^ cdb = defs->ToolFor(t, "debugger");
                 String^ exe = tc->ResolveFor("debugger", tc->Debugger);
                 if (cdb == nullptr || String::IsNullOrEmpty(exe) || !File::Exists(exe))
                 {
                     String^ cdbName = cdb == nullptr ? "cdb" : cdb->Name;
+                    if (ownHere) return OwnDebugger(l, ownDbg, ownExe, program, "the setting asks for " + cdbName + ", which is not installed - " + ownDbg->Name + " stands in");
                     // the debugger named for the role fallbackDebugger stands in where it is found (not RIDE's: cdb alone there)
                     ToolDefinition^ fb = defs->ToolFor(t, "fallbackDebugger");
                     String^ fbExe = fb == nullptr ? nullptr : tc->ResolveFor("fallbackDebugger", fb->Exe);
@@ -898,6 +952,8 @@ namespace Gride { namespace Services {
                 }
                 l->Kind = DebuggerKind::Cdb;
                 l->Tool = cdb; l->Session = cdb->Session; l->Backend = cdb->Name;
+                if (choice == "gride-dbg") l->BackendWhy = "the setting asks for " + (ownDbg == nullptr ? "gride-dbg" : ownDbg->Name) + ", which is not beside GRIDE - " + cdb->Name + " stands in";
+                else if (choice == "cdb" && ownHere) l->BackendWhy = "the setting asks for " + cdb->Name;
                 l->Command = RideToolchain::Quote(exe) + " " + cdb->OperationArgs("debug")->Replace("$(Program)", program)->Replace("$(OutDir)", Path::GetDirectoryName(program))->Trim();
                 if (l->Session == nullptr) l->WhyNot = cdb->Name + " has no session in toolchain.json - nothing knows how to drive it";
                 return l;
@@ -907,6 +963,35 @@ namespace Gride { namespace Services {
             l->WhyNot = "the program is built for " + arch + " - debug it there" + (theirs == nullptr ? String::Empty : ", with " + theirs->Name) +
                         "; here " + arch + " only reaches assembly";
             return l;
+        }
+
+        // GRIDE's own debugger for the program, why saying what put it there when the setting asked for another
+        static DebugLaunch^ OwnDebugger(DebugLaunch^ l, ToolDefinition^ ownDbg, String^ ownExe, String^ program, String^ why)
+        {
+            l->Kind = DebugTranscript::DialectOf(ownDbg->Session->Dialect);
+            if (l->Kind == DebuggerKind::None) l->Kind = DebuggerKind::Cdb;
+            l->Tool = ownDbg; l->Session = ownDbg->Session; l->Backend = ownDbg->Name; l->BackendWhy = why;
+            l->Command = RideToolchain::Quote(ownExe) + " " + ownDbg->OperationArgs("debug")->Replace("$(Program)", program)->Replace("$(OutDir)", Path::GetDirectoryName(program))->Trim();
+            return l;
+        }
+
+        // where main() starts, for a stop there (F10 / F11 with nothing debugged): C's and C++'s "int main(",
+        // Shalimar's "fun <> = main("; false when no source of the project has one
+        static bool EntryOf(GrideProject^ p, String^% file, int% line)
+        {
+            file = nullptr; line = 0;
+            if (p == nullptr) return false;
+            Regex^ c = gcnew Regex("^\\s*(int|void)?\\s*main\\s*\\(");
+            Regex^ shalimar = gcnew Regex("^\\s*fun\\s*<[^>]*>\\s*=\\s*main\\s*\\(");
+            for each (String^ f in p->AllFiles())
+            {
+                if (!File::Exists(f) || PathUtil::HasExtension(f, ".h")) continue;
+                array<String^>^ lines;
+                try { lines = File::ReadAllLines(f); } catch (Exception^) { continue; }
+                for (int i = 0; i < lines->Length; i++)
+                    if (c->IsMatch(lines[i]) || shalimar->IsMatch(lines[i])) { file = f; line = i + 1; return true; }
+            }
+            return false;
         }
 
         // RIDE's session for a Shalimar program where no engine reads it: the program itself, started with
@@ -991,6 +1076,7 @@ namespace Gride { namespace Services {
             onConsole = session != nullptr && session->Console;
             gate = gcnew Object();
             Said = gcnew StringBuilder();
+            entryFile = nullptr; entryLine = 0;
         }
 
         property String^ Name { virtual String^ get() override { return launch->Backend + " (" + (session == nullptr ? "no session" : session->Dialect) + ")"; } }
@@ -1002,11 +1088,14 @@ namespace Gride { namespace Services {
         // everything the debugger said in this session, for a report
         property StringBuilder^ Said;
 
-        // RIDE's start: the command, the preamble, the marker and the wait for it; then every breakpoint, then run
+        // RIDE's start: the command, the preamble, the marker and the wait for it; then every breakpoint, then
+        // run - to main's first line when F10 / F11 started it (StopAtEntry)
         virtual bool Start(String^ program, Target target, String^ entryFile, int entryLine) override
         {
             if (!StartSession()) return false;
-            BeginMove("run", false);
+            this->entryFile = entryFile;
+            this->entryLine = entryLine;
+            BeginMove(StopAtEntry && !String::IsNullOrEmpty(entryFile) && entryLine > 0 ? "runToEntry" : "run", false);
             return true;
         }
 
@@ -1071,6 +1160,7 @@ namespace Gride { namespace Services {
 
         // ---- the moves, synchronous (the tests' way in; the overrides above run these on a worker) ----
         DebugStop^ RunNow() { return MoveNow("run", false); }
+        DebugStop^ RunToEntryNow(String^ file, int line) { entryFile = file; entryLine = line; return MoveNow("runToEntry", false); }
         DebugStop^ ContinueNow() { return MoveNow("continue", false); }
         DebugStop^ StepOverNow() { return MoveNow("stepOver", true); }
         DebugStop^ StepIntoNow() { return MoveNow("stepInto", true); }
@@ -1127,7 +1217,7 @@ namespace Gride { namespace Services {
             String^ answer = Ask(session->Command("evaluate")->Replace("$(Expr)", expression));
             String^ value = DebugTranscript::ReadValue(dialect, answer, session->Marker);
             if (value->Length > 0) { ok = true; return value; }
-            String^ why = DebugTranscript::ComplaintIn(answer);
+            String^ why = DebugTranscript::Friendly(DebugTranscript::ComplaintIn(answer), expression);
             return why->Length == 0 ? "no answer" : why;
         }
 
@@ -1150,7 +1240,7 @@ namespace Gride { namespace Services {
             said = String::Empty;
             if (state != DebugState::Break || String::IsNullOrWhiteSpace(name) || String::IsNullOrWhiteSpace(value)) return false;
             String^ answer = Ask(session->Command("set")->Replace("$(Name)", name)->Replace("$(Value)", value));
-            String^ why = DebugTranscript::ComplaintIn(answer);
+            String^ why = DebugTranscript::Friendly(DebugTranscript::ComplaintIn(answer), name);
             if (why->Length > 0) { said = why; return false; }
             ReadWatches();
             return true;
@@ -1172,6 +1262,16 @@ namespace Gride { namespace Services {
         virtual void BreakpointsChanged() override
         {
             if (state == DebugState::Break) SetEveryBreakpoint();
+        }
+
+        // the program's input, where the session can hand it over (gride-dbg's ".input"): at once, even
+        // while a move waits for the program, which may be waiting for this very line
+        property bool TakesInput { virtual bool get() override { return session != nullptr && session->Has("input"); } }
+        virtual bool SendInput(String^ line) override
+        {
+            DebugProcess^ p = proc;
+            if (p == nullptr || !p->Running || !TakesInput) return false;
+            return p->Say(session->Command("input")->Replace("$(Text)", line == nullptr ? String::Empty : line));
         }
 
         // one command, then the marker, then what came before it (RIDE's ask)
@@ -1204,6 +1304,8 @@ namespace Gride { namespace Services {
         Object^ gate;
         volatile bool moving;
         bool onConsole;
+        String^ entryFile;      // where main() starts (Start's), for the stop there
+        int entryLine;
 
         String^ Fill(String^ templ, String^ file, int line)
         {
@@ -1250,7 +1352,7 @@ namespace Gride { namespace Services {
             {
                 if (state != DebugState::Running) state = DebugState::Running;
                 DebugStop^ origin = last;
-                DebugStop^ stop = stepping ? AfterStepping(commandId) : AfterMoving(commandId);
+                DebugStop^ stop = commandId == "runToEntry" ? ToEntry() : stepping ? AfterStepping(commandId) : AfterMoving(commandId);
                 // an incrementally linked program calls through a thunk (cdemo!ILT+5725(printf)): one
                 // more step reaches the function itself
                 String^ fresh = stop->Said;
@@ -1275,31 +1377,86 @@ namespace Gride { namespace Services {
             finally { moving = false; }
         }
 
+        // F10 / F11 with nothing debugged: a breakpoint for once on main's line, the run to it, and on past
+        // main's prologue to its first statement when the stop is main's entry (as a step into a function goes)
+        DebugStop^ ToEntry()
+        {
+            if (session->Has("runToLine") && !String::IsNullOrEmpty(entryFile) && entryLine > 0)
+            {
+                String^ said = Ask(Fill(session->Command("runToLine"), entryFile, entryLine));
+                bool ok = dialect == DebuggerKind::Cdb ? !said->Contains("Couldn't resolve") && !said->Contains("Bp expression") : true;
+                if (!ok) Print("no stop at main's line " + Path::GetFileName(entryFile) + ":" + entryLine + " - running on");
+            }
+            DebugStop^ stop = AfterMoving("run");
+            if (dialect == DebuggerKind::Cdb && stop->Stopped && stop->Function == "main" && AtFunctionEntry(stop->Said)) stop = AfterStepping("stepOver");
+            return stop;
+        }
+
+        // a move's answer read a little at a time, the program's lines in it told as they come - the prompt
+        // of a program waiting for its input among them - not when the move ends; told: how much of the
+        // answer has been looked through for them
+        String^ ReadMoving(DebugProcess^ p, bool% found, int% told)
+        {
+            StringBuilder^ all = gcnew StringBuilder();
+            Stopwatch^ waited = Stopwatch::StartNew();
+            found = false;
+            told = 0;
+            for (;;)
+            {
+                bool got;
+                String^ part = p->ReadUntil(session->Marker, 150, got, true);
+                all->Append(part);
+                Said->Append(part);
+                if (got) { found = true; break; }
+                String^ text = all->ToString();
+                int ended = text->LastIndexOf(L'\n') + 1;
+                if (ended > told)
+                {
+                    for each (String^ line in DebugTranscript::ProgramOutput(dialect, text->Substring(told, ended - told), MarkerStart())) PrintProgram(line);
+                    told = ended;
+                }
+                if (!p->Running || waited->ElapsedMilliseconds > MoveTimeoutMs) break;
+            }
+            return all->ToString();
+        }
+
         DebugStop^ AfterMoving(String^ commandId)
         {
             String^ command = session->Command(commandId);
             DebugProcess^ p = proc;
             if (p == nullptr || !p->Running) { DebugStop^ gone = gcnew DebugStop(); gone->Exited = true; return gone; }
             String^ said;
+            int told = 0;       // how much of said was looked through for the program's lines while the move went on
             Monitor::Enter(gate);
             try
             {
                 p->Say(command);
                 p->Say(session->MarkerCommand);
                 bool found;
-                said = p->ReadUntil(session->Marker, MoveTimeoutMs, found);
-                Said->Append(said);
-                if (onConsole) said = DebugTranscript::WithoutEcho(DebugTranscript::WithoutEscapes(said), command, session->MarkerCommand);
+                if (onConsole)
+                {
+                    said = p->ReadUntil(session->Marker, MoveTimeoutMs, found);
+                    Said->Append(said);
+                    said = DebugTranscript::WithoutEcho(DebugTranscript::WithoutEscapes(said), command, session->MarkerCommand);
+                }
+                else said = ReadMoving(p, found, told);
                 if (!found && p->Running) { Print("the debugger stopped answering"); p->Stop(nullptr); }
             }
             finally { Monitor::Exit(gate); }
+            String^ untold = said->Substring(told);
             if (dialect == DebuggerKind::Cdb && session->Has("afterMove"))
             {
                 String^ ev = Ask(session->Command("afterMove"));
                 said += "\n" + ev;
-                if (!ev->Contains("Exit process") && session->Has("where")) said += "\n" + Ask(session->Command("where"));
+                untold += "\n" + ev;
+                if (!ev->Contains("Exit process") && session->Has("where"))
+                {
+                    String^ where = Ask(session->Command("where"));
+                    said += "\n" + where;
+                    untold += "\n" + where;
+                }
             }
-            for each (String^ line in DebugTranscript::ProgramOutput(dialect, said, MarkerStart())) PrintProgram(line);
+            for each (String^ line in DebugTranscript::ProgramOutput(dialect, untold, MarkerStart())) PrintProgram(line);
             DebugStop^ stop = DebugTranscript::ReadStop(dialect, said);
             if (proc == nullptr || !proc->Running) { if (!stop->Exited) stop->Stopped = false; }
             if (stop->Stopped)
@@ -1382,7 +1539,6 @@ namespace Gride { namespace Services {
             if (stop->Stopped)
             {
                 String^ file = ResolveFile(stop->File);
-                ReadWatches();
                 Print(DebugTranscript::StopLine(file, stop->Line, stop->Function));
                 StopAt(file, stop->Line, stop->Said->Contains("Breakpoint") || stop->Said->Contains("breakpoint") ? "breakpoint" : "step", stop->Function);
                 return;

@@ -207,10 +207,10 @@ namespace Gride { namespace UI {
         if (!s->Ok) return;
         Workspace^ w = workspace != nullptr ? workspace : lone;
         if (w == nullptr || w->StartupProject == nullptr) return;   // closed during the build
-        if (next == AfterBuild::Debug)
+        if (next == AfterBuild::Debug || next == AfterBuild::DebugAtEntry)
         {
             GrideProject^ p = w->StartupProject;
-            LaunchDebugger(BuildEngine::ProgramPath(p, p->GetConfiguration(CurrentConfig(), CurrentTarget())));
+            LaunchDebugger(BuildEngine::ProgramPath(p, p->GetConfiguration(CurrentConfig(), CurrentTarget())), next == AfterBuild::DebugAtEntry);
         }
         else if (next == AfterBuild::Run || next == AfterBuild::Emulate || next == AfterBuild::Verify) RunChosen(next);
     }
@@ -298,16 +298,35 @@ namespace Gride { namespace UI {
         SetStatus(wasStopped ? "The program was stopped" : String::Format("The program returned {0}", code));
     }
 
+    // a line typed below the output: for the program being debugged when its debugger hands input over,
+    // else for the program running in the pane
     void MainForm::OnOutputInput(String^ line)
     {
+        if (debugger->IsActive && debugger->TakesInput)
+        {
+            programLineLast = false;
+            if (!debugger->SendInput(line)) SetStatus("The program being debugged could not be given that line");
+            return;
+        }
         if (!runner->Write(line)) SetStatus("No program is running to read that");
     }
 
     void MainForm::DebugStop()        { debugger->Stop(); }
     void MainForm::DebugBreakAll()    { debugger->BreakAll(); }
-    void MainForm::DebugStepInto()    { debugger->StepInto(); }
-    void MainForm::DebugStepOver()    { debugger->StepOver(); }
+    void MainForm::DebugStepInto()    { if (IsInBreak()) debugger->StepInto(); else DebugStartAtEntry(); }
+    void MainForm::DebugStepOver()    { if (IsInBreak()) debugger->StepOver(); else DebugStartAtEntry(); }
     void MainForm::DebugStepOut()     { debugger->StepOut(); }
+
+    // F11 or F10 with nothing debugged: the build, then the program started and stopped at main's first line
+    void MainForm::DebugStartAtEntry()
+    {
+        if (IsDebugging()) return;      // running: a step waits for the next stop
+        Workspace^ w = BuildSpace();
+        if (w == nullptr || w->StartupProject == nullptr) return;
+        afterBuild = AfterBuild::DebugAtEntry;
+        if (!StartBuild(BuildAction::Build, w->BuildOrderFor(w->StartupProject), nullptr))
+            afterBuild = AfterBuild::Nothing;
+    }
 
     void MainForm::DebugRestart()
     {
@@ -379,6 +398,7 @@ namespace Gride { namespace UI {
         if (!debugger->SetVariable(name, value, said))
         {
             output->Append("Debug", "cannot set " + name + ": " + said);
+            programLineLast = false;
             SetStatus("cannot set " + name + " - " + said);
         }
         else SetStatus(name + " = " + value);
@@ -425,18 +445,11 @@ namespace Gride { namespace UI {
         if (dlg->ShowDialog(this) == WF::DialogResult::OK) LaunchDebugger(dlg->FileName);
     }
 
-    // searches the project sources for main()
+    // searches the project sources for main() - C's and C++'s, and Shalimar's "fun <> = main("
     bool MainForm::FindEntryPoint(GrideProject^ p, String^% file, int% line)
     {
-        Regex^ re = gcnew Regex("^\\s*(int|void)?\\s*main\\s*\\(");
-        if (p != nullptr)
-            for each (String^ f in p->AllFiles())
-            {
-                if (!File::Exists(f) || PathUtil::HasExtension(f, ".h")) continue;
-                array<String^>^ lines = File::ReadAllLines(f);
-                for (int i = 0; i < lines->Length; i++)
-                    if (re->IsMatch(lines[i])) { file = f; line = i + 1; return true; }
-            }
+        String^ f; int l;
+        if (DebuggerChoice::EntryOf(p, f, l)) { file = f; line = l; return true; }
         EditorDocument^ d = docs->Active;
         if (d != nullptr && !d->IsUntitled) { file = d->FilePath; line = 1; return true; }
         return false;
@@ -475,8 +488,11 @@ namespace Gride { namespace UI {
         return objDir;
     }
 
-    // RIDE's F8: the engine for the build (dbg_planFor), the placeholder with the reason when there is none
-    void MainForm::LaunchDebugger(String^ program)
+    void MainForm::LaunchDebugger(String^ program) { LaunchDebugger(program, false); }
+
+    // RIDE's F8: the engine for the build (dbg_planFor), the placeholder with the reason when there is none;
+    // atEntry: F10 / F11 started it, so it stops at main's first line
+    void MainForm::LaunchDebugger(String^ program, bool atEntry)
     {
         String^ file = nullptr;
         int line = 1;
@@ -491,6 +507,7 @@ namespace Gride { namespace UI {
         output->Clear("Debug");
         output->ShowSource("Debug");
         bottomArea->ShowPane(output);
+        programLineLast = false;
         DebugEngine^ engine = gcnew PlaceholderDebugger();
         if (p != nullptr)
         {
@@ -511,14 +528,22 @@ namespace Gride { namespace UI {
         bottomArea->ShowPane(watch);
         bottomArea->ShowPane(callStack);
         bottomArea->ShowPane(locals);
+        // the program's input line below the output, when its debugger hands input over; what is typed comes
+        // back as the console echoes it, among the program's lines
+        if (debugger->TakesInput && !runner->IsRunning) { output->EchoInput = false; output->ShowInput(true, false); }
+        debugger->StopAtEntry = atEntry;
         debugger->Start(program, CurrentTarget(), file, line);
     }
 
-    // the program's own lines, as heard through the debugger (RIDE's console)
+    // the program's own lines, as heard through the debugger (RIDE's console): the rest of a line it had not
+    // finished goes on that line while nothing else was written after it
     void MainForm::OnDebugProgramOutput(String^ line)
     {
         if (InvokeRequired) { BeginInvoke(gcnew Action<String^>(this, &MainForm::OnDebugProgramOutput), line); return; }
-        output->Append("Debug", line);
+        String^ rest;
+        if (DebugEngine::Continues(line, rest) && programLineLast) output->Continue("Debug", rest);
+        else output->Append("Debug", rest);
+        programLineLast = true;
     }
 
     // Ctrl+F5: run the startup program
@@ -619,6 +644,7 @@ namespace Gride { namespace UI {
         output->Append("Build", shown);
         List<String^>^ env = tc->EnvironmentVars == nullptr ? gcnew List<String^>() : gcnew List<String^>(tc->EnvironmentVars);
         if (!runner->Start(cmd, p->ProjectDir, env, codePage)) { SetStatus("The program could not be started"); return; }
+        output->EchoInput = true;
         output->InputEnabled = true;
         SetStatus("Running " + Path::GetFileName(program) + " - type its input below the output, Stop Program ends it");
     }
@@ -668,6 +694,7 @@ namespace Gride { namespace UI {
     {
         if (InvokeRequired) { BeginInvoke(gcnew Action<String^>(this, &MainForm::OnDebugOutput), line); return; }
         output->Append("Debug", line);
+        programLineLast = false;
     }
 
     void MainForm::DebugStateUI(Object^ state)
@@ -676,6 +703,7 @@ namespace Gride { namespace UI {
         if (s == DebugState::Running) { ClearExecutionMarkers(); SetStatus("Running..."); }
         if (s == DebugState::Idle || s == DebugState::Terminated)
         {
+            if (!output->EchoInput && !runner->IsRunning) { output->ShowInput(false, false); output->EchoInput = true; }
             ClearExecutionMarkers();
             for each (DebugPaneBase^ p in debugPanes) p->ClearView();
             SetStatus("Debugging ended");

@@ -757,7 +757,7 @@ namespace Gride { namespace Settings {
         static array<String^>^ Roles()
         {
             return gcnew array<String^>{ "cCompiler", "cppCompiler", "shalimarCompiler", "hostCompiler", "hostCxx", "assembler", "linker",
-                                         "debugAssembler", "debugLinker", "nativeAssembler", "nativeLinker", "simulator", "emulator", "debugger", "converter" };
+                                         "debugAssembler", "debugLinker", "nativeAssembler", "nativeLinker", "simulator", "emulator", "ownDebugger", "debugger", "converter" };
         }
 
         static JsonValue^ Clone(JsonValue^ v) { return v == nullptr ? nullptr : JsonParser::Parse(JsonWriter::Write(v)); }

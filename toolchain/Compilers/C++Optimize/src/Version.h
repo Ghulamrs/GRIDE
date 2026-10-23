@@ -45,9 +45,21 @@
 // template called with explicit arguments, `s.m<int>(1)`, keeps its definition in the unit; and three
 // ill-formed programs are refused: `static_cast` between pointers to unrelated objects, an `explicit
 // operator bool` in copy-initialisation, and `--` on a bool.
-#define CXX1_VERSION      "1.28"
+//
+// 1.29 (2026-10-22): -g through GRIDE's own masm, the PDB line's cpp11 part. In the MASM spelling
+// -g is no longer refused: the lines go out as the `.FILE n, "path"` and `.LINE line, n` directives
+// GRIDE's masm reads, by the `.cv_loc` rules, and the CodeView the gnu spelling writes for clang -
+// S_GPROC32 with the display name, parameters and locals, blocks, globals, the types - is spelled
+// for masm as `.debug$S` and `.debug$T` SEGMENTs, a mergeable function's ASSOCIATIVE with its
+// COMDAT; the driver assembles with the masm beside this program, and link /DEBUG makes the PDB.
+// For the debugger that reads it: every name is whole, with its namespaces, as cl's PDB spells it -
+// `std::basic_string<char>::size`, `geo::Box<int>::count`, `geo::Pair::Pair` - a template specialization
+// with its arguments, `biggest<int>`, and a handler funclet is a procedure of its own with its lines,
+// cl's `` `f'::`1'::catch$0 ``, so a breakpoint in a catch block lands on its line and the stack names
+// the frame. Without -g the output is unchanged.
+#define CXX1_VERSION      "1.29"
 #define CXX1_SEAL_DATE    "22-10-2026"
-#define CXX1_SEAL_FILE    "cxx1-1.28.dat"
+#define CXX1_SEAL_FILE    "cxx1-1.29.dat"
 
 // The line every run prints first; what it claims is docs/EXCLUSIONS.md's to measure (review of 2026-10-08).
 #define CXX1_BANNER "©2026 G. R. Akhtar - C++03 with C++11 extensions"

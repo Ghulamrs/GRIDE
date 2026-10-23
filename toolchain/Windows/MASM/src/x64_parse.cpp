@@ -707,8 +707,10 @@ void X64Target::unwind(Unit &u, const std::vector<Token> &t, const std::string &
        .LINE line [, n]       the instructions that follow come from that line of file n - the file
                               of the .LINE before in the PROC when n is left out, else file 1
 
-   A .LINE stays in force until the next one or the PROC's ENDP. A file that has any is described
-   by them alone: the .asm's own lines are not recorded for it, though /Zi asked */
+   A .LINE stays in force until the next one or the PROC's ENDP, and the code after it starts a line
+   entry even when it names the line already in force (a one-line function's body, after its
+   prologue). A file that has any is described by them alone: the .asm's own lines are not recorded
+   for it, though /Zi asked */
 void X64Target::source_line(Unit &u, const std::vector<Token> &t, const std::string &w)
 {
     std::string err;
@@ -739,6 +741,7 @@ void X64Target::source_line(Unit &u, const std::vector<Token> &t, const std::str
     }
     u.src_file = (int)file;
     u.src_line = (int)line;
+    u.src_again = true;
 }
 
 /* ENDP of a PROC FRAME: the UNWIND_INFO into .xdata (version 1, codes last-first, padded to an

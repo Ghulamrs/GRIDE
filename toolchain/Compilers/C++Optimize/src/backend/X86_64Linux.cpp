@@ -1623,7 +1623,7 @@ void X86_64Linux::emit(const Function &fn) {
     if (const Source *src = lineSource()) {
         Source::Place at = src->locate(fn.pos());
         DwarfFunction d;
-        d.name = fn.name();
+        d.name = fn.displayName();
         d.begin = ".Lfunc.begin." + fn.symbol();
         d.end = ".Lfunc.end." + fn.symbol();
         d.file = at.file + 1;
@@ -1632,16 +1632,20 @@ void X86_64Linux::emit(const Function &fn) {
         d.returns = fn.returns();
         d.locals = &fn.locals();
         d.symbol = a_->labelText(fn.symbol());
-        if (target_.microsoftNames()) {
+        // A display name carries its scope and arguments already - `ns::biggest<int>`, `std::basic_string<char>::size`,
+        // `geo::Pair::Pair` (1.29); a function without one - a namespaced free function - is qualified from its symbol.
+        if (target_.microsoftNames() && !fn.hasDisplayName()) {
             const Type *self = nullptr;
             for (const Local &l : fn.locals())
                 if (l.isParam && l.name == "this" && l.type->isPointer()) self = l.type->pointee();
             d.name = codeViewName(fn.symbol(), fn.name(), self);
         }
-        // CoffSpelling's own labels round the code - see its prologue and functionEnd.
-        d.prologEnd = "\"$LNprolog$" + fn.symbol() + "\"";
-        d.codeEnd = "\"$LNend$" + fn.symbol() + "\"";
+        // The spelling's own labels round the code - see CoffSpelling's and MasmSpelling's prologue
+        // and functionEnd - as each spells a name: quoted for clang, bare for masm (1.29).
+        d.prologEnd = a_->labelText("$LNprolog$" + fn.symbol());
+        d.codeEnd = a_->labelText("$LNend$" + fn.symbol());
         d.mergeable = fn.isInline();
+        dwarfFnAt_ = dwarfFns_.size();
         dwarfFns_.push_back(d);
         resetBlocks(fn.blocks());
         a_->defLabel(d.begin);
@@ -1717,10 +1721,18 @@ void X86_64Linux::emit(const Function &fn) {
     if (lineSource()) {
         a_->defLabel(".Lfunc.end." + fn.symbol());
 
-        dwarfFns_.back().blocks = blocks();
-        dwarfFns_.back().frameBias = frameSize_ + outgoing_;
+        DwarfFunction &d = dwarfFns_[dwarfFnAt_];
+        d.blocks = blocks();
+        d.frameBias = frameSize_ + outgoing_;
         // The records measure from rbx, DWARF's register 3, up to the top of a realigned frame.
-        if (realign_ > 0) { dwarfFns_.back().frameBaseReg = 3; dwarfFns_.back().frameBias = top_; }
+        if (realign_ > 0) { d.frameBaseReg = 3; d.frameBias = top_; }
+        // Its funclets' records follow it and describe the same frame: the blocks, each funclet keeping
+        // the ones walked inside it (CodeView.cpp), and the slots measured as the function's are (1.29).
+        for (std::size_t i = dwarfFnAt_ + 1; i < dwarfFns_.size(); i++) {
+            dwarfFns_[i].blocks = d.blocks;
+            dwarfFns_[i].frameBias = d.frameBias;
+            dwarfFns_[i].frameBaseReg = d.frameBaseReg;
+        }
     }
     if (realign_ > 0 && optimizer_) a_ = optimizer_.get();
     realign_ = 0;
@@ -1998,13 +2010,48 @@ void X86_64Linux::walkBody(const Function &fn) {
 // **A funclet is a slice of the ordinary output, lifted.** Walking the handler
 // appends its code like any other, so remembering where that began and cutting
 // back to it gives the body exactly - and the code generator knows none of it.
-std::string X86_64Linux::beginFunclet() {
+std::string X86_64Linux::beginFunclet(std::size_t pos, int number, bool cleanup) {
     if (optimizing()) optimizer_->funcletBegin();
     inFunclet_ = true;
     atOutput([this] { funcletMark_ = out_.size(); });
     funcletSymbol_ = "$" + std::string(funcletKind_).substr(1) +
                      std::to_string(funcletIndex_++) + "$" + fnSymbol_;
+    funcletDebugBegin(funcletSymbol_, pos, number, cleanup);
     return funcletSymbol_;
+}
+
+// **-g: the funclet is a procedure of its own, over the parent's frame** - cl's `` `f'::`1'::catch$0 ``,
+// an S_LPROC32 with no type whose locals are the parent's (rbp is the parent's in a funclet) and whose
+// blocks are the ones walked inside it; its lines are a table of its own, the spelling told so (1.29).
+void X86_64Linux::funcletDebugBegin(const std::string &symbol, std::size_t pos, int number, bool cleanup) {
+    funcletEntryLoc_.clear();
+    if (!lineSource()) return;
+    const DwarfFunction &parent = dwarfFns_[dwarfFnAt_];
+    DwarfFunction d;
+    d.name = "`" + parent.name + "'::`1'::" + (cleanup ? "dtor$" : "catch$") + std::to_string(number - 1);
+    d.file = parent.file;
+    d.line = parent.line;
+    d.external = false;
+    d.returns = parent.returns;
+    d.locals = parent.locals;
+    d.symbol = a_->labelText(symbol);
+    d.prologEnd = a_->labelText("$LNprolog$" + symbol);
+    d.codeEnd = a_->labelText("$LNend$" + symbol);
+    d.mergeable = parent.mergeable;
+    d.funclet = number;
+    const int id = static_cast<int>(dwarfFns_.size());
+    dwarfFns_.push_back(d);
+    a_->funcletLinesBegin();
+    // Its first instructions are the prologue, which the walk writes no location for: named by the
+    // handler's own line, as cl names them, in the text closeFunclet puts before them.
+    if (pos != 0) {
+        const Source::Place at = lineSource()->locate(pos);
+        funcletEntryLoc_ = a_->locationDirective(id, at.file + 1, at.line, at.column);
+    }
+}
+
+void X86_64Linux::funcletDebugEnd() {
+    if (lineSource()) a_->funcletLinesEnd();
 }
 
 void X86_64Linux::endCleanupFunclet() {
@@ -2034,6 +2081,7 @@ void X86_64Linux::storeUnwindHelp(int slot) {
 // **The funclet's own frame, and the assembler writes its unwind data.**
 void X86_64Linux::closeFunclet(const std::string &tail) {
     inFunclet_ = false;
+    funcletDebugEnd();
     const std::string q = "\"" + funcletSymbol_ + "\"";
     const std::string b = "\"$LNbeg$" + funcletSymbol_ + "\"";
     const std::string e = "\"$LNend$" + funcletSymbol_ + "\"";
@@ -2051,6 +2099,8 @@ void X86_64Linux::closeFunclet(const std::string &tail) {
     head += "\n  .section .text$x,\"xr\"" + assoc + "\n";
     head += q + ":\n";
     head += b + ":\n";
+    // -g: the prologue is on the `catch` line, as cl's funclet begins (1.29).
+    head += funcletEntryLoc_;
     head += "  movq %rdx, 16(%rsp)\n";
     head += "  push %rbp\n";
     head += pu + ":\n";
@@ -2099,9 +2149,18 @@ void X86_64Linux::closeFunclet(const std::string &tail) {
     // **The body is lifted out of the output where it was written**, which
     // with an optimizer in front is after the function it belongs to.
     atOutput([this, head, f, pdata] {
-        const std::string body = out_.substr(funcletMark_);
+        std::string body = out_.substr(funcletMark_);
         out_.resize(funcletMark_);
-        funclets_ += head + body + f;
+        // -g: the funclet's `.cv_func_id` is the first thing the walk wrote in it (funcletLinesBegin), and the
+        // head's `.cv_loc` names that id, so the declaration goes before the head: the assembler takes a
+        // location only of an id it has been told of.
+        std::string declared;
+        if (body.compare(0, 14, "  .cv_func_id ") == 0) {
+            const std::size_t nl = body.find('\n');
+            declared = body.substr(0, nl + 1);
+            body.erase(0, nl + 1);
+        }
+        funclets_ += declared + head + body + f;
         funcletPdata_ += pdata;
     });
     if (optimizing()) optimizer_->funcletEnd();
@@ -2492,15 +2551,7 @@ void X86_64Linux::run(const Program &program) {
             dg.external = !g.isStatic;
             dwarfGlobals_.push_back(dg);
         }
-        // **Microsoft's tools read CodeView and nothing else**: link.exe drops DWARF from a COFF object.
-        if (target_.microsoftNames())
-            writeCodeView(out_, target_, CodeViewLanguage::Cpp,
-                          codeViewPath(compDir(), lineSource()->files().front() + ".obj"),
-                          dwarfFns_, dwarfGlobals_,
-                          [this](const std::string &s) { return a_->labelText(s); });
-        else
-            writeDwarf(out_, kElfDwarf, target_, lineSource()->files().front(),
-                       compDir(), dwarfFns_, dwarfGlobals_);
+        writeDebug(dwarfFns_, dwarfGlobals_);
         finishChunk();
     }
 
@@ -2509,4 +2560,17 @@ void X86_64Linux::run(const Program &program) {
     // After every function, so the .pdata the linker sees is in address order.
     sink_ << funcletPdata_;
     a_->postamble(sink_);
+}
+
+// **Microsoft's tools read CodeView and nothing else**: link.exe drops DWARF from a COFF object.
+// MasmCodeGen writes the same CodeView in GRIDE's masm's words (1.29).
+void X86_64Linux::writeDebug(const std::vector<DwarfFunction> &fns,
+                             const std::vector<DwarfGlobal> &globals) {
+    // The object's name plain: S_OBJNAME's writer escapes it (it was escaped twice until 1.29).
+    if (target_.microsoftNames())
+        writeCodeView(out_, target_, CodeViewLanguage::Cpp,
+                      codeViewPath(compDir(), lineSource()->files().front() + ".obj", false), fns, globals,
+                      [this](const std::string &s) { return a_->labelText(s); });
+    else
+        writeDwarf(out_, kElfDwarf, target_, lineSource()->files().front(), compDir(), fns, globals);
 }

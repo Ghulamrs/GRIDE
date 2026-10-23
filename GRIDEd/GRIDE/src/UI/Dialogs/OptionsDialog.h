@@ -771,6 +771,17 @@ namespace Gride { namespace UI {
             dbgNote->Text = "auto: sim6747 on this build's .out when it has a line table, else vm6747 on the assembly (White's rule). GRIDE_DEBUG_SIM6747=1 / GRIDE_DEBUG_VM6747=1 in the environment at start win.";
             dbgNote->AutoSize = true; dbgNote->Tag = "muted"; dbgNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, dbgNote);
+            windows = gcnew ComboBox();
+            windows->DropDownStyle = ComboBoxStyle::DropDownList;
+            windows->Items->AddRange(gcnew array<Object^>{ "auto", "gride-dbg", "cdb" });
+            windows->SelectedItem = env->EffectiveWindowsDebugger();
+            if (windows->SelectedIndex < 0) windows->SelectedIndex = 0;
+            Row("Windows debugger", windows);
+            Label^ winNote = gcnew Label();
+            winNote->Text = "auto: gride-dbg, GRIDE's own debugger, when it is beside GRIDE, else cdb (Debugging Tools for Windows), else lldb. "
+                            "Either named stands in for the other where that one is not there; the Output pane says which.";
+            winNote->AutoSize = true; winNote->Tag = "muted"; winNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, winNote);
             include->UpdateStatus(); lib->UpdateStatus(); vcvars->UpdateStatus(); ti->UpdateStatus(); tilib->UpdateStatus();
         }
         virtual void Commit() override
@@ -784,12 +795,13 @@ namespace Gride { namespace UI {
             env->SharedLibraries = FromLines(libraries);
             env->DefaultCompiler = safe_cast<String^>(compiler->SelectedItem);
             env->C6747Debugger = safe_cast<String^>(c6747->SelectedItem);
+            env->WindowsDebugger = safe_cast<String^>(windows->SelectedItem);
         }
     private:
         EnvironmentSettings^ env;
         PathField^ include; PathField^ lib; PathField^ vcvars; PathField^ ti; PathField^ tilib;
         TextBox^ includes; TextBox^ libraries;
-        ComboBox^ compiler; ComboBox^ c6747;
+        ComboBox^ compiler; ComboBox^ c6747; ComboBox^ windows;
     };
 
     // ---- Projects > Compiler Options: RIDE's installation-level store (settings.json options) -----------

@@ -144,8 +144,9 @@ namespace Gride { namespace UI {
         c = Cmd("Debug.Stop", "S&top Debugging", "Shift+F5", "stop", DO(DebugStop)); c->CanExecute = WHEN(IsDebugging);
         c = Cmd("Debug.Restart", "&Restart", "Ctrl+Shift+F5", "restart", DO(DebugRestart)); c->CanExecute = WHEN(IsDebugging);
         c = Cmd("Debug.BreakAll", "Break &All", "Ctrl+Alt+Break", "pause", DO(DebugBreakAll)); c->CanExecute = WHEN(IsDebugging);
-        c = Cmd("Debug.StepInto", "Step &Into", "F11", "stepinto", DO(DebugStepInto)); c->CanExecute = WHEN(IsInBreak);
-        c = Cmd("Debug.StepOver", "Step &Over", "F10", "stepover", DO(DebugStepOver)); c->CanExecute = WHEN(IsInBreak);
+        // F11 and F10 with nothing debugged build, start and stop at main's first line (Visual Studio's way)
+        c = Cmd("Debug.StepInto", "Step &Into", "F11", "stepinto", DO(DebugStepInto)); c->CanExecute = WHEN(CanStartDebug);
+        c = Cmd("Debug.StepOver", "Step &Over", "F10", "stepover", DO(DebugStepOver)); c->CanExecute = WHEN(CanStartDebug);
         c = Cmd("Debug.StepOut", "Step O&ut", "Shift+F11", "stepout", DO(DebugStepOut)); c->CanExecute = WHEN(IsInBreak);
         c = Cmd("Debug.RunToCursor", "Run to &Cursor", "Ctrl+F10", nullptr, DO(DebugRunToCursor)); c->CanExecute = WHEN(IsInBreak);
         // RIDE's Debug menu: up and down the stack (its Ctrl-Up / Ctrl-Down), a watch, a variable set

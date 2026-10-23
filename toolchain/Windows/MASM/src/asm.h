@@ -2,6 +2,7 @@
 #define ASM_H
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 enum TokKind { T_NAME, T_NUM, T_STR, T_PUNCT, T_REAL };
@@ -124,6 +125,7 @@ public:
     std::vector<unsigned long> prev_sizes;  /* the sections' sizes in the previous pass */
     std::vector<Section> sections;
     std::vector<Symbol> symbols;
+    std::unordered_map<std::string, int> symbol_index;  /* symbols by name: ref() adds, nothing removes */
     std::vector<Fixup> fixups;
     std::vector<std::string> errors;
 
@@ -131,6 +133,7 @@ public:
     bool debug;
     std::vector<std::string> files;     /* files[n] is .FILE n's path; files[0] is unused */
     int src_file, src_line;             /* the .LINE in force, file 0 before the first */
+    bool src_again;                     /* a .LINE since the last entry: the next code starts one, the same line or not */
     std::vector<LineEntry> lines;
     std::vector<ProcInfo> procs;
 

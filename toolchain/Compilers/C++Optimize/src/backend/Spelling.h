@@ -136,6 +136,16 @@ public:
 
     virtual void fileEntry(int, const std::string &) {}
     virtual void location(int, int, int) {}
+    // **-g inside a handler funclet** (1.29): its code is in another section, so its lines are a table of its
+    // own - between these two every location names the funclet (CodeView's next function id), with a run
+    // of lines of its own, and the function's are taken up again after. `locationDirective` is the text of
+    // one location for function `fn` (its index among the functions), for a code generator to place where
+    // it writes code of its own - a funclet's entry.
+    virtual void funcletLinesBegin() {}
+    virtual void funcletLinesEnd() {}
+    virtual std::string locationDirective(int fn, int file, int line, int column) const {
+        (void)fn; (void)file; (void)line; (void)column; return std::string();
+    }
 
     virtual void predefine(const std::vector<std::string> &) {}
     virtual void preamble(std::ostream &) {}
@@ -263,6 +273,9 @@ public:
     // CodeView's line entries in place of DWARF's - see CodeView.h.
     void fileEntry(int n, const std::string &name) override;
     void location(int file, int line, int column) override;
+    void funcletLinesBegin() override;
+    void funcletLinesEnd() override;
+    std::string locationDirective(int fn, int file, int line, int column) const override;
 
     std::string labelText(const std::string &l) const override { return sym(l); }
 
@@ -288,13 +301,21 @@ private:
     // The unwind codes, built in the prologue and written at the end.
     std::string unwindData_;
     int unwindCodes_ = 0;
-    // Whether a `.cv_file` was written (so -g), and how many functions have a `.cv_func_id`: the last is the one a `.cv_loc` names.
+    // Whether a `.cv_file` was written (so -g), how many `.cv_func_id`s have been given out (functions and
+    // funclets, in order), and the one a `.cv_loc` names now: the function's, or the funclet's inside one.
     bool codeView_ = false;
     int cvFunctions_ = 0;
+    int cvCurrent_ = -1;
     // The last `.cv_loc` and where it was written, so one that no instruction follows can be replaced.
     std::string lastLoc_;
     std::size_t lastLocAt_ = 0;
-    int lastLocFn_ = 0, lastLocFile_ = 0, lastLocLine_ = 0;
+    int lastLocFn_ = -1, lastLocFile_ = 0, lastLocLine_ = 0;
     // Every (file, line) the function being written has had a run of, so none gets a second.
     std::set<std::pair<int, int> > linesRun_;
+    // The function's line state, set aside while a funclet's lines are written (funcletLinesBegin).
+    struct LineState {
+        int current; std::string lastLoc; std::size_t lastLocAt; int lastLocFn, lastLocFile, lastLocLine;
+        std::set<std::pair<int, int> > linesRun;
+    };
+    std::vector<LineState> outerLines_;
 };

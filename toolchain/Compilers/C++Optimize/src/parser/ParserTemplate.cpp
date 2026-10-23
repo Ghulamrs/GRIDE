@@ -1478,6 +1478,7 @@ Parser::instantiate(const TemplateDecl &decl,
     Specialization sp;
     sp.key = key;
     sp.name = decl.name;
+    sp.display = decl.ns + display;
     sp.params = decl.params;
     sp.packs = packs;
     sp.symbol = symbol;
@@ -1605,8 +1606,10 @@ void Parser::instantiatePending() {
             bindTemplateParameters(sp.params, sp.binding, sp.values, sp.packs, &undo);
             const std::string wasKey = instantiationKey_;
             const std::string wasOf = instantiationOf_;
+            const std::string wasDisplay = instantiationDisplay_;
             instantiationKey_ = sp.isClass ? std::string() : sp.key;
             instantiationOf_ = sp.isClass ? std::string() : sp.name;
+            instantiationDisplay_ = sp.isClass ? std::string() : sp.display;
             // What this body asks for is one deeper than it - and a specialization appended
             // while this round runs is replayed in this same round, so a chain that never
             // settles is one round long; the depth, not the round, is what bounds it.
@@ -1642,6 +1645,7 @@ void Parser::instantiatePending() {
 
             instantiationKey_ = wasKey;
             instantiationOf_ = wasOf;
+            instantiationDisplay_ = wasDisplay;
             instantiationDepth_ = wasDepth;
             unbindTemplateParameters(undo);
         }

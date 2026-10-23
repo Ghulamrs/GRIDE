@@ -50,6 +50,7 @@ namespace Gride { namespace Settings {
             CcsEnabled = true;
             CcsRoot = String::Empty;
             C6747Debugger = "auto";
+            WindowsDebugger = "auto";
             SyntaxColors = gcnew Dictionary<String^, String^>();
         }
         property String^ Theme;
@@ -81,6 +82,7 @@ namespace Gride { namespace Settings {
         property bool    CcsEnabled;             // "ccs.enabled": File > Open > CCS Project
         property String^ CcsRoot;                // "ccs.root": the CCS installation ${CG_TOOL_ROOT} is found under (C:\ti\ccsv7)
         property String^ C6747Debugger;          // auto (sim6747 on a .out with lines, else vm6747), sim6747, vm6747; GRIDE_DEBUG_* at start win
+        property String^ WindowsDebugger;        // auto (gride-dbg beside GRIDE, else cdb, else lldb), gride-dbg, cdb: the other stands in where the one named is not there
         property Dictionary<String^, String^>^ SyntaxColors;   // token -> "#RRGGBB" override
 
         // what ${CG_TOOL_ROOT} is resolved from, in RIDE's order: the CCS root when one is named (the
@@ -102,6 +104,12 @@ namespace Gride { namespace Settings {
             String^ sim = Environment::GetEnvironmentVariable("GRIDE_DEBUG_SIM6747");
             if (!String::IsNullOrWhiteSpace(sim) && sim->Trim() != "0") return "sim6747";
             return String::IsNullOrWhiteSpace(C6747Debugger) ? "auto" : C6747Debugger->Trim()->ToLowerInvariant();
+        }
+
+        // the x86_64-windows debugger choice in force: auto, gride-dbg or cdb
+        String^ EffectiveWindowsDebugger()
+        {
+            return String::IsNullOrWhiteSpace(WindowsDebugger) ? "auto" : WindowsDebugger->Trim()->ToLowerInvariant();
         }
 
         JsonValue^ ToJson()
@@ -137,6 +145,7 @@ namespace Gride { namespace Settings {
             o->SetBool("ccsEnabled", CcsEnabled);
             o->SetString("ccsRoot", CcsRoot);
             o->SetString("c6747Debugger", C6747Debugger);
+            o->SetString("windowsDebugger", WindowsDebugger);
             JsonValue^ c = JsonValue::MakeObject();
             for each (KeyValuePair<String^, String^> kv in SyntaxColors) c->SetString(kv.Key, kv.Value);
             o->SetValue("syntaxColors", c);
@@ -175,6 +184,7 @@ namespace Gride { namespace Settings {
             CcsEnabled = o->GetBool("ccsEnabled", CcsEnabled);
             CcsRoot = o->GetString("ccsRoot", CcsRoot);
             C6747Debugger = o->GetString("c6747Debugger", C6747Debugger);
+            WindowsDebugger = o->GetString("windowsDebugger", WindowsDebugger);
             JsonValue^ c = o->GetObject("syntaxColors");
             if (c != nullptr)
                 for each (String^ k in c->KeyNames) SyntaxColors[k] = c->GetString(k, String::Empty);

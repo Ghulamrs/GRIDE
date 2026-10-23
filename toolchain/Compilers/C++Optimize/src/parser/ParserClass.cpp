@@ -348,6 +348,13 @@ std::vector<StmtPtr> Parser::storeVptrs(const std::string &cls,
 // **A function with no source behind it.** The deleting destructor runs the
 // destructor and then gives the memory back, because `delete p` through a base
 // pointer reaches both through one slot. Itanium's D0 and Microsoft's ??_G differ.
+// **-g: the name a debugger shows for a member the parser made** (1.29), as cl's PDB has it - `geo::Pair::Pair`,
+// `geo::Tally::~Tally`, `` Tally::`scalar deleting destructor' ``: the class's whole name (Type::displayTag, the
+// namespace a specialization keeps apart included), then the member. The Function's own name stays `tag::member`.
+static void showMemberAs(Function &f, const Type *cls, const std::string &member) {
+    f.setDisplayName(Type::displaySpelling(cls->displayTag() + "::" + member));
+}
+
 void Parser::synthesizeDeleting(const std::string &cls, const Type *type,
                                 Access access, std::size_t pos) {
     const bool ms = target_.microsoftNames();
@@ -411,6 +418,7 @@ void Parser::synthesizeDeleting(const std::string &cls, const Type *type,
                                            alignTo(frameSize_, 16), false, 0,
                                            false, 0, pos,
                                            std::vector<::Local>()));
+    showMemberAs(current_->functions.back(), type, "`scalar deleting destructor'");
     current_->functions.back().setSymbol(symbol);
     // **A compiler-written special member is inline** - [class.copy] and its
     // neighbours say the implicit definition is - so several translation units
@@ -736,6 +744,7 @@ void Parser::synthesizeCompleteCtor(const Type *type,
     current_->functions.back().setSymbol(c1);
     current_->functions.back().setHasLandingPads(guarded);
     if (isInline) current_->functions.back().setInline(true);
+    showMemberAs(current_->functions.back(), type, localOf(cls));
     closeFrame(savedFrame);
 }
 
@@ -779,6 +788,7 @@ void Parser::synthesizeCompleteDtor(const Type *type, const std::string &d1,
                                            std::vector<::Local>()));
     current_->functions.back().setSymbol(d1);
     if (isInline) current_->functions.back().setInline(true);
+    showMemberAs(current_->functions.back(), type, "~" + localOf(cls));
     closeFrame(savedFrame);
 }
 
@@ -3149,6 +3159,7 @@ void Parser::synthesizeDestructor(std::size_t which) {
                                            false, 0, pos, std::vector<::Local>()));
     current_->functions.back().setSymbol(symbol);
     current_->functions.back().setInline(true);
+    showMemberAs(current_->functions.back(), type, "~" + localOf(cls));
     // The Microsoft wrapper: `??1` above stops at this class's own part, and
     // `??_D` destroys it and then the virtual bases.
     if (target_.microsoftNames() && type->hasVirtualBase()) {
@@ -3625,6 +3636,7 @@ void Parser::synthesizeDefaultCtor(std::size_t which) {
                                            false, 0, pos, std::vector<::Local>()));
     current_->functions.back().setSymbol(symbol);
     current_->functions.back().setHasLandingPads(guarded || own.made());
+    showMemberAs(current_->functions.back(), type, localOf(cls));
     current_->functions.back().setInline(true);
     // The same two names a written constructor is emitted under: C1 for a
     // complete object and C2 for a base subobject, the second a label in front
@@ -3965,6 +3977,7 @@ void Parser::synthesizeCopy(std::size_t which, bool assigning) {
                                            alignTo(frameSize_, 16), false, 0,
                                            false, 0, pos, std::vector<::Local>()));
     current_->functions.back().setSymbol(symbol);
+    showMemberAs(current_->functions.back(), type, assigning ? std::string("operator=") : localOf(cls));
     current_->functions.back().setHasLandingPads(guarded || own.made());
     current_->functions.back().setInline(true);
     // A constructor is emitted under both of Itanium's names; an operator has

@@ -77,6 +77,7 @@ namespace Gride { namespace UI {
             input->Font = PaneUtil::MonoFont();
             input->Visible = false;
             input->KeyDown += gcnew KeyEventHandler(this, &OutputPane::OnInputKey);
+            EchoInput = true;
             Controls->Add(box);
             Controls->Add(input);
             Controls->Add(bar);
@@ -92,11 +93,35 @@ namespace Gride { namespace UI {
         property bool InputEnabled
         {
             bool get() { return input->Visible; }
-            void set(bool on)
-            {
-                input->Visible = on;
-                if (on) { input->Clear(); input->Focus(); }
-            }
+            void set(bool on) { ShowInput(on, true); }
+        }
+        // shown for a program under the debugger, the editor keeps the focus (F10 and F11 go on working)
+        void ShowInput(bool on, bool focus)
+        {
+            if (on && !input->Visible) input->Clear();
+            input->Visible = on;
+            if (on && focus) input->Focus();
+        }
+        // whether a line typed is shown here as typed: not for a program on the debugger's console, which
+        // echoes it among the program's own lines
+        property bool EchoInput;
+
+        // text added to the source's last line: the rest of a line the program had not finished
+        void Continue(String^ src, String^ text)
+        {
+            List<String^>^ l = Get(src);
+            if (l->Count == 0) { Append(src, text); return; }
+            l[l->Count - 1] = l[l->Count - 1] + text;
+            if (src != CurrentSource) return;
+            int end = box->TextLength > 0 ? box->TextLength - 1 : 0;     // before the line's "\n" (AppendLine ends every line with one)
+            box->SelectionStart = end;
+            box->SelectionLength = 0;
+            box->SelectionColor = ColorFor(l[l->Count - 1]);
+            box->ReadOnly = false;
+            box->SelectedText = text;
+            box->ReadOnly = true;
+            box->SelectionStart = box->TextLength;
+            box->ScrollToCaret();
         }
 
         void Clear(String^ src)
@@ -140,7 +165,7 @@ namespace Gride { namespace UI {
             e->SuppressKeyPress = true;
             String^ text = input->Text;
             input->Clear();
-            Append(CurrentSource, text);
+            if (EchoInput) Append(CurrentSource, text);
             InputEntered(text);
         }
 

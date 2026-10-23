@@ -56,10 +56,15 @@ void X86_64WindowsEmitter::endFunction(int slots) {
 }
 
 // **A line entry is entered once per run of the line**, as cl writes them: cdb takes the first
-// entry at an address and refuses `bp` on a line entered twice.
+// entry at an address and refuses `bp` on a line entered twice. **But the body's start**: a first
+// statement on the function's own line (a one-line function) is entered again, after the prologue
+// endFunction puts between and the parameters' spills, so a debugger stops where the parameters are
+// stored (gride-dbg's bodyStart takes a function's second entry of its first line as its body).
 void X86_64WindowsEmitter::sourceLine(int unit, int line) {
     if (!describing()) return;
-    if (unit == lastUnit_ && line == lastLine_) return;
+    const bool bodyStart = atEntry_ && unit == lastUnit_ && line == lastLine_;
+    atEntry_ = false;
+    if (unit == lastUnit_ && line == lastLine_ && !bodyStart) return;
     lastUnit_ = unit;
     lastLine_ = line;
     raw("\t.LINE\t" + std::to_string(line) + ", " + std::to_string(unit + 1));
@@ -84,6 +89,7 @@ void X86_64WindowsEmitter::describeFunction(const DebugFunction &function) {
     lastLine_ = -1;
     describing_ = true;
     if (function.line > 0) sourceLine(function.unit, function.line);
+    atEntry_ = function.line > 0;
     prologueMark_ = text_.size();
 }
 
