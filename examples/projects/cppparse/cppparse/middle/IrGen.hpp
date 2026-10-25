@@ -176,6 +176,7 @@ private:
     void bitField(LValue& lv, const sema::Symbol* field) const;   // marks lv as the bit-field field (when it is one)
     int  loadBits(const LValue& lv, const sema::Type* t, int line);
     void storeBits(const LValue& lv, int temp, const sema::Type* t, int line);
+    int  bitFieldResult(const LValue& lv, int v, const sema::Type* t, int line);
     int  bitConstant(unsigned long long v, const sema::Type* t, int line);
     void copyConstruct(const sema::Type* t, int dst, int src, int line);
     void copyAssign(const sema::Type* t, int dst, int src, int line);
@@ -258,6 +259,7 @@ private:
     // IR emission
     int    emit(IrInst inst);
     IrInst make(IrInst::Op op, const sema::Type* type, int line);
+    bool isVolatileAccess(const LValue& lv, const sema::Type* t) const;
     bool   terminated() const;
     void   br(int target, int line);
     void   condbr(int cond, int t, int f, int line);

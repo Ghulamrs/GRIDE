@@ -85,7 +85,9 @@ void foldWide(cxx::Expr* e, const std::string& op, long a, long b, bool isUnsign
     else if (op == "^") r = ux ^ uy;
     else ok = false;
     const long long s = static_cast<long long>(r);
-    e->semaConst = ok && static_cast<long long>(static_cast<long>(s)) == s;
+    // the range is spelled out: a round trip through long tests 32 bits only where long is 32 bits (MSVC), and on
+    // an LP64 host it would accept every value, which the IR then truncates (npos / 2 became -1 on macOS)
+    e->semaConst = ok && s >= -2147483647LL - 1 && s <= 2147483647LL;
     e->semaValue = e->semaConst ? static_cast<long>(s) : 0;
 }
 
@@ -481,6 +483,10 @@ int compareConversions(const Conversion& a, const Conversion& b)
     return 0;
 }
 
+// a candidate still in the running in resolveOverload; declared here because C++98 accepts no local type
+// as a template argument (std::vector<Viable>)
+struct Viable { Symbol* fn; std::vector<Conversion> convs; bool exactThis; };
+
 } // namespace
 
 Symbol* Sema::resolveOverload(const std::vector<Symbol*>& cands, const std::vector<cxx::Expr*>& args, size_t firstArg, cxx::Expr* thisExpr, Scope* in, const cxx::Loc& loc, const std::string& what, bool report, const std::vector<cxx::TemplateArg>* explicitArgs)
@@ -489,7 +495,6 @@ Symbol* Sema::resolveOverload(const std::vector<Symbol*>& cands, const std::vect
     for (size_t a = firstArg; a < args.size(); ++a) if (!args[a]->semaType) expr(args[a], in);
     for (size_t a = firstArg; a < args.size(); ++a) if (args[a]->semaType && args[a]->semaType->kind == Type::Dependent) return cands.empty() ? 0 : cands[0];
 
-    struct Viable { Symbol* fn; std::vector<Conversion> convs; bool exactThis; };
     std::vector<Viable> viable;
     // one entity reached twice is one candidate: "using namespace std; printf(...)" finds ::printf directly and
     // again through the using-declaration "using ::printf;" in std

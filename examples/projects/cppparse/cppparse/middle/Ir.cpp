@@ -103,6 +103,7 @@ std::string IrInst::str() const
         for (size_t i = 0; i < args.size(); ++i) s += (i ? ", " : " ") + args[i].str();
     }
     if (type && dst >= 0) s += "   : " + type->str();
+    if (isVolatile) s += "   volatile";
     return s;
 }
 

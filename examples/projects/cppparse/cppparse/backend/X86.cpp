@@ -788,10 +788,12 @@ std::string hex32(unsigned long v)
     return r;
 }
 
-// label for a double from its IEEE bits (two 32-bit halves: C++98 has no 64-bit integer)
+// label for a double from its IEEE bits (two 32-bit halves: C++98 has no 64-bit integer).
+// unsigned int is 32 bits on every target of ours; unsigned long is 64 on LP64 hosts (macOS, Linux),
+// where sizeof half would be 16 and the copy would read past the double
 std::string floatName(double v)
 {
-    unsigned long half[2];
+    unsigned int half[2];
     std::memcpy(half, &v, sizeof half);
     return "fconst_" + hex32(half[1]) + hex32(half[0]);
 }

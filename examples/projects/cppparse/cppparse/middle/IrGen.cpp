@@ -1019,7 +1019,8 @@ int IrGen::newLocal(const std::string& name, const sema::Type* t, bool addressTa
     l.align = isReference(t) ? 8 : alignOf(t);
     if (l.size <= 0) l.size = 8;
     if (l.align <= 0) l.align = 8;
-    l.addressTaken = addressTaken;
+    // a volatile local lives in memory: never promoted to a register, never forwarded (the IR type has no qualifier)
+    l.addressTaken = addressTaken || (t && !isReference(t) && t->isVolatile);
     m_out->locals.push_back(l);
     return static_cast<int>(m_out->locals.size() - 1);
 }
@@ -1041,14 +1042,25 @@ int IrGen::addressOf(const LValue& lv, int line)
     return lv.addr;
 }
 
+// is the object an access through lv reads or writes volatile? (the IR's types drop the qualifier: the access carries it)
+bool IrGen::isVolatileAccess(const LValue& lv, const sema::Type* t) const
+{
+    const sema::Type* u = m_semaTypes.unref(t);
+    return (u && u->isVolatile) || (lv.type && lv.type->isVolatile);
+}
+
 int IrGen::load(const LValue& lv, const sema::Type* t, int line)
 {
     const sema::Type* u = m_semaTypes.unref(t);
     if (byAddress(u)) return addressOf(lv, line);
-    if (lv.bitWidth > 0 && lv.kind == LValue::Mem) return loadBits(lv, u, line);
-    if (lv.kind == LValue::Local) { IrInst in = make(IrInst::LoadLocal, u, line); in.args.push_back(IrOperand::local(lv.local, oldType(u))); return emit(in); }
-    if (lv.kind == LValue::Global) { IrInst in = make(IrInst::LoadGlobal, u, line); in.args.push_back(IrOperand::global(lv.global, oldType(u))); return emit(in); }
-    if (lv.kind == LValue::Mem) { IrInst in = make(IrInst::LoadMem, u, line); in.args.push_back(IrOperand::temp(lv.addr, oldType(m_semaTypes.pointer(u)))); return emit(in); }
+    if (lv.bitWidth > 0 && lv.kind == LValue::Mem) return loadBits(lv, t, line);
+    IrInst in;
+    if (lv.kind == LValue::Local) { in = make(IrInst::LoadLocal, u, line); in.args.push_back(IrOperand::local(lv.local, oldType(u))); }
+    else if (lv.kind == LValue::Global) { in = make(IrInst::LoadGlobal, u, line); in.args.push_back(IrOperand::global(lv.global, oldType(u))); }
+    else if (lv.kind == LValue::Mem) { in = make(IrInst::LoadMem, u, line); in.args.push_back(IrOperand::temp(lv.addr, oldType(m_semaTypes.pointer(u)))); }
+    else return constant(0, u, line);
+    in.isVolatile = isVolatileAccess(lv, t);
+    return emit(in);
     return constant(0, u, line);
 }
 
@@ -1065,11 +1077,15 @@ void IrGen::store(const LValue& lv, int temp, const sema::Type* t, int line)
         emit(c);
         return;
     }
-    if (lv.bitWidth > 0 && lv.kind == LValue::Mem) { storeBits(lv, temp, u, line); return; }
-    if (lv.kind == LValue::Local) { IrInst in = make(IrInst::StoreLocal, u, line); in.args.push_back(IrOperand::local(lv.local, oldType(u))); in.args.push_back(IrOperand::temp(temp, oldType(u))); emit(in); return; }
-    if (lv.kind == LValue::Global) { IrInst in = make(IrInst::StoreGlobal, u, line); in.args.push_back(IrOperand::global(lv.global, oldType(u))); in.args.push_back(IrOperand::temp(temp, oldType(u))); emit(in); return; }
-    if (lv.kind == LValue::Mem) { IrInst in = make(IrInst::StoreMem, u, line); in.args.push_back(IrOperand::temp(lv.addr, oldType(m_semaTypes.pointer(u)))); in.args.push_back(IrOperand::temp(temp, oldType(u))); emit(in); return; }
-    m_notes.push_back("L" + numText(line) + ": store to a non-lvalue was dropped");
+    if (lv.bitWidth > 0 && lv.kind == LValue::Mem) { storeBits(lv, temp, t, line); return; }
+    IrInst in;
+    if (lv.kind == LValue::Local) { in = make(IrInst::StoreLocal, u, line); in.args.push_back(IrOperand::local(lv.local, oldType(u))); }
+    else if (lv.kind == LValue::Global) { in = make(IrInst::StoreGlobal, u, line); in.args.push_back(IrOperand::global(lv.global, oldType(u))); }
+    else if (lv.kind == LValue::Mem) { in = make(IrInst::StoreMem, u, line); in.args.push_back(IrOperand::temp(lv.addr, oldType(m_semaTypes.pointer(u)))); }
+    else { m_notes.push_back("L" + numText(line) + ": store to a non-lvalue was dropped"); return; }
+    in.args.push_back(IrOperand::temp(temp, oldType(u)));
+    in.isVolatile = isVolatileAccess(lv, t);
+    emit(in);
 }
 
 // ---- bit-fields: the unit (the declared type's size, at the field's offset) is read and written whole ----
@@ -1117,6 +1133,7 @@ int IrGen::loadBits(const LValue& lv, const sema::Type* t, int line)
     const sema::Type* ws = m_semaTypes.basic(bits == 64 ? sema::Type::LongLong : sema::Type::Int);
     IrInst in = make(IrInst::LoadMem, unit, line);
     in.args.push_back(IrOperand::temp(lv.addr, oldType(m_semaTypes.pointer(unit))));
+    in.isVolatile = isVolatileAccess(lv, t);
     int x = convert(emit(in), unit, wu, line);
     if (!u->isUnsigned()) {
         // signed: the field's top bit to the top, then an arithmetic shift down
@@ -1142,6 +1159,7 @@ void IrGen::storeBits(const LValue& lv, int temp, const sema::Type* t, int line)
     const sema::Type* pu = m_semaTypes.pointer(unit);
     IrInst ld = make(IrInst::LoadMem, unit, line);
     ld.args.push_back(IrOperand::temp(lv.addr, oldType(pu)));
+    ld.isVolatile = isVolatileAccess(lv, t);
     int old = binary("&", convert(emit(ld), unit, wu, line), wu, bitConstant(~field & all, wu, line), wu, wu, line);
     int v = convert(temp, u, wu, line);
     if (lv.bitOffset > 0) v = binary("<<", v, wu, constant(lv.bitOffset, wu, line), wu, wu, line);
@@ -1150,7 +1168,30 @@ void IrGen::storeBits(const LValue& lv, int temp, const sema::Type* t, int line)
     IrInst st = make(IrInst::StoreMem, unit, line);
     st.args.push_back(IrOperand::temp(lv.addr, oldType(pu)));
     st.args.push_back(IrOperand::temp(merged, oldType(unit)));
+    st.isVolatile = ld.isVolatile;
     emit(st);
+}
+
+// the value of an assignment to a bit-field: what it holds now, v cut to its width as loadBits would read it back;
+// a volatile field is not read back (the program does not read it), its value is cut from v instead
+int IrGen::bitFieldResult(const LValue& lv, int v, const sema::Type* t, int line)
+{
+    if (!isVolatileAccess(lv, t)) return load(lv, t, line);
+    const sema::Type* u = m_semaTypes.unqualified(m_semaTypes.unref(t));
+    const int bits = sizeOf(u) == 8 ? 64 : 32;
+    if (lv.bitWidth >= bits) return v;
+    const sema::Type* wu = m_semaTypes.basic(bits == 64 ? sema::Type::ULongLong : sema::Type::UInt);
+    const sema::Type* ws = m_semaTypes.basic(bits == 64 ? sema::Type::LongLong : sema::Type::Int);
+    if (!u->isUnsigned()) {
+        // signed: the field's top bit to the top, then an arithmetic shift down
+        int x = convert(v, u, ws, line);
+        x = binary("<<", x, ws, constant(bits - lv.bitWidth, ws, line), ws, ws, line);
+        x = binary(">>", x, ws, constant(bits - lv.bitWidth, ws, line), ws, ws, line);
+        return convert(x, ws, u, line);
+    }
+    int x = convert(v, u, wu, line);
+    x = binary("&", x, wu, bitConstant((1ULL << lv.bitWidth) - 1, wu, line), wu, wu, line);
+    return convert(x, wu, u, line);
 }
 
 int IrGen::toBool(int temp, const sema::Type* t, int line)
@@ -2720,7 +2761,8 @@ int IrGen::value(cxx::Expr* e)
             int cur = load(lv, ot, line);
             int nv = incremented(cur, ot, op == "++", line);
             store(lv, nv, ot, line);
-            return lv.bitWidth > 0 ? load(lv, ot, line) : nv;     // a bit-field holds the value cut to its width
+            if (lv.bitWidth > 0) return bitFieldResult(lv, nv, ot, line);   // a bit-field holds the value cut to its width
+            return nv;
         }
         int v = value(e->kids[0]);
         const sema::Type* ot = m_semaTypes.decay(exprType(e->kids[0]));
@@ -2800,7 +2842,8 @@ int IrGen::value(cxx::Expr* e)
             } else rv = binary(bop, cur, lt, r, exprType(e->kids[1]), lt, line);
         }
         store(lv, rv, lt, line);
-        return lv.bitWidth > 0 ? load(lv, lt, line) : rv;         // a bit-field holds the value cut to its width
+        if (lv.bitWidth > 0) return bitFieldResult(lv, rv, lt, line);   // a bit-field holds the value cut to its width
+        return rv;
     }
     case cxx::Expr::Cond: {
         const sema::Type* ct = m_semaTypes.unqualified(t);
