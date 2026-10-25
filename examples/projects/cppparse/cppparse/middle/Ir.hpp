@@ -72,8 +72,10 @@ struct IrInst {
     std::vector<IrOperand> args;
     int                    line;
     long                   extra;  // offset / element size / vtable slot
+    bool                   isVolatile;   // a load or store of a volatile object: a side effect, never removed,
+                                         // merged with another access, forwarded or moved
 
-    IrInst() : op(Nop), dst(-1), type(0), line(0), extra(0) {}
+    IrInst() : op(Nop), dst(-1), type(0), line(0), extra(0), isVolatile(false) {}
     bool pure() const;             // result-only, no side effects, no memory read
     bool readsMemory() const;
     bool isTerminator() const { return op == Br || op == CondBr || op == Ret || op == Throw || op == Unreachable; }

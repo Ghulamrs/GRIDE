@@ -94,7 +94,7 @@ void u64MulAdd(U64& v, unsigned long mul, unsigned long add)   // v = v * mul + 
 
 void u64Negate(U64& v)
 {
-    v.lo = ~v.lo; v.hi = ~v.hi;
+    v.lo = ~v.lo & 0xFFFFFFFFUL; v.hi = ~v.hi & 0xFFFFFFFFUL;   // the halves stay 32-bit where unsigned long is wider
     unsigned long lo = (v.lo + 1) & 0xFFFFFFFFUL;
     if (lo == 0) v.hi = (v.hi + 1) & 0xFFFFFFFFUL;
     v.lo = lo;
@@ -132,9 +132,12 @@ bool parseLong(const std::string& text, long& out)
 {
     U64 v;
     if (!parseU64(text, v)) return false;
-    // accept values that fit in a signed or unsigned 32-bit field
+    // accept values that fit in a signed or unsigned 32-bit field, and keep the sign of a negative one: on an
+    // LP64 host long is 64 bits, so a plain cast of the low word would turn -1 into 4294967295
     if (v.hi != 0 && v.hi != 0xFFFFFFFFUL) return false;
-    out = static_cast<long>(static_cast<unsigned int>(v.lo));
+    unsigned long lo = v.lo & 0xFFFFFFFFUL;
+    if (lo & 0x80000000UL) out = -static_cast<long>(((~lo + 1) & 0xFFFFFFFFUL) - 1) - 1;   // two's complement without overflowing a 32-bit long
+    else out = static_cast<long>(lo);
     return true;
 }
 

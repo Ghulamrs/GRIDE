@@ -440,6 +440,7 @@ int Optimizer::copyPropagation(IrFunction& f)
             IrInst& in = insts[i];
             if (in.op == IrInst::StoreMem && in.args.size() == 2 && in.args[0].kind == IrOperand::Temp) {
                 int addr = in.args[0].id;
+                if (in.isVolatile) { mem.clear(); continue; }   // the next read of a volatile object reads memory again
                 std::map<int, Def>::iterator da = defs.find(addr);
                 const IrInst* ad = da == defs.end() ? 0 : &f.blocks[static_cast<size_t>(da->second.block)].insts[static_cast<size_t>(da->second.index)];
                 for (std::map<int, IrOperand>::iterator m = mem.begin(); m != mem.end();) {
@@ -458,6 +459,7 @@ int Optimizer::copyPropagation(IrFunction& f)
                 continue;
             }
             if (in.op == IrInst::LoadMem && in.args.size() == 1 && in.args[0].kind == IrOperand::Temp) {
+                if (in.isVolatile) { mem.erase(in.args[0].id); continue; }
                 std::map<int, IrOperand>::iterator m = mem.find(in.args[0].id);
                 if (m != mem.end()) {
                     const Type* t = in.type;
@@ -475,6 +477,9 @@ int Optimizer::copyPropagation(IrFunction& f)
                 continue;
             }
             if (in.op == IrInst::Call || in.op == IrInst::VCall || in.op == IrInst::CatchParam || in.op == IrInst::StoreGlobal) mem.clear();
+            // a store to an address-taken local writes memory a remembered address may point to ("*p = 1; x = 2; *p")
+            if (in.op == IrInst::StoreLocal && !in.args.empty() && in.args[0].kind == IrOperand::Local &&
+                f.locals[static_cast<size_t>(in.args[0].id)].addressTaken) mem.clear();
         }
     }
     for (size_t b = 0; b < f.blocks.size(); ++b) {
@@ -554,7 +559,7 @@ int Optimizer::deadCode(IrFunction& f)
             std::vector<IrInst> kept;
             for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
                 const IrInst& in = f.blocks[b].insts[i];
-                bool dead = in.dst >= 0 && uses[in.dst] == 0 && (in.pure() || in.readsMemory());
+                bool dead = in.dst >= 0 && uses[in.dst] == 0 && (in.pure() || (in.readsMemory() && !in.isVolatile));
                 if (in.op == IrInst::Nop) dead = true;
                 if (dead) ++removed; else kept.push_back(in);
             }
@@ -644,6 +649,23 @@ int Optimizer::simplifyCfg(IrFunction& f)
         const std::vector<int>& succs = f.blocks[static_cast<size_t>(x)].succs;
         for (size_t s = 0; s < succs.size(); ++s)
             if (succs[s] >= 0 && static_cast<size_t>(succs[s]) < reach.size() && !reach[static_cast<size_t>(succs[s])]) { reach[static_cast<size_t>(succs[s])] = true; work.push_back(succs[s]); }
+    }
+    // phi operands of edges that are gone (a folded condbr, a block no longer reached): dropped, or the renumbering
+    // below would turn their block into B0 and leave SSA destruction a second, stale copy into the phi's value
+    for (size_t b = 0; b < f.blocks.size(); ++b) {
+        if (!reach[b]) continue;
+        const std::vector<int>& preds = f.blocks[b].preds;
+        for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
+            IrInst& phi = f.blocks[b].insts[i];
+            if (phi.op != IrInst::Phi) break;
+            std::vector<IrOperand> live;
+            for (size_t x = 0; x + 1 < phi.args.size(); x += 2) {
+                const int p = phi.args[x + 1].id;
+                if (p >= 0 && static_cast<size_t>(p) < reach.size() && reach[static_cast<size_t>(p)] &&
+                    std::find(preds.begin(), preds.end(), p) != preds.end()) { live.push_back(phi.args[x]); live.push_back(phi.args[x + 1]); }
+            }
+            if (live.size() != phi.args.size()) { phi.args.swap(live); ++changes; }
+        }
     }
     // merge: A ends with br B, B has A as its only predecessor
     for (size_t a = 0; a < f.blocks.size(); ++a) {
@@ -789,11 +811,17 @@ int Optimizer::licm(IrFunction& f)
                     IrInst& in = blk.insts[i];
                     // never a phi: its value depends on the edge it is entered by, even when every argument is a constant
                     bool candidate = in.pure() && in.dst >= 0 && in.op != IrInst::Copy && in.op != IrInst::Phi;
+                    // an integer division traps on a zero divisor (signed: also INT_MIN / -1): run in the preheader it
+                    // would run where the program does not (under "if (d != 0)", or a loop entered zero times), so it
+                    // moves only from the header, which runs whenever the preheader does, or by a safe constant
+                    if (in.op == IrInst::Bin && (in.sub == "sdiv" || in.sub == "srem" || in.sub == "udiv" || in.sub == "urem") &&
+                        loop.blocks[k] != loop.header &&
+                        !(in.args.size() == 2 && in.args[1].kind == IrOperand::Imm && in.args[1].ival != 0 && in.args[1].ival != -1)) candidate = false;
                     if (in.op == IrInst::LoadLocal && !in.args.empty() && in.args[0].kind == IrOperand::Local && !modifiedLocals.count(in.args[0].id) &&
                         !f.locals[static_cast<size_t>(in.args[0].id)].addressTaken && !hasCall) candidate = true;
                     // an int or pointer field the loop cannot change (no call, only floating-point stores) at an
                     // address that cannot fault: b.cols(), the data pointer of a vector member
-                    if (in.op == IrInst::LoadMem && in.dst >= 0 && !hasCall && onlyFloatStores && in.type && !isFloatingType(in.type) &&
+                    if (in.op == IrInst::LoadMem && in.dst >= 0 && !in.isVolatile && !hasCall && onlyFloatStores && in.type && !isFloatingType(in.type) &&
                         !in.args.empty() && dereferenceable(f, in.args[0], defs, 0)) candidate = true;
                     if (!candidate) continue;
                     bool invariant = true;
@@ -919,12 +947,28 @@ int Optimizer::inlineCalls(IrFunction& f, int maxInsts, int maxInstsInLoop)
     return changes;
 }
 
+namespace {
+
+// the branches of blocks that jump to from now jump to to (their other targets stay)
+void redirectBackEdges(IrFunction& f, const std::vector<int>& blocks, int from, int to)
+{
+    for (size_t k = 0; k < blocks.size(); ++k) {
+        IrInst& last = f.blocks[static_cast<size_t>(blocks[k])].insts.back();
+        for (size_t a = 0; a < last.args.size(); ++a)
+            if (last.args[a].kind == IrOperand::Block && last.args[a].id == from) last.args[a].id = to;
+    }
+}
+
+} // namespace
+
 int Optimizer::unrollLoops(IrFunction& f, int maxTrip, int maxBody)
 {
     int changes = 0;
     f.computeCfg();
     std::vector<LoopInfo> loops;
     naturalLoops(f, loops);
+    std::vector<int> idom;
+    dominators(f, idom);
     for (size_t L = 0; L < loops.size(); ++L) {
         const LoopInfo& loop = loops[L];
         std::set<int> inLoop(loop.blocks.begin(), loop.blocks.end());
@@ -948,7 +992,7 @@ int Optimizer::unrollLoops(IrFunction& f, int maxTrip, int maxBody)
         std::string rel = cmp->sub;
         bool trueIsBody = (cbr.args[1].id == bodyEntry);
         // exactly one store to i inside the loop: storelocal i, (bin add (loadlocal i) imm step)
-        int stores = 0; long step = 0; int bodyInsts = 0;
+        int stores = 0; long step = 0; int bodyInsts = 0; int stepBlock = -1;
         for (size_t k = 0; k < loop.blocks.size(); ++k) {
             const IrBlock& blk = f.blocks[static_cast<size_t>(loop.blocks[k])];
             bodyInsts += static_cast<int>(blk.insts.size());
@@ -957,6 +1001,7 @@ int Optimizer::unrollLoops(IrFunction& f, int maxTrip, int maxBody)
                 if (in.op == IrInst::Call || in.op == IrInst::VCall || in.op == IrInst::TryBegin || in.op == IrInst::Throw) { stores = 99; break; }
                 if (in.op == IrInst::StoreLocal && in.args[0].id == ivar) {
                     ++stores;
+                    stepBlock = loop.blocks[k];
                     if (in.args[1].kind != IrOperand::Temp) { stores = 99; break; }
                     const IrInst* add = 0;
                     for (size_t j = 0; j < blk.insts.size(); ++j) if (blk.insts[j].dst == in.args[1].id) add = &blk.insts[j];
@@ -969,6 +1014,15 @@ int Optimizer::unrollLoops(IrFunction& f, int maxTrip, int maxBody)
             }
         }
         if (stores != 1 || step <= 0 || bodyInsts > maxBody) continue;
+        // the trip count holds only when the step runs once per iteration: its block dominates every back edge (a
+        // "continue" to the header before it skips it) and lies in no loop nested in this one (that repeats it)
+        bool once = true;
+        for (size_t p = 0; p < header.preds.size(); ++p)
+            if (inLoop.count(header.preds[p]) && !dominates(idom, stepBlock, header.preds[p])) once = false;
+        for (size_t M = 0; M < loops.size(); ++M)
+            if (loops[M].header != loop.header && inLoop.count(loops[M].header) &&
+                std::find(loops[M].blocks.begin(), loops[M].blocks.end(), stepBlock) != loops[M].blocks.end()) once = false;
+        if (!once) continue;
         // initial value: last "storelocal i, imm" in the unique outside predecessor
         std::vector<int> outside;
         for (size_t p = 0; p < header.preds.size(); ++p) if (!inLoop.count(header.preds[p])) outside.push_back(header.preds[p]);
@@ -991,7 +1045,8 @@ int Optimizer::unrollLoops(IrFunction& f, int maxTrip, int maxBody)
         if (trip < 0 || trip > maxTrip) continue;
 
         // emit trip copies of the loop blocks
-        int prevExit = -1;   // block whose final br must be redirected to the next copy
+        std::vector<int> prevBackEdges;   // blocks of the previous copy that jump back to its header: the latch, and
+        int prevHeader = -1;              // a "continue" that jumps to the header (a loop can have several back edges)
         int firstCopyHeader = -1;
         for (long c = 0; c < trip; ++c) {
             int blockBase = static_cast<int>(f.blocks.size());
@@ -1031,23 +1086,21 @@ int Optimizer::unrollLoops(IrFunction& f, int maxTrip, int maxBody)
             IrInst& chLast = ch.insts.back();
             int bodyTarget = blockMap.count(bodyEntry) ? blockMap[bodyEntry] : copyHeader;
             chLast.op = IrInst::Br; chLast.args.clear(); chLast.args.push_back(IrOperand::block(bodyTarget));
-            // latch copy: its back edge becomes the link to the next copy (set below)
-            int copyLatch = blockMap[loop.latch];
-            if (prevExit >= 0) {
-                IrInst& pl = f.blocks[static_cast<size_t>(prevExit)].insts.back();
-                for (size_t a = 0; a < pl.args.size(); ++a) if (pl.args[a].kind == IrOperand::Block && pl.args[a].id == firstCopyHeader + 0 && false) {}
-                // redirect the previous latch's jump to the header copy of this iteration
-                for (size_t a = 0; a < pl.args.size(); ++a) if (pl.args[a].kind == IrOperand::Block) pl.args[a].id = copyHeader;
-            } else {
-                firstCopyHeader = copyHeader;
+            // the previous copy's back edges become the link to this copy; only the operands naming its header change
+            // (a latch "condbr c, header, if.end" keeps its other target)
+            if (prevHeader >= 0) redirectBackEdges(f, prevBackEdges, prevHeader, copyHeader);
+            else firstCopyHeader = copyHeader;
+            prevBackEdges.clear();
+            for (size_t k = 0; k < loop.blocks.size(); ++k) {
+                const int nb = blockMap[loop.blocks[k]];
+                const IrInst& last = f.blocks[static_cast<size_t>(nb)].insts.back();
+                for (size_t a = 0; a < last.args.size(); ++a)
+                    if (last.args[a].kind == IrOperand::Block && last.args[a].id == copyHeader) { prevBackEdges.push_back(nb); break; }
             }
-            prevExit = copyLatch;
+            prevHeader = copyHeader;
         }
-        // last latch -> exit; preheader -> first copy (or exit when trip == 0)
-        if (prevExit >= 0) {
-            IrInst& pl = f.blocks[static_cast<size_t>(prevExit)].insts.back();
-            for (size_t a = 0; a < pl.args.size(); ++a) if (pl.args[a].kind == IrOperand::Block) pl.args[a].id = exitBlock;
-        }
+        // the last copy's back edges -> exit; preheader -> first copy (or exit when trip == 0)
+        if (prevHeader >= 0) redirectBackEdges(f, prevBackEdges, prevHeader, exitBlock);
         IrInst& preBr = f.blocks[static_cast<size_t>(pre)].insts.back();
         preBr.args[0].id = trip > 0 ? firstCopyHeader : exitBlock;
         ++changes;
