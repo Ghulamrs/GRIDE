@@ -35,7 +35,7 @@ struct IrDataItem {
     enum Kind { Zero, Int, Float, String, Address, Bytes, Rva };
     Kind        kind;
     int         size;        // bytes; Zero: the length of the run; Bytes: the number of them
-    long        value;       // Int
+    long long   value;       // Int (all 64 bits of a DQ item)
     std::string text;        // Float: the literal; String: the literal with its quotes; Address, Rva: the IR name; Bytes: the bytes themselves
     IrDataItem() : kind(Zero), size(0), value(0) {}
 };
@@ -67,10 +67,13 @@ public:
     // cl's return-adjusting thunk of a covariant override (?self@CD@@QEAAPEAUSB@@XZ): a frame, the stack arguments
     // (stackArgs of them) staged again, this moved by thisAdjust, a call of target, the result moved by returnAdjust
     // (a pointer only when it is not null; a reference always)
-    void        addReturnThunk(const std::string& irName, const std::string& target, int thisAdjust, int returnAdjust, bool reference, int stackArgs);
+    // returnVbptr >= 0: the result's target base lies in a virtual base, found through the vbptr there and the entry at
+    // returnEntry of its vbtable, returnAdjust bytes further
+    void        addReturnThunk(const std::string& irName, const std::string& target, int thisAdjust, int returnAdjust, bool reference, int stackArgs, int returnVbptr = -1, int returnEntry = 0);
     // cl's vtordisp thunk ($4) of an overrider held by the vftable inside a virtual base: this moves back by the int
     // just before the base, then by adjust, then a tail jump
     void        addVtordispThunk(const std::string& irName, const std::string& target, int adjust);
+    void        addVtordispexThunk(const std::string& irName, const std::string& target, int vbptrOffset, int entryOffset, int nonVirtual);
     void        addGlobal(const IrGlobal& g) { m_globals.push_back(g); }
     void        addInitializer(const std::string& irName) { m_initializers.push_back(irName); }   // run by the CRT before main
     // the dynamic initializer of a COMDAT variable (a static data member of a class template instantiation): its .CRT$XCU
@@ -111,7 +114,11 @@ private:
     std::set<std::string>              m_cFunctions;      // IR names of functions without a parameter list (registerCFunction)
     std::set<std::string>              m_dataSymbols;     // symbols already made PUBLIC in .data
     std::vector<IrVtable>              m_vtables;
-    struct Thunk { std::string name, target; int adjust; bool vcall; bool returning; int returnAdjust; bool reference; int stackArgs; bool vtordisp; };
+    struct Thunk {
+        std::string name, target; int adjust; bool vcall; bool returning; int returnAdjust; bool reference; int stackArgs; bool vtordisp;
+        bool vtordispex; int vbptrOffset, entryOffset;   // cl's vtordispex thunk: adjust is the overrider's own adjustor
+        Thunk() : adjust(0), vcall(false), returning(false), returnAdjust(0), reference(false), stackArgs(0), vtordisp(false), vtordispex(false), vbptrOffset(0), entryOffset(0) {}
+    };
     std::vector<Thunk>                 m_thunks;
     std::set<std::string>              m_thunkNames;
     std::vector<IrGlobal>              m_globals;

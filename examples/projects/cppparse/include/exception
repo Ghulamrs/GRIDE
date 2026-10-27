@@ -1,0 +1,38 @@
+// exception - cppparse's C++98 library: the base class of the standard exceptions, terminate and unexpected with
+// their handlers, uncaught_exception (18.6). The handlers live in cppparse's exception runtime, which calls
+// terminate when an exception leaves a destructor during unwinding or no handler takes it.
+#ifndef CPPPARSE_EXCEPTION
+#define CPPPARSE_EXCEPTION
+
+extern "C" {
+    typedef void (*__cppparse_handler)();
+    __cppparse_handler cppparse_set_terminate(__cppparse_handler f);
+    __cppparse_handler cppparse_set_unexpected(__cppparse_handler f);
+    __declspec(noreturn) void cppparse_terminate(void);
+    __declspec(noreturn) void cppparse_unexpected(void);
+    int  cppparse_uncaught_exception(void);
+}
+
+namespace std {
+
+class exception {
+public:
+    exception() {}
+    exception(const exception&) {}
+    exception& operator=(const exception&) { return *this; }
+    virtual ~exception() {}
+    virtual const char* what() const { return "exception"; }
+};
+
+typedef void (*terminate_handler)();
+typedef void (*unexpected_handler)();
+
+inline terminate_handler set_terminate(terminate_handler f) { return cppparse_set_terminate(f); }
+inline unexpected_handler set_unexpected(unexpected_handler f) { return cppparse_set_unexpected(f); }
+__declspec(noreturn) inline void terminate() { cppparse_terminate(); }
+__declspec(noreturn) inline void unexpected() { cppparse_unexpected(); }
+inline bool uncaught_exception() { return cppparse_uncaught_exception() != 0; }
+
+}
+
+#endif

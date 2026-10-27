@@ -927,7 +927,12 @@ namespace Gride { namespace Services {
         // libraries are; null where the file defines none or it is not there
         static String^ HostShalimarRuntime(Target target, bool debug, String^ toolDir, String^ rideRoot)
         {
-            LibraryDefinition^ lib = Defs()->LibraryByKind(Arch(target), "shalimarRuntime");
+            return HostShalimarRuntime(target, debug, toolDir, rideRoot, String::Empty);
+        }
+        // the one built for that C runtime ("grt" / "msvc": shmrt-x86_64-windows-grt.lib against GRIDE's)
+        static String^ HostShalimarRuntime(Target target, bool debug, String^ toolDir, String^ rideRoot, String^ crt)
+        {
+            LibraryDefinition^ lib = Defs()->LibraryByKind(Arch(target), "shalimarRuntime", crt);
             if (lib == nullptr || lib->FileFor(debug)->Length == 0) return nullptr;
             String^ dir = FindLibraryDir(lib, toolDir, rideRoot);
             if (dir == nullptr) return nullptr;
@@ -945,6 +950,39 @@ namespace Gride { namespace Services {
         {
             TargetDefinition^ host = Defs()->HostTarget();
             return host == nullptr ? String::Empty : CrtLibraries(TargetInfo::Parse(host->IdeTarget), debug);
+        }
+
+        // the host C runtime's entry for a choice ("grt" GRIDE's, "msvc" Microsoft's)
+        static LibraryDefinition^ HostCrt(Target target, String^ crt)
+        {
+            return Defs()->LibraryByKind(Arch(target), "hostCrt", crt);
+        }
+        // Its libraries as the link takes them: where the entry names a directory (GRIDE's, lib beside GRIDE)
+        // each file by its full path, so no LIB is read for them; else the names, found through LIB (Microsoft's).
+        // Null where the entry's directory is not there.
+        static String^ CrtLibraries(Target target, bool debug, String^ crt, String^ toolDir, String^ rideRoot)
+        {
+            LibraryDefinition^ lib = HostCrt(target, crt);
+            if (lib == nullptr) return String::Empty;
+            if (String::IsNullOrEmpty(lib->Directory)) return lib->FileFor(debug);
+            String^ dir = FindLibraryDir(lib, toolDir, rideRoot);
+            if (dir == nullptr) return nullptr;
+            List<String^>^ paths = gcnew List<String^>();
+            for each (String^ f in lib->FileFor(debug)->Split(gcnew array<wchar_t>{ L' ' }, StringSplitOptions::RemoveEmptyEntries))
+            {
+                String^ full = Path::Combine(dir, f);
+                if (!File::Exists(full)) return nullptr;
+                paths->Add(Quote(full));
+            }
+            return String::Join(" ", paths);
+        }
+        // where GRIDE's runtime lies, for the messages: its directory, or the one it is looked for in
+        static String^ CrtDirectory(Target target, String^ crt, String^ toolDir, String^ rideRoot)
+        {
+            LibraryDefinition^ lib = HostCrt(target, crt);
+            if (lib == nullptr || String::IsNullOrEmpty(lib->Directory)) return String::Empty;
+            String^ dir = FindLibraryDir(lib, toolDir, rideRoot);
+            return dir == nullptr ? lib->Directory : dir;
         }
 
     private:

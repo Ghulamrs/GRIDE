@@ -208,8 +208,11 @@ static const Name jcc_names[] = {
     {"JLE", 14}, {"JNG", 14}, {"JG", 15}, {"JNLE", 15},
 };
 
-/* the SSE ops the compilers emit: a mandatory prefix before any REX, one opcode after 0F, the
-   form, and the memory width ml64 insists on (16: any, the 128-bit ops take unsized memory) */
+/* the SSE ops: a mandatory prefix before any REX, one opcode after 0F (or 0F esc op), the form,
+   and the memory width ml64 insists on - 4 or 8 that width exactly; 16 a 128-bit op, which takes
+   memory unsized, XMMWORD or OWORD, or of the width of its element when it has one (pcmpeqb a
+   BYTE, xorps a DWORD, xorpd a QWORD; pxor and movdqa none), as ml64 does. imm: a constant
+   operand follows, one byte */
 enum SseForm { S_LOAD, S_STORE, S_FROM_INT, S_TO_INT };
 
 struct SseOp {
@@ -218,6 +221,9 @@ struct SseOp {
     unsigned char op;
     int form;
     int msize;
+    int elem;
+    unsigned char esc;
+    bool imm;
 };
 
 static const SseOp sse_ops[] = {
@@ -235,20 +241,27 @@ static const SseOp sse_ops[] = {
     {"CVTSI2SD", 0xF2, 0x2A, S_FROM_INT, 0}, {"CVTSI2SS", 0xF3, 0x2A, S_FROM_INT, 0},
     {"CVTTSD2SI", 0xF2, 0x2C, S_TO_INT, 8}, {"CVTSD2SI", 0xF2, 0x2D, S_TO_INT, 8},
     {"CVTTSS2SI", 0xF3, 0x2C, S_TO_INT, 4}, {"CVTSS2SI", 0xF3, 0x2D, S_TO_INT, 4},
-    {"PXOR", 0x66, 0xEF, S_LOAD, 16}, {"XORPD", 0x66, 0x57, S_LOAD, 16}, {"XORPS", 0x00, 0x57, S_LOAD, 16},
-    {"ANDPD", 0x66, 0x54, S_LOAD, 16}, {"ANDPS", 0x00, 0x54, S_LOAD, 16},
-    {"ANDNPD", 0x66, 0x55, S_LOAD, 16}, {"ANDNPS", 0x00, 0x55, S_LOAD, 16},
-    {"ORPD", 0x66, 0x56, S_LOAD, 16}, {"ORPS", 0x00, 0x56, S_LOAD, 16},
-    {"PADDQ", 0x66, 0xD4, S_LOAD, 16}, {"PSUBQ", 0x66, 0xFB, S_LOAD, 16},
-    {"PAND", 0x66, 0xDB, S_LOAD, 16}, {"POR", 0x66, 0xEB, S_LOAD, 16}, {"PANDN", 0x66, 0xDF, S_LOAD, 16},
-    {"MOVAPD", 0x66, 0x28, S_LOAD, 16}, {"MOVAPD", 0x66, 0x29, S_STORE, 16},
-    {"MOVAPS", 0x00, 0x28, S_LOAD, 16}, {"MOVAPS", 0x00, 0x29, S_STORE, 16},
-    {"MOVUPD", 0x66, 0x10, S_LOAD, 16}, {"MOVUPD", 0x66, 0x11, S_STORE, 16},
-    {"MOVUPS", 0x00, 0x10, S_LOAD, 16}, {"MOVUPS", 0x00, 0x11, S_STORE, 16},
-    {"MOVDQA", 0x66, 0x6F, S_LOAD, 16}, {"MOVDQA", 0x66, 0x7F, S_STORE, 16},
-    {"MOVDQU", 0xF3, 0x6F, S_LOAD, 16}, {"MOVDQU", 0xF3, 0x7F, S_STORE, 16},
-    {"MOVQ", 0xF3, 0x7E, S_LOAD, 8}, {"MOVQ", 0x66, 0xD6, S_STORE, 8},
-    {"MOVD", 0x66, 0x6E, S_LOAD, 4}, {"MOVD", 0x66, 0x7E, S_STORE, 4},
+    {"PXOR", 0x66, 0xEF, S_LOAD, 16, 0}, {"XORPD", 0x66, 0x57, S_LOAD, 16, 8}, {"XORPS", 0x00, 0x57, S_LOAD, 16, 4},
+    {"ANDPD", 0x66, 0x54, S_LOAD, 16, 8}, {"ANDPS", 0x00, 0x54, S_LOAD, 16, 4},
+    {"ANDNPD", 0x66, 0x55, S_LOAD, 16, 8}, {"ANDNPS", 0x00, 0x55, S_LOAD, 16, 4},
+    {"ORPD", 0x66, 0x56, S_LOAD, 16, 8}, {"ORPS", 0x00, 0x56, S_LOAD, 16, 4},
+    {"PADDQ", 0x66, 0xD4, S_LOAD, 16, 8}, {"PSUBQ", 0x66, 0xFB, S_LOAD, 16, 8},
+    {"PAND", 0x66, 0xDB, S_LOAD, 16, 0}, {"POR", 0x66, 0xEB, S_LOAD, 16, 0}, {"PANDN", 0x66, 0xDF, S_LOAD, 16, 0},
+    {"MOVAPD", 0x66, 0x28, S_LOAD, 16, 8}, {"MOVAPD", 0x66, 0x29, S_STORE, 16, 8},
+    {"MOVAPS", 0x00, 0x28, S_LOAD, 16, 4}, {"MOVAPS", 0x00, 0x29, S_STORE, 16, 4},
+    {"MOVUPD", 0x66, 0x10, S_LOAD, 16, 8}, {"MOVUPD", 0x66, 0x11, S_STORE, 16, 8},
+    {"MOVUPS", 0x00, 0x10, S_LOAD, 16, 4}, {"MOVUPS", 0x00, 0x11, S_STORE, 16, 4},
+    {"MOVDQA", 0x66, 0x6F, S_LOAD, 16, 0}, {"MOVDQA", 0x66, 0x7F, S_STORE, 16, 0},
+    {"MOVDQU", 0xF3, 0x6F, S_LOAD, 16, 0}, {"MOVDQU", 0xF3, 0x7F, S_STORE, 16, 0},
+    {"MOVNTDQ", 0x66, 0xE7, S_STORE, 16, 0},
+    /* the integer ops the runtime's string and memory routines use */
+    {"PCMPEQB", 0x66, 0x74, S_LOAD, 16, 1}, {"PCMPEQW", 0x66, 0x75, S_LOAD, 16, 2}, {"PCMPEQD", 0x66, 0x76, S_LOAD, 16, 4},
+    {"PMINUB", 0x66, 0xDA, S_LOAD, 16, 1}, {"PMAXUB", 0x66, 0xDE, S_LOAD, 16, 1}, {"PSUBB", 0x66, 0xF8, S_LOAD, 16, 1},
+    {"PUNPCKLBW", 0x66, 0x60, S_LOAD, 16, 1}, {"PUNPCKLWD", 0x66, 0x61, S_LOAD, 16, 2},
+    {"PUNPCKLDQ", 0x66, 0x62, S_LOAD, 16, 4}, {"PUNPCKLQDQ", 0x66, 0x6C, S_LOAD, 16, 8},
+    {"PSHUFD", 0x66, 0x70, S_LOAD, 16, 4, 0, true},
+    /* SSE4.1's rounding: 66 0F 3A 0B (sd) and 0A (ss), the mode in the constant */
+    {"ROUNDSD", 0x66, 0x0B, S_LOAD, 16, 8, 0x3A, true}, {"ROUNDSS", 0x66, 0x0A, S_LOAD, 16, 4, 0x3A, true},
 };
 
 static int lookup(const Name *list, int n, const std::string &name)
@@ -265,15 +278,18 @@ static const Name plain_names[] = {
     {"CLD", 0xFC}, {"STD", 0xFD}, {"PUSHFQ", 0x9C}, {"POPFQ", 0x9D},
     {"MOVSB", 0xA4}, {"MOVSD", 0xA5}, {"CMPSB", 0xA6}, {"CMPSD", 0xA7},
     {"STOSB", 0xAA}, {"STOSD", 0xAB}, {"LODSB", 0xAC}, {"LODSD", 0xAD}, {"SCASB", 0xAE}, {"SCASD", 0xAF},
+    {"FWAIT", 0x9B}, {"WAIT", 0x9B},
 };
-/* two-byte plain forms: 66 or REX.W in front of a string op, or 0F xx */
+/* two-byte plain forms: 66 or REX.W in front of a string op, 0F xx, or an x87 DB xx */
 static const Name plain2_names[] = {
     {"CWD", 0x6699}, {"CBW", 0x6698}, {"PAUSE", 0xF390}, {"UD2", 0x0F0B}, {"SYSCALL", 0x0F05},
-    {"CPUID", 0x0FA2}, {"RDTSC", 0x0F31},
+    {"CPUID", 0x0FA2}, {"RDTSC", 0x0F31}, {"FNCLEX", 0xDBE2}, {"FNINIT", 0xDBE3},
     {"MOVSW", 0x66A5}, {"MOVSQ", 0x48A5}, {"CMPSW", 0x66A7}, {"CMPSQ", 0x48A7},
     {"STOSW", 0x66AB}, {"STOSQ", 0x48AB}, {"LODSW", 0x66AD}, {"LODSQ", 0x48AD}, {"SCASW", 0x66AF}, {"SCASQ", 0x48AF},
 };
-static const Name fence_names[] = { {"LFENCE", 0xE8}, {"MFENCE", 0xF0}, {"SFENCE", 0xF8} };
+/* three-byte plain forms, 0F xx xx */
+static const Name fence_names[] = { {"LFENCE", 0xAEE8}, {"MFENCE", 0xAEF0}, {"SFENCE", 0xAEF8}, {"XGETBV", 0x01D0} };
+#define COUNT(a) ((int)(sizeof a / sizeof a[0]))
 /* 0F xx /r with the destination register in the reg field */
 static const Name bitscan_names[] = { {"BSF", 0xBC}, {"BSR", 0xBD} };
 static const Name cnt_names[] = { {"POPCNT", 0xB8}, {"LZCNT", 0xBD}, {"TZCNT", 0xBC} };
@@ -331,13 +347,33 @@ static bool is_xmm(const Operand &o)
     return o.kind == O_REG && o.size == 128;
 }
 
-/* the memory operand's width must be what the op reads or writes; 128-bit ops take it unsized */
-static bool sse_size(Unit &u, const Operand &m, int msize)
+/* a bare code label (a PROC, a NEAR label) is not data: ml64 refuses it where memory is read or
+   written, unless a PTR names the width (A2070) */
+static bool code_label(Unit &u, const Operand &m)
+{
+    if (m.kind != O_MEM || !m.near || m.ptr) return false;
+    u.error("invalid instruction operands: a code label is not data");
+    return true;
+}
+
+/* the memory operand's width must be what the op reads or writes: 4 and 8 exactly; a 128-bit op
+   (16) takes it unsized, XMMWORD or OWORD, or as wide as its element */
+static bool sse_size(Unit &u, const Operand &m, int msize, int elem)
 {
     if (m.kind != O_MEM) return true;
-    if (msize == 16 ? (m.size == 0 || m.size == 128) : m.size == msize * 8) return true;
+    if (code_label(u, m)) return false;
+    if (msize == 16 ? (m.size == 0 || m.size == 128 || (elem && m.size == elem * 8)) : m.size == msize * 8) return true;
     if (m.size == 0) u.error("size unknown; use QWORD PTR or DWORD PTR");
     else u.error("wrong memory operand size for this instruction");
+    return false;
+}
+
+/* an 8-bit constant operand: ml64 takes -128 to 255 */
+static bool imm8(Unit &u, const std::string &name, const Operand &o)
+{
+    if (o.kind != O_IMM || o.sym >= 0) { u.error(name + " needs a constant"); return false; }
+    if (o.value >= -128 && o.value <= 255) return true;
+    u.error("constant does not fit in 8 bits");
     return false;
 }
 
@@ -349,17 +385,19 @@ static bool sse(Unit &u, const std::string &name, std::vector<Operand> &ops, Cod
         if (name == sse_ops[i].name) { first = i; break; }
     if (first == count)
         return false;
-    if (ops.size() != 2 || ops[0].kind == O_IMM || ops[1].kind == O_IMM) {
-        u.error(name + " needs two operands");
+    const bool imm = sse_ops[first].imm;
+    if (ops.size() != (imm ? 3u : 2u) || ops[0].kind == O_IMM || ops[1].kind == O_IMM) {
+        u.error(name + (imm ? " needs two operands and a constant" : " needs two operands"));
         return true;
     }
+    if (imm && !imm8(u, name, ops[2])) return true;
     Operand &d = ops[0];
     Operand &s = ops[1];
     if (d.kind == O_MEM && s.kind == O_MEM) { u.error("two memory operands"); return true; }
     const SseOp *op = 0;
     for (size_t i = first; i < count && name == sse_ops[i].name; i++) {
         int f = sse_ops[i].form;
-        if (f == S_LOAD && is_xmm(d) && !(name != "MOVQ" && name != "MOVD" && s.kind == O_REG && !is_xmm(s))) op = &sse_ops[i];
+        if (f == S_LOAD && is_xmm(d) && !(s.kind == O_REG && !is_xmm(s))) op = &sse_ops[i];
         else if (f == S_STORE && is_xmm(s) && !is_xmm(d)) op = &sse_ops[i];
         else if (f == S_FROM_INT && is_xmm(d) && !is_xmm(s)) op = &sse_ops[i];
         else if (f == S_TO_INT && d.kind == O_REG && !is_xmm(d) && (is_xmm(s) || s.kind == O_MEM)) op = &sse_ops[i];
@@ -367,8 +405,6 @@ static bool sse(Unit &u, const std::string &name, std::vector<Operand> &ops, Cod
     }
     if (!op) { u.error(name + ": bad operand combination"); return true; }
     bool w = false;
-    unsigned prefix = op->prefix;
-    unsigned opcode = op->op;
     if (op->form == S_FROM_INT) {
         if (s.kind == O_REG ? (s.size != 32 && s.size != 64) : (s.size != 32 && s.size != 64)) {
             u.error(name + " needs a 32- or 64-bit integer operand");
@@ -377,27 +413,95 @@ static bool sse(Unit &u, const std::string &name, std::vector<Operand> &ops, Cod
         w = s.size == 64;
     } else if (op->form == S_TO_INT) {
         if (d.size != 32 && d.size != 64) { u.error(name + " needs a 32- or 64-bit register"); return true; }
-        if (!sse_size(u, s, op->msize)) return true;
+        if (!sse_size(u, s, op->msize, 0)) return true;
         w = d.size == 64;
-    } else if ((name == "MOVQ" || name == "MOVD") && (d.kind == O_REG && s.kind == O_REG) && (!is_xmm(d) || !is_xmm(s))) {
-        /* MOVQ/MOVD with a general register: 66 [REX.W] 0F 6E (into the xmm) or 7E (out of it) */
-        const Operand &g = is_xmm(d) ? s : d;
-        if (g.size != (name == "MOVQ" ? 64 : 32)) { u.error(name + " needs a " + (name == "MOVQ" ? "64" : "32") + "-bit register"); return true; }
-        prefix = 0x66;
-        opcode = is_xmm(d) ? 0x6E : 0x7E;
-        w = name == "MOVQ";
     } else {
         const Operand &m = op->form == S_LOAD ? s : d;
         if (m.kind == O_REG && !is_xmm(m)) { u.error(name + " needs XMM registers"); return true; }
-        if (!sse_size(u, m, op->msize)) return true;
+        if (!sse_size(u, m, op->msize, op->elem)) return true;
     }
-    if (prefix) put(c, prefix);
-    if (op->form == S_LOAD || op->form == S_FROM_INT || (op->form == S_TO_INT)) {
-        if (op->form == S_TO_INT) rm2(c, w, d.reg, s, 0x0F, opcode);
-        else rm2(c, w, d.reg, s, 0x0F, opcode);
+    if (op->prefix) put(c, op->prefix);
+    unsigned char code[3] = { 0x0F, op->esc, op->op };
+    if (!op->esc) code[1] = op->op;
+    if (op->form == S_STORE) rm_code(c, w, s.reg, d, code, op->esc ? 3 : 2);
+    else rm_code(c, w, d.reg, s, code, op->esc ? 3 : 2);
+    if (imm) put(c, (unsigned)ops[2].value & 0xFF);
+    emit(u, c);
+    return true;
+}
+
+/* MOVD and MOVQ: 32 or 64 bits between an XMM register and a general register or memory, as ml64
+   spells them. With a general register both are 66 [REX.W] 0F 6E (into the XMM) and 7E (out of
+   it): MOVD takes a 32- or 64-bit one, MOVQ a 64-bit one. With memory, MOVD takes DWORD (66 0F
+   6E/7E) or QWORD (REX.W as with a register); MOVQ takes QWORD, F3 0F 7E in and 66 0F D6 out, the
+   form MOVQ between two XMM registers also takes (F3 0F 7E). Unsized memory is refused by both */
+static void movdq(Unit &u, const std::string &name, std::vector<Operand> &ops, Code &c)
+{
+    const bool q = name == "MOVQ";
+    if (ops.size() != 2 || ops[0].kind == O_IMM || ops[1].kind == O_IMM) { u.error(name + " needs two operands"); return; }
+    Operand &d = ops[0];
+    Operand &s = ops[1];
+    const bool in = is_xmm(d);
+    const Operand &x = in ? d : s;
+    const Operand &o = in ? s : d;
+    if (!is_xmm(x)) { u.error(name + " needs an XMM register"); return; }
+    if (is_xmm(o)) {
+        if (!q) { u.error("MOVD cannot move between XMM registers; use MOVQ"); return; }
+        put(c, 0xF3);
+        rm2(c, false, d.reg, s, 0x0F, 0x7E);
+        emit(u, c);
+        return;
+    }
+    if (o.kind == O_MEM && code_label(u, o)) return;
+    if (o.kind == O_MEM && o.size == 0) { u.error(std::string("size unknown; use ") + (q ? "QWORD PTR" : "DWORD PTR or QWORD PTR")); return; }
+    if (o.size != 64 && (q || o.size != 32)) {
+        if (o.kind == O_REG) u.error(name + (q ? " needs a 64-bit register" : " needs a 32- or 64-bit register"));
+        else u.error("wrong memory operand size for this instruction");
+        return;
+    }
+    if (q && o.kind == O_MEM) {
+        put(c, in ? 0xF3 : 0x66);
+        rm2(c, false, x.reg, o, 0x0F, in ? 0x7E : 0xD6);
     } else {
-        rm2(c, w, s.reg, d, 0x0F, opcode);
+        put(c, 0x66);
+        rm2(c, o.size == 64, x.reg, o, 0x0F, in ? 0x6E : 0x7E);
     }
+    emit(u, c);
+}
+
+/* the instructions whose one operand is memory, with a /digit: the width ml64 takes besides
+   unsized (0: any) */
+struct MemOp {
+    const char *name;
+    unsigned char op1;
+    unsigned char op2;      /* 0: a one-byte opcode */
+    int digit;
+    int bits;
+};
+
+static const MemOp mem_ops[] = {
+    {"PREFETCHNTA", 0x0F, 0x18, 0, 0}, {"PREFETCHT0", 0x0F, 0x18, 1, 0},
+    {"PREFETCHT1", 0x0F, 0x18, 2, 0}, {"PREFETCHT2", 0x0F, 0x18, 3, 0},
+    {"LDMXCSR", 0x0F, 0xAE, 2, 32}, {"STMXCSR", 0x0F, 0xAE, 3, 32},
+    {"FLDCW", 0xD9, 0x00, 5, 16}, {"FNSTCW", 0xD9, 0x00, 7, 16},
+};
+
+static bool mem_op(Unit &u, const std::string &name, std::vector<Operand> &ops, Code &c)
+{
+    const MemOp *op = 0;
+    for (size_t i = 0; i < sizeof mem_ops / sizeof mem_ops[0]; i++)
+        if (name == mem_ops[i].name) op = &mem_ops[i];
+    if (!op)
+        return false;
+    if (ops.size() != 1 || ops[0].kind != O_MEM) { u.error(name + " needs one memory operand"); return true; }
+    const Operand &m = ops[0];
+    if (code_label(u, m)) return true;
+    if (op->bits && m.size != 0 && m.size != op->bits) {
+        u.error(name + (op->bits == 32 ? " needs DWORD PTR" : " needs WORD PTR"));
+        return true;
+    }
+    if (op->op2) rm2(c, false, op->digit, m, op->op1, op->op2);
+    else rm1(c, false, op->digit, m, op->op1);
     emit(u, c);
     return true;
 }
@@ -427,20 +531,20 @@ void X64Target::instruction(Unit &u, const std::string &name, std::vector<Operan
         return;
     }
     /* MOVSD and CMPSD are string ops with no operands and SSE ops with two */
-    k = n == 0 ? lookup(plain2_names, 17, name) : -1;
+    k = lookup(plain2_names, COUNT(plain2_names), name);
     if (k >= 0) {
         if (n != 0) { u.error(name + " takes no operands"); return; }
         u.emit8((unsigned)k >> 8);
         u.emit8((unsigned)k & 0xFF);
         return;
     }
-    k = lookup(fence_names, 3, name);
+    k = lookup(fence_names, COUNT(fence_names), name);
     if (k >= 0) {
         if (n != 0) { u.error(name + " takes no operands"); return; }
-        u.emit8(0x0F); u.emit8(0xAE); u.emit8((unsigned)k);
+        u.emit8(0x0F); u.emit8((unsigned)k >> 8); u.emit8((unsigned)k & 0xFF);
         return;
     }
-    k = lookup(plain_names, 24, name);
+    k = lookup(plain_names, COUNT(plain_names), name);
     if (k >= 0 && n != 0 && (name == "MOVSD" || name == "CMPSD")) k = -1;
     if (k >= 0 || name == "CQO" || name == "CDQE") {
         if (n == 1 && name == "RET" && ops[0].kind == O_IMM) {
@@ -639,9 +743,15 @@ void X64Target::instruction(Unit &u, const std::string &name, std::vector<Operan
     int cnt = lookup(cnt_names, 3, name);
     if (k >= 0 || cnt >= 0) {
         if (n != 2 || ops[0].kind != O_REG || ops[1].kind == O_IMM || ops[0].size == 8) { u.error(name + " needs a register and a register or memory operand"); return; }
+        if (code_label(u, ops[1])) return;
         if (!same_size(u, ops[0], ops[1])) return;
+        /* F3 then 66, as ml64 orders them - unless a REX follows, when it writes 66 F3 */
+        const Operand &m = ops[1];
+        const bool rexed = (ops[0].reg & 8) || (m.kind == O_REG ? (m.reg & 8) != 0
+                         : ((m.base >= 0 && (m.base & 8)) || (m.index >= 0 && (m.index & 8))));
+        if (ops[0].size == 16 && rexed) put(c, 0x66);
         if (cnt >= 0) put(c, 0xF3);
-        if (ops[0].size == 16) put(c, 0x66);
+        if (ops[0].size == 16 && !rexed) put(c, 0x66);
         rm2(c, ops[0].size == 64, ops[0].reg, ops[1], 0x0F, (unsigned)(k >= 0 ? k : cnt));
         emit(u, c);
         return;
@@ -777,6 +887,50 @@ void X64Target::instruction(Unit &u, const std::string &name, std::vector<Operan
         emit(u, c);
         return;
     }
+
+    if (name == "MOVD" || name == "MOVQ") {
+        movdq(u, name, ops, c);
+        return;
+    }
+
+    if (name == "PMOVMSKB") {
+        /* 66 [REX.W] 0F D7 /r: the general register in the reg field, the XMM register in r/m */
+        if (n != 2 || ops[0].kind != O_REG || (ops[0].size != 32 && ops[0].size != 64) || !is_xmm(ops[1])) {
+            u.error("PMOVMSKB needs a 32- or 64-bit register and an XMM register");
+            return;
+        }
+        put(c, 0x66);
+        rm2(c, ops[0].size == 64, ops[0].reg, ops[1], 0x0F, 0xD7);
+        emit(u, c);
+        return;
+    }
+
+    if (name == "PSLLDQ" || name == "PSRLDQ") {
+        /* 66 0F 73 /7 ib and /3 ib: the register shifted by whole bytes */
+        if (n != 2 || !is_xmm(ops[0])) { u.error(name + " needs an XMM register and a constant"); return; }
+        if (!imm8(u, name, ops[1])) return;
+        put(c, 0x66);
+        rm2(c, false, name == "PSLLDQ" ? 7 : 3, ops[0], 0x0F, 0x73);
+        put(c, (unsigned)ops[1].value & 0xFF);
+        emit(u, c);
+        return;
+    }
+
+    if (name == "MOVNTI") {
+        /* [REX.W] 0F C3 /r: a 32- or 64-bit register stored past the cache */
+        if (n != 2 || ops[0].kind != O_MEM || ops[1].kind != O_REG || (ops[1].size != 32 && ops[1].size != 64)) {
+            u.error("MOVNTI needs a memory operand and a 32- or 64-bit register");
+            return;
+        }
+        if (code_label(u, ops[0])) return;
+        if (!same_size(u, ops[0], ops[1])) return;
+        rm2(c, ops[1].size == 64, ops[1].reg, ops[0], 0x0F, 0xC3);
+        emit(u, c);
+        return;
+    }
+
+    if (mem_op(u, name, ops, c))
+        return;
 
     if (sse(u, name, ops, c))
         return;

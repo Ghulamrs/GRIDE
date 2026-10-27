@@ -1,0 +1,337 @@
+// ostream - cppparse's C++98 library: basic_ostream (27.6.2) over a basic_streambuf; ostream and wostream. Numbers
+// are written through the locale's num_put (27.6.2.5.2): a facet the program installed is called, the library's own
+// facet's work (<__num_facets>: the text printf would make, widened and punctuated by the locale, padded) is done
+// here, straight into the buffer. The common output (a good stream, nothing tied, no width) makes no sentry and
+// copies into the buffer's put area when it has room.
+#ifndef CPPPARSE_OSTREAM
+#define CPPPARSE_OSTREAM
+
+#include <cstddef>
+#include <cstring>
+#include <exception>
+#include <ios>
+#include <string>
+#include <__num_facets>
+
+namespace std {
+
+// the members that take the narrow characters: char streams have the signed and unsigned char forms (27.6.2.5.4),
+// wide streams those of char, widened; the other entries are types no argument has
+template <int N> struct __no_argument {};
+template <class charT> struct __ostream_arguments {
+    typedef __no_argument<1> narrow; typedef __no_argument<2> schar; typedef __no_argument<3> uchar;
+};
+template <> struct __ostream_arguments<char> {
+    typedef __no_argument<1> narrow; typedef signed char schar; typedef unsigned char uchar;
+};
+template <> struct __ostream_arguments<wchar_t> {
+    typedef char narrow; typedef __no_argument<2> schar; typedef __no_argument<3> uchar;
+};
+
+template <class charT, class traits = char_traits<charT> >
+class basic_ostream : virtual public basic_ios<charT, traits> {
+    typedef typename __ostream_arguments<charT>::narrow __narrow;
+    typedef typename __ostream_arguments<charT>::schar  __schar;
+    typedef typename __ostream_arguments<charT>::uchar  __uchar;
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+
+    explicit basic_ostream(basic_streambuf<charT, traits>* sb) { this->init(sb); }
+    virtual ~basic_ostream() {}
+
+    // 27.6.2.3: the preparation of each output: the tied stream is flushed; the destructor flushes a unitbuf stream
+    class sentry {
+    public:
+        explicit sentry(basic_ostream& os) : m_os(os), m_ok(false)
+        {
+            if (os.good() && os.tie()) os.tie()->flush();
+            m_ok = os.good();
+        }
+        ~sentry() { if ((m_os.flags() & ios_base::unitbuf) && !uncaught_exception()) m_os.flush(); }
+        operator bool() const { return m_ok; }
+        bool operator!() const { return !m_ok; }   // cppparse applies no ! through the conversion
+    private:
+        sentry(const sentry&);
+        sentry& operator=(const sentry&);
+        basic_ostream& m_os;
+        bool           m_ok;
+    };
+
+    basic_ostream& operator<<(basic_ostream& (*pf)(basic_ostream&)) { return pf(*this); }
+    basic_ostream& operator<<(basic_ios<charT, traits>& (*pf)(basic_ios<charT, traits>&)) { pf(*this); return *this; }
+    basic_ostream& operator<<(ios_base& (*pf)(ios_base&)) { pf(*this); return *this; }
+
+    // 27.6.2.5.2 arithmetic inserters: through num_put::put with these argument types (short and int as long: their
+    // bits in hexadecimal and octal)
+    basic_ostream& operator<<(bool v)
+    {
+        if (this->m_numput) return __facet_put(v);
+        if (!(this->m_flags & ios_base::boolalpha)) return __signed(v ? 1 : 0);
+        const numpunct<charT>& np = use_facet<numpunct<charT> >(this->m_loc);
+        const basic_string<charT> s = v ? np.truename() : np.falsename();
+        return __write(s.data(), s.size());
+    }
+    basic_ostream& operator<<(short v)
+    {
+        const long l = (this->m_flags & (ios_base::hex | ios_base::oct)) ? static_cast<long>(static_cast<unsigned short>(v)) : static_cast<long>(v);
+        return this->m_numput ? __facet_put(l) : __signed(l);
+    }
+    basic_ostream& operator<<(unsigned short v) { return this->m_numput ? __facet_put(static_cast<unsigned long>(v)) : __unsigned(v); }
+    basic_ostream& operator<<(int v)
+    {
+        if (this->m_numput) return __facet_put(static_cast<long>(v));
+        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __unsigned(static_cast<unsigned>(v)) : __signed(v);
+    }
+    basic_ostream& operator<<(unsigned v) { return this->m_numput ? __facet_put(static_cast<unsigned long>(v)) : __unsigned(v); }
+    basic_ostream& operator<<(long v)
+    {
+        if (this->m_numput) return __facet_put(v);
+        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __unsigned(static_cast<unsigned long>(v)) : __signed(v);
+    }
+    basic_ostream& operator<<(unsigned long v) { return this->m_numput ? __facet_put(v) : __unsigned(v); }
+    basic_ostream& operator<<(long long v)
+    {
+        if (this->m_numput) return __facet_put(v);
+        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __unsigned(static_cast<unsigned long long>(v)) : __signed(v);
+    }
+    basic_ostream& operator<<(unsigned long long v) { return this->m_numput ? __facet_put(v) : __unsigned(v); }
+    basic_ostream& operator<<(float v) { return this->m_numput ? __facet_put(static_cast<double>(v)) : __floating(v); }
+    basic_ostream& operator<<(double v) { return this->m_numput ? __facet_put(v) : __floating(v); }
+    basic_ostream& operator<<(long double v) { return this->m_numput ? __facet_put(v) : __floating(static_cast<double>(v)); }
+    basic_ostream& operator<<(const void* p)
+    {
+        if (this->m_numput) return __facet_put(p);
+        char buf[16];
+        const char* s = __number_text::pointer(p, buf + 16);
+        return __number(s, 16, false);
+    }
+    // the rest of sb's input (failbit when nothing was written): what sb's get area holds is moved a run at a time
+    basic_ostream& operator<<(basic_streambuf<charT, traits>* sb)
+    {
+        sentry ok(*this);
+        if (!ok) return *this;
+        if (!sb) { this->setstate(ios_base::badbit); return *this; }
+        basic_streambuf<charT, traits>* out = this->m_sb;
+        streamsize n = 0;
+        for (int_type c = sb->sgetc(); !traits::eq_int_type(c, traits::eof()); c = sb->sgetc()) {
+            // sgetc made the get area hold at least c: its run goes out whole, and only what was taken is consumed
+            const streamsize run = static_cast<streamsize>(sb->__gend - sb->__gnext);
+            if (run > 0) {
+                const streamsize put = out->sputn(sb->__gnext, run);
+                sb->__gnext += put;
+                n += put;
+                if (put < run) break;
+                continue;
+            }
+            if (traits::eq_int_type(out->sputc(traits::to_char_type(c)), traits::eof())) break;
+            ++n;
+            sb->sbumpc();
+        }
+        if (n == 0) this->setstate(ios_base::failbit);
+        return *this;
+    }
+
+    // the character inserters (27.6.2.5.4) are members here: cppparse lets a viable member operator hide the
+    // non-member ones, so cout << 'c' would print a number otherwise
+    basic_ostream& operator<<(charT c)
+    {
+        if (this->m_state == 0 && !this->m_tie && this->m_width == 0 && !(this->m_flags & ios_base::unitbuf)) {
+            basic_streambuf<charT, traits>* sb = this->m_sb;
+            if (sb->__pnext < sb->__pend) *sb->__pnext++ = c;
+            else if (traits::eq_int_type(sb->sputc(c), traits::eof())) this->setstate(ios_base::badbit);
+            return *this;
+        }
+        return padded(&c, 1, 0);
+    }
+    basic_ostream& operator<<(const charT* s) { return __write(s, __is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s)); }
+    basic_ostream& operator<<(__narrow c) { char_type w = this->widen(static_cast<char>(c)); return padded(&w, 1, 0); }
+    basic_ostream& operator<<(const __narrow* s)
+    {
+        basic_string<charT, traits> w;
+        for (const char* t = reinterpret_cast<const char*>(s); *t; ++t) w.push_back(this->widen(*t));
+        return __write(w.data(), w.size());
+    }
+    basic_ostream& operator<<(__schar c) { char_type ch = static_cast<char_type>(c); return padded(&ch, 1, 0); }
+    basic_ostream& operator<<(__uchar c) { char_type ch = static_cast<char_type>(c); return padded(&ch, 1, 0); }
+    basic_ostream& operator<<(const __schar* s) { return __write(reinterpret_cast<const charT*>(s), traits::length(reinterpret_cast<const charT*>(s))); }
+    basic_ostream& operator<<(const __uchar* s) { return __write(reinterpret_cast<const charT*>(s), traits::length(reinterpret_cast<const charT*>(s))); }
+    // 21.3.7.9 the string inserter, a member for the same reason
+    template <class Allocator>
+    basic_ostream& operator<<(const basic_string<charT, traits, Allocator>& s) { return __write(s.data(), s.size()); }
+
+    // 27.6.2.6 unformatted output
+    basic_ostream& put(char_type c)
+    {
+        if (this->m_state == 0 && !this->m_tie && !(this->m_flags & ios_base::unitbuf)) {
+            basic_streambuf<charT, traits>* sb = this->m_sb;
+            if (sb->__pnext < sb->__pend) *sb->__pnext++ = c;
+            else if (traits::eq_int_type(sb->sputc(c), traits::eof())) this->setstate(ios_base::badbit);
+            return *this;
+        }
+        sentry ok(*this);
+        if (ok && traits::eq_int_type(this->m_sb->sputc(c), traits::eof())) this->setstate(ios_base::badbit);
+        return *this;
+    }
+    basic_ostream& write(const char_type* s, streamsize n)
+    {
+        if (this->m_state == 0 && !this->m_tie && !(this->m_flags & ios_base::unitbuf)) {
+            __out(s, static_cast<size_t>(n));
+            return *this;
+        }
+        sentry ok(*this);
+        if (ok && this->m_sb->sputn(s, n) != n) this->setstate(ios_base::badbit);
+        return *this;
+    }
+    basic_ostream& flush()
+    {
+        if (this->m_sb && this->m_sb->pubsync() == -1) this->setstate(ios_base::badbit);
+        return *this;
+    }
+    // 27.6.2.4 positioning
+    pos_type tellp() { return this->fail() ? pos_type(off_type(-1)) : this->rdbuf()->pubseekoff(0, ios_base::cur, ios_base::out); }
+    basic_ostream& seekp(pos_type pos)
+    {
+        if (!this->fail() && static_cast<off_type>(this->rdbuf()->pubseekpos(pos, ios_base::out)) == -1) this->setstate(ios_base::failbit);
+        return *this;
+    }
+    basic_ostream& seekp(off_type off, ios_base::seekdir dir)
+    {
+        if (!this->fail() && static_cast<off_type>(this->rdbuf()->pubseekoff(off, dir, ios_base::out)) == -1) this->setstate(ios_base::failbit);
+        return *this;
+    }
+
+protected:
+    basic_ostream() {}   // basic_iostream initialises the virtual base through basic_istream
+
+private:
+    // n characters into the buffer: into its put area when they fit, through sputn otherwise (the room is measured
+    // in bytes: a pointer difference is a division in -O0 code)
+    void __out(const charT* s, size_t n)
+    {
+        basic_streambuf<charT, traits>* sb = this->m_sb;
+        if (reinterpret_cast<size_t>(sb->__pend) - reinterpret_cast<size_t>(sb->__pnext) >= n * sizeof(charT)) {
+            memcpy(sb->__pnext, s, n * sizeof(charT));
+            sb->__pnext += n;
+        } else if (static_cast<size_t>(sb->sputn(s, static_cast<streamsize>(n))) != n) this->setstate(ios_base::badbit);
+    }
+    // a formatted output of n characters: the common case (a good stream, nothing tied, no width, not unitbuf) needs
+    // no sentry, its work is __out's; padded does the rest
+    basic_ostream& __write(const charT* s, size_t n)
+    {
+        if (this->m_state == 0 && !this->m_tie && this->m_width == 0 && !(this->m_flags & ios_base::unitbuf)) {
+            __out(s, n);
+            return *this;
+        }
+        return padded(s, n, 0);
+    }
+    void fillChars(size_t n)
+    {
+        charT buf[32];
+        for (int i = 0; i < 32; ++i) buf[i] = this->m_fill;
+        while (n > 0) { size_t k = n < 32 ? n : 32; __out(buf, k); n -= k; }
+    }
+    // writes n characters padded to the width (cleared after) with the fill character: after them when left
+    // adjusted, at split (after a number's sign or 0x) when internal, before them otherwise
+    basic_ostream& padded(const charT* s, size_t n, size_t split)
+    {
+        sentry ok(*this);
+        if (!ok) return *this;
+        const size_t w = this->m_width > 0 ? static_cast<size_t>(this->m_width) : 0;
+        this->m_width = 0;
+        const ios_base::fmtflags adjust = this->m_flags & ios_base::adjustfield;
+        if (w <= n) __out(s, n);
+        else if (adjust == ios_base::left) { __out(s, n); fillChars(w - n); }
+        else if (adjust == ios_base::internal) { __out(s, split); fillChars(w - n); __out(s + split, n - split); }
+        else { fillChars(w - n); __out(s, n); }
+        return *this;
+    }
+    // num_put's stages 2 to 4 for the library's facet: a char stream of the classic locale writes the narrow text as
+    // it is; otherwise it is widened by the locale's ctype and given its point and thousands separators
+    basic_ostream& __number(const char* s, size_t n, bool number)
+    {
+        if (sizeof(charT) == 1 && this->m_classic) {
+            const charT* t = reinterpret_cast<const charT*>(s);
+            if (this->m_state == 0 && !this->m_tie && this->m_width == 0 && !(this->m_flags & ios_base::unitbuf)) { __out(t, n); return *this; }
+            size_t split = n > 0 && (s[0] == '-' || s[0] == '+') ? 1 : 0;
+            if (n > split + 1 && s[split] == '0' && (s[split + 1] == 'x' || s[split + 1] == 'X')) split += 2;
+            return padded(t, n, split);
+        }
+        charT buf[800];
+        size_t split = 0;
+        const size_t k = __num_layout<charT>::make(s, n, number, this->m_classic ? 0 : this->m_ctype, this->m_decimal, this->m_thousands, this->m_grouping.c_str(), buf, split);
+        if (this->m_state == 0 && !this->m_tie && this->m_width == 0 && !(this->m_flags & ios_base::unitbuf)) { __out(buf, k); return *this; }
+        return padded(buf, k, split);
+    }
+    basic_ostream& __signed(long long v)
+    {
+        char buf[72];
+        size_t n = 0;
+        const char* p = v < 0 ? __number_text::integer(static_cast<unsigned long long>(-(v + 1)) + 1, true, true, this->m_flags, buf + 72, n)
+                              : __number_text::integer(static_cast<unsigned long long>(v), false, true, this->m_flags, buf + 72, n);
+        return __number(p, n, true);
+    }
+    basic_ostream& __unsigned(unsigned long long u)
+    {
+        char buf[72];
+        size_t n = 0;
+        const char* p = __number_text::integer(u, false, false, this->m_flags, buf + 72, n);
+        return __number(p, n, true);
+    }
+    basic_ostream& __floating(double v)
+    {
+        char buf[400];
+        const size_t n = __number_text::floating(v, this->m_flags, this->m_precision, buf);
+        return __number(buf, n, true);
+    }
+    // a num_put the program installed: called as 27.6.2.5.2 has it
+    template <class V> basic_ostream& __facet_put(V v)
+    {
+        sentry ok(*this);
+        if (ok && __num_out<charT, traits>::put(*this, this->m_numput, this->m_fill, v)) this->setstate(ios_base::badbit);
+        return *this;
+    }
+};
+
+// 27.6.2.7 the standard manipulators
+template <class charT, class traits> basic_ostream<charT, traits>& endl(basic_ostream<charT, traits>& os) { os.put(os.widen('\n')); os.flush(); return os; }
+template <class charT, class traits> basic_ostream<charT, traits>& ends(basic_ostream<charT, traits>& os) { os.put(charT()); return os; }
+template <class charT, class traits> basic_ostream<charT, traits>& flush(basic_ostream<charT, traits>& os) { os.flush(); return os; }
+
+// the calls of a num_put the program installed, for the char and wchar_t streams: defined in libcpp/iostream.cpp (see
+// __num_put_call in <__num_facets>); true when the output failed
+bool __num_put_out(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, bool v);
+bool __num_put_out(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, long v);
+bool __num_put_out(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, unsigned long v);
+bool __num_put_out(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, long long v);
+bool __num_put_out(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, unsigned long long v);
+bool __num_put_out(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, double v);
+bool __num_put_out(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, long double v);
+bool __num_put_out(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, const void* v);
+bool __num_put_out(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, bool v);
+bool __num_put_out(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, long v);
+bool __num_put_out(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, unsigned long v);
+bool __num_put_out(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, long long v);
+bool __num_put_out(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, unsigned long long v);
+bool __num_put_out(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, double v);
+bool __num_put_out(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, long double v);
+bool __num_put_out(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, const void* v);
+
+template <> struct __num_out<char, char_traits<char> > {
+    template <class V> static bool put(basic_ostream<char, char_traits<char> >& os, const locale::facet* f, char fill, V v) { return __num_put_out(os, f, fill, v); }
+};
+template <> struct __num_out<wchar_t, char_traits<wchar_t> > {
+    template <class V> static bool put(basic_ostream<wchar_t, char_traits<wchar_t> >& os, const locale::facet* f, wchar_t fill, V v) { return __num_put_out(os, f, fill, v); }
+};
+
+typedef basic_ostream<char, char_traits<char> >       ostream;
+typedef basic_ostream<wchar_t, char_traits<wchar_t> > wostream;
+typedef basic_ios<char, char_traits<char> >           ios;
+typedef basic_ios<wchar_t, char_traits<wchar_t> >     wios;
+
+}
+
+#endif

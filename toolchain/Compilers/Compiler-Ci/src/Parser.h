@@ -274,6 +274,11 @@ private:
     static const StrLit *stringInitialiser(const Init &in, const Type *type);
 
     void topLevel(Program &program);
+    // The rest of a file-scope declaration list from d, objects and function declarators alike, to its ';'.
+    void fileScopeList(Program &program, Declared d, const Type *base, StorageClass sc,
+                       const Qualifiers &quals, int baseEnum);
+    bool listedFunction(const Declared &d);
+    void freshFileScope();
     StmtPtr block();
     StmtPtr statement();
     StmtPtr statementBody();

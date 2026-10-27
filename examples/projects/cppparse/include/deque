@@ -1,0 +1,138 @@
+// deque - cppparse's C++98 library: a double-ended queue (23.2.1) kept contiguous in a malloc block with room
+// at both ends, so that its iterators are pointers; growing at an end that is full reallocates (unlike the
+// standard's deque, push_front and push_back invalidate the iterators and references then).
+#ifndef CPPPARSE_DEQUE
+#define CPPPARSE_DEQUE
+
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <__iterator>
+#include <new>
+#include <__traits>
+
+namespace std {
+
+template <class T>
+class deque {
+public:
+    typedef T         value_type;
+    typedef size_t    size_type;
+    typedef ptrdiff_t difference_type;
+    typedef T*        iterator;
+    typedef const T*  const_iterator;
+    typedef T&        reference;
+    typedef const T&  const_reference;
+    typedef std::reverse_iterator<iterator>       reverse_iterator;
+    typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+
+    deque() : m_block(0), m_first(0), m_last(0), m_cap(0) {}
+    explicit deque(size_t n) : m_block(0), m_first(0), m_last(0), m_cap(0) { resize(n); }
+    deque(size_t n, const T& v) : m_block(0), m_first(0), m_last(0), m_cap(0) { assign(n, v); }
+    template <class It> deque(It first, It last) : m_block(0), m_first(0), m_last(0), m_cap(0) { initRange(first, last, typename __is_integer<It>::type()); }
+    deque(const deque& o) : m_block(0), m_first(0), m_last(0), m_cap(0) { assign(o.begin(), o.end()); }
+    ~deque() { clear(); free(m_block); }
+    deque& operator=(const deque& o) { if (this != &o) assign(o.begin(), o.end()); return *this; }
+
+    iterator begin() { return m_block + m_first; }
+    iterator end() { return m_block + m_last; }
+    const_iterator begin() const { return m_block + m_first; }
+    const_iterator end() const { return m_block + m_last; }
+    reverse_iterator rbegin() { return reverse_iterator(end()); }
+    reverse_iterator rend() { return reverse_iterator(begin()); }
+    const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
+    const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
+
+    size_t size() const { return m_last - m_first; }
+    size_t max_size() const { return ~static_cast<size_t>(0) / sizeof(T); }
+    bool   empty() const { return m_first == m_last; }
+    T&       operator[](size_t i) { return m_block[m_first + i]; }
+    const T& operator[](size_t i) const { return m_block[m_first + i]; }
+    T&       at(size_t i) { return m_block[m_first + i]; }
+    const T& at(size_t i) const { return m_block[m_first + i]; }
+    T&       front() { return m_block[m_first]; }
+    const T& front() const { return m_block[m_first]; }
+    T&       back() { return m_block[m_last - 1]; }
+    const T& back() const { return m_block[m_last - 1]; }
+
+    void push_back(const T& v) { if (m_last == m_cap) makeRoom(1, false); new (m_block + m_last) T(v); ++m_last; }
+    void push_front(const T& v) { if (m_first == 0) makeRoom(1, true); --m_first; new (m_block + m_first) T(v); }
+    void pop_back() { --m_last; m_block[m_last].~T(); }
+    void pop_front() { m_block[m_first].~T(); ++m_first; }
+    void clear() { for (size_t i = m_first; i < m_last; ++i) m_block[i].~T(); m_first = m_last = m_cap / 2; }
+    void resize(size_t n) { while (size() > n) pop_back(); while (size() < n) push_back(T()); }
+    void resize(size_t n, const T& v) { while (size() > n) pop_back(); while (size() < n) push_back(v); }
+    void assign(size_t n, const T& v) { clear(); for (size_t i = 0; i < n; ++i) push_back(v); }
+    template <class It> void assign(It first, It last) { clear(); for (; first != last; ++first) push_back(*first); }
+    void swap(deque& o)
+    {
+        T* b = m_block; m_block = o.m_block; o.m_block = b;
+        size_t t = m_first; m_first = o.m_first; o.m_first = t;
+        t = m_last; m_last = o.m_last; o.m_last = t;
+        t = m_cap; m_cap = o.m_cap; o.m_cap = t;
+    }
+
+    iterator insert(iterator pos, const T& v)
+    {
+        size_t at = pos - begin();
+        push_back(v);                         // room, then the elements after at move up by one
+        for (size_t i = size() - 1; i > at; --i) m_block[m_first + i] = m_block[m_first + i - 1];
+        m_block[m_first + at] = v;
+        return begin() + at;
+    }
+    void insert(iterator pos, size_t n, const T& v) { size_t at = pos - begin(); for (size_t k = 0; k < n; ++k) insert(begin() + at, v); }
+    template <class It> void insert(iterator pos, It first, It last) { size_t at = pos - begin(); for (; first != last; ++first, ++at) insert(begin() + at, *first); }
+    iterator erase(iterator pos)
+    {
+        size_t at = pos - begin();
+        for (size_t i = at; i + 1 < size(); ++i) m_block[m_first + i] = m_block[m_first + i + 1];
+        pop_back();
+        return begin() + at;
+    }
+    iterator erase(iterator first, iterator last)
+    {
+        size_t at = first - begin();
+        size_t n = last - first;
+        for (size_t i = at; i + n < size(); ++i) m_block[m_first + i] = m_block[m_first + i + n];
+        while (n-- > 0) pop_back();
+        return begin() + at;
+    }
+
+private:
+    template <class It> void initRange(It first, It last, __false_type) { for (; first != last; ++first) push_back(*first); }
+    template <class N> void initRange(N n, N v, __true_type) { assign(static_cast<size_t>(n), static_cast<T>(v)); }
+    // a bigger block with the elements in its middle (the live objects are moved by their copy constructors)
+    void makeRoom(size_t extra, bool atFront)
+    {
+        size_t n = size();
+        size_t cap = m_cap ? m_cap * 2 + extra : 8 + extra;
+        T* block = static_cast<T*>(malloc(cap * sizeof(T)));
+        size_t first = (cap - n) / 2;
+        if (atFront && first == 0) first = 1;
+        if (!atFront && first + n == cap) first = cap - n - 1;
+        for (size_t i = 0; i < n; ++i) { new (block + first + i) T(m_block[m_first + i]); m_block[m_first + i].~T(); }
+        free(m_block);
+        m_block = block; m_first = first; m_last = first + n; m_cap = cap;
+    }
+    T*     m_block;
+    size_t m_first, m_last, m_cap;
+};
+
+template <class T> bool operator==(const deque<T>& a, const deque<T>& b)
+{
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) if (!(a[i] == b[i])) return false;
+    return true;
+}
+template <class T> bool operator!=(const deque<T>& a, const deque<T>& b) { return !(a == b); }
+template <class T> bool operator<(const deque<T>& a, const deque<T>& b)
+{
+    size_t n = a.size() < b.size() ? a.size() : b.size();
+    for (size_t i = 0; i < n; ++i) { if (a[i] < b[i]) return true; if (b[i] < a[i]) return false; }
+    return a.size() < b.size();
+}
+template <class T> void swap(deque<T>& a, deque<T>& b) { a.swap(b); }
+
+}
+
+#endif

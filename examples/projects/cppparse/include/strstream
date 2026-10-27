@@ -1,0 +1,154 @@
+// strstream - cppparse's C++98 library: the char array streams of annex D.7 (deprecated, still C++98): strstreambuf,
+// istrstream, ostrstream and strstream. A dynamic strstreambuf grows its array as it is written (from malloc, or the
+// allocation functions the program gives) until it is frozen; str() freezes it and hands the array out.
+#ifndef CPPPARSE_STRSTREAM
+#define CPPPARSE_STRSTREAM
+
+#include <cstdlib>
+#include <cstring>
+#include <istream>
+#include <ostream>
+#include <streambuf>
+
+namespace std {
+
+class strstreambuf : public basic_streambuf<char, char_traits<char> > {
+public:
+    explicit strstreambuf(streamsize alsize = 0) : m_dynamic(true), m_frozen(false), m_constant(false), m_alsize(alsize), m_alloc(0), m_free(0), m_end(0) {}
+    strstreambuf(void* (*palloc)(size_t), void (*pfree)(void*)) : m_dynamic(true), m_frozen(false), m_constant(false), m_alsize(0), m_alloc(palloc), m_free(pfree), m_end(0) {}
+    strstreambuf(char* gnext, streamsize n, char* pbeg = 0) : m_dynamic(false), m_frozen(false), m_constant(false), m_alsize(0), m_alloc(0), m_free(0), m_end(0) { fixed(gnext, n, pbeg); }
+    strstreambuf(const char* gnext, streamsize n) : m_dynamic(false), m_frozen(false), m_constant(true), m_alsize(0), m_alloc(0), m_free(0), m_end(0) { fixed(const_cast<char*>(gnext), n, 0); }
+    strstreambuf(signed char* gnext, streamsize n, signed char* pbeg = 0) : m_dynamic(false), m_frozen(false), m_constant(false), m_alsize(0), m_alloc(0), m_free(0), m_end(0) { fixed(reinterpret_cast<char*>(gnext), n, reinterpret_cast<char*>(pbeg)); }
+    strstreambuf(const signed char* gnext, streamsize n) : m_dynamic(false), m_frozen(false), m_constant(true), m_alsize(0), m_alloc(0), m_free(0), m_end(0) { fixed(const_cast<char*>(reinterpret_cast<const char*>(gnext)), n, 0); }
+    strstreambuf(unsigned char* gnext, streamsize n, unsigned char* pbeg = 0) : m_dynamic(false), m_frozen(false), m_constant(false), m_alsize(0), m_alloc(0), m_free(0), m_end(0) { fixed(reinterpret_cast<char*>(gnext), n, reinterpret_cast<char*>(pbeg)); }
+    strstreambuf(const unsigned char* gnext, streamsize n) : m_dynamic(false), m_frozen(false), m_constant(true), m_alsize(0), m_alloc(0), m_free(0), m_end(0) { fixed(const_cast<char*>(reinterpret_cast<const char*>(gnext)), n, 0); }
+    virtual ~strstreambuf() { if (m_dynamic && !m_frozen) release(eback() ? eback() : pbase()); }
+
+    void freeze(bool f = true) { if (m_dynamic) m_frozen = f; }
+    char* str() { freeze(); return eback() ? eback() : pbase(); }
+    int   pcount() const { return pptr() ? static_cast<int>(pptr() - pbase()) : 0; }
+
+protected:
+    // the array is full: a dynamic one doubles (keeping the get area over what was written)
+    virtual int_type overflow(int_type c = char_traits<char>::eof())
+    {
+        if (char_traits<char>::eq_int_type(c, char_traits<char>::eof())) return char_traits<char>::not_eof(c);
+        if (pptr() == epptr()) {
+            if (!m_dynamic || m_frozen) return char_traits<char>::eof();
+            const size_t used = static_cast<size_t>(pptr() - pbase());
+            size_t cap = static_cast<size_t>(epptr() - pbase()) * 2;
+            if (cap < 16) cap = 16;
+            if (m_alsize > 0 && cap < static_cast<size_t>(m_alsize)) cap = static_cast<size_t>(m_alsize);
+            char* p = allocate(cap);
+            if (!p) return char_traits<char>::eof();
+            const size_t got = gptr() ? static_cast<size_t>(gptr() - eback()) : 0;
+            if (used) memcpy(p, pbase(), used);
+            release(pbase());
+            setp(p, p + cap);
+            pbump(static_cast<int>(used));
+            setg(p, p + got, p + used);
+        }
+        *pptr() = char_traits<char>::to_char_type(c);
+        pbump(1);
+        if (m_dynamic) setg(eback() ? eback() : pbase(), gptr() ? gptr() : pbase(), pptr());   // what was written can be read
+        return c;
+    }
+    virtual int_type pbackfail(int_type c = char_traits<char>::eof())
+    {
+        if (gptr() == eback()) return char_traits<char>::eof();
+        if (char_traits<char>::eq_int_type(c, char_traits<char>::eof())) { gbump(-1); return char_traits<char>::not_eof(c); }
+        if (gptr()[-1] == char_traits<char>::to_char_type(c)) { gbump(-1); return c; }
+        if (m_constant) return char_traits<char>::eof();
+        gbump(-1);
+        *gptr() = char_traits<char>::to_char_type(c);
+        return c;
+    }
+    virtual int_type underflow()
+    {
+        if (gptr() && gptr() < egptr()) return char_traits<char>::to_int_type(*gptr());
+        if (gptr() && pptr() > egptr()) { setg(eback(), gptr(), pptr()); return char_traits<char>::to_int_type(*gptr()); }
+        return char_traits<char>::eof();
+    }
+    virtual pos_type seekoff(off_type off, ios_base::seekdir way, ios_base::openmode which = ios_base::in | ios_base::out)
+    {
+        const bool in = (which & ios_base::in) != 0, out = (which & ios_base::out) != 0;
+        if ((!in && !out) || (in && out && way == ios_base::cur)) return pos_type(off_type(-1));
+        char* beg = eback() ? eback() : pbase();
+        char* high = pptr() && pptr() > egptr() ? pptr() : egptr();
+        if (!beg) return pos_type(off_type(-1));
+        off_type base = way == ios_base::beg ? 0 : way == ios_base::end ? static_cast<off_type>(high - beg) : static_cast<off_type>((in ? gptr() : pptr()) - beg);
+        off_type to = base + off;
+        if (to < 0 || to > static_cast<off_type>(high - beg)) return pos_type(off_type(-1));
+        if (in) setg(beg, beg + to, high);
+        if (out && pbase()) { char* e = epptr(); setp(pbase(), e); pbump(static_cast<int>(to)); }
+        return pos_type(to);
+    }
+    virtual pos_type seekpos(pos_type sp, ios_base::openmode which = ios_base::in | ios_base::out) { return seekoff(off_type(sp), ios_base::beg, which); }
+    virtual basic_streambuf<char, char_traits<char> >* setbuf(char*, streamsize) { return this; }
+
+private:
+    bool       m_dynamic, m_frozen, m_constant;
+    streamsize m_alsize;
+    void*      (*m_alloc)(size_t);
+    void       (*m_free)(void*);
+    char*      m_end;
+
+    // D.7.1.1: n > 0 is the array's size, 0 means up to its terminator, < 0 unbounded
+    void fixed(char* gnext, streamsize n, char* pbeg)
+    {
+        size_t len = n > 0 ? static_cast<size_t>(n) : n == 0 ? strlen(gnext) : static_cast<size_t>(0x7fffffff);
+        if (!pbeg) setg(gnext, gnext, gnext + len);
+        else { setg(gnext, gnext, pbeg); setp(pbeg, gnext + len); }
+    }
+    char* allocate(size_t n) { return static_cast<char*>(m_alloc ? m_alloc(n) : malloc(n)); }
+    void  release(char* p) { if (!p) return; if (m_free) m_free(p); else free(p); }
+};
+
+class istrstream : public basic_istream<char, char_traits<char> > {
+public:
+    explicit istrstream(const char* s) : basic_istream<char, char_traits<char> >(&m_sb), m_sb(s, 0) {}
+    explicit istrstream(char* s) : basic_istream<char, char_traits<char> >(&m_sb), m_sb(s, 0) {}
+    istrstream(const char* s, streamsize n) : basic_istream<char, char_traits<char> >(&m_sb), m_sb(s, n) {}
+    istrstream(char* s, streamsize n) : basic_istream<char, char_traits<char> >(&m_sb), m_sb(s, n) {}
+    virtual ~istrstream() {}
+    strstreambuf* rdbuf() const { return const_cast<strstreambuf*>(&m_sb); }
+    char* str() { return m_sb.str(); }
+private:
+    strstreambuf m_sb;
+};
+
+class ostrstream : public basic_ostream<char, char_traits<char> > {
+public:
+    ostrstream() : basic_ostream<char, char_traits<char> >(&m_sb), m_sb() {}
+    ostrstream(char* s, int n, ios_base::openmode mode = ios_base::out)
+        : basic_ostream<char, char_traits<char> >(&m_sb), m_sb(s, n, (mode & ios_base::app) ? s + strlen(s) : s) {}
+    virtual ~ostrstream() {}
+    strstreambuf* rdbuf() const { return const_cast<strstreambuf*>(&m_sb); }
+    void  freeze(bool f = true) { m_sb.freeze(f); }
+    char* str() { return m_sb.str(); }
+    int   pcount() const { return m_sb.pcount(); }
+private:
+    strstreambuf m_sb;
+};
+
+class strstream : public basic_iostream<char, char_traits<char> > {
+public:
+    typedef char                      char_type;
+    typedef char_traits<char>::int_type int_type;
+    typedef char_traits<char>::pos_type pos_type;
+    typedef char_traits<char>::off_type off_type;
+    strstream() : basic_iostream<char, char_traits<char> >(&m_sb), m_sb() {}
+    strstream(char* s, int n, ios_base::openmode mode = ios_base::in | ios_base::out)
+        : basic_iostream<char, char_traits<char> >(&m_sb), m_sb(s, n, (mode & ios_base::app) ? s + strlen(s) : s) {}
+    virtual ~strstream() {}
+    strstreambuf* rdbuf() const { return const_cast<strstreambuf*>(&m_sb); }
+    void  freeze(bool f = true) { m_sb.freeze(f); }
+    int   pcount() const { return m_sb.pcount(); }
+    char* str() { return m_sb.str(); }
+private:
+    strstreambuf m_sb;
+};
+
+}
+
+#endif

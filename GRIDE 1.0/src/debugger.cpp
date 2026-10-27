@@ -1,6 +1,7 @@
 #include "debugger.h"
 
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -8,6 +9,7 @@
 
 #include "path.h"
 #include "product.h"
+#include "settings.h"
 
 namespace editor {
 
@@ -52,8 +54,13 @@ bool onPath(const std::string& name) {
 #endif
 }
 
-std::vector<std::string> preamble(DebuggerKind kind) {
+std::vector<std::string> preamble(DebuggerKind kind, bool own) {
     std::vector<std::string> said;
+    // gride-dbg stops on lines and steps by them as it is; a step goes over the runtimes', the C++ library's too
+    if (own) {
+        said.push_back(".step_filter \"*!shm_*;*!shm::*;*!std::*\"");
+        return said;
+    }
     if (dbg_gdbLike(kind)) {
         said.push_back("set confirm off");
 
@@ -207,7 +214,34 @@ bool ourCommand(const std::string& bare) {
     for (size_t i = 0; i < sizeof said / sizeof said[0]; ++i)
         if (bare == said[i]) return true;
     return startsWith(bare, "bp ") || startsWith(bare, "bu ") ||
-           startsWith(bare, "bc ") || startsWith(bare, ".printf ") || startsWith(bare, ".step_filter ");
+           startsWith(bare, "bc ") || startsWith(bare, ".printf ") || startsWith(bare, ".step_filter ") ||
+           startsWith(bare, ".input ");
+}
+
+bool hasExtension(const std::string& file) {
+    const size_t dot = file.find_last_of('.');
+    const size_t slash = file.find_last_of("/\\");
+    return dot != std::string::npos && dot + 1 < file.size() && (slash == std::string::npos || dot > slash);
+}
+
+bool rooted(const std::string& file) {
+    return (!file.empty() && (file[0] == '\\' || file[0] == '/')) ||
+           (file.size() > 2 && file[1] == ':' && (file[2] == '\\' || file[2] == '/'));
+}
+
+// ln's place: a source and a line, "path\file.c(9)" or "...\file.c(9)+0x2c" - a source has an extension, or is a
+// standard header named by its full path (include\string(40)). The program's own "greet(4) is 10" is no place.
+bool cdbPlace(const std::string& line, size_t* open = 0) {
+    const size_t at = line.rfind('(');
+    if (at == std::string::npos || at == 0) return false;
+    const size_t close = line.find(')', at);
+    if (close == std::string::npos || !digits(line.substr(at + 1, close - at - 1))) return false;
+    const std::string after = line.substr(close + 1);
+    if (!after.empty() && !startsWith(after, "+0x")) return false;
+    const std::string named = line.substr(0, at);
+    if (!hasExtension(named) && !rooted(named)) return false;
+    if (open) *open = at;
+    return true;
 }
 
 bool cdbOwn(const std::string& line) {
@@ -217,6 +251,7 @@ bool cdbOwn(const std::string& line) {
     if (startsWith(bare, "Last event:")) return true;
     if (startsWith(bare, "debugger time:")) return true;
     if (startsWith(bare, "ModLoad:")) return true;
+    if (startsWith(bare, "No runnable debuggees")) return true;
 
     if (bare.find('!') != std::string::npos && endsWith(bare, ':')) return true;
 
@@ -228,6 +263,8 @@ bool cdbOwn(const std::string& line) {
     if (endsWith(bare, ')') &&
         (bare.find(".c(") != std::string::npos || bare.find(".cpp(") != std::string::npos ||
          bare.find(".h(") != std::string::npos)) return true;
+    // ln's place for any source ("matrix.shl(12)", "list.hpp(40)", "...\include\string(40)")
+    if (endsWith(bare, ')') && cdbPlace(bare)) return true;
     return false;
 }
 
@@ -447,6 +484,85 @@ const char* dbg_program(DebuggerKind kind) {
     return found->c_str();
 }
 
+std::string dbg_grideDbg() {
+    const char* named = std::getenv("GRIDE_DBG");
+    if (named && *named) return path::exists(named) ? std::string(named) : std::string();
+    return path::besideProgram("gride-dbg.exe");
+}
+
+std::string dbg_windowsBackend(std::string* why) {
+    if (why) why->clear();
+    const std::string choice = settings::windowsDebugger();
+    const bool own = !dbg_grideDbg().empty(), cdb = path::exists(dbg_program(DebuggerCdb));
+    if (own && choice != "cdb") return "gride-dbg";
+    if (!cdb) {
+        if (own && why) *why = "the setting asks for cdb, which is not installed - gride-dbg stands in";
+        return own ? "gride-dbg" : std::string();
+    }
+    if (why && choice == "gride-dbg") *why = "the setting asks for gride-dbg, which is not beside " + std::string(product::kName) + " - cdb stands in";
+    else if (why && choice == "cdb" && own) *why = "the setting asks for cdb";
+    return "cdb";
+}
+
+const char* dbg_continuedMark() { return "<<more>>"; }
+
+namespace {
+
+// Past the blanks from at.
+size_t blanks(const std::string& text, size_t at) {
+    while (at < text.size() && (text[at] == ' ' || text[at] == '\t')) ++at;
+    return at;
+}
+
+bool wordAt(const std::string& text, size_t at, const char* word) {
+    return text.compare(at, std::strlen(word), word) == 0;
+}
+
+// "^\s*(int|void)?\s*main\s*\(", C's and C++'s, or "^\s*fun\s*<[^>]*>\s*=\s*main\s*\(", Shalimar's.
+bool startsMain(const std::string& line) {
+    size_t at = blanks(line, 0);
+    if (wordAt(line, at, "fun")) {
+        size_t shl = blanks(line, at + 3);
+        if (shl < line.size() && line[shl] == '<') {
+            shl = line.find('>', shl);
+            if (shl == std::string::npos) return false;
+            shl = blanks(line, shl + 1);
+            if (shl >= line.size() || line[shl] != '=') return false;
+            shl = blanks(line, shl + 1);
+            if (!wordAt(line, shl, "main")) return false;
+            shl = blanks(line, shl + 4);
+            return shl < line.size() && line[shl] == '(';
+        }
+    }
+    if (wordAt(line, at, "int")) at = blanks(line, at + 3);
+    else if (wordAt(line, at, "void")) at = blanks(line, at + 4);
+    if (!wordAt(line, at, "main")) return false;
+    at = blanks(line, at + 4);
+    return at < line.size() && line[at] == '(';
+}
+
+}
+
+size_t dbg_mainLineIn(const std::string& file) {
+    const size_t dot = file.find_last_of('.');
+    if (dot != std::string::npos && (file.substr(dot) == ".h" || file.substr(dot) == ".H")) return 0;
+    // <cstdio>, not <fstream>: this file is compiled into the mixed-mode window (dbg_shalimarRuntime says why)
+    std::FILE* in = std::fopen(file.c_str(), "rb");
+    if (!in) return 0;
+    char text[4096];
+    size_t row = 0, found = 0;
+    bool midLine = false;
+    while (found == 0 && std::fgets(text, sizeof text, in)) {
+        if (!midLine) ++row;
+        const size_t n = std::strlen(text);
+        const bool ended = n > 0 && text[n - 1] == '\n';
+        if (!midLine && startsMain(text)) found = row;
+        midLine = !ended;
+    }
+    std::fclose(in);
+    return found;
+}
+
 // **A Shalimar program on the emulator needs its runtime beside it** - the directory of C6000 text
 // cpp11 wrote from runtime/, as a run on vm6747 is given it (toolchain.cpp). The assembly says what
 // it is: shc opens it with `; <source>.shl` (or .shm), and nothing else does.
@@ -473,9 +589,10 @@ DebuggerKind dbg_for(ToolchainKind kind, const std::string& arch) {
 
     if (!emitsDebugInfo(kind, arch)) return DebuggerNone;
 
-    // cl's PDB, and since M10 c90's and cpp11's on x86_64-windows: CodeView, which cdb reads.
+    // cl's PDB, and since M10 c90's and cpp11's on x86_64-windows: CodeView, which gride-dbg and cdb read -
+    // both in cdb's words, so one kind for either (dbg_windowsBackend chooses at start).
     if (kind == ToolMsvc || arch == "x86_64-windows")
-        return path::exists(dbg_program(DebuggerCdb)) ? DebuggerCdb : DebuggerNone;
+        return dbg_windowsBackend().empty() ? DebuggerNone : DebuggerCdb;
 
     // tms6747: vm6747 --debug on the .s cpp11 -g wrote, with its .dwpsn positions (GRIDE_DEBUG_SIM6747=1 asks
     // for sim6747 --run --debug on the .out beside it instead - which stops on a line only where the image
@@ -532,8 +649,8 @@ std::string dbg_whyNot(ToolchainKind kind, const std::string& arch) {
         return std::string(toolchainName(kind)) + " writes no line table for " + arch + " - c90 -g and cpp11 -g write "
                "cl6x's .dwpsn, which vm6747 --debug and sim6747 stop on";
     if (kind == ToolMsvc || (emitsDebugInfo(kind, arch) && arch == "x86_64-windows"))
-        return std::string(toolchainName(kind)) + " writes a .pdb and cdb reads one, but cdb is not installed - "
-               "add Debugging Tools for Windows";
+        return std::string(toolchainName(kind)) + " writes a .pdb, and nothing here reads one: no gride-dbg beside " +
+               product::kName + " ($GRIDE_DBG names one) and no cdb - add Debugging Tools for Windows";
     if (!emitsDebugInfo(kind, arch))
         return std::string(toolchainName(kind)) + " generates MASM for " + arch +
                ", which carries no line table";
@@ -605,13 +722,10 @@ Stop dbg_readCdbStop(const std::string& said) {
         }
         if (stop.stopped || stop.exited) continue;
 
-        size_t open = line.rfind('(');
-        if (open == std::string::npos || open == 0) continue;
-        size_t close = line.find(')', open);
-        if (close == std::string::npos) continue;
-
-        std::string number = line.substr(open + 1, close - open - 1);
-        if (!digits(number)) continue;
+        // ln says "path\file.c(9)" or "path\file.c(9)+0x2c"; the program's own "greet(4) is 10" is not a place
+        size_t open = 0;
+        if (!cdbPlace(line, &open)) continue;
+        std::string number = line.substr(open + 1, line.find(')', open) - open - 1);
 
         stop.file = line.substr(0, open);
         stop.line = editor::number(number);
@@ -946,6 +1060,43 @@ bool cdbRefused(const std::string& line) {
     return line.find("Couldn't resolve") != std::string::npos ||
            line.find("<<gride") != std::string::npos || line.find("rror") != std::string::npos;
 }
+
+// Where the value starts in cdb's answer to "?? x", after the type: the last word, or the whole of a quoted
+// text or a braced list ending the line, which may hold spaces ("char [12] "Alice Smith"", "int[] {5, 7, 13}");
+// npos with no type before it.
+size_t cdbValueAt(const std::string& line) {
+    const char last = line.empty() ? '\0' : line[line.size() - 1];
+    if (last == '"' || last == '}') {
+        const char open = last == '"' ? '"' : '{';
+        for (size_t i = 1; i < line.size(); ++i)
+            if (line[i] == open && line[i - 1] == ' ') return i;
+    }
+    const size_t space = line.find_last_of(' ');
+    return space == std::string::npos ? std::string::npos : space + 1;
+}
+
+// Whether the words after the type are a value: a number, true or false, a quoted text, a braced list.
+bool cdbValue(const std::string& value) {
+    return value.find_first_of("0123456789") != std::string::npos || value == "true" || value == "false" ||
+           (value.size() >= 2 && ((value[0] == '"' && endsWith(value, '"')) || (value[0] == '{' && endsWith(value, '}'))));
+}
+
+// A complaint as the panes say it: cdb's "Couldn't resolve error at 'count'" about the expression's own first
+// name is a name not in scope where the program stopped, as gride-dbg says it itself.
+std::string friendly(const std::string& complaint, const std::string& expression) {
+    const std::string head = "Couldn't resolve error at '";
+    const size_t at = complaint.find(head);
+    if (at == std::string::npos) return complaint;
+    const size_t end = complaint.find('\'', at + head.size());
+    if (end == std::string::npos) return complaint;
+    const std::string name = complaint.substr(at + head.size(), end - at - head.size());
+    size_t i = 0;
+    while (i < expression.size() && (expression[i] == '*' || expression[i] == '&' || expression[i] == '(' || expression[i] == ' ')) ++i;
+    size_t j = i;
+    while (j < expression.size() &&
+           (std::isalnum(static_cast<unsigned char>(expression[j])) || expression[j] == '_' || expression[j] == ':')) ++j;
+    return !name.empty() && expression.substr(i, j - i) == name ? "not in scope here" : complaint;
+}
 }
 
 std::string dbg_readValue(DebuggerKind kind, const std::string& said) {
@@ -961,12 +1112,12 @@ std::string dbg_readValue(DebuggerKind kind, const std::string& said) {
             // An expression cdb cannot resolve is an error line, which ends in the marker's ", 0x2d".
             if (cdbRefused(line)) return std::string();
 
-            size_t space = line.find_last_of(' ');
-            if (space == std::string::npos || space + 1 >= line.size()) continue;
-            std::string value = line.substr(space + 1);
+            const size_t at = cdbValueAt(line);
+            if (at == std::string::npos || at == 0 || at >= line.size()) continue;
+            std::string value = line.substr(at);
             if (value.compare(0, 2, "0n") == 0) value = value.substr(2);
 
-            if (value.find_first_of("0123456789") == std::string::npos) continue;
+            if (!cdbValue(value)) continue;
             return value;
         }
 
@@ -991,7 +1142,7 @@ std::string dbg_lookingAt(const StackFrame& frame) {
     return "the variables are " + frame.function + "'s, at " + where;
 }
 
-Debugger::Debugger() : kind_(DebuggerNone), onConsole_(false) {}
+Debugger::Debugger() : kind_(DebuggerNone), onConsole_(false), sink_(0), sinkContext_(0) {}
 Debugger::~Debugger() { stop(); }
 
 bool Debugger::start(DebuggerKind kind, const std::string& executable,
@@ -1014,20 +1165,24 @@ bool Debugger::start(DebuggerKind kind, const std::string& executable,
         else command = editor::quoted(run) + " --debug " + editor::quoted(executable) + dbg_shalimarRuntime(executable);
     } else backend_ = dbg_name(kind_);
     if (kind_ == DebuggerCdb) {
-
+        // gride-dbg or cdb, as settings.json's windowsDebugger asks and what is here allows; both take the
+        // output folder for the PDB, and gride-dbg talks on plain pipes - its program has a console of its own.
+        backend_ = dbg_windowsBackend(&backendWhy_);
+        if (backend_.empty()) backend_ = dbg_name(kind_);
+        if (ownDebugger() && program.empty()) run = dbg_grideDbg();
         command = editor::quoted(run) + " -y " + editor::quoted(path::parent(executable)) +
                   " " + editor::quoted(executable);
     }
 
     onConsole_ = false;
-    if (kind_ == DebuggerCdb && child_.startOnConsole(command)) {
+    if (kind_ == DebuggerCdb && !ownDebugger() && child_.startOnConsole(command)) {
         onConsole_ = true;
     } else if (!child_.start(command)) {
         kind_ = DebuggerNone;
         return false;
     }
 
-    std::vector<std::string> first = preamble(kind_);
+    std::vector<std::string> first = preamble(kind_, ownDebugger());
     for (size_t i = 0; i < first.size(); ++i) child_.say(first[i]);
 
     bool found = false;
@@ -1043,24 +1198,69 @@ bool Debugger::start(DebuggerKind kind, const std::string& executable,
 
 void Debugger::stop() {
     if (child_.running()) {
-        child_.say("quit");
+        child_.say(ownDebugger() ? "q" : "quit");
         child_.stop();
     }
     kind_ = DebuggerNone;
 }
 
-std::string Debugger::ask(const std::string& command) {
+std::string Debugger::ask(const std::string& command, int timeoutMs) {
     if (!running()) return std::string();
 
     child_.say(command);
     sayMarker(child_, kind_);
 
     bool found = false;
-    std::string said = child_.readUntil(marker(), &found);
+    std::string said = child_.readUntil(marker(), &found, timeoutMs);
     if (!found) child_.stop();
 
     if (onConsole_) said = dbg_withoutEcho(dbg_withoutEscapes(said), command, markerCommand(kind_));
     return said;
+}
+
+namespace {
+// A move waits for the program, which may wait for its input, for this long; Stop ends the wait before.
+const int kMoveWaitMs = 600000;
+// And is read this much at a time, its program lines told between.
+const int kMovePieceMs = 150;
+}
+
+std::string Debugger::askMoving(const std::string& command, size_t* told) {
+    *told = 0;
+    if (!running()) return std::string();
+    if (onConsole_) return ask(command, kMoveWaitMs);
+
+    child_.say(command);
+    sayMarker(child_, kind_);
+    const std::chrono::steady_clock::time_point began = std::chrono::steady_clock::now();
+    std::string said;
+    bool found = false;
+    while (!found && child_.running()) {
+        said += child_.readLines(marker(), &found, kMovePieceMs);
+        if (!found && sink_) {
+            const size_t ended = said.rfind('\n') + 1;
+            if (ended > *told) {
+                tell(said.substr(*told, ended - *told));
+                *told = ended;
+            }
+        }
+        if (std::chrono::steady_clock::now() - began > std::chrono::milliseconds(kMoveWaitMs)) break;
+    }
+    if (!found) child_.stop();
+    return said;
+}
+
+void Debugger::tell(const std::string& said) {
+    if (!sink_) return;
+    const std::vector<std::string> printed = lines(dbg_programOutput(kind_, said));
+    for (size_t i = 0; i < printed.size(); ++i) sink_(sinkContext_, printed[i]);
+}
+
+bool Debugger::takesInput() const { return running() && ownDebugger(); }
+
+bool Debugger::sendInput(const std::string& line) {
+    if (!takesInput()) return false;
+    return child_.say(".input " + line);
 }
 
 bool Debugger::breakAt(const std::string& file, size_t line) {
@@ -1093,15 +1293,26 @@ bool Debugger::clearBreakpoints() {
 }
 
 Stop Debugger::afterMoving(const std::string& command) {
-    std::string said = ask(command);
+    size_t told = 0;
+    std::string said = askMoving(command, &told);
+    std::string untold = said.substr(told);
 
     if (kind_ == DebuggerCdb) {
         std::string event = ask(".lastevent");
         said += "\n" + event;
-        if (event.find("Exit process") == std::string::npos) said += "\n" + ask("ln");
+        untold += "\n" + event;
+        if (event.find("Exit process") == std::string::npos) {
+            const std::string where = ask("ln");
+            said += "\n" + where;
+            untold += "\n" + where;
+        }
     }
 
     Stop stop = dbg_readStop(kind_, said);
+    if (sink_) {
+        tell(untold);
+        stop.told = true;
+    }
     if (!running()) stop.stopped = false;
 
     if (stop.stopped) {
@@ -1117,10 +1328,38 @@ Stop Debugger::afterMoving(const std::string& command) {
 }
 
 Stop Debugger::run() {
+    note_.clear();
 
     if (kind_ == DebuggerCdb) return afterMoving("g");
 
     return afterMoving(dbg_gdbLike(kind_) ? "run < /dev/null" : "run");
+}
+
+static bool atFunctionEntry(const std::string& said);
+
+Stop Debugger::runToEntry(const std::string& file, size_t line) {
+    std::string refused;
+    if (running() && !file.empty() && line > 0) {
+        const std::string at = path::filename(file) + ":" + std::to_string(line);
+        std::string said;
+        // For once where the engine has the words: gride-dbg's bp /1, gdb's tbreak, lldb's --one-shot; cdb's
+        // stays, as Black's does, and is passed once - main's first line is reached once.
+        if (kind_ == DebuggerCdb) said = ask(std::string(ownDebugger() ? "bp /1 `" : "bp `") + at + "`");
+        else if (dbg_gdbLike(kind_)) said = ask("tbreak " + at);
+        else said = ask("breakpoint set --one-shot true --file " + quoted(path::filename(file)) + " --line " + std::to_string(line));
+        const bool set = kind_ == DebuggerCdb ? said.find("Couldn't resolve") == std::string::npos &&
+                                                    said.find("Bp expression") == std::string::npos
+                                              : said.find("reakpoint") != std::string::npos;
+        if (!set) refused = "no stop at main's line " + at + " - running on";
+    }
+    Stop stop = run();
+    if (kind_ == DebuggerCdb && stop.stopped && stop.function == "main" && atFunctionEntry(stop.said)) {
+        Stop first = afterStepping("p");
+        first.said = stop.said + '\n' + first.said;
+        stop = first;
+    }
+    note_ = refused;
+    return stop;
 }
 
 Stop Debugger::afterStepping(const std::string& command) {
@@ -1139,8 +1378,8 @@ Stop Debugger::afterStepping(const std::string& command) {
     return stop;
 }
 
-Stop Debugger::resume() { return afterMoving(kind_ == DebuggerCdb ? "g" : "continue"); }
-Stop Debugger::stepOver() { return afterStepping(kind_ == DebuggerCdb ? "p" : "next"); }
+Stop Debugger::resume() { note_.clear(); return afterMoving(kind_ == DebuggerCdb ? "g" : "continue"); }
+Stop Debugger::stepOver() { note_.clear(); return afterStepping(kind_ == DebuggerCdb ? "p" : "next"); }
 // **cdb's `t` stops on a callee's first instruction**, before its prologue has stored the arguments -
 // cl's programs as much as c90's and cpp11's (M10) - so one more step over goes to its first line, where
 // gdb and lldb stop. A first instruction is the one cdb names "module!function:" with no offset.
@@ -1155,6 +1394,7 @@ static bool atFunctionEntry(const std::string& said) {
 }
 
 Stop Debugger::stepInto() {
+    note_.clear();
     Stop stop = afterStepping(kind_ == DebuggerCdb ? "t" : "step");
     if (kind_ != DebuggerCdb || !atFunctionEntry(stop.said)) return stop;
     Stop first = afterStepping("p");
@@ -1162,7 +1402,7 @@ Stop Debugger::stepInto() {
     return first;
 }
 
-Stop Debugger::stepOut() { return afterMoving(kind_ == DebuggerCdb ? "gu" : "finish"); }
+Stop Debugger::stepOut() { note_.clear(); return afterMoving(kind_ == DebuggerCdb ? "gu" : "finish"); }
 
 std::vector<Variable> Debugger::locals() {
     if (!running()) return std::vector<Variable>();
@@ -1197,7 +1437,7 @@ std::string Debugger::evaluate(const std::string& expression, bool* ok) {
         return value;
     }
 
-    const std::string why = complaintIn(answer);
+    const std::string why = friendly(complaintIn(answer), expression);
     return why.empty() ? "no answer" : why;
 }
 
@@ -1222,11 +1462,10 @@ std::string dbg_readType(DebuggerKind kind, const std::string& said) {
         if (kind == DebuggerCdb) {
             if (line[0] == '?') continue;
             if (cdbRefused(line)) return std::string();
-            size_t space = line.find_last_of(' ');
-            if (space == std::string::npos) continue;
-            std::string value = line.substr(space + 1);
-            if (value.find_first_of("0123456789") == std::string::npos) continue;
-            return trimmed(line.substr(0, space));
+            const size_t at = cdbValueAt(line);
+            if (at == std::string::npos || at == 0) continue;
+            if (!cdbValue(line.substr(at))) continue;
+            return trimmed(line.substr(0, at));
         }
         if (dbg_gdbLike(kind)) {
             if (line.compare(0, 7, "type = ") == 0) return trimmed(line.substr(7));
@@ -1314,7 +1553,7 @@ bool Debugger::setVariable(const std::string& name, const std::string& value,
         answer = ask("expression " + name + " = " + value);
     }
 
-    const std::string why = complaintIn(answer);
+    const std::string why = friendly(complaintIn(answer), name);
     if (!why.empty()) {
         if (said) *said = why;
         return false;

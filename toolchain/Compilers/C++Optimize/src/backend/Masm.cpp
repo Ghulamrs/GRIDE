@@ -75,18 +75,65 @@ bool isReservedInMasm(const std::string &name) {
     return false;
 }
 
-bool canUnreserve(const std::string &name) {
-    static const char *const kNeverEmitted[] = {
-        "fabs","fadd","fchs","fcos","fdiv","fild","finit","fist","fld","fmul",
-        "fnop","fprem","fptan","frndint","fscale","fsin","fsqrt","fst","fstp",
-        "fsub","ftst","fwait","fxam","fxch",
+// **The reserved words this spelling writes as keywords** - every register, the size words, its
+// directives, and the instructions kRules and the prologues spell. Any other reserved word a symbol
+// is named - `fabs`, C90's `div`, `length` - is given up with `OPTION NOKEYWORD:<...>` at the top of
+// the file, as ml64 has it, and the C name is the symbol's (1.30, 2026-10-23: a definition of `fabs`
+// was renamed `$fabs`, which nothing outside the file could call). `div` and `idiv` are written as
+// instructions too and given up all the same: their instructions are then written as bytes - see
+// finishText.
+bool writtenAsKeyword(const std::string &lower) {
+    static const char *const kWritten[] = {
+        "ah","al","ax","eax","rax","bh","bl","bx","ebx","rbx",
+        "ch","cl","cx","ecx","rcx","dh","dl","dx","edx","rdx",
+        "si","esi","rsi","di","edi","rdi","bp","ebp","rbp","sp","esp","rsp",
+        "r8","r9","r10","r11","r12","r13","r14","r15",
+        "cs","ds","es","fs","gs","ss","flat","rip",
+        "byte","word","dword","qword","tbyte","oword","ptr","offset",
+        "proc","endp","segment","ends","public","extern","externdef","end","align","dup",
+        "label","db","dw","dd","dq","dt",
+        "add","and","call","cdq","cmp","cqo","dec","imul","inc","ja","jae","jb","jbe","je",
+        "jg","jge","jl","jle","jmp","jne","jno","jnp","jns","jnz","jo","jp","js","jz","lea",
+        "mov","movsd","movss","movsx","movsxd","movzx","neg","nop","not","or","pop","push",
+        "rep","ret","sar","seta","setae","setb","setbe","sete","setg","setge","setl","setle",
+        "setne","setnz","setz","shl","shr","sub","test","xor",
+        "addsd","addss","cvtsd2ss","cvtsi2sd","cvtss2sd","cvttsd2si","divsd","divss",
+        "movapd","movaps","movd","movq","mulsd","mulss","pxor","subsd","subss","ucomisd",
+        "ucomiss","xorpd","xorps",
         nullptr,
     };
-    std::string lower;
-    for (char c : name) lower += static_cast<char>(std::tolower(c));
-    for (const char *const *p = kNeverEmitted; *p != nullptr; ++p)
+    for (const char *const *p = kWritten; *p != nullptr; ++p)
         if (lower == *p) return true;
     return false;
+}
+
+std::string lowered(const std::string &name) {
+    std::string lower;
+    for (char c : name) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return lower;
+}
+
+bool canUnreserve(const std::string &name) {
+    const std::string lower = lowered(name);
+    return lower == "div" || lower == "idiv" || !writtenAsKeyword(lower);
+}
+
+// A general register as this spelling writes one - its number and width - or -1.
+int registerNumber(const std::string &r, int *bits) {
+    static const char *const k64[] = { "rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi" };
+    static const char *const k32[] = { "eax","ecx","edx","ebx","esp","ebp","esi","edi" };
+    for (int i = 0; i < 8; i++) {
+        if (r == k64[i]) { *bits = 64; return i; }
+        if (r == k32[i]) { *bits = 32; return i; }
+    }
+    if (r.size() < 2 || r[0] != 'r' || !std::isdigit(static_cast<unsigned char>(r[1]))) return -1;
+    std::size_t k = 1;
+    int n = 0;
+    while (k < r.size() && std::isdigit(static_cast<unsigned char>(r[k]))) n = n * 10 + (r[k++] - '0');
+    if (n < 8 || n > 15) return -1;
+    if (k == r.size()) { *bits = 64; return n; }
+    if (r.substr(k) == "d") { *bits = 32; return n; }
+    return -1;
 }
 
 const char *ptrFor(int bytes) {
@@ -201,12 +248,23 @@ std::string MasmSpelling::mangle(const std::string &name) {
         return out;
     }
     if (!isReservedInMasm(name)) return name;
-    if (defined_.find(name) != defined_.end()) return "$" + name;
-    if (!canUnreserve(name))
-        give_up(name, "'" + name + "' is a name ml64 reserves and this file "
-                      "emits, so an imported symbol cannot be spelled it");
-    unreserved_.insert(name);
-    return name;
+    // A keyword this spelling never writes as one is given up, and the name is the C name - see
+    // writtenAsKeyword (1.30). One it writes - a register, `test`, `add` - is renamed where this file
+    // defines it, which only this file can then call, and said so.
+    if (canUnreserve(name)) {
+        unreserved_.insert(name);
+        return name;
+    }
+    if (defined_.find(name) != defined_.end()) {
+        if (renamed_.insert(name).second)
+            std::fprintf(stderr, "%s: masm: warning: '%s' is a word MASM reserves and this file also "
+                                 "writes as one, so it is defined as '$%s' - only this file can call "
+                                 "it; the default GNU syntax, -masm=gnu, keeps the name\n",
+                         program::kName, name.c_str(), name.c_str());
+        return "$" + name;
+    }
+    give_up(name, "'" + name + "' is a name ml64 reserves and this file "
+                  "emits, so an imported symbol cannot be spelled it");
 }
 
 MasmSpelling::Rendered MasmSpelling::render(const Op &x) {
@@ -823,6 +881,50 @@ void MasmSpelling::initialiserEntry(const std::string &fn, bool) {
 
 void MasmSpelling::predefine(const std::vector<std::string> &names) {
     for (const std::string &n : names) defined_.insert(n);
+}
+
+// **`div` named a symbol is no instruction in this file** (1.30): NOKEYWORD gives the word up for the
+// whole file, so every `div reg` and `idiv reg` the code generator wrote becomes its bytes - F7 /6 and
+// F7 /7 on the register, REX.W for a 64-bit one and REX.B for r8-r15 - and keeps the text as a comment.
+void MasmSpelling::finishText(std::vector<std::string> &chunks) {
+    bool given[2] = { false, false };
+    for (const std::string &u : unreserved_) {
+        const std::string lower = lowered(u);
+        if (lower == "div") given[0] = true;
+        if (lower == "idiv") given[1] = true;
+    }
+    if (!given[0] && !given[1]) return;
+    for (std::string &text : chunks) {
+        std::string out;
+        std::size_t at = 0;
+        while (at < text.size()) {
+            std::size_t nl = text.find('\n', at);
+            const std::size_t end = nl == std::string::npos ? text.size() : nl + 1;
+            const std::string line = text.substr(at, end - at);
+            at = end;
+            const int which = line.compare(0, 6, "  div ") == 0 ? 0 : line.compare(0, 7, "  idiv ") == 0 ? 1 : -1;
+            if (which < 0 || !given[which]) { out += line; continue; }
+            std::string reg = line.substr(which == 0 ? 6 : 7);
+            while (!reg.empty() && (reg.back() == '\n' || reg.back() == '\r' || reg.back() == ' ')) reg.pop_back();
+            int bits = 0;
+            const int n = registerNumber(reg, &bits);
+            if (n < 0)
+                give_up(line, "'" + std::string(which == 0 ? "div" : "idiv") + "' names a symbol in this "
+                              "file, so its instruction is written as bytes, and these bytes are for a "
+                              "64- or 32-bit register only");
+            char bytes[64];
+            const int rex = (bits == 64 ? 0x48 : 0x40) | (n >= 8 ? 1 : 0);
+            const int modrm = 0xC0 | ((which == 0 ? 6 : 7) << 3) | (n & 7);
+            if (rex != 0x40) std::snprintf(bytes, sizeof bytes, "  DB 0%02XH, 0F7H, 0%02XH", rex, modrm);
+            else             std::snprintf(bytes, sizeof bytes, "  DB 0F7H, 0%02XH", modrm);
+            out += bytes;
+            out += "  ; ";
+            out += which == 0 ? "div " : "idiv ";
+            out += reg;
+            out += '\n';
+        }
+        text.swap(out);
+    }
 }
 
 void MasmSpelling::preamble(std::ostream &sink) {

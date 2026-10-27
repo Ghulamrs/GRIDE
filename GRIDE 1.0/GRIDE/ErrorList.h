@@ -49,12 +49,14 @@ public:
         CellClick += gcnew DataGridViewCellEventHandler(this, &ErrorList::OnRow);
     }
 
-    // Every diagnostic in output; source is the file built, or empty for a project.
+    // Every diagnostic in output; source is the file built, or empty for a project. A file the Output names
+    // from the project's folder (projectDir) is kept by its full path, which a click goes to.
     // Answers how many errors (not warnings) there were, for the tab's title.
-    int Collect(String^ output, String^ source) {
+    int Collect(String^ output, String^ source, String^ projectDir) {
         Rows->Clear();
         files_ = gcnew System::Collections::Generic::List<String^>();
         errors_ = 0;
+        projectDir_ = projectDir;
         Utf8 sourceBytes(source == nullptr ? "" : source);
         array<String^>^ all = (output == nullptr ? "" : output)->Replace("\r\n", "\n")->Split('\n');
         String^ previous = "";
@@ -81,13 +83,19 @@ public:
 private:
     System::Collections::Generic::List<String^>^ files_;
     int errors_;
+    String^ projectDir_;
 
-    // Never throws: the name comes from the Output tab's text, which may hold characters no path may
-    // (Path::GetFileName threw on them, EndedRunning never finished, and White stayed "running").
+    // A file named from the project's folder, by its full path where it is there.
+    String^ Full(String^ named) {
+        if (String::IsNullOrEmpty(named) || String::IsNullOrEmpty(projectDir_) || System::IO::Path::IsPathRooted(named)) return named;
+        try {
+            String^ full = System::IO::Path::GetFullPath(System::IO::Path::Combine(projectDir_, named));
+            return System::IO::File::Exists(full) ? full : named;
+        } catch (Exception^) { return named; }
+    }
+
     static String^ Leaf(String^ file) {
-        if (String::IsNullOrEmpty(file)) return "";
-        int slash = file->LastIndexOfAny(gcnew array<wchar_t>{L'\\', L'/'});
-        return slash < 0 ? file : file->Substring(slash + 1);
+        return String::IsNullOrEmpty(file) ? "" : System::IO::Path::GetFileName(file);
     }
 
     bool Read(String^ line, Utf8% source) {
@@ -96,7 +104,7 @@ private:
         const char* file = "";
         const char* message = "";
         if (gride_parse_diagnostic(text.c(), source.c(), &row, &column, &file, &message) == 0) return false;
-        String^ named = FromUtf8(file);
+        String^ named = Full(FromUtf8(file));
         String^ said = FromUtf8(message);
         for (int i = 0; i < Rows->Count; ++i)
             if (String::Equals(safe_cast<String^>(Rows[i]->Cells[3]->Value), said) &&

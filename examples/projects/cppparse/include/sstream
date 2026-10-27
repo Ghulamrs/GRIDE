@@ -1,0 +1,240 @@
+// sstream - cppparse's C++98 library: basic_stringbuf and the string streams (27.7): istringstream, ostringstream,
+// stringstream and their wide forms. The buffer keeps its characters in a basic_string whose whole storage is the put
+// area (so a write that fits is a copy into it, with no call to the buffer) and whose characters are the get area;
+// the characters written so far are those up to the high-water mark of the put pointer.
+#ifndef CPPPARSE_SSTREAM
+#define CPPPARSE_SSTREAM
+
+#include <istream>
+#include <ostream>
+#include <string>
+
+namespace std {
+
+template <class charT, class traits = char_traits<charT>, class Allocator = allocator<charT> >
+class basic_stringbuf : public basic_streambuf<charT, traits> {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+    typedef basic_string<charT, traits, Allocator> string_type;
+
+    explicit basic_stringbuf(ios_base::openmode which = ios_base::in | ios_base::out) : m_mode(which), m_high(0), m_out(0) { __setup(0, 0); }
+    explicit basic_stringbuf(const string_type& s, ios_base::openmode which = ios_base::in | ios_base::out) : m_str(s), m_mode(which), m_high(s.size()), m_out(0)
+    {
+        __setup(0, (m_mode & (ios_base::app | ios_base::ate)) ? m_high : 0);
+    }
+    virtual ~basic_stringbuf() {}
+
+    string_type str() const { return string_type(m_str.data(), __high()); }
+    void str(const string_type& s)
+    {
+        m_str = s;
+        m_high = m_str.size();
+        __setup(0, (m_mode & (ios_base::app | ios_base::ate)) ? m_high : 0);
+    }
+
+protected:
+    // the characters written since the get area was set are made readable
+    virtual int_type underflow()
+    {
+        if (!(m_mode & ios_base::in)) return traits::eof();
+        if (this->__gnext < this->__gend) return traits::to_int_type(*this->__gnext);
+        const size_t high = __high();
+        m_high = high;
+        this->__gend = this->__gbeg + high;
+        if (this->__gnext < this->__gend) return traits::to_int_type(*this->__gnext);
+        return traits::eof();
+    }
+    virtual int_type pbackfail(int_type c)
+    {
+        if (!(m_mode & ios_base::in) || this->__gnext == this->__gbeg) return traits::eof();
+        if (traits::eq_int_type(c, traits::eof())) { --this->__gnext; return traits::not_eof(c); }
+        if (!traits::eq(traits::to_char_type(c), this->__gnext[-1]) && !(m_mode & ios_base::out)) return traits::eof();
+        *--this->__gnext = traits::to_char_type(c);
+        return c;
+    }
+    // the put area is full (or the buffer appends, in app mode): the string grows
+    virtual int_type overflow(int_type c)
+    {
+        if (traits::eq_int_type(c, traits::eof())) return traits::not_eof(c);
+        if (!(m_mode & ios_base::out)) return traits::eof();
+        const char_type ch = traits::to_char_type(c);
+        if (m_mode & ios_base::app) { __append(&ch, 1); return c; }
+        __room(1);
+        *this->__pnext++ = ch;
+        return c;
+    }
+    virtual streamsize xsputn(const char_type* s, streamsize n)
+    {
+        if (!(m_mode & ios_base::out) || n <= 0) return 0;
+        if (m_mode & ios_base::app) { __append(s, static_cast<size_t>(n)); return n; }
+        if (reinterpret_cast<size_t>(this->__pend) - reinterpret_cast<size_t>(this->__pnext) < static_cast<size_t>(n) * sizeof(char_type)) __room(static_cast<size_t>(n));
+        memcpy(this->__pnext, s, static_cast<size_t>(n) * sizeof(char_type));
+        this->__pnext += n;
+        return n;
+    }
+    virtual streamsize showmanyc()
+    {
+        if (!(m_mode & ios_base::in)) return -1;
+        const size_t high = __high();
+        const size_t at = static_cast<size_t>(this->__gnext - this->__gbeg);
+        return at < high ? static_cast<streamsize>(high - at) : -1;
+    }
+    virtual pos_type seekoff(off_type off, ios_base::seekdir way, ios_base::openmode which)
+    {
+        const bool in = (which & ios_base::in) != 0 && (m_mode & ios_base::in) != 0;
+        const bool out = (which & ios_base::out) != 0 && (m_mode & ios_base::out) != 0;
+        if ((!in && !out) || (in && out && way == ios_base::cur)) return pos_type(off_type(-1));
+        const size_t high = __high();
+        m_high = high;
+        off_type base = 0;
+        if (way == ios_base::end) base = static_cast<off_type>(high);
+        else if (way == ios_base::cur) base = in ? static_cast<off_type>(this->__gnext - this->__gbeg) : static_cast<off_type>(__outPos());
+        const off_type to = base + off;
+        if (to < 0 || to > static_cast<off_type>(high)) return pos_type(off_type(-1));
+        if (in) { this->__gnext = this->__gbeg + to; this->__gend = this->__gbeg + high; }
+        if (out) {
+            if (this->__pbeg) this->__pnext = this->__pbeg + to;
+            else m_out = static_cast<size_t>(to);
+        }
+        return pos_type(to);
+    }
+    virtual pos_type seekpos(pos_type sp, ios_base::openmode which) { return seekoff(off_type(sp), ios_base::beg, which); }
+
+private:
+    string_type         m_str;    // the characters [0, high) in its storage (its size may lag behind), then the room the put area may fill
+    ios_base::openmode  m_mode;
+    size_t              m_high;   // the high-water mark when it was last taken (the put pointer may be past it)
+    size_t              m_out;    // the put position in app mode, which has no put area (every write appends)
+
+    basic_stringbuf(const basic_stringbuf&);
+    basic_stringbuf& operator=(const basic_stringbuf&);
+
+    // (the positions are counted from byte addresses: a pointer difference is a division in -O0 code)
+    static size_t __count(const char_type* from, const char_type* to)
+    {
+        const size_t bytes = reinterpret_cast<size_t>(to) - reinterpret_cast<size_t>(from);
+        return sizeof(char_type) == 1 ? bytes : bytes / sizeof(char_type);
+    }
+    size_t __high() const
+    {
+        if (!this->__pnext) return m_high;
+        const size_t p = __count(this->__pbeg, this->__pnext);
+        return p > m_high ? p : m_high;
+    }
+    size_t __outPos() const { return this->__pbeg ? __count(this->__pbeg, this->__pnext) : m_out; }
+    // the areas over the string: the put area (not in app mode) is all its storage, the get area its characters
+    void __setup(size_t in, size_t out)
+    {
+        if ((m_mode & ios_base::out) && !(m_mode & ios_base::app)) {
+            char_type* b = const_cast<char_type*>(m_str.data());
+            this->__pbeg = b;
+            this->__pnext = b + out;
+            this->__pend = b + m_str.capacity();
+        } else {
+            this->__pbeg = this->__pnext = this->__pend = 0;
+            m_out = out;
+        }
+        if (m_mode & ios_base::in) {
+            char_type* b = const_cast<char_type*>(m_str.data());
+            this->__gbeg = b;
+            this->__gnext = b + in;
+            this->__gend = b + m_high;
+        } else this->__gbeg = this->__gnext = this->__gend = 0;
+    }
+    // room for n more characters at the put pointer: the storage at least doubles
+    void __room(size_t n)
+    {
+        const size_t high = __high();
+        const size_t out = static_cast<size_t>(this->__pnext - this->__pbeg);
+        const size_t in = static_cast<size_t>(this->__gnext - this->__gbeg);
+        m_high = high;
+        size_t want = m_str.capacity() * 2;
+        if (want < out + n) want = out + n;
+        m_str.__set_size(high);   // what the put area wrote is kept by the reallocation
+        m_str.reserve(want);
+        __setup(in, out);
+    }
+    // app mode: what is written goes at the end
+    void __append(const char_type* s, size_t n)
+    {
+        const size_t in = static_cast<size_t>(this->__gnext - this->__gbeg);
+        m_str.append(s, n);
+        m_high = m_str.size();
+        __setup(in, m_high);
+    }
+};
+
+// the streams pass their buffer to the base before it is constructed (only its address is kept there), as 27.7.2.1 does
+template <class charT, class traits = char_traits<charT>, class Allocator = allocator<charT> >
+class basic_istringstream : public basic_istream<charT, traits> {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+    typedef basic_string<charT, traits, Allocator> string_type;
+    explicit basic_istringstream(ios_base::openmode which = ios_base::in) : basic_istream<charT, traits>(&m_sb), m_sb(which | ios_base::in) {}
+    explicit basic_istringstream(const string_type& s, ios_base::openmode which = ios_base::in) : basic_istream<charT, traits>(&m_sb), m_sb(s, which | ios_base::in) {}
+    virtual ~basic_istringstream() {}
+    basic_stringbuf<charT, traits, Allocator>* rdbuf() const { return const_cast<basic_stringbuf<charT, traits, Allocator>*>(&m_sb); }
+    string_type str() const { return m_sb.str(); }
+    void        str(const string_type& s) { m_sb.str(s); this->clear(); }
+private:
+    basic_stringbuf<charT, traits, Allocator> m_sb;
+};
+
+template <class charT, class traits = char_traits<charT>, class Allocator = allocator<charT> >
+class basic_ostringstream : public basic_ostream<charT, traits> {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+    typedef basic_string<charT, traits, Allocator> string_type;
+    explicit basic_ostringstream(ios_base::openmode which = ios_base::out) : basic_ostream<charT, traits>(&m_sb), m_sb(which | ios_base::out) {}
+    explicit basic_ostringstream(const string_type& s, ios_base::openmode which = ios_base::out) : basic_ostream<charT, traits>(&m_sb), m_sb(s, which | ios_base::out) {}
+    virtual ~basic_ostringstream() {}
+    basic_stringbuf<charT, traits, Allocator>* rdbuf() const { return const_cast<basic_stringbuf<charT, traits, Allocator>*>(&m_sb); }
+    string_type str() const { return m_sb.str(); }
+    void        str(const string_type& s) { m_sb.str(s); }
+private:
+    basic_stringbuf<charT, traits, Allocator> m_sb;
+};
+
+template <class charT, class traits = char_traits<charT>, class Allocator = allocator<charT> >
+class basic_stringstream : public basic_iostream<charT, traits> {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+    typedef basic_string<charT, traits, Allocator> string_type;
+    explicit basic_stringstream(ios_base::openmode which = ios_base::out | ios_base::in) : basic_iostream<charT, traits>(&m_sb), m_sb(which) {}
+    explicit basic_stringstream(const string_type& s, ios_base::openmode which = ios_base::out | ios_base::in) : basic_iostream<charT, traits>(&m_sb), m_sb(s, which) {}
+    virtual ~basic_stringstream() {}
+    basic_stringbuf<charT, traits, Allocator>* rdbuf() const { return const_cast<basic_stringbuf<charT, traits, Allocator>*>(&m_sb); }
+    string_type str() const { return m_sb.str(); }
+    void        str(const string_type& s) { m_sb.str(s); }
+private:
+    basic_stringbuf<charT, traits, Allocator> m_sb;
+};
+
+typedef basic_stringbuf<char, char_traits<char>, allocator<char> >                stringbuf;
+typedef basic_stringbuf<wchar_t, char_traits<wchar_t>, allocator<wchar_t> >       wstringbuf;
+typedef basic_istringstream<char, char_traits<char>, allocator<char> >            istringstream;
+typedef basic_istringstream<wchar_t, char_traits<wchar_t>, allocator<wchar_t> >   wistringstream;
+typedef basic_ostringstream<char, char_traits<char>, allocator<char> >            ostringstream;
+typedef basic_ostringstream<wchar_t, char_traits<wchar_t>, allocator<wchar_t> >   wostringstream;
+typedef basic_stringstream<char, char_traits<char>, allocator<char> >             stringstream;
+typedef basic_stringstream<wchar_t, char_traits<wchar_t>, allocator<wchar_t> >    wstringstream;
+
+}
+
+#endif

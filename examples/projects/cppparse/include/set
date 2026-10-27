@@ -1,0 +1,62 @@
+// set - cppparse's C++98 library: an ordered set on the AVL tree of __tree.
+#ifndef CPPPARSE_SET
+#define CPPPARSE_SET
+
+#include <__tree>
+#include <algorithm>
+#include <utility>
+
+namespace std {
+
+template <class K>
+struct __self_of {
+    const K& operator()(const K& v) const { return v; }
+};
+
+template <class K, class C = less<K> >
+class set {
+public:
+    typedef K      key_type;
+    typedef K      value_type;
+    typedef size_t size_type;
+    typedef C      key_compare;
+    typedef __tree<K, K, __self_of<K>, C> tree_type;
+    typedef typename tree_type::iterator iterator;
+    typedef typename tree_type::iterator const_iterator;
+
+    set() {}
+    set(const set& o) : m_tree(o.m_tree) {}
+    set(const K* first, const K* last) { for (; first != last; ++first) m_tree.insert(*first); }
+    template <class It> set(It first, It last) { for (; first != last; ++first) m_tree.insert(*first); }
+    template <class It> void insert(It first, It last) { for (; first != last; ++first) m_tree.insert(*first); }
+    set& operator=(const set& o) { m_tree = o.m_tree; return *this; }
+
+    size_t   size() const { return m_tree.size(); }
+    bool     empty() const { return m_tree.empty(); }
+    void     clear() { m_tree.clear(); }
+    iterator begin() const { return m_tree.begin(); }
+    iterator end() const { return m_tree.end(); }
+    void     swap(set& o) { m_tree.swap(o.m_tree); }
+
+    iterator find(const K& k) const { return m_tree.find(k); }
+    size_t   count(const K& k) const { return m_tree.count(k); }
+    iterator lower_bound(const K& k) const { return m_tree.lower_bound(k); }
+    iterator upper_bound(const K& k) const { return m_tree.upper_bound(k); }
+
+    pair<iterator, bool> insert(const K& v) { return m_tree.insert(v); }
+    iterator insert(iterator, const K& v) { return m_tree.insert(v).first; }
+    void     insert(const K* first, const K* last) { for (; first != last; ++first) m_tree.insert(*first); }
+    void     erase(iterator at) { m_tree.erase(at); }
+    size_t   erase(const K& k) { return m_tree.erase(k); }
+    void     erase(iterator first, iterator last) { m_tree.erase(first, last); }
+
+private:
+    tree_type m_tree;
+};
+
+template <class K, class C>
+void swap(set<K, C>& a, set<K, C>& b) { a.swap(b); }
+
+}
+
+#endif

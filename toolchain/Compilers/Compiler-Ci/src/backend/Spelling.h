@@ -91,6 +91,16 @@ inline void appendNum(std::string &s, long long v) {
 }
 inline void appendNum(std::string &s, int v) { appendNum(s, static_cast<long long>(v)); }
 
+// **A Windows frame of a page or more is probed, as cl probes it.** Windows commits a thread's stack
+// a page at a time behind a guard page, so a `sub rsp, n` that steps past the guard page leaves the
+// next access in uncommitted memory, and the program faults. cl x64's prologue from 4096 bytes on
+// (measured at /O2 and /Od: 4080 is a plain `sub rsp, 4080`, 4096 is probed) is
+// `mov eax, n` / `call __chkstk` / `sub rsp, rax`: __chkstk touches each page from rsp down by rax
+// bytes, moves no rsp and keeps every register but r10, r11 and the flags, so the arguments in
+// rcx, rdx, r8 and r9 arrive intact. The unwind data is the same allocation of n bytes. The two
+// Windows spellings write it (MasmSpelling, CoffSpelling); Linux and Darwin have no such page.
+const int kStackProbeFrom = 4096;
+
 class Spelling {
 public:
     virtual ~Spelling() = default;

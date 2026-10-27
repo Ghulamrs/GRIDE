@@ -158,7 +158,7 @@ struct Expr {
     sema::Symbol*      semaSym;     // the entity a Name/Member/Call refers to (variable, function chosen by overload resolution, ...)
     bool               semaLvalue;
     bool               semaConst;   // a constant expression
-    long               semaValue;   // its value when semaConst
+    long long          semaValue;   // its value when semaConst (see Sema.hpp, Symbol::constValue)
     const sema::Type*  semaOperand; // Typeid: the type the operand names or has (typeid(int), typeid(x))
     Expr() : kind(Error), type(0), arrayDelete(false), hasInit(false), arrowMember(false), globalScope(false), semaType(0), semaSym(0), semaLvalue(false), semaConst(false), semaValue(0), semaOperand(0) {}
 };
@@ -335,6 +335,7 @@ void countTranslationUnit(const TranslationUnit& tu, Counts& out);
 // deep copies for template instantiation: fresh nodes without semantic annotations, owned by the arena
 Decl*      cloneDecl(const Decl* d, CxxArena& arena);
 ClassDecl* cloneClassDecl(const ClassDecl* c, CxxArena& arena);
+Expr*      cloneExpr(const Expr* e, CxxArena& arena);
 
 } // namespace cxx
 } // namespace cppparse

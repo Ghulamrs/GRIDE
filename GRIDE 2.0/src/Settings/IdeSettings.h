@@ -108,6 +108,7 @@ namespace Gride
         literal String^ WinDebugAssembler  = "win.clang";      // a Debug build's CodeView path: clang on the GNU spelling
         literal String^ WinDebugLinker     = "win.mslink";     // Microsoft's link.exe /DEBUG, which writes the PDB
         literal String^ WinNativeAssembler = "win.ml64";       // offered when the project's own assembler fails (the native question)
+        literal String^ WinOwnDebugger     = "win.gride-dbg";  // GRIDE's own debugger (gride-dbg beside GRIDE, the PDB through dbghelp), before cdb
         literal String^ WinDebugger        = "win.cdb";        // the Windows debugger (cdb, which reads the PDB)
         literal String^ WinFallbackDebugger = "win.lldb";      // the one standing in where cdb is not installed (lldb, $GRIDE_LLDB)
         literal String^ LinuxAssembler     = "linux.as";
@@ -138,6 +139,7 @@ namespace Gride
                 gcnew ToolBinding(WinDebugAssembler, "Windows", true, TargetKind::Windows, "debugAssembler", "assemble"),
                 gcnew ToolBinding(WinDebugLinker, "Windows", true, TargetKind::Windows, "debugLinker", "link"),
                 gcnew ToolBinding(WinNativeAssembler, "Windows", true, TargetKind::Windows, "nativeAssembler", "assemble"),
+                gcnew ToolBinding(WinOwnDebugger, "Windows", true, TargetKind::Windows, "ownDebugger", "debug"),
                 gcnew ToolBinding(WinDebugger, "Windows", true, TargetKind::Windows, "debugger", "debug"),
                 gcnew ToolBinding(WinFallbackDebugger, "Windows", true, TargetKind::Windows, "fallbackDebugger", "debug"),
                 gcnew ToolBinding(LinuxAssembler, "Linux", true, TargetKind::Linux, "assembler", "assemble"),
@@ -724,6 +726,8 @@ namespace Gride
         [DataMember(Order = 8)]  property bool AskNativeTools;
         // a program runs inside the IDE, in the Output pane with an input line (RIDE's window); off: in a console window of its own
         [DataMember(Order = 9)]  property bool RunInIde;
+        // how many of a project's files compile and assemble at once: 0 one per processor, 1 one at a time
+        [DataMember(Order = 76)] property int BuildJobs;
         // ---- RIDE's settings.json, merged (R07)
         [DataMember(Name = "GrideIncludeDir", Order = 60)] property String^ RideIncludeDir;   // "include": cpp11's headers, against the installation ("" = its include)
         [DataMember(Name = "GrideLibDir", Order = 61)] property String^ RideLibDir;           // "lib": c90's headers ("" = the installation's lib)
@@ -746,6 +750,13 @@ namespace Gride
         [DataMember(Order = 72, EmitDefaultValue = false)] property Dictionary<String^, CcsProjectState^>^ CcsProjects;
         // a Visual Studio project's state, the same, by its project file (R08)
         [DataMember(Order = 73, EmitDefaultValue = false)] property Dictionary<String^, CcsProjectState^>^ VsProjects;
+        // x86_64-windows' debugger: auto (gride-dbg beside GRIDE, else cdb, else lldb), gride-dbg, cdb - the one
+        // named stands in for the other where that one is not there
+        [DataMember(Order = 74)] property String^ WindowsDebugger;
+        // the C runtime a Windows program links: auto (Microsoft's only where Visual Studio is found and the build
+        // has cl's objects, GRIDE's otherwise), grt (GRIDE's own, lib\grtc.lib and its layers), msvc (Visual Studio's
+        // libcmt and the SDK's UCRT); GRIDE_WINDOWS_RUNTIME in the environment at start wins
+        [DataMember(Order = 75)] property String^ WindowsRuntime;
         // ---- Editor
         [DataMember(Order = 10)] property String^ EditorFontName;
         [DataMember(Order = 11)] property float EditorFontSize;
@@ -795,6 +806,7 @@ namespace Gride
             JumpToFirstError = true;
             AskNativeTools = true;
             RunInIde = true;
+            BuildJobs = 0;
             RideIncludeDir = String::Empty;
             RideLibDir = String::Empty;
             Vcvars = String::Empty;
@@ -806,6 +818,8 @@ namespace Gride
             CcsEnabled = true;
             CcsRoot = String::Empty;
             C6747Debugger = String::Empty;
+            WindowsDebugger = "auto";
+            WindowsRuntime = "auto";
             CompilerOptions = nullptr;
             CcsProjects = nullptr;
             VsProjects = nullptr;
@@ -849,6 +863,7 @@ namespace Gride
             if (LastProject == nullptr) LastProject = String::Empty;
             if (RecentProjects == nullptr) RecentProjects = gcnew List<String^>();
             if (RecentFiles == nullptr) RecentFiles = gcnew List<String^>();
+            if (BuildJobs < 0) BuildJobs = 0;
             if (String::IsNullOrEmpty(RideRoot) && !String::IsNullOrEmpty(FormerRideRoot)) RideRoot = FormerRideRoot;
             if (String::IsNullOrEmpty(RideIncludeDir) && !String::IsNullOrEmpty(FormerRideIncludeDir)) RideIncludeDir = FormerRideIncludeDir;
             if (String::IsNullOrEmpty(RideLibDir) && !String::IsNullOrEmpty(FormerRideLibDir)) RideLibDir = FormerRideLibDir;
@@ -864,6 +879,8 @@ namespace Gride
             if (SharedLibraries == nullptr) SharedLibraries = gcnew List<String^>();
             if (CcsRoot == nullptr) CcsRoot = String::Empty;
             if (C6747Debugger == nullptr) C6747Debugger = String::Empty;
+            WindowsDebugger = Choice(WindowsDebugger, gcnew array<String^>{ "gride-dbg", "cdb" });
+            WindowsRuntime = Choice(WindowsRuntime, gcnew array<String^>{ "grt", "msvc" });
             if (CompilerOptions != nullptr && CompilerOptions->Count == 0) CompilerOptions = nullptr;
             if (CcsProjects != nullptr && CcsProjects->Count == 0) CcsProjects = nullptr;
             if (VsProjects != nullptr && VsProjects->Count == 0) VsProjects = nullptr;
@@ -953,6 +970,20 @@ namespace Gride
                 if (!String::IsNullOrWhiteSpace(v) && v->Trim() != "0") return id;
             }
             return C6747Debugger;
+        }
+
+        // the Windows C runtime in force: auto, grt or msvc (GRIDE_WINDOWS_RUNTIME, then the setting)
+        String^ EffectiveWindowsRuntime()
+        {
+            String^ e = System::Environment::GetEnvironmentVariable("GRIDE_WINDOWS_RUNTIME");
+            return Choice(String::IsNullOrWhiteSpace(e) ? WindowsRuntime : e, gcnew array<String^>{ "grt", "msvc" });
+        }
+
+        // one of the words, else auto
+        static String^ Choice(String^ v, array<String^>^ words)
+        {
+            String^ w = String::IsNullOrWhiteSpace(v) ? String::Empty : v->Trim()->ToLowerInvariant();
+            return Array::IndexOf(words, w) >= 0 ? w : Str("auto");
         }
 
         // a CCS project's state, by its folder (slashes and case aside)

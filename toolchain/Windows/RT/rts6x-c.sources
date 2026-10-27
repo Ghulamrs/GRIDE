@@ -1,0 +1,81 @@
+# The sources of RTS6x's C library (toolchain\TI\RTS6x\src) that grtc compiles for x86_64-windows with cpp11,
+# beside grtc's own c\. A line names a file or a folder's *.cpp; a line starting with - takes one back out.
+# What is left out is the C6747's: its host and boot (the Windows layer and start-up are grtwin's and
+# grtstart's), its assembly (.s, C6000 instructions), the C6000 ABI's helpers, the Itanium C++ ABI, and the
+# files whose Windows form is the runtime's own - noted where they go.
+ctype/*.cpp
+locale/*.cpp
+# math: fabs is c\fabs.asm (two instructions) and sqrt c\sqrt.asm (the processor's sqrtsd, and EDOM)
+math/*.cpp
+-math/fabs.cpp
+-math/sqrt.cpp
+# exit: atexit is c\atexit.cpp, RTS6x's with its list locked once a program has threads
+exit/*.cpp
+-exit/atexit.cpp
+# string: the C++ reference versions of strlen, strchr and strcmp, built with RTS6X_REFERENCE; memcpy,
+# memmove and memset are c\memory.asm
+string/*.cpp
+-string/memcpy-reference.cpp
+-string/memmove-reference.cpp
+-string/memset-reference.cpp
+# stdlib: the heap is Windows' (win\heap.c)
+stdlib/*.cpp
+-stdlib/Heap.cpp
+-stdlib/malloc.cpp
+-stdlib/calloc.cpp
+-stdlib/realloc.cpp
+-stdlib/free.cpp
+# stdio: the formatting and scanning engines are RTS6x's; the stream itself (its buffer, opening and closing,
+# position) is the Windows stream layer's (c\Stream*.cpp), and so are fflush, tmpfile, the character functions
+# (c\fputc.cpp ...) and _fileno (c\streams.cpp). The functions that take a FILE are RTS6x's bodies in grtc's own
+# files (c\fprintf.cpp ...), which lock the stream for the call once a program has threads (c\StreamWin.h).
+# fopen (its slot claimed by the stream layer), feof and ferror (one word read), perror (fputs and fputc),
+# remove, rename and the string forms stay RTS6x's.
+stdio/*.cpp
+-stdio/StreamRead.cpp
+-stdio/StreamOpen.cpp
+-stdio/StreamFill.cpp
+-stdio/StreamPosition.cpp
+-stdio/StreamWrite.cpp
+-stdio/fflush.cpp
+-stdio/tmpfile.cpp
+-stdio/fputc.cpp
+-stdio/putc.cpp
+-stdio/putchar.cpp
+-stdio/fgetc.cpp
+-stdio/getc.cpp
+-stdio/getchar.cpp
+-stdio/fileno.cpp
+-stdio/clearerr.cpp
+-stdio/fclose.cpp
+-stdio/fgets.cpp
+-stdio/fprintf.cpp
+-stdio/fputs.cpp
+-stdio/fread.cpp
+-stdio/freopen.cpp
+-stdio/fscanf.cpp
+-stdio/fseek.cpp
+-stdio/ftell.cpp
+-stdio/fwrite.cpp
+-stdio/gets.cpp
+-stdio/printf.cpp
+-stdio/puts.cpp
+-stdio/rewind.cpp
+-stdio/scanf.cpp
+-stdio/ungetc.cpp
+-stdio/vfprintf.cpp
+-stdio/vprintf.cpp
+-stdio/wprintf.cpp
+# time: the calendar and the formatter; the clock and the time zone are Windows' (win\time.c, c\time64.cpp)
+time/Calendar.cpp
+time/TimeFormatter.cpp
+time/asctime.cpp
+time/strftime.cpp
+# misc: signals. errno's storage is grtwin's (win\errno.cpp); getenv reads the Windows environment
+# (win\environment.c); strerror says what the Microsoft runtime says (c\messages.c); setjmp is c\setjmp.asm
+misc/raise.cpp
+misc/signal.cpp
+misc/SignalTable.cpp
+# helpers: the soft-float arithmetic math reads its bits with (the C6000 ABI's entry points are left out)
+helpers/SoftFloat.cpp
+helpers/FloatRounding.cpp

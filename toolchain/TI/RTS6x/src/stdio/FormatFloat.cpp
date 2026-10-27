@@ -29,12 +29,31 @@ void Formatter::floating(const FormatSpec &spec)
 
     if ((hi >> 20) == 0x7FF) {
         bool nan = (hi & 0xFFFFFu) != 0 || lo != 0;
+#if defined(_WIN32)
+        // grt: the Microsoft runtime's spellings - "nan(ind)" for the indefinite NaN (the sign and the quiet bit
+        // alone, what 0.0/0.0 makes), "nan(snan)" for a signalling one, every NaN's sign written; and with # and
+        // a precision of 0 it puts the point after the first character, as it does for a number ("i.nf", "-.inf")
+        bool quiet = (hi & 0x80000u) != 0;
+        const char *t = !nan ? (spec.upper() ? "INF" : "inf")
+                      : negative && quiet && (hi & 0x7FFFFu) == 0 && lo == 0 ? (spec.upper() ? "NAN(IND)" : "nan(ind)")
+                      : !quiet ? (spec.upper() ? "NAN(SNAN)" : "nan(snan)") : (spec.upper() ? "NAN" : "nan");
+        size_t tn = 0;
+        while (t[tn]) tn++;
+        bool point = spec.alternate() && spec.precision() == 0;
+        size_t p = signPrefix(spec, negative, prefix);
+        size_t padding = open(spec, prefix, p, tn + (point ? 1 : 0), false);
+        if (point && p == 0) { out_.put(t[0]); out_.put('.'); out_.put(t + 1, tn - 1); }
+        else { if (point) out_.put('.'); out_.put(t, tn); }
+        close(spec, padding);
+        return;
+#else
         size_t p = signPrefix(spec, negative && !nan, prefix);
         const char *t = nan ? (spec.upper() ? "NAN" : "nan") : (spec.upper() ? "INF" : "inf");
         size_t padding = open(spec, prefix, p, 3, false);
         out_.put(t, 3);
         close(spec, padding);
         return;
+#endif
     }
     size_t p = signPrefix(spec, negative, prefix);
     char c = (char)(spec.conversion() | 0x20);
@@ -113,8 +132,12 @@ void Formatter::hexadecimal(const FormatSpec &spec, const char *prefix, size_t p
         exponent = 0;
     } else if (biased == 0) {
         exponent = -1022;
+#if defined(_WIN32)   // grt: the Microsoft runtime writes a subnormal as it is, 0x0.hhhp-1022
+        lead = 0;
+#else
         while ((top & 0x100000u) == 0) { top = (top << 1) | (lo >> 31); lo <<= 1; exponent--; }
         top &= 0xFFFFFu;
+#endif
     }
     unsigned nibble[13];
     for (int i = 0; i < 5; i++) nibble[i] = (top >> (16 - 4 * i)) & 15u;
@@ -123,7 +146,9 @@ void Formatter::hexadecimal(const FormatSpec &spec, const char *prefix, size_t p
     int n = spec.precision();
     if (n < 0) {
         n = 13;
+#if !defined(_WIN32)   // grt: the Microsoft runtime keeps all thirteen digits when no precision is given
         while (n > 0 && nibble[n - 1] == 0) n--;
+#endif
     } else if (n < 13) {
         bool rest = false;
         for (int k = n + 1; k < 13; k++) rest = rest || nibble[k] != 0;

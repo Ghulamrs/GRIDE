@@ -533,6 +533,61 @@ std::vector<std::string> libraries() { return installedList("libraries"); }
 bool rememberIncludes(const std::vector<std::string>& dirs) { return rememberList("includes", dirs); }
 bool rememberLibraries(const std::vector<std::string>& files) { return rememberList("libraries", files); }
 
+namespace {
+
+// A choice as settings.json or the environment spells it, lower case and trimmed; one not among `words`, auto.
+std::string choiceOf(const std::string& said, const char* const* words, size_t count) {
+    std::string word;
+    for (size_t i = 0; i < said.size(); ++i)
+        if (!std::isspace(static_cast<unsigned char>(said[i])))
+            word += static_cast<char>(std::tolower(static_cast<unsigned char>(said[i])));
+    for (size_t i = 0; i < count; ++i)
+        if (word == words[i]) return word;
+    return "auto";
+}
+
+const char* const kRuntimes[] = {"auto", "grt", "msvc"};
+const char* const kDebuggers[] = {"auto", "gride-dbg", "cdb"};
+
+}
+
+std::string windowsRuntimeSetting() {
+    return choiceOf(readInstall().get("windowsRuntime").text("auto"), kRuntimes, 3);
+}
+
+std::string windowsRuntime() {
+    const char* given = std::getenv("GRIDE_WINDOWS_RUNTIME");
+    if (given && *given) return choiceOf(given, kRuntimes, 3);
+    return windowsRuntimeSetting();
+}
+
+bool rememberWindowsRuntime(const std::string& choice) {
+    Json root = readInstall();
+    root.set("windowsRuntime", Json::fromText(choiceOf(choice, kRuntimes, 3)));
+    return writeInstall(root);
+}
+
+std::string windowsDebugger() {
+    return choiceOf(readInstall().get("windowsDebugger").text("auto"), kDebuggers, 3);
+}
+
+bool rememberWindowsDebugger(const std::string& choice) {
+    Json root = readInstall();
+    root.set("windowsDebugger", Json::fromText(choiceOf(choice, kDebuggers, 3)));
+    return writeInstall(root);
+}
+
+size_t buildJobs() {
+    long jobs = readInstall().get("buildJobs").integer(0);
+    return jobs < 0 ? 0 : static_cast<size_t>(jobs);
+}
+
+bool rememberBuildJobs(size_t jobs) {
+    Json root = readInstall();
+    root.set("buildJobs", Json::fromNumber(static_cast<double>(jobs)));
+    return writeInstall(root);
+}
+
 std::string defaultCompiler() {
     std::string said = readInstall().get("compiler").text("auto");
     return said.empty() ? std::string("auto") : said;
@@ -677,6 +732,9 @@ bool writeInstallFileIfAbsent() {
     root.set("tilib", Json::fromText(""));
     root.set("tilinker", Json::fromText(""));
     root.set("askNative", Json::fromBool(true));
+    root.set("windowsRuntime", Json::fromText("auto"));
+    root.set("windowsDebugger", Json::fromText("auto"));
+    root.set("buildJobs", Json::fromNumber(0));
     root.set("compiler", Json::fromText("auto"));
     root.set("indent", Json::fromNumber(4));
     root.set("tabs", Json::fromBool(false));

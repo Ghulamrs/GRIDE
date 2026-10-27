@@ -1,0 +1,24 @@
+// iostream - cppparse's C++98 library: the standard streams (27.3) on the C runtime's stdin, stdout and stderr, through
+// basic_filebuf. The objects are defined in libcpp/iostream.cpp, which is compiled by cppparse and linked in; their
+// names are cl's (?cout@std@@3V?$basic_ostream@DU?$char_traits@D@std@@@1@A).
+#ifndef CPPPARSE_IOSTREAM
+#define CPPPARSE_IOSTREAM
+
+#include <fstream>
+#include <istream>
+#include <ostream>
+
+namespace std {
+
+extern istream  cin;
+extern ostream  cout;
+extern ostream  cerr;
+extern ostream  clog;
+extern wistream wcin;
+extern wostream wcout;
+extern wostream wcerr;
+extern wostream wclog;
+
+}
+
+#endif

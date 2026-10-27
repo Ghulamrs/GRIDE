@@ -71,12 +71,22 @@ void Formatter::unsignedField(const FormatSpec &spec, unsigned hi, unsigned lo, 
 void Formatter::pointer(const FormatSpec &spec)
 {
     void *v = va_arg(*args_, void *);
+#if defined(_WIN32)   // grt: the Microsoft runtime's %p - all sixteen hexadecimal digits, upper case, no 0x
+    unsigned long long a = (unsigned long long)(size_t)v;
+    IntegerDigits digits((unsigned)(a >> 32), (unsigned)a, 16, true);
+    size_t n = digits.length();
+    size_t padding = open(spec, "", 0, 16, false);
+    out_.repeat('0', 16 - n);
+    out_.put(digits.text(), n);
+    close(spec, padding);
+#else
     IntegerDigits digits(0, (unsigned)(size_t)v, 16, false);
     size_t n = digits.length();
     size_t padding = open(spec, "0x", 2, n == 0 ? 1 : n, false);
     if (n == 0) out_.put('0');
     else out_.put(digits.text(), n);
     close(spec, padding);
+#endif
 }
 
 }  // namespace rts6x

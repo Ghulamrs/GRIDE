@@ -1,0 +1,60 @@
+// memory - cppparse's C++98 library: allocator, auto_ptr and the uninitialized_* algorithms (20.4).
+#ifndef CPPPARSE_MEMORY
+#define CPPPARSE_MEMORY
+
+#include <cstddef>
+#include <cstdlib>
+#include <iterator>
+#include <new>
+#include <__allocator>
+
+namespace std {
+
+// allocator: <__allocator>
+
+template <class T> struct auto_ptr_ref { T* p; explicit auto_ptr_ref(T* q) : p(q) {} };
+
+template <class T>
+class auto_ptr {
+public:
+    typedef T element_type;
+    explicit auto_ptr(T* p = 0) : m_p(p) {}
+    auto_ptr(auto_ptr& o) : m_p(o.release()) {}
+    template <class U> auto_ptr(auto_ptr<U>& o) : m_p(o.release()) {}
+    auto_ptr(auto_ptr_ref<T> r) : m_p(r.p) {}
+    ~auto_ptr() { delete m_p; }
+    auto_ptr& operator=(auto_ptr& o) { reset(o.release()); return *this; }
+    template <class U> auto_ptr& operator=(auto_ptr<U>& o) { reset(o.release()); return *this; }
+    auto_ptr& operator=(auto_ptr_ref<T> r) { reset(r.p); return *this; }
+    T& operator*() const { return *m_p; }
+    T* operator->() const { return m_p; }
+    T* get() const { return m_p; }
+    T* release() { T* p = m_p; m_p = 0; return p; }
+    void reset(T* p = 0) { if (p != m_p) { delete m_p; m_p = p; } }
+    operator auto_ptr_ref<T>() { return auto_ptr_ref<T>(release()); }
+private:
+    T* m_p;
+};
+
+template <class It, class Out>
+Out uninitialized_copy(It first, It last, Out out)
+{
+    for (; first != last; ++first, ++out) new (&*out) typename iterator_traits<Out>::value_type(*first);
+    return out;
+}
+
+template <class It, class T>
+void uninitialized_fill(It first, It last, const T& v)
+{
+    for (; first != last; ++first) new (&*first) typename iterator_traits<It>::value_type(v);
+}
+
+template <class It, class N, class T>
+void uninitialized_fill_n(It first, N n, const T& v)
+{
+    for (; n > 0; --n, ++first) new (&*first) typename iterator_traits<It>::value_type(v);
+}
+
+}
+
+#endif

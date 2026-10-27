@@ -58,6 +58,9 @@ double Power::raise(double x, double y)
         return yNegative ? MathBits::zero(sign) : MathBits::infinity(sign);
     }
     if (xNegative && py == NotInteger) return MathError::domain();
+    // (-1)^y is 1 for an even y and -1 for an odd one, however large y is (C99 F.9.4.4): finite() would take
+    // |x| = 1 with a y past 2^64 for |x| < 1 and answer 0.
+    if ((ux & MathBits::magnitudeMask()) == 0x3FF0000000000000ull) return py == Odd ? -1.0 : 1.0;
     return finite(MathBits::absolute(x), y, xNegative && py == Odd);
 }
 

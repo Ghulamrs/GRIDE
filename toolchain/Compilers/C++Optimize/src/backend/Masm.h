@@ -52,6 +52,11 @@ public:
     // emission goes through the same door as defLabel, or a table names
     // `.L.main.caught.0` where the code defines `$_L_main_caught_0`.
     std::string labelName(const std::string &l) { return mangle(l); }
+    // `$LNend$` and the rest are the prefix before the function's MASM name - see prologue and
+    // functionEnd - so -g's records name them that way, not as one name spelled whole (1.30).
+    std::string codeLabelText(const std::string &prefix, const std::string &symbol) override {
+        return prefix + mangle(symbol);
+    }
     void functionEnd(const std::string &name) override;
 
     // -g: the source files and lines, in the directives GRIDE's masm reads - `.FILE n, "path"` and
@@ -84,6 +89,8 @@ public:
 
     void predefine(const std::vector<std::string> &names) override;
     void initialiserEntry(const std::string &fn, bool dsoHandle) override;
+    // A `div` or `idiv` given up as a keyword is still an instruction here: written as its bytes (1.30).
+    void finishText(std::vector<std::string> &chunks) override;
     void preamble(std::ostream &sink) override;
     void postamble(std::ostream &sink) override;
 
@@ -118,6 +125,8 @@ private:
     std::string mangleNames(const std::string &expr);
 
     std::set<std::string> defined_, exported_, referenced_, unreserved_;
+    // Keywords this file writes and defines a symbol by, renamed and warned about once (1.30).
+    std::set<std::string> renamed_;
     // Referenced inside a SECTIONREL expression, which ml64 refuses to add to a `:PROC` (A2102).
     std::set<std::string> referencedData_;
 

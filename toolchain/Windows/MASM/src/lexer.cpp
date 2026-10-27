@@ -71,6 +71,7 @@ bool split_line(const std::string &src, std::vector<Token> &out, std::string &er
         t.value = 0;
         t.real = 0;
         t.wide = false;
+        t.plain = false;
         if (name_char(c, true)) {
             size_t s = i++;
             while (i < n && name_char(src[i], false)) i++;

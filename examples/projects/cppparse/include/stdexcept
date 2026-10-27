@@ -1,0 +1,68 @@
+// stdexcept - cppparse's C++98 library: the standard exception classes carrying a message.
+#ifndef CPPPARSE_STDEXCEPT
+#define CPPPARSE_STDEXCEPT
+
+#include <exception>
+#include <string>
+
+namespace std {
+
+class logic_error : public exception {
+public:
+    explicit logic_error(const string& message) : m_message(message) {}
+    virtual ~logic_error() {}
+    virtual const char* what() const { return m_message.c_str(); }
+private:
+    string m_message;
+};
+
+class runtime_error : public exception {
+public:
+    explicit runtime_error(const string& message) : m_message(message) {}
+    virtual ~runtime_error() {}
+    virtual const char* what() const { return m_message.c_str(); }
+private:
+    string m_message;
+};
+
+class out_of_range : public logic_error {
+public:
+    explicit out_of_range(const string& message) : logic_error(message) {}
+};
+
+class invalid_argument : public logic_error {
+public:
+    explicit invalid_argument(const string& message) : logic_error(message) {}
+};
+
+class domain_error : public logic_error {
+public:
+    explicit domain_error(const string& message) : logic_error(message) {}
+};
+
+class length_error : public logic_error {
+public:
+    explicit length_error(const string& message) : logic_error(message) {}
+};
+
+class range_error : public runtime_error {
+public:
+    explicit range_error(const string& message) : runtime_error(message) {}
+};
+
+class overflow_error : public runtime_error {
+public:
+    explicit overflow_error(const string& message) : runtime_error(message) {}
+};
+
+class underflow_error : public runtime_error {
+public:
+    explicit underflow_error(const string& message) : runtime_error(message) {}
+};
+
+// what <string>'s position checks call (declared there, before class string, which this header needs complete)
+inline void __throw_out_of_range(const char* what) { throw out_of_range(what); }
+
+}
+
+#endif

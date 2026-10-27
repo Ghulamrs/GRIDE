@@ -54,6 +54,6 @@
 <text class="s" x="340" y="468" text-anchor="middle" fill="#854F0B">GRIDE.exe, 10 tools, lib\, toolchain.json, docs</text>
 <line class="dep" x1="170" y1="506" x2="200" y2="506" marker-end="url(#c)"/>
 <text class="s" x="208" y="510" fill="#444441">builds first: the project runs that tool's output</text>
-<text class="s" x="170" y="530" fill="#444441">cppparse (samples\) is in the solution too, with no dependency either way</text>
+<text class="s" x="170" y="530" fill="#444441">the examples are not in the solution: cppparse opens from its own .pro or .sln</text>
 </g>
 </svg>

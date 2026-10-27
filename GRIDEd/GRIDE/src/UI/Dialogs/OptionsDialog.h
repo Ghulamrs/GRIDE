@@ -200,6 +200,12 @@ namespace Gride { namespace UI {
             jumpFirst = Check("Go to the first error when a build fails", env->JumpToFirstError); Row(String::Empty, jumpFirst);
             askNative = Check("Offer Visual Studio's (or TI's) assembler and linker when the project's own fail", env->AskNativeTools); Row(String::Empty, askNative);
             runInIde = Check("Run programs in the Output pane, with an input line (off: an external console window)", env->RunInIde); Row(String::Empty, runInIde);
+            buildJobs = gcnew NumericUpDown(); buildJobs->Minimum = Decimal(0); buildJobs->Maximum = Decimal(64); buildJobs->Value = Decimal(Math::Min(64, Math::Max(0, env->BuildJobs)));
+            Row("Files compiled at once", buildJobs);
+            Label^ jobsNote = gcnew Label();
+            jobsNote->Text = String::Format("0: one per processor ({0} here); 1: one file at a time. The Output pane and the Error List keep the project's order.", Environment::ProcessorCount);
+            jobsNote->AutoSize = true; jobsNote->Tag = "muted"; jobsNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, jobsNote);
             Section("Settings file");
             TextBox^ path = Text1(s->FilePath);
             path->ReadOnly = true;
@@ -219,11 +225,12 @@ namespace Gride { namespace UI {
             env->JumpToFirstError = jumpFirst->Checked;
             env->AskNativeTools = askNative->Checked;
             env->RunInIde = runInIde->Checked;
+            env->BuildJobs = Decimal::ToInt32(buildJobs->Value);
         }
     private:
         EnvironmentSettings^ env;
         ComboBox^ theme;
-        NumericUpDown^ tabSize;
+        NumericUpDown^ tabSize; NumericUpDown^ buildJobs;
         CheckBox^ insertSpaces; CheckBox^ lineNumbers; CheckBox^ whitespace; CheckBox^ reopen; CheckBox^ saveBefore; CheckBox^ jumpFirst; CheckBox^ askNative; CheckBox^ runInIde;
     };
 
@@ -782,6 +789,18 @@ namespace Gride { namespace UI {
                             "Either named stands in for the other where that one is not there; the Output pane says which.";
             winNote->AutoSize = true; winNote->Tag = "muted"; winNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, winNote);
+            runtime = gcnew ComboBox();
+            runtime->DropDownStyle = ComboBoxStyle::DropDownList;
+            runtime->Items->AddRange(gcnew array<Object^>{ "automatic", "GRIDE's runtime", "Microsoft's CRT" });   // settings.json's auto, grt, msvc
+            String^ now = env->WindowsRuntime == nullptr ? "auto" : env->WindowsRuntime->Trim()->ToLowerInvariant();
+            runtime->SelectedIndex = now == "grt" ? 1 : now == "msvc" ? 2 : 0;
+            Row("Windows C runtime", runtime);
+            Label^ rtNote = gcnew Label();
+            rtNote->Text = "GRIDE's runtime: lib\\grtstart, grtcompat, grtcxx, grtc and grtwin.lib and GRIDE's own kernel32.lib - a program needs no Visual Studio and no Windows SDK to link, "
+                           "and kernel32.dll alone to run. Microsoft's CRT: Visual Studio's libcmt and the SDK's UCRT, found through LIB. "
+                           "Automatic: Microsoft's only where Visual Studio is found and the build has cl's objects. GRIDE_WINDOWS_RUNTIME=grt / msvc in the environment at start wins.";
+            rtNote->AutoSize = true; rtNote->Tag = "muted"; rtNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, rtNote);
             include->UpdateStatus(); lib->UpdateStatus(); vcvars->UpdateStatus(); ti->UpdateStatus(); tilib->UpdateStatus();
         }
         virtual void Commit() override
@@ -796,12 +815,13 @@ namespace Gride { namespace UI {
             env->DefaultCompiler = safe_cast<String^>(compiler->SelectedItem);
             env->C6747Debugger = safe_cast<String^>(c6747->SelectedItem);
             env->WindowsDebugger = safe_cast<String^>(windows->SelectedItem);
+            env->WindowsRuntime = runtime->SelectedIndex == 1 ? "grt" : runtime->SelectedIndex == 2 ? "msvc" : "auto";
         }
     private:
         EnvironmentSettings^ env;
         PathField^ include; PathField^ lib; PathField^ vcvars; PathField^ ti; PathField^ tilib;
         TextBox^ includes; TextBox^ libraries;
-        ComboBox^ compiler; ComboBox^ c6747; ComboBox^ windows;
+        ComboBox^ compiler; ComboBox^ c6747; ComboBox^ windows; ComboBox^ runtime;
     };
 
     // ---- Projects > Compiler Options: RIDE's installation-level store (settings.json options) -----------

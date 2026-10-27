@@ -20,6 +20,13 @@
 // fix is in X86_64Linux.cpp and Arm64Darwin.cpp, and it is general: it is
 // simply invisible anywhere except here, because nothing else returns twice.
 //
+// **That was half of it.** A comparison parked its right operand on the stack
+// the same way - the 0 of '(n = setjmp(env)) == 0' - and longjmp's return read
+// it back after later calls had written over it, so the program went round for
+// ever: at -O0, and at -O2 once a variadic callee spilled a register into that
+// slot. The x86-64 generator now evaluates an operand that calls setjmp first,
+// with nothing parked (returnsTwice in X86_64Linux.cpp).
+//
 // **Windows works now too, and what this header used to blame was wrong.** It
 // said the obstacle was unwind data. cc1 emits .pdata and .xdata since - see
 // Masm.cpp - and that turned out not to be the thing. Three facts, each

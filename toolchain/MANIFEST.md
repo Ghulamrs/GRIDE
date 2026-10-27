@@ -18,13 +18,19 @@ the project files stay inside the tool trees.
 | sim6747 | TI\SIM6747 | sim6747.vcxproj, src\ | |
 | vm6747 | TI\VM6747 | vm6747.vcxproj, src\ | |
 | masm | Windows\MASM | masm.vcxproj, src\ | |
-| link | Windows\LINK | link.vcxproj, src\ | |
+| link | Windows\LINK | link.vcxproj, src\ | src\librarian.cpp is link /LIB (archives, import libraries from a .def) |
+| grt | Windows\RT | grt.vcxproj, rts6x-c.sources, rts6x-cxx.sources, kernel32.def, catalogue.json, start\, compat\, cxx\, c\, win\, internal\, tests\, bench\ | GRIDE's own runtime for Windows, GRIDE's (not copied; docs\Runtime_Design.md): RTS6x's C library (the files rts6x-c.sources names) and the runtime's own layers, built by c90, cpp11, masm and link into five layered libraries - lib\grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib - with lib\kernel32.lib and the Shalimar runtime over them; catalogue.json is its public C ABI |
 
 `msbuild\Toolchain.targets` holds the build steps the tool trees did with batch files, as MSBuild tasks:
-shalimar's runtimes (shc.vcxproj, target ShalimarRuntimes) and the rts6x libraries (rts6x.vcxproj, target
-Rts6xLibraries). No step runs through cmd.exe, so Build Solution in Visual Studio runs the same steps as a
-command-line build. Both projects set DisableFastUpToDateCheck, so Visual Studio always lets their targets decide
-what is out of date.
+shalimar's runtimes (shc.vcxproj, target ShalimarRuntimes), the rts6x libraries (rts6x.vcxproj, target
+Rts6xLibraries) and grt's (grt.vcxproj, target GrtLibraries: WindowsLibrary, LibraryClosed). No step runs through
+cmd.exe, so Build Solution in Visual Studio runs the same steps as a command-line build. The three projects set
+DisableFastUpToDateCheck, so Visual Studio always lets their targets decide what is out of date.
+
+Every program of the toolchain is built with the static VC++ runtime (/MT, /MTd): only GRIDE.exe, which is C++/CLI,
+needs the VC++ runtime DLLs Setup puts beside it. RTS6x's sources carry `#if defined(_WIN32)` branches for grt (the
+FILE, abort's status, the Microsoft runtime's spellings of NaN, %p and %a, and two fixes - log's order of evaluation,
+pow(-1, y) for a huge y); the C6747 build compiles the other branch, as before.
 
 The tree's own files: rts6x.vcxproj, ar6x.vcxproj and shc.vcxproj were changed or written for this solution, and
 Windows\LINK\src\image.cpp starts two locals at 0, so a Debug build passes /WX (C4701). Five of cpp11's sources -

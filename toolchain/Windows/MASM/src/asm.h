@@ -3,6 +3,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 enum TokKind { T_NAME, T_NUM, T_STR, T_PUNCT, T_REAL };
@@ -13,6 +14,7 @@ struct Token {
     long long value;
     bool wide;      /* a number of 2^32 or more: MOV r64 takes the 64-bit immediate for it, as ml64 */
     double real;    /* T_REAL: the value, stored as float or double bits by the data directives */
+    bool plain;     /* a word OPTION NOKEYWORD listed: a name, never the keyword it was */
 };
 
 /* REL32_n: a RIP-relative displacement followed by n bytes of immediate (COFF types 5..9) */
@@ -128,6 +130,9 @@ public:
     std::unordered_map<std::string, int> symbol_index;  /* symbols by name: ref() adds, nothing removes */
     std::vector<Fixup> fixups;
     std::vector<std::string> errors;
+    /* OPTION NOKEYWORD:<...>: the words, upper-cased, that are names from that line on - an
+       instruction, register, operator or directive no longer, as in ml64 */
+    std::unordered_set<std::string> nokeyword;
 
     /* CodeView (codeview.cpp): asked for by /Zi, or by a .FILE or .LINE in the source */
     bool debug;

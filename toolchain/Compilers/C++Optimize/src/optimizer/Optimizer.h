@@ -71,6 +71,7 @@ public:
         return under_.locationDirective(fn, file, line, column);
     }
     void predefine(const std::vector<std::string> &names) override { under_.predefine(names); }
+    void finishText(std::vector<std::string> &chunks) override { under_.finishText(chunks); }
     void preamble(std::ostream &o) override { under_.preamble(o); }
     void postamble(std::ostream &o) override { under_.postamble(o); }
 
@@ -93,6 +94,9 @@ public:
     void noteHasEh(bool yes) override;
     void initialiserEntry(const std::string &fn, bool dsoHandle) override;
     std::string labelText(const std::string &l) const override { return under_.labelText(l); }
+    std::string codeLabelText(const std::string &prefix, const std::string &symbol) override {
+        return under_.codeLabelText(prefix, symbol);
+    }
     void dataBytes(const std::string &bytes) override;
 
 private:

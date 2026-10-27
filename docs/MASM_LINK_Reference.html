@@ -85,6 +85,16 @@ END</pre>
 </table>
 <p>The layout is the MSF one LLVM documents and <code>lld-link</code> writes; it reads back through dbghelp (cdb, WinDbg), DIA (Visual Studio) and <code>llvm-pdbutil</code>. So a Debug build needs neither clang nor Microsoft's <code>link.exe</code>: <code>c90 -g -masm=masm</code> (or <code>shalimar -g -masm=masm</code>), masm, and <code>link /DEBUG</code> make a program a debugger stops in at <code>file.c:line</code>, steps line by line, shows the parameters, locals and globals of with their types, and walks the stack of, the C runtime's frames included.</p>
 
+<h2>link /LIB: libraries</h2>
+<p><code>link /LIB</code> is the librarian, as <code>link.exe /LIB</code> is <code>lib.exe</code>. What it writes is the archive <code>link.exe</code> and <code>lib.exe</code> read: both linker members (the second sorted, for a binary search), the longnames member when a name passes fifteen characters, the members on even offsets, every header dated -1 so the same inputs make the same file. <code>@file</code> on either command line reads its words from the file, which is how a library of a few hundred objects is named under Windows' 32,767 characters.</p>
+<table>
+  <tr><th>Command</th><th>What it does</th></tr>
+  <tr><td><code>link /LIB /OUT:x.lib a.obj b.obj ...</code></td><td>an archive of the objects, indexing every external each defines (a weak external is not indexed); a name two members define is said, unless both define it in a COMDAT - an inline function each translation unit emits</td></tr>
+  <tr><td><code>link /LIB /DEF:x.def [/NAME:dll] /OUT:x.lib</code></td><td>an import library for the DLL the .def's <code>LIBRARY</code> names: its import descriptor, the null descriptor and null thunk, and one short import member per export (<code>DATA</code> ones without the jump thunk, <code>PRIVATE</code> ones left out) - the SDK's import libraries' layout, so link builds the import table from it as from theirs</td></tr>
+  <tr><td><code>link /LIB /LIST x.lib</code></td><td>each member, and the externals it defines</td></tr>
+</table>
+<p>GRIDE's runtime for Windows is made this way: five layered libraries - <code>grtstart.lib</code>, <code>grtcompat.lib</code>, <code>grtcxx.lib</code>, <code>grtc.lib</code>, <code>grtwin.lib</code> - from the objects c90, cpp11 and masm make of it, and <code>kernel32.lib</code> from <code>toolchain\Windows\RT\kernel32.def</code> - no SDK library is read. A program linked with them needs no Visual Studio and no Windows SDK, and imports <code>KERNEL32.dll</code> alone (docs\Runtime_Design.md).</p>
+
 <h2>In RIDE's manual</h2>
 <p>RIDE 5.17's Complete Manual (<a href="RIDE_Manual.html">RIDE_Manual.html</a>) explains the two Windows spellings:</p>
 <ul>

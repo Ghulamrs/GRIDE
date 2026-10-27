@@ -1,0 +1,654 @@
+// string - cppparse's C++98 library: basic_string<charT, traits, Allocator> (21.3), string and wstring. char_traits is
+// in <__char_traits>. The characters are always zero-terminated. Up to 15 chars (7 wchar_t) live in the object itself,
+// longer strings in a buffer from the allocator: MSVC's layout, the characters or the buffer's address, then the size
+// and the capacity; the capacity tells which (below the local buffer's size: in the object). The object holds no
+// pointer into itself, so a container may move it bytewise (cppparse's vector does).
+// Characters are copied with memcpy and memmove, which is what 21.1.1 defines traits::copy and traits::move to do
+// (a sequence of assign, which is =); comparisons, lengths and searches go through traits. The members cppparse's own
+// sources use most (append, push_back, +=, compare, find, c_str, size, the copies) do their work in place rather than
+// through other members, since every call is a real call in a -O0 build.
+#ifndef CPPPARSE_STRING
+#define CPPPARSE_STRING
+
+#include <cctype>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <__allocator>
+#include <__char_traits>
+#include <__iterator>
+#include <__traits>
+
+namespace std {
+
+// throws std::out_of_range (defined inline at the end of <stdexcept>, which this header includes last): what at() and
+// the members taking a position do for a position past the end (21.3)
+void __throw_out_of_range(const char* what);
+
+// the default arguments are on the definition (cppparse takes them from the declaration that defines the template)
+template <class charT, class traits = char_traits<charT>, class Allocator = allocator<charT> >
+class basic_string {
+public:
+    typedef traits                                traits_type;
+    typedef typename traits::char_type            value_type;
+    typedef Allocator                             allocator_type;
+    typedef size_t                                size_type;
+    typedef ptrdiff_t                             difference_type;
+    typedef charT&                                reference;
+    typedef const charT&                          const_reference;
+    typedef charT*                                pointer;
+    typedef const charT*                          const_pointer;
+    typedef charT*                                iterator;
+    typedef const charT*                          const_iterator;
+    typedef std::reverse_iterator<iterator>       reverse_iterator;
+    typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+    static const size_type npos = static_cast<size_type>(-1);
+
+    // 21.3.1: construction (the allocator argument is accepted; every allocator of a type is taken as equal, none is kept)
+    basic_string() : m_size(0), m_cap(__local - 1) { m_bx.buf[0] = charT(); }
+    explicit basic_string(const Allocator&) : m_size(0), m_cap(__local - 1) { m_bx.buf[0] = charT(); }
+    basic_string(const basic_string& o) { __init(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, o.m_size); }
+    basic_string(const basic_string& o, size_type pos, size_type n = npos) { __initSub(o, pos, n); }
+    basic_string(const basic_string& o, size_type pos, size_type n, const Allocator&) { __initSub(o, pos, n); }
+    basic_string(const charT* s, size_type n) { __init(s, n); }
+    basic_string(const charT* s, size_type n, const Allocator&) { __init(s, n); }
+    basic_string(const charT* s) { __init(s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string(const charT* s, const Allocator&) { __init(s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string(size_type n, charT c) { __initFill(n, c); }
+    basic_string(size_type n, charT c, const Allocator&) { __initFill(n, c); }
+    // any iterator range, or "n copies of c" when both arguments are integers
+    template <class InputIterator> basic_string(InputIterator first, InputIterator last) : m_size(0), m_cap(__local - 1)
+    {
+        m_bx.buf[0] = charT();
+        assignDispatch(first, last, typename __is_integer<InputIterator>::type());
+    }
+    template <class InputIterator> basic_string(InputIterator first, InputIterator last, const Allocator&) : m_size(0), m_cap(__local - 1)
+    {
+        m_bx.buf[0] = charT();
+        assignDispatch(first, last, typename __is_integer<InputIterator>::type());
+    }
+    ~basic_string() { if (m_cap >= __local) __release(m_bx.ptr, m_cap); }
+
+    basic_string& operator=(const basic_string& o) { if (this != &o) assign(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, o.m_size); return *this; }
+    basic_string& operator=(const charT* s) { return assign(s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string& operator=(charT c) { return assign(&c, 1); }
+
+    // 21.3.2: iterators
+    iterator               begin() { return m_cap < __local ? m_bx.buf : m_bx.ptr; }
+    const_iterator         begin() const { return m_cap < __local ? m_bx.buf : m_bx.ptr; }
+    iterator               end() { return (m_cap < __local ? m_bx.buf : m_bx.ptr) + m_size; }
+    const_iterator         end() const { return (m_cap < __local ? m_bx.buf : m_bx.ptr) + m_size; }
+    reverse_iterator       rbegin() { return reverse_iterator(end()); }
+    const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
+    reverse_iterator       rend() { return reverse_iterator(begin()); }
+    const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
+
+    // 21.3.3: capacity
+    size_type size() const { return m_size; }
+    size_type length() const { return m_size; }
+    size_type max_size() const { return npos / 2 / sizeof(charT); }
+    void      resize(size_type n, charT c)
+    {
+        if (n > m_cap) __grow(n);
+        charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        if (n > m_size) __fill(p + m_size, n - m_size, c);
+        m_size = n;
+        p[n] = charT();
+    }
+    void      resize(size_type n) { resize(n, charT()); }
+    size_type capacity() const { return m_cap; }
+    void      reserve(size_type n = 0) { if (n > m_cap) __grow(n); }
+    void      clear() { m_size = 0; (m_cap < __local ? m_bx.buf : m_bx.ptr)[0] = charT(); }
+    bool      empty() const { return m_size == 0; }
+
+    // 21.3.4: element access
+    const_reference operator[](size_type i) const { return (m_cap < __local ? m_bx.buf : m_bx.ptr)[i]; }
+    reference       operator[](size_type i) { return (m_cap < __local ? m_bx.buf : m_bx.ptr)[i]; }
+    const_reference at(size_type i) const { if (i >= m_size) __throw_out_of_range("invalid string position"); return (m_cap < __local ? m_bx.buf : m_bx.ptr)[i]; }
+    reference       at(size_type i) { if (i >= m_size) __throw_out_of_range("invalid string position"); return (m_cap < __local ? m_bx.buf : m_bx.ptr)[i]; }
+
+    // 21.3.5: modifiers
+    basic_string& operator+=(const basic_string& o) { return append(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, o.m_size); }
+    basic_string& operator+=(const charT* s) { return append(s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string& operator+=(charT c)
+    {
+        const size_type n = m_size;
+        if (n < m_cap) {
+            charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+            p[n] = c;
+            p[n + 1] = charT();
+            m_size = n + 1;
+        } else __appendGrow(&c, 1);
+        return *this;
+    }
+
+    basic_string& append(const basic_string& o) { return append(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, o.m_size); }
+    basic_string& append(const basic_string& o, size_type pos, size_type n)
+    {
+        if (pos > o.m_size) __throw_out_of_range("invalid string position");
+        if (n > o.m_size - pos) n = o.m_size - pos;
+        return append((o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr) + pos, n);
+    }
+    // s may point into this string: when the string grows, the old buffer is released only after the copy
+    basic_string& append(const charT* s, size_type n)
+    {
+        const size_type size = m_size;
+        if (n <= m_cap - size) {
+            charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+            if (n) memmove(p + size, s, n * sizeof(charT));
+            p[size + n] = charT();
+            m_size = size + n;
+        } else __appendGrow(s, n);
+        return *this;
+    }
+    basic_string& append(const charT* s) { return append(s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string& append(size_type n, charT c)
+    {
+        if (n > m_cap - m_size) __grow(m_size + n);
+        charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        __fill(p + m_size, n, c);
+        m_size += n;
+        p[m_size] = charT();
+        return *this;
+    }
+    template <class InputIterator> basic_string& append(InputIterator first, InputIterator last) { return appendDispatch(first, last, typename __is_integer<InputIterator>::type()); }
+    void push_back(charT c)
+    {
+        const size_type n = m_size;
+        if (n < m_cap) {
+            charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+            p[n] = c;
+            p[n + 1] = charT();
+            m_size = n + 1;
+        } else __appendGrow(&c, 1);
+    }
+
+    basic_string& assign(const basic_string& o) { return assign(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, o.m_size); }
+    basic_string& assign(const basic_string& o, size_type pos, size_type n)
+    {
+        if (pos > o.m_size) __throw_out_of_range("invalid string position");
+        if (n > o.m_size - pos) n = o.m_size - pos;
+        return assign((o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr) + pos, n);
+    }
+    // s may point into this string
+    basic_string& assign(const charT* s, size_type n)
+    {
+        charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        if (n <= m_cap) {
+            if (n) memmove(p, s, n * sizeof(charT));
+        } else {
+            const size_type cap = __newCapacity(n);
+            charT* d = __allocate(cap);
+            memcpy(d, s, n * sizeof(charT));
+            if (m_cap >= __local) __release(p, m_cap);
+            m_bx.ptr = d;
+            m_cap = cap;
+            p = d;
+        }
+        p[n] = charT();
+        m_size = n;
+        return *this;
+    }
+    basic_string& assign(const charT* s) { return assign(s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string& assign(size_type n, charT c) { clear(); return append(n, c); }
+    template <class InputIterator> basic_string& assign(InputIterator first, InputIterator last) { return assignDispatch(first, last, typename __is_integer<InputIterator>::type()); }
+
+    basic_string& insert(size_type pos, const basic_string& o) { return replace(pos, 0, o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, o.m_size); }
+    basic_string& insert(size_type pos1, const basic_string& o, size_type pos2, size_type n)
+    {
+        if (pos2 > o.m_size) __throw_out_of_range("invalid string position");
+        if (n > o.m_size - pos2) n = o.m_size - pos2;
+        return replace(pos1, 0, (o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr) + pos2, n);
+    }
+    basic_string& insert(size_type pos, const charT* s, size_type n) { return replace(pos, 0, s, n); }
+    basic_string& insert(size_type pos, const charT* s) { return replace(pos, 0, s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string& insert(size_type pos, size_type n, charT c) { return replace(pos, 0, n, c); }
+    iterator insert(iterator p, charT c)
+    {
+        size_type pos = static_cast<size_type>(p - begin());
+        replace(pos, 0, &c, 1);
+        return begin() + pos;
+    }
+    iterator insert(iterator p) { return insert(p, charT()); }   // insert(p, c = charT()): the default argument as an overload
+    void insert(iterator p, size_type n, charT c) { replace(static_cast<size_type>(p - begin()), 0, n, c); }
+    template <class InputIterator> void insert(iterator p, InputIterator first, InputIterator last) { replaceDispatch(p, p, first, last, typename __is_integer<InputIterator>::type()); }
+
+    basic_string& erase(size_type pos = 0, size_type n = npos)
+    {
+        if (pos > m_size) __throw_out_of_range("invalid string position");
+        if (n > m_size - pos) n = m_size - pos;
+        charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        if (n) memmove(p + pos, p + pos + n, (m_size - pos - n) * sizeof(charT));
+        m_size -= n;
+        p[m_size] = charT();
+        return *this;
+    }
+    iterator erase(iterator p) { size_type pos = static_cast<size_type>(p - begin()); erase(pos, 1); return begin() + pos; }
+    iterator erase(iterator first, iterator last)
+    {
+        size_type pos = static_cast<size_type>(first - begin());
+        erase(pos, static_cast<size_type>(last - first));
+        return begin() + pos;
+    }
+
+    basic_string& replace(size_type pos, size_type n1, const basic_string& o) { return replace(pos, n1, o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, o.m_size); }
+    basic_string& replace(size_type pos1, size_type n1, const basic_string& o, size_type pos2, size_type n2)
+    {
+        if (pos2 > o.m_size) __throw_out_of_range("invalid string position");
+        if (n2 > o.m_size - pos2) n2 = o.m_size - pos2;
+        return replace(pos1, n1, (o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr) + pos2, n2);
+    }
+    // s may point into this string: its characters are copied out first then
+    basic_string& replace(size_type pos, size_type n1, const charT* s, size_type n2)
+    {
+        if (pos > m_size) __throw_out_of_range("invalid string position");
+        if (n1 > m_size - pos) n1 = m_size - pos;
+        charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        if (n2 != 0 && !(s + n2 <= p || s > p + m_size)) {
+            const basic_string t(s, n2);
+            return replace(pos, n1, t.data(), n2);
+        }
+        const size_type tail = m_size - pos - n1;
+        const size_type n = m_size - n1 + n2;
+        if (n > m_cap) {
+            const size_type cap = __newCapacity(n);
+            charT* d = __allocate(cap);
+            memcpy(d, p, pos * sizeof(charT));
+            memcpy(d + pos, s, n2 * sizeof(charT));
+            memcpy(d + pos + n2, p + pos + n1, tail * sizeof(charT));
+            if (m_cap >= __local) __release(p, m_cap);
+            m_bx.ptr = d;
+            m_cap = cap;
+            p = d;
+        } else {
+            if (tail) memmove(p + pos + n2, p + pos + n1, tail * sizeof(charT));
+            if (n2) memcpy(p + pos, s, n2 * sizeof(charT));
+        }
+        m_size = n;
+        p[n] = charT();
+        return *this;
+    }
+    basic_string& replace(size_type pos, size_type n1, const charT* s) { return replace(pos, n1, s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string& replace(size_type pos, size_type n1, size_type n2, charT c)
+    {
+        if (pos > m_size) __throw_out_of_range("invalid string position");
+        if (n1 > m_size - pos) n1 = m_size - pos;
+        const size_type tail = m_size - pos - n1;
+        const size_type n = m_size - n1 + n2;
+        if (n > m_cap) __grow(n);
+        charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        if (tail) memmove(p + pos + n2, p + pos + n1, tail * sizeof(charT));
+        __fill(p + pos, n2, c);
+        m_size = n;
+        p[n] = charT();
+        return *this;
+    }
+    basic_string& replace(iterator i1, iterator i2, const basic_string& o) { return replace(static_cast<size_type>(i1 - begin()), static_cast<size_type>(i2 - i1), o.data(), o.m_size); }
+    basic_string& replace(iterator i1, iterator i2, const charT* s, size_type n) { return replace(static_cast<size_type>(i1 - begin()), static_cast<size_type>(i2 - i1), s, n); }
+    basic_string& replace(iterator i1, iterator i2, const charT* s) { return replace(static_cast<size_type>(i1 - begin()), static_cast<size_type>(i2 - i1), s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    basic_string& replace(iterator i1, iterator i2, size_type n, charT c) { return replace(static_cast<size_type>(i1 - begin()), static_cast<size_type>(i2 - i1), n, c); }
+    template <class InputIterator> basic_string& replace(iterator i1, iterator i2, InputIterator j1, InputIterator j2) { return replaceDispatch(i1, i2, j1, j2, typename __is_integer<InputIterator>::type()); }
+
+    size_type copy(charT* s, size_type n, size_type pos = 0) const
+    {
+        if (pos > m_size) __throw_out_of_range("invalid string position");
+        if (n > m_size - pos) n = m_size - pos;
+        if (n) memcpy(s, (m_cap < __local ? m_bx.buf : m_bx.ptr) + pos, n * sizeof(charT));
+        return n;
+    }
+    // the representations are exchanged whole (a local buffer travels with its characters)
+    void swap(basic_string& o)
+    {
+        __bx b = m_bx; m_bx = o.m_bx; o.m_bx = b;
+        size_type s = m_size; m_size = o.m_size; o.m_size = s;
+        size_type c = m_cap; m_cap = o.m_cap; o.m_cap = c;
+    }
+
+    // 21.3.6: string operations
+    const charT*   c_str() const { return m_cap < __local ? m_bx.buf : m_bx.ptr; }
+    const charT*   data() const { return m_cap < __local ? m_bx.buf : m_bx.ptr; }
+    allocator_type get_allocator() const { return allocator_type(); }
+
+    size_type find(const basic_string& o, size_type pos = 0) const { return find(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, pos, o.m_size); }
+    // the first character by traits::find (memchr for char), then the rest compared
+    size_type find(const charT* s, size_type pos, size_type n) const
+    {
+        if (pos > m_size || n > m_size - pos) return npos;
+        if (n == 0) return pos;
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        const charT* const last = p + (m_size - n);
+        for (const charT* q = p + pos; q <= last; ++q) {
+            const size_type room = __dist(q, last) + 1;
+            q = __is_char_traits<traits>::value ? static_cast<const charT*>(memchr(q, s[0], room)) : traits::find(q, room, s[0]);
+            if (!q) return npos;
+            if ((__is_char_traits<traits>::value ? memcmp(q + 1, s + 1, n - 1) : traits::compare(q + 1, s + 1, n - 1)) == 0) return __dist(p, q);
+        }
+        return npos;
+    }
+    size_type find(const charT* s, size_type pos = 0) const { return find(s, pos, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    size_type find(charT c, size_type pos = 0) const
+    {
+        if (pos >= m_size) return npos;
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        const charT* q = __is_char_traits<traits>::value ? static_cast<const charT*>(memchr(p + pos, c, m_size - pos)) : traits::find(p + pos, m_size - pos, c);
+        return q ? __dist(p, q) : npos;
+    }
+    size_type rfind(const basic_string& o, size_type pos = npos) const { return rfind(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, pos, o.m_size); }
+    size_type rfind(const charT* s, size_type pos, size_type n) const
+    {
+        if (n > m_size) return npos;
+        size_type i = m_size - n;
+        if (pos < i) i = pos;
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        for (;; --i) {
+            if (traits::compare(p + i, s, n) == 0) return i;
+            if (i == 0) return npos;
+        }
+    }
+    size_type rfind(const charT* s, size_type pos = npos) const { return rfind(s, pos, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    size_type rfind(charT c, size_type pos = npos) const
+    {
+        if (m_size == 0) return npos;
+        size_type i = m_size - 1;
+        if (pos < i) i = pos;
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        for (;; --i) {
+            if (traits::eq(p[i], c)) return i;
+            if (i == 0) return npos;
+        }
+    }
+
+    size_type find_first_of(const basic_string& o, size_type pos = 0) const { return find_first_of(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, pos, o.m_size); }
+    size_type find_first_of(const charT* s, size_type pos, size_type n) const
+    {
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        for (size_type i = pos; i < m_size; ++i) if (traits::find(s, n, p[i])) return i;
+        return npos;
+    }
+    size_type find_first_of(const charT* s, size_type pos = 0) const { return find_first_of(s, pos, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    size_type find_first_of(charT c, size_type pos = 0) const { return find(c, pos); }
+    size_type find_last_of(const basic_string& o, size_type pos = npos) const { return find_last_of(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, pos, o.m_size); }
+    size_type find_last_of(const charT* s, size_type pos, size_type n) const
+    {
+        if (m_size == 0) return npos;
+        size_type i = m_size - 1;
+        if (pos < i) i = pos;
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        for (;; --i) {
+            if (traits::find(s, n, p[i])) return i;
+            if (i == 0) return npos;
+        }
+    }
+    size_type find_last_of(const charT* s, size_type pos = npos) const { return find_last_of(s, pos, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    size_type find_last_of(charT c, size_type pos = npos) const { return rfind(c, pos); }
+    size_type find_first_not_of(const basic_string& o, size_type pos = 0) const { return find_first_not_of(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, pos, o.m_size); }
+    size_type find_first_not_of(const charT* s, size_type pos, size_type n) const
+    {
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        for (size_type i = pos; i < m_size; ++i) if (!traits::find(s, n, p[i])) return i;
+        return npos;
+    }
+    size_type find_first_not_of(const charT* s, size_type pos = 0) const { return find_first_not_of(s, pos, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    size_type find_first_not_of(charT c, size_type pos = 0) const
+    {
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        for (size_type i = pos; i < m_size; ++i) if (!traits::eq(p[i], c)) return i;
+        return npos;
+    }
+    size_type find_last_not_of(const basic_string& o, size_type pos = npos) const { return find_last_not_of(o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, pos, o.m_size); }
+    size_type find_last_not_of(const charT* s, size_type pos, size_type n) const
+    {
+        if (m_size == 0) return npos;
+        size_type i = m_size - 1;
+        if (pos < i) i = pos;
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        for (;; --i) {
+            if (!traits::find(s, n, p[i])) return i;
+            if (i == 0) return npos;
+        }
+    }
+    size_type find_last_not_of(const charT* s, size_type pos = npos) const { return find_last_not_of(s, pos, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    size_type find_last_not_of(charT c, size_type pos = npos) const
+    {
+        if (m_size == 0) return npos;
+        size_type i = m_size - 1;
+        if (pos < i) i = pos;
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        for (;; --i) {
+            if (!traits::eq(p[i], c)) return i;
+            if (i == 0) return npos;
+        }
+    }
+
+    basic_string substr(size_type pos = 0, size_type n = npos) const { basic_string r(*this, pos, n); return r; }
+
+    int compare(const basic_string& o) const
+    {
+        const size_type n = m_size < o.m_size ? m_size : o.m_size;
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        const charT* q = o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr;
+        const int r = __is_char_traits<traits>::value ? memcmp(p, q, n) : traits::compare(p, q, n);
+        if (r != 0) return r;
+        return m_size < o.m_size ? -1 : m_size > o.m_size ? 1 : 0;
+    }
+    int compare(size_type pos1, size_type n1, const basic_string& o) const { return compare(pos1, n1, o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr, o.m_size); }
+    int compare(size_type pos1, size_type n1, const basic_string& o, size_type pos2, size_type n2) const
+    {
+        if (pos2 > o.m_size) __throw_out_of_range("invalid string position");
+        if (n2 > o.m_size - pos2) n2 = o.m_size - pos2;
+        return compare(pos1, n1, (o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr) + pos2, n2);
+    }
+    int compare(const charT* s) const { return compare(s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    int compare(size_type pos1, size_type n1, const charT* s) const { return compare(pos1, n1, s, (__is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s))); }
+    int compare(size_type pos1, size_type n1, const charT* s, size_type n2) const
+    {
+        if (pos1 > m_size) __throw_out_of_range("invalid string position");
+        if (n1 > m_size - pos1) n1 = m_size - pos1;
+        const int r = traits::compare((m_cap < __local ? m_bx.buf : m_bx.ptr) + pos1, s, n1 < n2 ? n1 : n2);
+        if (r != 0) return r;
+        return n1 < n2 ? -1 : n1 > n2 ? 1 : 0;
+    }
+    // the whole string against the n characters at s (not in 21.3; kept from cppparse's string class)
+    int compare(const charT* s, size_type n) const
+    {
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        const size_type k = m_size < n ? m_size : n;
+        const int r = __is_char_traits<traits>::value ? memcmp(p, s, k) : traits::compare(p, s, k);
+        if (r != 0) return r;
+        return m_size < n ? -1 : m_size > n ? 1 : 0;
+    }
+    // the library's: the size set to n (at most the capacity) without writing the characters below it, which a string
+    // stream's buffer has written into the storage itself; the terminator is put after them
+    void __set_size(size_type n) { m_size = n; (m_cap < __local ? m_bx.buf : m_bx.ptr)[n] = charT(); }
+    // the library's: equality, which needs no ordering (operator== and != call it); with the C string's length
+    // counted here when it is not given
+    bool __equal(const charT* s, size_type n) const
+    {
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        return m_size == n && (__is_char_traits<traits>::value ? memcmp(p, s, n) : traits::compare(p, s, n)) == 0;
+    }
+    bool __equal(const charT* s) const
+    {
+        const size_type n = __is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(s)) : traits::length(s);
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        return m_size == n && (__is_char_traits<traits>::value ? memcmp(p, s, n) : traits::compare(p, s, n)) == 0;
+    }
+    bool __equal(const basic_string& o) const
+    {
+        const charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        const charT* q = o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr;
+        return m_size == o.m_size && (__is_char_traits<traits>::value ? memcmp(p, q, m_size) : traits::compare(p, q, m_size)) == 0;
+    }
+
+private:
+    // the local buffer's size in characters (16 bytes' worth); a capacity below it means the characters are there
+    static const size_type __local = 16 / sizeof(charT) < 1 ? 1 : 16 / sizeof(charT);
+    union __bx {
+        charT  buf[16 / sizeof(charT) < 1 ? 1 : 16 / sizeof(charT)];
+        charT* ptr;
+    };
+    __bx      m_bx;
+    size_type m_size;
+    size_type m_cap;
+
+    // the characters from a to b, from their byte addresses (a pointer difference is a division in -O0 code)
+    static size_type __dist(const charT* a, const charT* b)
+    {
+        const size_type bytes = reinterpret_cast<size_type>(b) - reinterpret_cast<size_type>(a);
+        return sizeof(charT) == 1 ? bytes : bytes / sizeof(charT);
+    }
+    static charT* __allocate(size_type cap) { Allocator a; return a.allocate(cap + 1); }
+    static void   __release(charT* p, size_type cap) { Allocator a; a.deallocate(p, cap + 1); }
+    size_type __newCapacity(size_type need) const { size_type cap = m_cap * 2; return cap < need ? need : cap; }
+    static void __fill(charT* p, size_type n, charT c) { if (n) traits::assign(p, n, c); }
+    void __init(const charT* s, size_type n)
+    {
+        charT* p;
+        if (n < __local) { m_cap = __local - 1; p = m_bx.buf; }
+        else { m_cap = n; p = __allocate(n); m_bx.ptr = p; }
+        if (n) memcpy(p, s, n * sizeof(charT));
+        p[n] = charT();
+        m_size = n;
+    }
+    void __initFill(size_type n, charT c)
+    {
+        charT* p;
+        if (n < __local) { m_cap = __local - 1; p = m_bx.buf; }
+        else { m_cap = n; p = __allocate(n); m_bx.ptr = p; }
+        __fill(p, n, c);
+        p[n] = charT();
+        m_size = n;
+    }
+    void __initSub(const basic_string& o, size_type pos, size_type n)
+    {
+        if (pos > o.m_size) __throw_out_of_range("invalid string position");
+        if (n > o.m_size - pos) n = o.m_size - pos;
+        __init((o.m_cap < __local ? o.m_bx.buf : o.m_bx.ptr) + pos, n);
+    }
+    // a capacity of at least need, the characters and the terminator kept
+    void __grow(size_type need)
+    {
+        const size_type cap = __newCapacity(need);
+        charT* d = __allocate(cap);
+        charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        memcpy(d, p, (m_size + 1) * sizeof(charT));
+        if (m_cap >= __local) __release(p, m_cap);
+        m_bx.ptr = d;
+        m_cap = cap;
+    }
+    // append's slow path: a new buffer with the old characters and n from s (which may be in the old buffer)
+    void __appendGrow(const charT* s, size_type n)
+    {
+        const size_type size = m_size;
+        const size_type cap = __newCapacity(size + n);
+        charT* d = __allocate(cap);
+        charT* p = m_cap < __local ? m_bx.buf : m_bx.ptr;
+        memcpy(d, p, size * sizeof(charT));
+        memcpy(d + size, s, n * sizeof(charT));
+        d[size + n] = charT();
+        if (m_cap >= __local) __release(p, m_cap);
+        m_bx.ptr = d;
+        m_cap = cap;
+        m_size = size + n;
+    }
+    // the iterator members: integers are a count and a character (21.3/6), other types a range
+    template <class InputIterator> basic_string& appendDispatch(InputIterator n, InputIterator c, __true_type) { return append(static_cast<size_type>(n), static_cast<charT>(c)); }
+    template <class InputIterator> basic_string& appendDispatch(InputIterator first, InputIterator last, __false_type)
+    {
+        basic_string t;
+        for (; first != last; ++first) t.push_back(*first);
+        return append(t.data(), t.m_size);
+    }
+    template <class InputIterator> basic_string& assignDispatch(InputIterator n, InputIterator c, __true_type) { return assign(static_cast<size_type>(n), static_cast<charT>(c)); }
+    template <class InputIterator> basic_string& assignDispatch(InputIterator first, InputIterator last, __false_type)
+    {
+        basic_string t;
+        for (; first != last; ++first) t.push_back(*first);
+        swap(t);
+        return *this;
+    }
+    template <class InputIterator> basic_string& replaceDispatch(iterator i1, iterator i2, InputIterator n, InputIterator c, __true_type) { return replace(i1, i2, static_cast<size_type>(n), static_cast<charT>(c)); }
+    template <class InputIterator> basic_string& replaceDispatch(iterator i1, iterator i2, InputIterator first, InputIterator last, __false_type)
+    {
+        basic_string t;
+        for (; first != last; ++first) t.push_back(*first);
+        return replace(i1, i2, t.data(), t.m_size);
+    }
+};
+
+template <class charT, class traits, class Allocator>
+const typename basic_string<charT, traits, Allocator>::size_type basic_string<charT, traits, Allocator>::npos;
+template <class charT, class traits, class Allocator>
+const typename basic_string<charT, traits, Allocator>::size_type basic_string<charT, traits, Allocator>::__local;
+
+typedef basic_string<char>    string;
+typedef basic_string<wchar_t> wstring;
+
+// 21.3.7: operator+ (the result's buffer is reserved once), the comparisons and swap
+template <class charT, class traits, class Allocator>
+basic_string<charT, traits, Allocator> operator+(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b)
+{ basic_string<charT, traits, Allocator> r; r.reserve(a.size() + b.size()); r.append(a.data(), a.size()); r.append(b.data(), b.size()); return r; }
+template <class charT, class traits, class Allocator>
+basic_string<charT, traits, Allocator> operator+(const charT* a, const basic_string<charT, traits, Allocator>& b)
+{
+    const typename basic_string<charT, traits, Allocator>::size_type n = __is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(a)) : traits::length(a);
+    basic_string<charT, traits, Allocator> r; r.reserve(n + b.size()); r.append(a, n); r.append(b.data(), b.size()); return r;
+}
+template <class charT, class traits, class Allocator>
+basic_string<charT, traits, Allocator> operator+(charT a, const basic_string<charT, traits, Allocator>& b)
+{ basic_string<charT, traits, Allocator> r; r.reserve(1 + b.size()); r.push_back(a); r.append(b.data(), b.size()); return r; }
+template <class charT, class traits, class Allocator>
+basic_string<charT, traits, Allocator> operator+(const basic_string<charT, traits, Allocator>& a, const charT* b)
+{
+    const typename basic_string<charT, traits, Allocator>::size_type n = __is_char_traits<traits>::value ? strlen(reinterpret_cast<const char*>(b)) : traits::length(b);
+    basic_string<charT, traits, Allocator> r; r.reserve(a.size() + n); r.append(a.data(), a.size()); r.append(b, n); return r;
+}
+template <class charT, class traits, class Allocator>
+basic_string<charT, traits, Allocator> operator+(const basic_string<charT, traits, Allocator>& a, charT b)
+{ basic_string<charT, traits, Allocator> r; r.reserve(a.size() + 1); r.append(a.data(), a.size()); r.push_back(b); return r; }
+
+template <class charT, class traits, class Allocator>
+bool operator==(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b) { return a.__equal(b); }
+template <class charT, class traits, class Allocator>
+bool operator==(const charT* a, const basic_string<charT, traits, Allocator>& b) { return b.__equal(a); }
+template <class charT, class traits, class Allocator>
+bool operator==(const basic_string<charT, traits, Allocator>& a, const charT* b) { return a.__equal(b); }
+template <class charT, class traits, class Allocator>
+bool operator!=(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b) { return !a.__equal(b); }
+template <class charT, class traits, class Allocator>
+bool operator!=(const charT* a, const basic_string<charT, traits, Allocator>& b) { return !b.__equal(a); }
+template <class charT, class traits, class Allocator>
+bool operator!=(const basic_string<charT, traits, Allocator>& a, const charT* b) { return !a.__equal(b); }
+template <class charT, class traits, class Allocator>
+bool operator<(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b) { return a.compare(b) < 0; }
+template <class charT, class traits, class Allocator>
+bool operator<(const basic_string<charT, traits, Allocator>& a, const charT* b) { return a.compare(b) < 0; }
+template <class charT, class traits, class Allocator>
+bool operator<(const charT* a, const basic_string<charT, traits, Allocator>& b) { return b.compare(a) > 0; }
+template <class charT, class traits, class Allocator>
+bool operator>(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b) { return a.compare(b) > 0; }
+template <class charT, class traits, class Allocator>
+bool operator>(const basic_string<charT, traits, Allocator>& a, const charT* b) { return a.compare(b) > 0; }
+template <class charT, class traits, class Allocator>
+bool operator>(const charT* a, const basic_string<charT, traits, Allocator>& b) { return b.compare(a) < 0; }
+template <class charT, class traits, class Allocator>
+bool operator<=(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b) { return a.compare(b) <= 0; }
+template <class charT, class traits, class Allocator>
+bool operator<=(const basic_string<charT, traits, Allocator>& a, const charT* b) { return a.compare(b) <= 0; }
+template <class charT, class traits, class Allocator>
+bool operator<=(const charT* a, const basic_string<charT, traits, Allocator>& b) { return b.compare(a) >= 0; }
+template <class charT, class traits, class Allocator>
+bool operator>=(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b) { return a.compare(b) >= 0; }
+template <class charT, class traits, class Allocator>
+bool operator>=(const basic_string<charT, traits, Allocator>& a, const charT* b) { return a.compare(b) >= 0; }
+template <class charT, class traits, class Allocator>
+bool operator>=(const charT* a, const basic_string<charT, traits, Allocator>& b) { return b.compare(a) <= 0; }
+
+template <class charT, class traits, class Allocator>
+void swap(basic_string<charT, traits, Allocator>& a, basic_string<charT, traits, Allocator>& b) { a.swap(b); }
+
+}
+
+#include <stdexcept>   // defines __throw_out_of_range over the exception classes, which need string complete
+
+#endif

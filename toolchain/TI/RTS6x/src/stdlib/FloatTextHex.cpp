@@ -46,7 +46,12 @@ unsigned long long FloatText::hexadecimal(const FloatFormat &format, bool negati
     unsigned long long magnitude = bits & ~format.signBit();
     int lowest = 1 - format.bias() - format.fractionBits();
     bool lost = sticky || (exponent < lowest && (lowest - exponent >= 64 || (significand & ((1ull << (lowest - exponent)) - 1)) != 0));
+#if defined(_WIN32)
+    // GRIDE's runtime for Windows: ERANGE when the value overflowed or came to zero, as the Microsoft runtime's
+    if (magnitude == format.infinity(false) || (magnitude == 0 && lost)) range = true;
+#else
     if (magnitude == format.infinity(false) || (magnitude < (1ull << format.fractionBits()) && lost)) range = true;
+#endif
     return bits;
 }
 

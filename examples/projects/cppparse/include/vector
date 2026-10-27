@@ -1,0 +1,221 @@
+// vector - cppparse's C++98 library: a contiguous array with pointer iterators. Elements live
+// in malloc storage and are built with placement new and destroyed explicitly. The range
+// constructor and insert take pointer ranges (the iterators of string and vector).
+#ifndef CPPPARSE_VECTOR
+#define CPPPARSE_VECTOR
+
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <new>
+#include <stdexcept>
+#include <__iterator>
+#include <__traits>
+
+namespace std {
+
+template <class T>
+class vector {
+public:
+    typedef T        value_type;
+    typedef size_t   size_type;
+    typedef T*       iterator;
+    typedef const T* const_iterator;
+    typedef T&       reference;
+    typedef const T& const_reference;
+    typedef ptrdiff_t difference_type;
+    typedef std::reverse_iterator<iterator>       reverse_iterator;
+    typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+
+    vector() : m_data(0), m_size(0), m_cap(0) {}
+    explicit vector(size_t n) : m_data(0), m_size(0), m_cap(0) { resize(n); }
+    vector(size_t n, const T& v) : m_data(0), m_size(0), m_cap(0) { assign(n, v); }
+    vector(const T* first, const T* last) : m_data(0), m_size(0), m_cap(0) { assign(first, last); }
+    // any other iterator pair, or "n copies of v" when both arguments are integers
+    template <class It> vector(It first, It last) : m_data(0), m_size(0), m_cap(0) { initRange(first, last, typename __is_integer<It>::type()); }
+    vector(const vector& o) : m_data(0), m_size(0), m_cap(0) { assign(o.m_data, o.m_data + o.m_size); }
+    ~vector() { destroyAll(); free(m_data); }
+
+    vector& operator=(const vector& o)
+    {
+        if (this != &o) assign(o.m_data, o.m_data + o.m_size);
+        return *this;
+    }
+
+    size_t size() const { return m_size; }
+    size_t capacity() const { return m_cap; }
+    size_t max_size() const { return ~static_cast<size_t>(0) / sizeof(T); }
+    bool   empty() const { return m_size == 0; }
+    void   clear() { destroyAll(); }
+    void   reserve(size_t n) { if (n > m_cap) grow(n); }
+    void   resize(size_t n)
+    {
+        if (n > m_cap) grow(n);
+        while (m_size > n) { --m_size; m_data[m_size].~T(); }
+        while (m_size < n) { new (m_data + m_size) T(); ++m_size; }
+    }
+    void resize(size_t n, const T& v)
+    {
+        if (n > m_cap) grow(n);
+        while (m_size > n) { --m_size; m_data[m_size].~T(); }
+        while (m_size < n) { new (m_data + m_size) T(v); ++m_size; }
+    }
+
+    T&       operator[](size_t i) { return m_data[i]; }
+    const T& operator[](size_t i) const { return m_data[i]; }
+    T&       at(size_t i) { if (i >= m_size) throw out_of_range("invalid vector subscript"); return m_data[i]; }
+    const T& at(size_t i) const { if (i >= m_size) throw out_of_range("invalid vector subscript"); return m_data[i]; }
+    T&       front() { return m_data[0]; }
+    const T& front() const { return m_data[0]; }
+    T&       back() { return m_data[m_size - 1]; }
+    const T& back() const { return m_data[m_size - 1]; }
+    T*       data() { return m_data; }
+    const T* data() const { return m_data; }
+    iterator       begin() { return m_data; }
+    reverse_iterator       rbegin() { return reverse_iterator(end()); }
+    reverse_iterator       rend() { return reverse_iterator(begin()); }
+    const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
+    const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
+    iterator       end() { return m_data + m_size; }
+    const_iterator begin() const { return m_data; }
+    const_iterator end() const { return m_data + m_size; }
+
+    void push_back(const T& v)
+    {
+        if (m_size == m_cap) {
+            T copy(v);                 // v may live inside the array that is about to move
+            grow(m_cap ? m_cap * 2 : 4);
+            new (m_data + m_size) T(copy);
+        } else new (m_data + m_size) T(v);
+        ++m_size;
+    }
+    void pop_back() { --m_size; m_data[m_size].~T(); }
+
+    void assign(size_t n, const T& v)
+    {
+        destroyAll();
+        if (n > m_cap) grow(n);
+        for (size_t i = 0; i < n; ++i) new (m_data + i) T(v);
+        m_size = n;
+    }
+    void assign(const T* first, const T* last)
+    {
+        size_t n = static_cast<size_t>(last - first);
+        destroyAll();
+        if (n > m_cap) grow(n);
+        for (size_t i = 0; i < n; ++i) new (m_data + i) T(first[i]);
+        m_size = n;
+    }
+
+    iterator insert(iterator pos, const T& v)
+    {
+        size_t at = static_cast<size_t>(pos - m_data);
+        T copy(v);
+        if (m_size == m_cap) grow(m_cap ? m_cap * 2 : 4);
+        shiftUp(at, 1);
+        new (m_data + at) T(copy);
+        ++m_size;
+        return m_data + at;
+    }
+    void insert(iterator pos, size_t n, const T& v)
+    {
+        size_t at = static_cast<size_t>(pos - m_data);
+        T copy(v);
+        if (m_size + n > m_cap) grow(m_size + n);
+        shiftUp(at, n);
+        for (size_t i = 0; i < n; ++i) new (m_data + at + i) T(copy);
+        m_size += n;
+    }
+    void insert(iterator pos, const T* first, const T* last)
+    {
+        size_t at = static_cast<size_t>(pos - m_data);
+        size_t n = static_cast<size_t>(last - first);
+        if (first >= m_data && first < m_data + m_size) {
+            vector copy(first, last);
+            insert(pos, copy.begin(), copy.end());
+            return;
+        }
+        if (m_size + n > m_cap) grow(m_size + n);
+        shiftUp(at, n);
+        for (size_t i = 0; i < n; ++i) new (m_data + at + i) T(first[i]);
+        m_size += n;
+    }
+    iterator erase(iterator pos)
+    {
+        size_t at = static_cast<size_t>(pos - m_data);
+        m_data[at].~T();
+        memmove(m_data + at, m_data + at + 1, (m_size - at - 1) * sizeof(T));
+        --m_size;
+        return m_data + at;
+    }
+    iterator erase(iterator first, iterator last)
+    {
+        size_t at = static_cast<size_t>(first - m_data);
+        size_t n = static_cast<size_t>(last - first);
+        for (size_t i = 0; i < n; ++i) m_data[at + i].~T();
+        memmove(m_data + at, m_data + at + n, (m_size - at - n) * sizeof(T));
+        m_size -= n;
+        return m_data + at;
+    }
+    void swap(vector& o)
+    {
+        T* d = m_data; m_data = o.m_data; o.m_data = d;
+        size_t s = m_size; m_size = o.m_size; o.m_size = s;
+        size_t c = m_cap; m_cap = o.m_cap; o.m_cap = c;
+    }
+
+private:
+    T*     m_data;
+    size_t m_size;
+    size_t m_cap;
+
+    template <class It> void initRange(It first, It last, __false_type) { for (; first != last; ++first) push_back(*first); }
+    template <class N> void initRange(N n, N v, __true_type) { assign(static_cast<size_t>(n), static_cast<T>(v)); }
+
+    // elements are moved bytewise between buffers: every type stored here must tolerate that
+    void grow(size_t n)
+    {
+        T* d = static_cast<T*>(malloc(n * sizeof(T)));
+        if (m_size) memcpy(d, m_data, m_size * sizeof(T));
+        free(m_data);
+        m_data = d;
+        m_cap = n;
+    }
+    void shiftUp(size_t at, size_t n)
+    {
+        if (at < m_size) memmove(m_data + at + n, m_data + at, (m_size - at) * sizeof(T));
+    }
+    void destroyAll()
+    {
+        while (m_size > 0) { --m_size; m_data[m_size].~T(); }
+    }
+};
+
+template <class T>
+bool operator==(const vector<T>& a, const vector<T>& b)
+{
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) if (!(a[i] == b[i])) return false;
+    return true;
+}
+
+template <class T>
+bool operator!=(const vector<T>& a, const vector<T>& b) { return !(a == b); }
+
+template <class T>
+bool operator<(const vector<T>& a, const vector<T>& b)
+{
+    size_t n = a.size() < b.size() ? a.size() : b.size();
+    for (size_t i = 0; i < n; ++i) {
+        if (a[i] < b[i]) return true;
+        if (b[i] < a[i]) return false;
+    }
+    return a.size() < b.size();
+}
+
+template <class T>
+void swap(vector<T>& a, vector<T>& b) { a.swap(b); }
+
+}
+
+#endif

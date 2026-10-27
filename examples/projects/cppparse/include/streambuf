@@ -1,0 +1,147 @@
+// streambuf - cppparse's C++98 library: basic_streambuf (27.5.2), the character source and sink every stream reads
+// and writes through: a get area and a put area the derived buffers set up, and the virtual functions they override.
+// The six pointers of the areas are public under reserved names: the library's streams read and write the areas
+// themselves (an inserter copies into the put area when it has room, an extractor scans the get area), so that the
+// common case makes no virtual call and, in a -O0 build, as few calls as can be.
+#ifndef CPPPARSE_STREAMBUF
+#define CPPPARSE_STREAMBUF
+
+#include <cstring>
+#include <__ios_base>
+
+namespace std {
+
+template <class charT, class traits = char_traits<charT> >
+class basic_streambuf {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+
+    virtual ~basic_streambuf() {}
+
+    // 27.5.2.2.1 locales
+    locale pubimbue(const locale& loc) { locale old = m_loc; imbue(loc); m_loc = loc; return old; }
+    locale getloc() const { return m_loc; }
+    // 27.5.2.2.2 buffer and positioning
+    basic_streambuf* pubsetbuf(char_type* s, streamsize n) { return setbuf(s, n); }
+    pos_type pubseekoff(off_type off, ios_base::seekdir way, ios_base::openmode which = ios_base::in | ios_base::out) { return seekoff(off, way, which); }
+    pos_type pubseekpos(pos_type sp, ios_base::openmode which = ios_base::in | ios_base::out) { return seekpos(sp, which); }
+    int      pubsync() { return sync(); }
+    // 27.5.2.2.3 get area
+    streamsize in_avail() { return __gnext < __gend ? static_cast<streamsize>(__gend - __gnext) : showmanyc(); }
+    int_type   snextc()
+    {
+        if (__gnext < __gend) {
+            if (++__gnext < __gend) return traits::to_int_type(*__gnext);
+            return underflow();
+        }
+        return traits::eq_int_type(uflow(), traits::eof()) ? traits::eof() : sgetc();
+    }
+    int_type   sbumpc() { return __gnext < __gend ? traits::to_int_type(*__gnext++) : uflow(); }
+    int_type   sgetc() { return __gnext < __gend ? traits::to_int_type(*__gnext) : underflow(); }
+    streamsize sgetn(char_type* s, streamsize n) { return xsgetn(s, n); }
+    // 27.5.2.2.4 putback
+    int_type sputbackc(char_type c)
+    {
+        if (__gbeg < __gnext && traits::eq(c, __gnext[-1])) return traits::to_int_type(*--__gnext);
+        return pbackfail(traits::to_int_type(c));
+    }
+    int_type sungetc() { return __gbeg < __gnext ? traits::to_int_type(*--__gnext) : pbackfail(traits::eof()); }
+    // 27.5.2.2.5 put area
+    int_type   sputc(char_type c)
+    {
+        if (__pnext < __pend) { *__pnext++ = c; return traits::to_int_type(c); }
+        return overflow(traits::to_int_type(c));
+    }
+    streamsize sputn(const char_type* s, streamsize n) { return xsputn(s, n); }
+
+    // the library's: the get area (begin, next, end) and the put area (begin, next, end)
+    char_type* __gbeg;
+    char_type* __gnext;
+    char_type* __gend;
+    char_type* __pbeg;
+    char_type* __pnext;
+    char_type* __pend;
+
+protected:
+    basic_streambuf() : __gbeg(0), __gnext(0), __gend(0), __pbeg(0), __pnext(0), __pend(0), m_loc() {}
+
+    // 27.5.2.3 the get and put areas
+    char_type* eback() const { return __gbeg; }
+    char_type* gptr() const { return __gnext; }
+    char_type* egptr() const { return __gend; }
+    void       gbump(int n) { __gnext += n; }
+    void       setg(char_type* gbeg, char_type* gnext, char_type* gend) { __gbeg = gbeg; __gnext = gnext; __gend = gend; }
+    char_type* pbase() const { return __pbeg; }
+    char_type* pptr() const { return __pnext; }
+    char_type* epptr() const { return __pend; }
+    void       pbump(int n) { __pnext += n; }
+    void       setp(char_type* pbeg, char_type* pend) { __pbeg = pbeg; __pnext = pbeg; __pend = pend; }
+
+    // 27.5.2.4 the virtual functions
+    virtual void imbue(const locale&) {}
+    virtual basic_streambuf* setbuf(char_type*, streamsize) { return this; }
+    virtual pos_type seekoff(off_type, ios_base::seekdir, ios_base::openmode = ios_base::in | ios_base::out) { return pos_type(off_type(-1)); }
+    virtual pos_type seekpos(pos_type, ios_base::openmode = ios_base::in | ios_base::out) { return pos_type(off_type(-1)); }
+    virtual int      sync() { return 0; }
+    virtual streamsize showmanyc() { return 0; }
+    virtual streamsize xsgetn(char_type* s, streamsize n)
+    {
+        streamsize i = 0;
+        while (i < n) {
+            if (__gnext < __gend) {
+                streamsize k = static_cast<streamsize>(__gend - __gnext);
+                if (k > n - i) k = n - i;
+                memcpy(s + i, __gnext, static_cast<size_t>(k) * sizeof(char_type));
+                __gnext += k;
+                i += k;
+                continue;
+            }
+            int_type c = uflow();
+            if (traits::eq_int_type(c, traits::eof())) break;
+            s[i++] = traits::to_char_type(c);
+        }
+        return i;
+    }
+    virtual int_type underflow() { return traits::eof(); }
+    // the default: underflow() made characters available in the get area
+    virtual int_type uflow()
+    {
+        if (traits::eq_int_type(underflow(), traits::eof()) || !(__gnext < __gend)) return traits::eof();
+        return traits::to_int_type(*__gnext++);
+    }
+    virtual int_type pbackfail(int_type = traits::eof()) { return traits::eof(); }
+    virtual streamsize xsputn(const char_type* s, streamsize n)
+    {
+        streamsize i = 0;
+        while (i < n) {
+            if (__pnext < __pend) {
+                streamsize k = static_cast<streamsize>(__pend - __pnext);
+                if (k > n - i) k = n - i;
+                memcpy(__pnext, s + i, static_cast<size_t>(k) * sizeof(char_type));
+                __pnext += k;
+                i += k;
+                continue;
+            }
+            if (traits::eq_int_type(overflow(traits::to_int_type(s[i])), traits::eof())) break;
+            ++i;
+        }
+        return i;
+    }
+    virtual int_type overflow(int_type = traits::eof()) { return traits::eof(); }
+
+private:
+    basic_streambuf(const basic_streambuf&);
+    basic_streambuf& operator=(const basic_streambuf&);
+    locale m_loc;
+};
+
+typedef basic_streambuf<char, char_traits<char> >       streambuf;
+typedef basic_streambuf<wchar_t, char_traits<wchar_t> > wstreambuf;
+
+}
+
+#endif

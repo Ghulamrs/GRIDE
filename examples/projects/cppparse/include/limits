@@ -1,0 +1,144 @@
+// limits - cppparse's C++98 library: std::numeric_limits for the fundamental types of the x86-64 Windows target
+// (18.2.1; MSVC's values: char signed, long 32 bits, long double is double).
+#ifndef CPPPARSE_LIMITS
+#define CPPPARSE_LIMITS
+
+#include <cfloat>
+#include <climits>
+
+namespace std {
+
+enum float_round_style { round_indeterminate = -1, round_toward_zero = 0, round_to_nearest = 1, round_toward_infinity = 2, round_toward_neg_infinity = 3 };
+enum float_denorm_style { denorm_indeterminate = -1, denorm_absent = 0, denorm_present = 1 };
+
+template <class T>
+class numeric_limits {
+public:
+    static const bool is_specialized = false;
+    static T min() { return T(); }
+    static T max() { return T(); }
+    static const int  digits = 0;
+    static const int  digits10 = 0;
+    static const bool is_signed = false;
+    static const bool is_integer = false;
+    static const bool is_exact = false;
+    static const int  radix = 0;
+    static T epsilon() { return T(); }
+    static T round_error() { return T(); }
+    static const int  min_exponent = 0;
+    static const int  min_exponent10 = 0;
+    static const int  max_exponent = 0;
+    static const int  max_exponent10 = 0;
+    static const bool has_infinity = false;
+    static const bool has_quiet_NaN = false;
+    static const bool has_signaling_NaN = false;
+    static const float_denorm_style has_denorm = denorm_absent;
+    static const bool has_denorm_loss = false;
+    static T infinity() { return T(); }
+    static T quiet_NaN() { return T(); }
+    static T signaling_NaN() { return T(); }
+    static T denorm_min() { return T(); }
+    static const bool is_iec559 = false;
+    static const bool is_bounded = false;
+    static const bool is_modulo = false;
+    static const bool traps = false;
+    static const bool tinyness_before = false;
+    static const float_round_style round_style = round_toward_zero;
+};
+
+// the integer types: CPPPARSE_INTEGER_LIMITS(type, min, max, digits (value bits), digits10, signed)
+#define CPPPARSE_INTEGER_LIMITS(T, MIN, MAX, DIGITS, DIGITS10, SIGNED) \
+template <> class numeric_limits<T> { \
+public: \
+    static const bool is_specialized = true; \
+    static T min() { return MIN; } \
+    static T max() { return MAX; } \
+    static const int  digits = DIGITS; \
+    static const int  digits10 = DIGITS10; \
+    static const bool is_signed = SIGNED; \
+    static const bool is_integer = true; \
+    static const bool is_exact = true; \
+    static const int  radix = 2; \
+    static T epsilon() { return 0; } \
+    static T round_error() { return 0; } \
+    static const int  min_exponent = 0; \
+    static const int  min_exponent10 = 0; \
+    static const int  max_exponent = 0; \
+    static const int  max_exponent10 = 0; \
+    static const bool has_infinity = false; \
+    static const bool has_quiet_NaN = false; \
+    static const bool has_signaling_NaN = false; \
+    static const float_denorm_style has_denorm = denorm_absent; \
+    static const bool has_denorm_loss = false; \
+    static T infinity() { return 0; } \
+    static T quiet_NaN() { return 0; } \
+    static T signaling_NaN() { return 0; } \
+    static T denorm_min() { return 0; } \
+    static const bool is_iec559 = false; \
+    static const bool is_bounded = true; \
+    static const bool is_modulo = !(SIGNED); \
+    static const bool traps = true; \
+    static const bool tinyness_before = false; \
+    static const float_round_style round_style = round_toward_zero; \
+};
+
+CPPPARSE_INTEGER_LIMITS(bool, false, true, 1, 0, false)
+CPPPARSE_INTEGER_LIMITS(char, CHAR_MIN, CHAR_MAX, 7, 2, true)
+CPPPARSE_INTEGER_LIMITS(signed char, SCHAR_MIN, SCHAR_MAX, 7, 2, true)
+CPPPARSE_INTEGER_LIMITS(unsigned char, 0, UCHAR_MAX, 8, 2, false)
+CPPPARSE_INTEGER_LIMITS(wchar_t, 0, 0xffff, 16, 4, false)
+CPPPARSE_INTEGER_LIMITS(short, SHRT_MIN, SHRT_MAX, 15, 4, true)
+CPPPARSE_INTEGER_LIMITS(unsigned short, 0, USHRT_MAX, 16, 4, false)
+CPPPARSE_INTEGER_LIMITS(int, INT_MIN, INT_MAX, 31, 9, true)
+CPPPARSE_INTEGER_LIMITS(unsigned int, 0, UINT_MAX, 32, 9, false)
+CPPPARSE_INTEGER_LIMITS(long, LONG_MIN, LONG_MAX, 31, 9, true)
+CPPPARSE_INTEGER_LIMITS(unsigned long, 0, ULONG_MAX, 32, 9, false)
+CPPPARSE_INTEGER_LIMITS(long long, LLONG_MIN, LLONG_MAX, 63, 18, true)
+CPPPARSE_INTEGER_LIMITS(unsigned long long, 0, ULLONG_MAX, 64, 19, false)
+#undef CPPPARSE_INTEGER_LIMITS
+
+// the floating types (IEEE 754): the infinities and NaNs are folded constants (an overflowing product, inf - inf),
+// as cl folds them
+#define CPPPARSE_FLOAT_LIMITS(T, MIN, MAX, EPS, MANT, DIG, MINEXP, MINEXP10, MAXEXP, MAXEXP10, DENORM) \
+template <> class numeric_limits<T> { \
+public: \
+    static const bool is_specialized = true; \
+    static T min() { return MIN; } \
+    static T max() { return MAX; } \
+    static const int  digits = MANT; \
+    static const int  digits10 = DIG; \
+    static const bool is_signed = true; \
+    static const bool is_integer = false; \
+    static const bool is_exact = false; \
+    static const int  radix = 2; \
+    static T epsilon() { return EPS; } \
+    static T round_error() { return static_cast<T>(0.5); } \
+    static const int  min_exponent = MINEXP; \
+    static const int  min_exponent10 = MINEXP10; \
+    static const int  max_exponent = MAXEXP; \
+    static const int  max_exponent10 = MAXEXP10; \
+    static const bool has_infinity = true; \
+    static const bool has_quiet_NaN = true; \
+    static const bool has_signaling_NaN = true; \
+    static const float_denorm_style has_denorm = denorm_present; \
+    static const bool has_denorm_loss = true; \
+    static T infinity() { return static_cast<T>(DBL_MAX * 10.0); } \
+    static T quiet_NaN() { return static_cast<T>(DBL_MAX * 10.0 - DBL_MAX * 10.0); } \
+    static T signaling_NaN() { return static_cast<T>(DBL_MAX * 10.0 - DBL_MAX * 10.0); } \
+    static T denorm_min() { return DENORM; } \
+    static const bool is_iec559 = true; \
+    static const bool is_bounded = true; \
+    static const bool is_modulo = false; \
+    static const bool traps = false; \
+    static const bool tinyness_before = false; \
+    static const float_round_style round_style = round_to_nearest; \
+};
+
+CPPPARSE_FLOAT_LIMITS(float, FLT_MIN, FLT_MAX, FLT_EPSILON, FLT_MANT_DIG, FLT_DIG, FLT_MIN_EXP, FLT_MIN_10_EXP, FLT_MAX_EXP, FLT_MAX_10_EXP, 1.401298464e-45F)
+CPPPARSE_FLOAT_LIMITS(double, DBL_MIN, DBL_MAX, DBL_EPSILON, DBL_MANT_DIG, DBL_DIG, DBL_MIN_EXP, DBL_MIN_10_EXP, DBL_MAX_EXP, DBL_MAX_10_EXP, 4.9406564584124654e-324)
+CPPPARSE_FLOAT_LIMITS(long double, DBL_MIN, DBL_MAX, DBL_EPSILON, DBL_MANT_DIG, DBL_DIG, DBL_MIN_EXP, DBL_MIN_10_EXP, DBL_MAX_EXP, DBL_MAX_10_EXP, 4.9406564584124654e-324)
+#undef CPPPARSE_FLOAT_LIMITS
+
+}
+
+#endif

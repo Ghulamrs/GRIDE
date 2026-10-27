@@ -1,0 +1,77 @@
+// locale - cppparse's C++98 library: locales (22.1) as far as the streams use them. locale, its facets and ids,
+// use_facet and has_facet, ctype<char>, ctype<wchar_t>, numpunct and collate are in <__locale> (every stream includes
+// it), num_put and num_get in <__num_facets> (every stream includes it too); this header adds the convenience functions
+// of 22.1.3 and the _byname facets, which know the "C" locale only. Not provided: codecvt, the monetary, time and
+// messages facets, and named locales other than "C" and "".
+#ifndef CPPPARSE_LOCALE
+#define CPPPARSE_LOCALE
+
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <__locale>
+#include <istream>
+#include <ostream>
+
+namespace std {
+
+// 22.1.3.1 character classification
+template <class charT> bool isspace(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::space, c); }
+template <class charT> bool isprint(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::print, c); }
+template <class charT> bool iscntrl(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::cntrl, c); }
+template <class charT> bool isupper(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::upper, c); }
+template <class charT> bool islower(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::lower, c); }
+template <class charT> bool isalpha(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::alpha, c); }
+template <class charT> bool isdigit(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::digit, c); }
+template <class charT> bool ispunct(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::punct, c); }
+template <class charT> bool isxdigit(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::xdigit, c); }
+template <class charT> bool isalnum(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::alnum, c); }
+template <class charT> bool isgraph(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).is(ctype_base::graph, c); }
+// 22.1.3.2 character conversions
+template <class charT> charT toupper(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).toupper(c); }
+template <class charT> charT tolower(charT c, const locale& loc) { return use_facet<ctype<charT> >(loc).tolower(c); }
+
+// the named facets: the "C" (or "") locale's
+inline void __check_locale_name(const char* name)
+{
+    if (!name || (strcmp(name, "C") != 0 && name[0] != 0)) throw runtime_error("bad locale name");
+}
+
+template <class charT>
+class ctype_byname : public ctype<charT> {
+public:
+    typedef typename ctype<charT>::mask mask;
+    explicit ctype_byname(const char* name, size_t refs = 0) : ctype<charT>(refs) { __check_locale_name(name); }
+protected:
+    virtual ~ctype_byname() {}
+};
+template <>
+class ctype_byname<char> : public ctype<char> {
+public:
+    explicit ctype_byname(const char* name, size_t refs = 0) : ctype<char>(0, false, refs) { __check_locale_name(name); }
+protected:
+    virtual ~ctype_byname() {}
+};
+
+template <class charT>
+class numpunct_byname : public numpunct<charT> {
+public:
+    typedef charT               char_type;
+    typedef basic_string<charT> string_type;
+    explicit numpunct_byname(const char* name, size_t refs = 0) : numpunct<charT>(refs) { __check_locale_name(name); }
+protected:
+    virtual ~numpunct_byname() {}
+};
+
+template <class charT>
+class collate_byname : public collate<charT> {
+public:
+    typedef basic_string<charT> string_type;
+    explicit collate_byname(const char* name, size_t refs = 0) : collate<charT>(refs) { __check_locale_name(name); }
+protected:
+    virtual ~collate_byname() {}
+};
+
+}
+
+#endif

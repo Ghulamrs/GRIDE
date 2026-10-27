@@ -30,6 +30,8 @@ void free(void *);
 void exit(int);
 void abort(void);
 int atexit(void (*)(void));
+// C90 7.10.4.5: the command to the host's command processor, its status back; a null pointer asks whether there is one.
+int system(const char *);
 
 int atoi(const char *);
 long atol(const char *);

@@ -105,6 +105,8 @@ namespace Gride { namespace Services {
             this->settings = settings;
             runner = gcnew ToolRunner();
             runner->Line += gcnew TextLineHandler(this, &BuildEngine::OnToolLine);
+            workers = gcnew List<ToolRunner^>();
+            stepDone = gcnew System::Threading::AutoResetEvent(false);
             projectLines = gcnew List<String^>();
             busy = false;
             Asker = nullptr;
@@ -142,7 +144,7 @@ namespace Gride { namespace Services {
             return true;
         }
 
-        void Cancel() { runner->Cancel(); }
+        void Cancel() { runner->Cancel(); StopWorkers(); }
 
         // full path of the linked program for a project/config/target
         static String^ ProgramPath(GrideProject^ p, BuildConfiguration^ cfg)
@@ -263,6 +265,8 @@ namespace Gride { namespace Services {
     private:
         GrideSettings^ settings;
         ToolRunner^ runner;
+        List<ToolRunner^>^ workers;     // the runners of the compile steps running now, which Cancel stops too
+        System::Threading::AutoResetEvent^ stepDone;
         List<BuildRequest^>^ pending;
         BuildSummary^ summary;
         GrideProject^ currentProject;
@@ -294,7 +298,26 @@ namespace Gride { namespace Services {
         literal int MaxToolLines = 40;
         bool clSettingsSaid;         // the project's own cl settings were named (once a project build)
         bool rideHeadersSaid;        // an installation header directory kept from cl was named (once)
+        bool crtSaid;                // the Windows C runtime of the link was named (once a project build)
         bool busy;
+
+        // The Windows C runtime a link takes: "grt" (GRIDE's) or "msvc" (Microsoft's). Tools > Options says which;
+        // automatic is Microsoft's only where Visual Studio is found and cl's objects are among the inputs - they
+        // name its libraries themselves - and GRIDE's otherwise, always where there is no Visual Studio.
+        String^ WindowsRuntime(bool clObjects)
+        {
+            String^ choice = settings->Env->EffectiveWindowsRuntime();
+            if (choice != "auto") return choice;
+            return clObjects && VisualStudio::Find() != nullptr ? "msvc" : "grt";
+        }
+
+        // Microsoft's runtime libraries, each refused to a link with GRIDE's runtime (docs\Runtime_Design.md 13.4)
+        literal String^ MicrosoftRuntimeRefused =
+            " /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd"
+            " /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd"
+            " /NODEFAULTLIB:libvcruntime /NODEFAULTLIB:libvcruntimed /NODEFAULTLIB:vcruntime /NODEFAULTLIB:vcruntimed"
+            " /NODEFAULTLIB:libcpmt /NODEFAULTLIB:libcpmtd /NODEFAULTLIB:msvcprt /NODEFAULTLIB:msvcprtd"
+            " /NODEFAULTLIB:oldnames /NODEFAULTLIB:legacy_stdio_definitions";
 
         void Say(String^ s) { Output(s); Keep(s); }
 
@@ -335,35 +358,203 @@ namespace Gride { namespace Services {
             toolHidden = 0;
         }
 
-        // runs one tool through the reader; a tool that could not be started gets RIDE's hint. RIDE's
-        // own compilers write UTF-8 (their banner's first character shows it), so their lines are read
+        // RIDE's own compilers write UTF-8 (their banner's first character shows it), so their lines are read
         // as UTF-8 unless the toolchain names a code page; the rest write the console's
+        static ToolRunOptions^ ToolOptions(ToolRunOptions^ options, bool rideTool)
+        {
+            if (!rideTool || options == nullptr || options->OutputCodePage != 0) return options;
+            ToolRunOptions^ o = gcnew ToolRunOptions();
+            o->SetupScript = options->SetupScript;
+            o->Environment = options->Environment;
+            o->OutputCodePage = 65001;
+            return o;
+        }
+
+        // runs one tool through the reader; a tool that could not be started gets RIDE's hint
         int RunTool(String^ command, String^ workDir, ToolRunOptions^ options, String^ source, String^ toolName, String^ targetName, bool rideTool)
         {
             BeginTool(source, toolName);
-            if (rideTool && options != nullptr && options->OutputCodePage == 0)
-            {
-                ToolRunOptions^ o = gcnew ToolRunOptions();
-                o->SetupScript = options->SetupScript;
-                o->Environment = options->Environment;
-                o->OutputCodePage = 65001;
-                options = o;
-            }
-            int rc = runner->Run(command, workDir, options);
+            int rc = runner->Run(command, workDir, ToolOptions(options, rideTool));
+            EndTool(rc, source, toolName, targetName);
+            return rc;
+        }
+
+        void EndTool(int rc, String^ source, String^ toolName, String^ targetName)
+        {
             if (toolHidden > 0) Say(String::Format("[{0}: {1} more line(s) not shown]", toolName, toolHidden));
-            DiagnosticReader^ r = reader;
-            if (r != nullptr)
-                for each (BuildMessage^ m in r->Itself)
-                {
-                    m->Sev = rc != 0 && rc != ToolRunner::ExitCancelled ? Severity::Error : Severity::Info;
-                    if (m->Sev == Severity::Error && r->First == nullptr) r->First = m;
-                    if (currentProject != nullptr) m->Project = currentProject->Name;
-                    summary->Count(m);
-                    Message(m);
-                }
             if (rc == ToolRunner::ExitStartFailed)
                 Report(Severity::Error, source, toolName + " could not be run - name it under Tools > Options > Toolchains > " + targetName + ", or put it on PATH");
-            return rc;
+        }
+
+        // one tool run of a compile step: decided before any tool runs, run on a worker, read back in project order
+        ref class ToolPass
+        {
+        public:
+            ToolPass() { Before = gcnew List<String^>(); Lines = gcnew List<String^>(); Code = 0; Ran = false; }
+            List<String^>^ Before;      // said before it: the part's "$ group (compiler)" line, "[cpp11]  a.cpp  ->  obj\a.s"
+            String^ Command;
+            ToolRunOptions^ Options;
+            String^ Source;             // the file its diagnostics are filed under when they name none
+            String^ ToolName;
+            String^ TargetName;         // the toolchain the hint names when it cannot be started
+            String^ Echo;               // the file a compiler writes: its echo of the path is not shown
+            String^ Writes;             // the file it writes, removed when it fails: half an object would look up to date
+            String^ Step;               // compile / assemble, the failedStep when it fails
+            String^ Refused;            // said after it fails (asm6x refusing assembly on the emulated target), or null
+            List<String^>^ Lines;       // what it wrote, in order
+            int Code;
+            bool Ran;
+        };
+
+        // a source's compile and the assembly of what it wrote, one after the other on a worker
+        ref class CompileStep
+        {
+        public:
+            CompileStep() { Passes = gcnew List<ToolPass^>(); Size = 0; Started = false; Done = false; }
+            List<ToolPass^>^ Passes;
+            Int64 Size;                 // its sources' bytes: the largest start first, so the longest compile does not start last
+            bool Started;
+            volatile bool Done;
+        };
+
+        ref class StepWorker
+        {
+        public:
+            StepWorker(BuildEngine^ engine, CompileStep^ step, String^ workDir) { this->engine = engine; this->step = step; this->workDir = workDir; into = nullptr; }
+
+            void Run()
+            {
+                ToolRunner^ r = gcnew ToolRunner();
+                r->Line += gcnew TextLineHandler(this, &StepWorker::OnLine);
+                engine->Enlist(r);
+                try
+                {
+                    for each (ToolPass^ pass in step->Passes)
+                    {
+                        into = pass->Lines;
+                        pass->Code = r->Run(pass->Command, workDir, pass->Options);
+                        pass->Ran = true;
+                        if (pass->Code != 0) { RemoveFile(pass->Writes); break; }
+                    }
+                }
+                catch (Exception^ ex)
+                {
+                    for each (ToolPass^ pass in step->Passes)
+                        if (!pass->Ran) { pass->Lines->Add("error: " + ex->Message); pass->Code = ToolRunner::ExitStartFailed; pass->Ran = true; break; }
+                }
+                finally
+                {
+                    engine->Dismiss(r);
+                    step->Done = true;
+                    engine->stepDone->Set();
+                }
+            }
+
+        private:
+            BuildEngine^ engine;
+            CompileStep^ step;
+            String^ workDir;
+            List<String^>^ into;
+
+            // a ToolRunner hands over its two streams one line at a time
+            void OnLine(String^ line) { into->Add(line); }
+        };
+
+        void Enlist(ToolRunner^ r)
+        {
+            System::Threading::Monitor::Enter(workers);
+            try { workers->Add(r); if (runner->Cancelled) r->Cancel(); }
+            finally { System::Threading::Monitor::Exit(workers); }
+        }
+
+        void Dismiss(ToolRunner^ r)
+        {
+            System::Threading::Monitor::Enter(workers);
+            try { workers->Remove(r); }
+            finally { System::Threading::Monitor::Exit(workers); }
+        }
+
+        void StopWorkers()
+        {
+            System::Threading::Monitor::Enter(workers);
+            try { for each (ToolRunner^ r in workers) r->Cancel(); }
+            finally { System::Threading::Monitor::Exit(workers); }
+        }
+
+        static bool Empty(CompileStep^ s) { return s->Passes->Count == 0; }
+
+        static void RemoveFile(String^ path)
+        {
+            try { if (!String::IsNullOrEmpty(path) && File::Exists(path)) File::Delete(path); } catch (Exception^) { }
+        }
+
+        // how many compile steps run at once (Tools > Options > Environment > General): 0 is one per processor
+        int Jobs()
+        {
+            int n = settings->Env->BuildJobs;
+            return n > 0 ? n : Math::Max(1, Environment::ProcessorCount);
+        }
+
+        // The compile steps on workers, Jobs() at a time, the largest first, each read back in project order once it
+        // and those before it are done - so the Output pane, the Error List, the first error and the native question
+        // are what one tool after another gave. The first step to fail stops the others (those running are stopped,
+        // the rest never start), as the build stopped at it before. -1 when one failed or the build was cancelled, else 0.
+        int RunSteps(List<CompileStep^>^ steps, String^ workDir)
+        {
+            int jobs = Jobs();
+            List<CompileStep^>^ order = gcnew List<CompileStep^>(steps);
+            order->Sort(gcnew Comparison<CompileStep^>(&BuildEngine::LargerFirst));
+            int started = 0, read = 0;
+            bool failed = false;
+            for (;;)
+            {
+                while (!failed && read < steps->Count && steps[read]->Done)
+                    if (ReadBack(steps[read++]) != 0) { failed = true; StopWorkers(); }
+                int running = 0;
+                for each (CompileStep^ s in steps) if (s->Started && !s->Done) running++;
+                if (failed || runner->Cancelled)
+                {
+                    if (running == 0) return -1;
+                }
+                else
+                {
+                    if (read == steps->Count) return 0;
+                    while (running < jobs && started < order->Count)
+                    {
+                        CompileStep^ next = order[started++];
+                        next->Started = true;
+                        System::Threading::Thread^ t = gcnew System::Threading::Thread(
+                            gcnew System::Threading::ThreadStart(gcnew StepWorker(this, next, workDir), &StepWorker::Run));
+                        t->IsBackground = true;
+                        t->Name = "GRIDE compile";
+                        t->Start();
+                        running++;
+                    }
+                }
+                stepDone->WaitOne(100);
+            }
+        }
+
+        static int LargerFirst(CompileStep^ a, CompileStep^ b) { return b->Size.CompareTo(a->Size); }
+
+        // a finished step read as RunTool reads a tool while it runs; 0, or -1 with failedStep where it failed
+        int ReadBack(CompileStep^ step)
+        {
+            for each (ToolPass^ pass in step->Passes)
+            {
+                for each (String^ s in pass->Before) Say(s);
+                if (!pass->Ran) return -1;
+                BeginTool(pass->Source, pass->ToolName);
+                writes = pass->Echo;
+                for each (String^ line in pass->Lines) OnToolLine(line);
+                writes = nullptr;
+                EndTool(pass->Code, pass->Source, pass->ToolName, pass->TargetName);
+                if (pass->Code == 0) continue;
+                failedStep = pass->Step;
+                if (pass->Refused != nullptr) Say(pass->Refused);
+                return -1;
+            }
+            return 0;
         }
 
         void OnToolLine(String^ line)
@@ -424,6 +615,7 @@ namespace Gride { namespace Services {
                         codeViewWarned = false;
                         clSettingsSaid = false;
                         rideHeadersSaid = false;
+                        crtSaid = false;
                         int result = BuildProject(p, r, false);
                         if (result == -1 && !runner->Cancelled) result = NativeFallback(p, r);
                         if (result > 0) summary->Succeeded++;
@@ -751,9 +943,11 @@ namespace Gride { namespace Services {
             bool codeView = false;
             String^ lastFolder = nullptr;
 
-            // ---- compile + assemble each source ----
+            // ---- compile + assemble each source: every step decided here, in project order, before any tool
+            // runs; then RunSteps runs them Jobs() at a time ----
             if (r->Action != BuildAction::LinkOnly)
             {
+                List<CompileStep^>^ steps = gcnew List<CompileStep^>();
                 for each (String^ src in sources)
                 {
                     if (runner->Cancelled) return -1;
@@ -799,13 +993,18 @@ namespace Gride { namespace Services {
                     mx->Set("AsmFile", asmFile);
                     mx->Set("ObjFile", objFile);
                     SetCompilerMacros(mx, tool, lang, p, cfg, tc);
+                    CompileStep^ step = gcnew CompileStep();
+                    for each (String^ f in group != nullptr ? group : gcnew List<String^>(gcnew array<String^>{ src }))
+                        if (File::Exists(f)) step->Size += (gcnew FileInfo(f))->Length;
+                    steps->Add(step);
 
                     if (lang != Language::Assembly && r->Action != BuildAction::AssembleOnly)
                     {
+                        ToolPass^ compile = gcnew ToolPass();
                         // RIDE's "$ group (compiler)" line as each part starts
                         String^ folder = p->FolderOfFile(src);
                         String^ heading = (String::IsNullOrEmpty(folder) ? p->Name : folder) + " (" + RideToolchain::Name(tool) + ")";
-                        if (heading != lastFolder) { Say("$ " + heading); lastFolder = heading; }
+                        if (heading != lastFolder) { compile->Before->Add("$ " + heading); lastFolder = heading; }
 
                         String^ compiler = tc->ResolveFor(RideToolchain::RoleOf(tool), tc->CompilerFor(tool));
                         if (!File::Exists(compiler) && !viaSetup)
@@ -824,22 +1023,21 @@ namespace Gride { namespace Services {
                         ToolDefinition^ ran = ProgramDefinition(tool, compiler);
                         String^ ranName = ran != nullptr ? ran->Name : Path::GetFileNameWithoutExtension(compiler);
                         String^ shownSources = group != nullptr ? String::Join(" ", Leaves(group)) : Path::GetFileName(src);
-                        Say(String::Format("[{0}]  {1}  ->  {2}", ranName, shownSources, PathUtil::MakeRelative(p->ProjectDir, writesObject ? objFile : asmFile)));
+                        compile->Before->Add(String::Format("[{0}]  {1}  ->  {2}", ranName, shownSources, PathUtil::MakeRelative(p->ProjectDir, writesObject ? objFile : asmFile)));
                         bool own = !writesObject && RideToolchain::OwnCodeView(tool, t, debug);
                         bool cv = !writesObject && !own && !codeViewMissing && RideToolchain::DebugsWithCodeView(tool, t, debug);
                         if (own) ownCodeView = true;
                         List<String^>^ optionEnv = RideToolchain::OptionEnvironment(p->Options, RideToolchain::Definition(tool), cfg->Config);
                         // RIDE's own compilers write UTF-8; a program the definitions know is read as they say
                         bool utf8 = ran != nullptr ? String::Compare(ran->OutputEncoding, "utf-8", true) == 0 : tool != RideTool::Cl && tool != RideTool::HostCxx;
-                        writes = writesObject ? objFile : asmFile;
-                        int compiled = RunTool(mx->Expand(templ), p->ProjectDir, CompileOptions(run, tc, cv, optionEnv), src, ranName, tc->Name, utf8);
-                        writes = nullptr;
-                        if (compiled != 0)
-                        {
-                            failedStep = "compile";
-                            return -1;
-                        }
-                        if (writesObject) continue;      // the compiler wrote the object itself: nothing to assemble
+                        compile->Command = mx->Expand(templ);
+                        compile->Options = ToolOptions(CompileOptions(run, tc, cv, optionEnv), utf8);
+                        compile->Source = src; compile->ToolName = ranName; compile->TargetName = tc->Name;
+                        compile->Echo = writesObject ? objFile : asmFile;
+                        compile->Writes = compile->Echo;
+                        compile->Step = "compile";
+                        step->Passes->Add(compile);
+                        if (writesObject) continue;      // the compiler writes the object itself: nothing to assemble
                         if (cv) codeView = true;
                     }
 
@@ -854,14 +1052,18 @@ namespace Gride { namespace Services {
                         return -1;
                     }
                     mx->Set(as->Macro, as->Path);
-                    Say(String::Format("[{0}]  {1}  ->  {2}", as->Name, Path::GetFileName(asmFile), PathUtil::MakeRelative(p->ProjectDir, objFile)));
-                    if (RunTool(mx->Expand(as->Cmd), p->ProjectDir, run, asmFile, as->Name, tc->Name, false) != 0)
-                    {
-                        failedStep = "assemble";
-                        if (emulated) Say(as->Name + " refused the assembly - the emulator would run it, but it is not a TI program");
-                        return -1;
-                    }
+                    ToolPass^ assemble = gcnew ToolPass();
+                    assemble->Before->Add(String::Format("[{0}]  {1}  ->  {2}", as->Name, Path::GetFileName(asmFile), PathUtil::MakeRelative(p->ProjectDir, objFile)));
+                    assemble->Command = mx->Expand(as->Cmd);
+                    assemble->Options = run;
+                    assemble->Source = asmFile; assemble->ToolName = as->Name; assemble->TargetName = tc->Name;
+                    assemble->Writes = objFile;
+                    assemble->Step = "assemble";
+                    if (emulated) assemble->Refused = as->Name + " refused the assembly - the emulator would run it, but it is not a TI program";
+                    step->Passes->Add(assemble);
                 }
+                steps->RemoveAll(gcnew Predicate<CompileStep^>(&BuildEngine::Empty));
+                if (RunSteps(steps, p->ProjectDir) != 0) return -1;
             }
             else
             {
@@ -944,6 +1146,40 @@ namespace Gride { namespace Services {
                 return -1;
             }
             mx->Set(ld->Macro, ld->Path);
+            // the Windows C runtime: GRIDE's own (its five layered libraries and kernel32.lib, by their paths - no LIB, no Visual
+            // Studio) or Microsoft's (libcmt and the UCRT, through LIB)
+            String^ crt = String::Empty;
+            if (!emulated && RideToolchain::HostCrt(t, "grt") != nullptr)
+            {
+                crt = WindowsRuntime(clObjects);
+                String^ libs = RideToolchain::CrtLibraries(t, debug, crt, tc->ToolDir, ToolchainSettings::RideRoot);
+                String^ where = RideToolchain::CrtDirectory(t, "grt", tc->ToolDir, ToolchainSettings::RideRoot);
+                if (libs == nullptr && settings->Env->EffectiveWindowsRuntime() == "auto" && VisualStudio::Find() != nullptr)
+                {
+                    Say("[GRIDE's C runtime is not in " + where + " - Microsoft's (Visual Studio's) is linked instead]");
+                    crt = "msvc";
+                    libs = RideToolchain::CrtLibraries(t, debug, crt, tc->ToolDir, ToolchainSettings::RideRoot);
+                }
+                if (libs == nullptr)
+                {
+                    Report(Severity::Error, nullptr, "GRIDE's C runtime is not there: grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib and kernel32.lib are looked for in " + where +
+                           " beside GRIDE (Setup installs them; Build Solution writes them into x64\\<Configuration>\\lib)");
+                    failedStep = "link";
+                    return -1;
+                }
+                // a library cl built names Microsoft's runtime by /DEFAULTLIB (libcmt, oldnames ...): with GRIDE's
+                // runtime those names are refused, and what cl's code calls beyond the C library is grtcompat's
+                if (crt == "grt") libs += MicrosoftRuntimeRefused;
+                mx->Set("CrtLibs", libs);
+                if (crt == "grt" && clObjects)
+                    Report(Severity::Warning, nullptr, "cl's objects name Microsoft's C runtime, and GRIDE's runtime is chosen (Tools > Options > Projects > GRIDE Paths, Windows C runtime): they may not link");
+                if (!crtSaid)
+                {
+                    crtSaid = true;
+                    Say(crt == "grt" ? "[GRIDE's C runtime: grtstart, grtcompat, grtcxx, grtc, grtwin and kernel32.lib from " + where + " - no Visual Studio or Windows SDK library]"
+                                     : "[Microsoft's C runtime: " + RideToolchain::CrtLibraries(t, debug, crt, tc->ToolDir, ToolchainSettings::RideRoot) + ", found through LIB]");
+                }
+            }
             // every object cl's: they name their own C runtime (/DEFAULTLIB from /MT, /MTd, /MD ...), so no CRT list is added to theirs
             if (!emulated && clObjects && !otherObjects && ld->Role != "linker")
             {
@@ -951,7 +1187,7 @@ namespace Gride { namespace Services {
                 Say("[cl's objects name their own C runtime - " + ld->Name + " takes it from them, no CRT list is added]");
             }
             int linked = emulated ? TiLink(p, cfg, tc, mx, run, ld, objects, program, debug, shalimarProgram, native)
-                                  : HostLink(p, tc, mx, run, ld, objects, program, shalimarProgram || unit->Count > 0, debug);
+                                  : HostLink(p, tc, mx, run, ld, objects, program, shalimarProgram || unit->Count > 0, debug, crt);
             if (linked != 0) { failedStep = "link"; return -1; }
             summary->Program = program;
             return 1;
@@ -960,12 +1196,14 @@ namespace Gride { namespace Services {
         // the host link: "$ linking with link.exe", then "[built <program>]"; a Shalimar program takes its
         // runtime library first (RIDE's shalimar links it itself; here the objects are linked), the
         // configuration's one - the Debug runtime is the one with the session in it
-        int HostLink(GrideProject^ p, ToolchainSettings^ tc, MacroExpander^ mx, ToolRunOptions^ run, Step^ ld, List<String^>^ objects, String^ program, bool shalimarProgram, bool debug)
+        int HostLink(GrideProject^ p, ToolchainSettings^ tc, MacroExpander^ mx, ToolRunOptions^ run, Step^ ld, List<String^>^ objects, String^ program, bool shalimarProgram, bool debug,
+                     String^ crt)
         {
             if (shalimarProgram)
             {
-                LibraryDefinition^ lib = ToolchainDefinitions::Current->LibraryByKind(RideToolchain::Arch(tc->TargetKind), "shalimarRuntime");
-                String^ shm = RideToolchain::HostShalimarRuntime(tc->TargetKind, debug, tc->ToolDir, ToolchainSettings::RideRoot);
+                // the Shalimar runtime built for the C runtime in force (shmrt-x86_64-windows-grt.lib over GRIDE's)
+                LibraryDefinition^ lib = ToolchainDefinitions::Current->LibraryByKind(RideToolchain::Arch(tc->TargetKind), "shalimarRuntime", crt);
+                String^ shm = RideToolchain::HostShalimarRuntime(tc->TargetKind, debug, tc->ToolDir, ToolchainSettings::RideRoot, crt);
                 if (shm != nullptr)
                 {
                     String^ libs;

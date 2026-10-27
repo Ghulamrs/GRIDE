@@ -551,5 +551,11 @@ ClassDecl* cloneClassDecl(const ClassDecl* k, CxxArena& arena)
     return c.classDecl(k);
 }
 
+Expr* cloneExpr(const Expr* e, CxxArena& arena)
+{
+    Cloner c(arena);
+    return c.expr(e);
+}
+
 } // namespace cxx
 } // namespace cppparse

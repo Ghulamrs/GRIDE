@@ -1,0 +1,17 @@
+// iosfwd - cppparse's C++98 library: the names of the stream library (27.2): char_traits, allocator, the stream
+// positions, and the stream class templates with their typedefs. Its stream names are typedefs of templates, which
+// cppparse must see defined before it names a specialisation (a specialisation named before the definition stays
+// incomplete), so this header includes the stream headers instead of declaring the templates.
+#ifndef CPPPARSE_IOSFWD
+#define CPPPARSE_IOSFWD
+
+#include <__allocator>
+#include <__char_traits>
+#include <ios>
+#include <streambuf>
+#include <istream>
+#include <ostream>
+#include <sstream>
+#include <fstream>
+
+#endif

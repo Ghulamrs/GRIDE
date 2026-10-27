@@ -1,0 +1,56 @@
+// utility - cppparse's C++98 library: pair, make_pair and swap.
+#ifndef CPPPARSE_UTILITY
+#define CPPPARSE_UTILITY
+
+namespace std {
+
+template <class T>
+void swap(T& a, T& b)
+{
+    T t(a);
+    a = b;
+    b = t;
+}
+
+template <class A, class B>
+struct pair {
+    typedef A first_type;
+    typedef B second_type;
+    A first;
+    B second;
+    pair() : first(), second() {}
+    pair(const A& a, const B& b) : first(a), second(b) {}
+    pair(const pair& o) : first(o.first), second(o.second) {}
+    template <class U, class W> pair(const pair<U, W>& o) : first(o.first), second(o.second) {}   // pair<K, V> to map's pair<const K, V> (20.2.2)
+    pair& operator=(const pair& o) { first = o.first; second = o.second; return *this; }
+};
+
+template <class A, class B>
+pair<A, B> make_pair(A a, B b)
+{
+    return pair<A, B>(a, b);
+}
+
+template <class A, class B>
+bool operator==(const pair<A, B>& x, const pair<A, B>& y)
+{
+    return x.first == y.first && x.second == y.second;
+}
+
+template <class A, class B>
+bool operator!=(const pair<A, B>& x, const pair<A, B>& y)
+{
+    return !(x == y);
+}
+
+template <class A, class B>
+bool operator<(const pair<A, B>& x, const pair<A, B>& y)
+{
+    if (x.first < y.first) return true;
+    if (y.first < x.first) return false;
+    return x.second < y.second;
+}
+
+}
+
+#endif

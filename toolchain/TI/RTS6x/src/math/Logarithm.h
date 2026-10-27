@@ -12,6 +12,7 @@ class Logarithm {
 public:
     static double natural(double x);    // log
     static double common(double x);     // log10
+    static double binary(double x);     // log2
     // ln x = the result + lo, x finite and above zero (subnormal allowed): about 2^-70 relative.
     static double kernel(double x, double &lo);
 

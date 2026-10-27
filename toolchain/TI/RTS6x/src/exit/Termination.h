@@ -22,7 +22,15 @@ public:
     static void abort();
 
 private:
+#if defined(_WIN32)
+    // GRIDE's runtime for Windows (toolchain\Windows\RT): abort ends a program as the Microsoft runtime's
+    // Release build does, by the fast fail, whose exit code 0xC0000409 is the status __rts6x_halt is given
+    // (win\halt.asm takes it as the sign to fail fast). The list holds every static object's destructor a
+    // C++ program registers, as that runtime's grows to.
+    enum { Capacity = 4096, AbortStatus = -1073740791 };
+#else
     enum { Capacity = 64, AbortStatus = 134 };
+#endif
     struct Entry {
         void (*plain)(void);
         void (*withObject)(void *);

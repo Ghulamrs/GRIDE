@@ -1,0 +1,72 @@
+// cwchar - cppparse's C++98 library: the wide-character functions of MSVC's C runtime (wchar_t is 16 bits).
+#ifndef CPPPARSE_CWCHAR
+#define CPPPARSE_CWCHAR
+
+#include <cstddef>
+#include <cstdio>
+
+typedef unsigned short wint_t;
+typedef int            mbstate_t;
+#define WEOF ((wint_t)0xffff)
+#ifndef WCHAR_MIN
+#define WCHAR_MIN 0
+#define WCHAR_MAX 0xffff
+#endif
+
+extern "C" {
+    size_t   wcslen(const wchar_t* s);
+    int      wcscmp(const wchar_t* a, const wchar_t* b);
+    int      wcsncmp(const wchar_t* a, const wchar_t* b, size_t n);
+    wchar_t* wcscpy(wchar_t* dst, const wchar_t* src);
+    wchar_t* wcsncpy(wchar_t* dst, const wchar_t* src, size_t n);
+    wchar_t* wcscat(wchar_t* dst, const wchar_t* src);
+    wchar_t* wcsncat(wchar_t* dst, const wchar_t* src, size_t n);
+    wchar_t* wcschr(const wchar_t* s, wchar_t c);
+    wchar_t* wcsrchr(const wchar_t* s, wchar_t c);
+    wchar_t* wcsstr(const wchar_t* s, const wchar_t* sub);
+    size_t   wcsspn(const wchar_t* s, const wchar_t* accept);
+    size_t   wcscspn(const wchar_t* s, const wchar_t* reject);
+    wchar_t* wmemcpy(wchar_t* dst, const wchar_t* src, size_t n);
+    wchar_t* wmemmove(wchar_t* dst, const wchar_t* src, size_t n);
+    wchar_t* wmemset(wchar_t* dst, wchar_t c, size_t n);
+    int      wmemcmp(const wchar_t* a, const wchar_t* b, size_t n);
+    wchar_t* wmemchr(const wchar_t* s, wchar_t c, size_t n);
+    long     wcstol(const wchar_t* s, wchar_t** end, int base);
+    unsigned long wcstoul(const wchar_t* s, wchar_t** end, int base);
+    double   wcstod(const wchar_t* s, wchar_t** end);
+    size_t   mbrlen(const char* s, size_t n, mbstate_t* state);
+    size_t   mbrtowc(wchar_t* out, const char* s, size_t n, mbstate_t* state);
+    size_t   wcrtomb(char* out, wchar_t c, mbstate_t* state);
+    size_t   mbstowcs(wchar_t* dst, const char* src, size_t n);
+    size_t   wcstombs(char* dst, const wchar_t* src, size_t n);
+    int      mbtowc(wchar_t* out, const char* s, size_t n);
+    int      wctomb(char* out, wchar_t c);
+    wint_t   btowc(int c);
+    int      wctob(wint_t c);
+    wint_t   fgetwc(FILE* f);
+    wint_t   fputwc(wchar_t c, FILE* f);
+    wchar_t* fgetws(wchar_t* buf, int n, FILE* f);
+    int      fputws(const wchar_t* s, FILE* f);
+    wint_t   getwc(FILE* f);
+    wint_t   putwc(wchar_t c, FILE* f);
+    wint_t   getwchar(void);
+    wint_t   putwchar(wchar_t c);
+    wint_t   ungetwc(wint_t c, FILE* f);
+    int      wprintf(const wchar_t* format, ...);
+    int      fwprintf(FILE* f, const wchar_t* format, ...);
+    int      wscanf(const wchar_t* format, ...);
+    int      fwscanf(FILE* f, const wchar_t* format, ...);
+}
+
+namespace std {
+    using ::wint_t; using ::mbstate_t;
+    using ::wcslen; using ::wcscmp; using ::wcsncmp; using ::wcscpy; using ::wcsncpy; using ::wcscat; using ::wcsncat;
+    using ::wcschr; using ::wcsrchr; using ::wcsstr; using ::wcsspn; using ::wcscspn;
+    using ::wmemcpy; using ::wmemmove; using ::wmemset; using ::wmemcmp; using ::wmemchr;
+    using ::wcstol; using ::wcstoul; using ::wcstod;
+    using ::mbrlen; using ::mbrtowc; using ::wcrtomb; using ::mbstowcs; using ::wcstombs; using ::mbtowc; using ::wctomb; using ::btowc; using ::wctob;
+    using ::fgetwc; using ::fputwc; using ::fgetws; using ::fputws; using ::getwc; using ::putwc; using ::getwchar; using ::putwchar; using ::ungetwc;
+    using ::wprintf; using ::fwprintf; using ::wscanf; using ::fwscanf;
+}
+
+#endif

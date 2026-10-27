@@ -1,0 +1,74 @@
+// iomanip - cppparse's C++98 library: the parameterised manipulators (27.6.3): setw, setfill, setprecision,
+// setbase, setiosflags and resetiosflags, as small objects the stream operators apply. Each operator is a template
+// for any stream, and a plain function for the char and wchar_t streams as well, which takes the streams derived
+// from them (cppparse deduces no template argument from a derived class).
+#ifndef CPPPARSE_IOMANIP
+#define CPPPARSE_IOMANIP
+
+#include <ios>
+#include <istream>
+#include <ostream>
+
+namespace std {
+
+struct __iomanip_width { streamsize n; };
+template <class charT> struct __iomanip_fill { charT c; };
+struct __iomanip_precision { streamsize n; };
+struct __iomanip_base { int base; };
+struct __iomanip_setflags { ios_base::fmtflags f; };
+struct __iomanip_resetflags { ios_base::fmtflags f; };
+
+inline __iomanip_width setw(streamsize n) { __iomanip_width m; m.n = n; return m; }
+template <class charT> __iomanip_fill<charT> setfill(charT c) { __iomanip_fill<charT> m; m.c = c; return m; }
+inline __iomanip_precision setprecision(streamsize n) { __iomanip_precision m; m.n = n; return m; }
+inline __iomanip_base setbase(int base) { __iomanip_base m; m.base = base; return m; }
+inline __iomanip_setflags setiosflags(ios_base::fmtflags f) { __iomanip_setflags m; m.f = f; return m; }
+inline __iomanip_resetflags resetiosflags(ios_base::fmtflags f) { __iomanip_resetflags m; m.f = f; return m; }
+
+inline void __apply(ios_base& b, __iomanip_width m) { b.width(m.n); }
+inline void __apply(ios_base& b, __iomanip_precision m) { b.precision(m.n); }
+inline void __apply(ios_base& b, __iomanip_base m) { b.setf(m.base == 16 ? ios_base::hex : m.base == 8 ? ios_base::oct : m.base == 10 ? ios_base::dec : 0, ios_base::basefield); }
+inline void __apply(ios_base& b, __iomanip_setflags m) { b.setf(m.f); }
+inline void __apply(ios_base& b, __iomanip_resetflags m) { b.setf(ios_base::fmtflags(0), m.f); }
+
+template <class charT, class traits> basic_ostream<charT, traits>& operator<<(basic_ostream<charT, traits>& o, __iomanip_width m) { __apply(o, m); return o; }
+template <class charT, class traits> basic_ostream<charT, traits>& operator<<(basic_ostream<charT, traits>& o, __iomanip_fill<charT> m) { o.fill(m.c); return o; }
+template <class charT, class traits> basic_ostream<charT, traits>& operator<<(basic_ostream<charT, traits>& o, __iomanip_precision m) { __apply(o, m); return o; }
+template <class charT, class traits> basic_ostream<charT, traits>& operator<<(basic_ostream<charT, traits>& o, __iomanip_base m) { __apply(o, m); return o; }
+template <class charT, class traits> basic_ostream<charT, traits>& operator<<(basic_ostream<charT, traits>& o, __iomanip_setflags m) { __apply(o, m); return o; }
+template <class charT, class traits> basic_ostream<charT, traits>& operator<<(basic_ostream<charT, traits>& o, __iomanip_resetflags m) { __apply(o, m); return o; }
+template <class charT, class traits> basic_istream<charT, traits>& operator>>(basic_istream<charT, traits>& i, __iomanip_width m) { __apply(i, m); return i; }
+template <class charT, class traits> basic_istream<charT, traits>& operator>>(basic_istream<charT, traits>& i, __iomanip_fill<charT> m) { i.fill(m.c); return i; }
+template <class charT, class traits> basic_istream<charT, traits>& operator>>(basic_istream<charT, traits>& i, __iomanip_precision m) { __apply(i, m); return i; }
+template <class charT, class traits> basic_istream<charT, traits>& operator>>(basic_istream<charT, traits>& i, __iomanip_base m) { __apply(i, m); return i; }
+template <class charT, class traits> basic_istream<charT, traits>& operator>>(basic_istream<charT, traits>& i, __iomanip_setflags m) { __apply(i, m); return i; }
+template <class charT, class traits> basic_istream<charT, traits>& operator>>(basic_istream<charT, traits>& i, __iomanip_resetflags m) { __apply(i, m); return i; }
+
+inline ostream& operator<<(ostream& o, __iomanip_width m) { __apply(o, m); return o; }
+inline ostream& operator<<(ostream& o, __iomanip_fill<char> m) { o.fill(m.c); return o; }
+inline ostream& operator<<(ostream& o, __iomanip_precision m) { __apply(o, m); return o; }
+inline ostream& operator<<(ostream& o, __iomanip_base m) { __apply(o, m); return o; }
+inline ostream& operator<<(ostream& o, __iomanip_setflags m) { __apply(o, m); return o; }
+inline ostream& operator<<(ostream& o, __iomanip_resetflags m) { __apply(o, m); return o; }
+inline wostream& operator<<(wostream& o, __iomanip_width m) { __apply(o, m); return o; }
+inline wostream& operator<<(wostream& o, __iomanip_fill<wchar_t> m) { o.fill(m.c); return o; }
+inline wostream& operator<<(wostream& o, __iomanip_precision m) { __apply(o, m); return o; }
+inline wostream& operator<<(wostream& o, __iomanip_base m) { __apply(o, m); return o; }
+inline wostream& operator<<(wostream& o, __iomanip_setflags m) { __apply(o, m); return o; }
+inline wostream& operator<<(wostream& o, __iomanip_resetflags m) { __apply(o, m); return o; }
+inline istream& operator>>(istream& i, __iomanip_width m) { __apply(i, m); return i; }
+inline istream& operator>>(istream& i, __iomanip_fill<char> m) { i.fill(m.c); return i; }
+inline istream& operator>>(istream& i, __iomanip_precision m) { __apply(i, m); return i; }
+inline istream& operator>>(istream& i, __iomanip_base m) { __apply(i, m); return i; }
+inline istream& operator>>(istream& i, __iomanip_setflags m) { __apply(i, m); return i; }
+inline istream& operator>>(istream& i, __iomanip_resetflags m) { __apply(i, m); return i; }
+inline wistream& operator>>(wistream& i, __iomanip_width m) { __apply(i, m); return i; }
+inline wistream& operator>>(wistream& i, __iomanip_fill<wchar_t> m) { i.fill(m.c); return i; }
+inline wistream& operator>>(wistream& i, __iomanip_precision m) { __apply(i, m); return i; }
+inline wistream& operator>>(wistream& i, __iomanip_base m) { __apply(i, m); return i; }
+inline wistream& operator>>(wistream& i, __iomanip_setflags m) { __apply(i, m); return i; }
+inline wistream& operator>>(wistream& i, __iomanip_resetflags m) { __apply(i, m); return i; }
+
+}
+
+#endif

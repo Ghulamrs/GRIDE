@@ -1,0 +1,168 @@
+// functional - cppparse's C++98 library: the function objects (20.3): arithmetic, comparison and logical
+// functors, the negators, the binders, the adaptors of function pointers and of member functions.
+#ifndef CPPPARSE_FUNCTIONAL
+#define CPPPARSE_FUNCTIONAL
+
+namespace std {
+
+template <class A, class R> struct unary_function { typedef A argument_type; typedef R result_type; };
+template <class A, class B, class R> struct binary_function { typedef A first_argument_type; typedef B second_argument_type; typedef R result_type; };
+
+template <class T> struct plus : public binary_function<T, T, T> { T operator()(const T& a, const T& b) const { return a + b; } };
+template <class T> struct minus : public binary_function<T, T, T> { T operator()(const T& a, const T& b) const { return a - b; } };
+template <class T> struct multiplies : public binary_function<T, T, T> { T operator()(const T& a, const T& b) const { return a * b; } };
+template <class T> struct divides : public binary_function<T, T, T> { T operator()(const T& a, const T& b) const { return a / b; } };
+template <class T> struct modulus : public binary_function<T, T, T> { T operator()(const T& a, const T& b) const { return a % b; } };
+template <class T> struct negate : public unary_function<T, T> { T operator()(const T& a) const { return -a; } };
+
+template <class T> struct equal_to : public binary_function<T, T, bool> { bool operator()(const T& a, const T& b) const { return a == b; } };
+template <class T> struct not_equal_to : public binary_function<T, T, bool> { bool operator()(const T& a, const T& b) const { return a != b; } };
+template <class T> struct greater : public binary_function<T, T, bool> { bool operator()(const T& a, const T& b) const { return b < a; } };
+template <class T> struct less : public binary_function<T, T, bool> { bool operator()(const T& a, const T& b) const { return a < b; } };
+template <class T> struct greater_equal : public binary_function<T, T, bool> { bool operator()(const T& a, const T& b) const { return !(a < b); } };
+template <class T> struct less_equal : public binary_function<T, T, bool> { bool operator()(const T& a, const T& b) const { return !(b < a); } };
+
+template <class T> struct logical_and : public binary_function<T, T, bool> { bool operator()(const T& a, const T& b) const { return a && b; } };
+template <class T> struct logical_or : public binary_function<T, T, bool> { bool operator()(const T& a, const T& b) const { return a || b; } };
+template <class T> struct logical_not : public unary_function<T, bool> { bool operator()(const T& a) const { return !a; } };
+
+template <class P>
+class unary_negate : public unary_function<typename P::argument_type, bool> {
+public:
+    explicit unary_negate(const P& p) : m_p(p) {}
+    bool operator()(const typename P::argument_type& a) const { return !m_p(a); }
+private:
+    P m_p;
+};
+template <class P> unary_negate<P> not1(const P& p) { return unary_negate<P>(p); }
+
+template <class P>
+class binary_negate : public binary_function<typename P::first_argument_type, typename P::second_argument_type, bool> {
+public:
+    explicit binary_negate(const P& p) : m_p(p) {}
+    bool operator()(const typename P::first_argument_type& a, const typename P::second_argument_type& b) const { return !m_p(a, b); }
+private:
+    P m_p;
+};
+template <class P> binary_negate<P> not2(const P& p) { return binary_negate<P>(p); }
+
+template <class F>
+class binder1st : public unary_function<typename F::second_argument_type, typename F::result_type> {
+public:
+    binder1st(const F& f, const typename F::first_argument_type& a) : m_f(f), m_a(a) {}
+    typename F::result_type operator()(const typename F::second_argument_type& b) const { return m_f(m_a, b); }
+    typename F::result_type operator()(typename F::second_argument_type& b) const { return m_f(m_a, b); }
+private:
+    F m_f;
+    typename F::first_argument_type m_a;
+};
+template <class F, class A> binder1st<F> bind1st(const F& f, const A& a) { return binder1st<F>(f, typename F::first_argument_type(a)); }
+
+template <class F>
+class binder2nd : public unary_function<typename F::first_argument_type, typename F::result_type> {
+public:
+    binder2nd(const F& f, const typename F::second_argument_type& b) : m_f(f), m_b(b) {}
+    typename F::result_type operator()(const typename F::first_argument_type& a) const { return m_f(a, m_b); }
+    typename F::result_type operator()(typename F::first_argument_type& a) const { return m_f(a, m_b); }
+private:
+    F m_f;
+    typename F::second_argument_type m_b;
+};
+template <class F, class B> binder2nd<F> bind2nd(const F& f, const B& b) { return binder2nd<F>(f, typename F::second_argument_type(b)); }
+
+template <class A, class R>
+class pointer_to_unary_function : public unary_function<A, R> {
+public:
+    explicit pointer_to_unary_function(R (*f)(A)) : m_f(f) {}
+    R operator()(A a) const { return m_f(a); }
+private:
+    R (*m_f)(A);
+};
+template <class A, class B, class R>
+class pointer_to_binary_function : public binary_function<A, B, R> {
+public:
+    explicit pointer_to_binary_function(R (*f)(A, B)) : m_f(f) {}
+    R operator()(A a, B b) const { return m_f(a, b); }
+private:
+    R (*m_f)(A, B);
+};
+template <class A, class R> pointer_to_unary_function<A, R> ptr_fun(R (*f)(A)) { return pointer_to_unary_function<A, R>(f); }
+template <class A, class B, class R> pointer_to_binary_function<A, B, R> ptr_fun(R (*f)(A, B)) { return pointer_to_binary_function<A, B, R>(f); }
+
+template <class R, class T>
+class mem_fun_t : public unary_function<T*, R> {
+public:
+    explicit mem_fun_t(R (T::*m)()) : m_m(m) {}
+    R operator()(T* p) const { return (p->*m_m)(); }
+private:
+    R (T::*m_m)();
+};
+template <class R, class T, class A>
+class mem_fun1_t : public binary_function<T*, A, R> {
+public:
+    explicit mem_fun1_t(R (T::*m)(A)) : m_m(m) {}
+    R operator()(T* p, A a) const { return (p->*m_m)(a); }
+private:
+    R (T::*m_m)(A);
+};
+template <class R, class T>
+class const_mem_fun_t : public unary_function<const T*, R> {
+public:
+    explicit const_mem_fun_t(R (T::*m)() const) : m_m(m) {}
+    R operator()(const T* p) const { return (p->*m_m)(); }
+private:
+    R (T::*m_m)() const;
+};
+template <class R, class T, class A>
+class const_mem_fun1_t : public binary_function<const T*, A, R> {
+public:
+    explicit const_mem_fun1_t(R (T::*m)(A) const) : m_m(m) {}
+    R operator()(const T* p, A a) const { return (p->*m_m)(a); }
+private:
+    R (T::*m_m)(A) const;
+};
+template <class R, class T> mem_fun_t<R, T> mem_fun(R (T::*m)()) { return mem_fun_t<R, T>(m); }
+template <class R, class T, class A> mem_fun1_t<R, T, A> mem_fun(R (T::*m)(A)) { return mem_fun1_t<R, T, A>(m); }
+template <class R, class T> const_mem_fun_t<R, T> mem_fun(R (T::*m)() const) { return const_mem_fun_t<R, T>(m); }
+template <class R, class T, class A> const_mem_fun1_t<R, T, A> mem_fun(R (T::*m)(A) const) { return const_mem_fun1_t<R, T, A>(m); }
+
+template <class R, class T>
+class mem_fun_ref_t : public unary_function<T, R> {
+public:
+    explicit mem_fun_ref_t(R (T::*m)()) : m_m(m) {}
+    R operator()(T& r) const { return (r.*m_m)(); }
+private:
+    R (T::*m_m)();
+};
+template <class R, class T, class A>
+class mem_fun1_ref_t : public binary_function<T, A, R> {
+public:
+    explicit mem_fun1_ref_t(R (T::*m)(A)) : m_m(m) {}
+    R operator()(T& r, A a) const { return (r.*m_m)(a); }
+private:
+    R (T::*m_m)(A);
+};
+template <class R, class T>
+class const_mem_fun_ref_t : public unary_function<T, R> {
+public:
+    explicit const_mem_fun_ref_t(R (T::*m)() const) : m_m(m) {}
+    R operator()(const T& r) const { return (r.*m_m)(); }
+private:
+    R (T::*m_m)() const;
+};
+template <class R, class T, class A>
+class const_mem_fun1_ref_t : public binary_function<T, A, R> {
+public:
+    explicit const_mem_fun1_ref_t(R (T::*m)(A) const) : m_m(m) {}
+    R operator()(const T& r, A a) const { return (r.*m_m)(a); }
+private:
+    R (T::*m_m)(A) const;
+};
+template <class R, class T> mem_fun_ref_t<R, T> mem_fun_ref(R (T::*m)()) { return mem_fun_ref_t<R, T>(m); }
+template <class R, class T, class A> mem_fun1_ref_t<R, T, A> mem_fun_ref(R (T::*m)(A)) { return mem_fun1_ref_t<R, T, A>(m); }
+template <class R, class T> const_mem_fun_ref_t<R, T> mem_fun_ref(R (T::*m)() const) { return const_mem_fun_ref_t<R, T>(m); }
+template <class R, class T, class A> const_mem_fun1_ref_t<R, T, A> mem_fun_ref(R (T::*m)(A) const) { return const_mem_fun1_ref_t<R, T, A>(m); }
+
+}
+
+#endif

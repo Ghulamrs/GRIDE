@@ -68,6 +68,8 @@ namespace Gride
             breakpoints = gcnew Dictionary<String^, SortedSet<int>^>(StringComparer::OrdinalIgnoreCase);
             debugger = nullptr;
             stoppedIn = nullptr;
+            debugAtEntry = false;
+            programLineLast = false;
             parser = gcnew ErrorParser();
             runner = gcnew ProgramRunner(gcnew Action<String^>(this, &MainForm::EnqueueOutput), gcnew Action<int, bool>(this, &MainForm::OnProgramExited));
             untitledCounter = 0;
@@ -163,6 +165,8 @@ namespace Gride
         ProgramRunner^ runner;              // the program running in the Output pane (RIDE's window)
         CancellationTokenSource^ verifyCts; // a Verify running on its own thread
         bool verifying;
+        bool debugAtEntry;                  // the build for the debugger was F7 / F6's: the session stops at main's first line
+        bool programLineLast;               // the Output's last line is the debugged program's, which its rest may go on
 
         // ------------------------------------------------------------ controls
         MenuStrip^ menu;
@@ -762,8 +766,9 @@ namespace Gride
             miDebugStart->Enabled = stopped || (canRun && !debugging);
             miDebugStart->Text = stopped ? "&Continue" : "Start / &Continue Debugging";
             miToggleBreakpoint->Enabled = ed != nullptr && ed->FilePath != nullptr;
-            miStepOver->Enabled = stopped;
-            miStepInto->Enabled = stopped;
+            // with nothing debugged they build, start and stop at main's first line (Visual Studio's way)
+            miStepOver->Enabled = stopped || (canRun && !debugging);
+            miStepInto->Enabled = stopped || (canRun && !debugging);
             miStepOut->Enabled = stopped;
             miRunToCursor->Enabled = stopped && ed != nullptr && ed->FilePath != nullptr;
             miUpStack->Enabled = stopped;
@@ -2115,6 +2120,12 @@ namespace Gride
         void OnDebugStart(Object^ sender, EventArgs^ e)
         {
             if (debugger != nullptr && debugger->State == DebugState::Break) { debugger->Continue(); return; }
+            StartBuildForDebugger(false);
+        }
+
+        // the build for the debugger; atEntry: F7 / F6 with nothing debugged, which stop at main's first line
+        void StartBuildForDebugger(bool atEntry)
+        {
             if (debugger != nullptr && debugger->IsActive) return;
             if (busy || ProgramBusy()) return;
             if (project == nullptr) { Ui::Info(this, "Open or create a project first."); return; }
@@ -2129,6 +2140,7 @@ namespace Gride
             }
             if (!PrepareBuild()) return;
             BuildJob^ job = MakeJob(JobKind::BuildAndDebug);
+            debugAtEntry = atEntry;
             SetStatus("Build started (for the debugger)...");
             StartJob(job, true);
         }
@@ -2149,25 +2161,45 @@ namespace Gride
             d->StateChanged += gcnew DebugStateHandler(this, &MainForm::OnDebuggerState);
             d->Stopped += gcnew DebugStopHandler(this, &MainForm::OnDebuggerStopped);
             d->Output += gcnew TextLineHandler(this, &MainForm::OnDebuggerLine);
-            d->ProgramOutput += gcnew TextLineHandler(this, &MainForm::EnqueueOutput);
+            d->ProgramOutput += gcnew TextLineHandler(this, &MainForm::OnDebugProgramLine);
             d->SetBreakpoints(breakpoints);
             List<String^>^ files = gcnew List<String^>();
             for each (String^ f in project->SourceFiles) files->Add(project->ResolvePath(f));
             d->SetSourceFiles(files);
             debugger = d;
+            programLineLast = false;
             localsPane->ClearView();
             watchPane->UpdateFrom(d);
             SetStatus(String::Format("debugging with {0}", l->Backend));
-            if (!d->Start(l->Program, project->TargetValue, nullptr, 0))
+            // the program's input line, when its debugger hands input over; the editor keeps the focus (F7 / F6
+            // go on working), and what is typed comes back as the program's console echoes it
+            if (d->TakesInput && !ProgramBusy()) txtInput->Enabled = true;
+            String^ entryFile = nullptr;
+            int entryLine = 0;
+            d->StopAtEntry = debugAtEntry && DebuggerChoice::EntryOf(project, entryFile, entryLine);
+            if (debugAtEntry && !d->StopAtEntry) EnqueueOutput("[debug] no main() in the project's sources - running to a breakpoint or the end");
+            debugAtEntry = false;
+            if (!d->Start(l->Program, project->TargetValue, entryFile, entryLine))
             {
                 SetStatus("the debugger did not start - see the Output pane");
                 debugger = nullptr;
                 watchPane->ClearView();
+                if (!ProgramBusy()) txtInput->Enabled = false;
             }
             UpdateUi();
         }
 
-        void OnDebuggerLine(String^ line) { EnqueueOutput(String::Concat("[debug] ", line)); }
+        void OnDebuggerLine(String^ line) { programLineLast = false; EnqueueOutput(String::Concat("[debug] ", line)); }
+
+        // the program's own lines, as heard through the debugger: the rest of a line it had not finished goes
+        // on that line while nothing else was written after it (FlushQueues joins it)
+        void OnDebugProgramLine(String^ line)
+        {
+            String^ rest;
+            bool continues = DebugEngine::Continues(line, rest);
+            EnqueueOutput(continues && programLineLast ? String::Concat(DebugEngine::ContinuedMark, rest) : rest);
+            programLineLast = true;
+        }
 
         void OnDebuggerState(DebugState state)
         {
@@ -2178,6 +2210,7 @@ namespace Gride
             if (state == DebugState::Idle)
             {
                 ClearStopArrow();
+                if (!ProgramBusy()) txtInput->Enabled = false;
                 localsPane->ClearView();
                 callStackPane->ClearView();
                 registersPane->ClearView();
@@ -2240,8 +2273,18 @@ namespace Gride
             memoryPane->UpdateFrom(d);
         }
 
-        void OnStepOver(Object^ sender, EventArgs^ e) { if (debugger != nullptr && debugger->State == DebugState::Break) debugger->StepOver(); }
-        void OnStepInto(Object^ sender, EventArgs^ e) { if (debugger != nullptr && debugger->State == DebugState::Break) debugger->StepInto(); }
+        // F7 / F6 when stopped step; with nothing debugged they build, start and stop at main's first line; while
+        // the program runs they wait for the next stop
+        void OnStepOver(Object^ sender, EventArgs^ e)
+        {
+            if (debugger != nullptr && debugger->State == DebugState::Break) debugger->StepOver();
+            else StartBuildForDebugger(true);
+        }
+        void OnStepInto(Object^ sender, EventArgs^ e)
+        {
+            if (debugger != nullptr && debugger->State == DebugState::Break) debugger->StepInto();
+            else StartBuildForDebugger(true);
+        }
         void OnStepOut(Object^ sender, EventArgs^ e) { if (debugger != nullptr && debugger->State == DebugState::Break) debugger->StepOut(); }
 
         void OnRunToCursor(Object^ sender, EventArgs^ e)
@@ -2539,9 +2582,22 @@ namespace Gride
             UpdateUi();
         }
 
-        // the input line: Enter hands the line to the program (and shows it, as a console echoes), Ctrl+Z ends its input
+        // the input line: Enter hands the line to the program (and shows it, as a console echoes), Ctrl+Z ends its
+        // input; under a debugger that hands input over, the line goes to the program being debugged, whose console
+        // echoes it among the program's lines
         void OnInputKeyDown(Object^ sender, KeyEventArgs^ e)
         {
+            DebugEngine^ d = debugger;
+            if (d != nullptr && d->IsActive && d->TakesInput && !ProgramBusy())
+            {
+                if (e->KeyCode != Keys::Enter) return;
+                e->SuppressKeyPress = true;
+                String^ typed = txtInput->Text;
+                txtInput->Clear();
+                programLineLast = false;
+                if (!d->SendInput(typed)) SetStatus("The program being debugged could not be given that line");
+                return;
+            }
             if (e->Control && e->KeyCode == Keys::Z)
             {
                 e->SuppressKeyPress = true;
@@ -2721,7 +2777,20 @@ namespace Gride
             StringBuilder^ sb = gcnew StringBuilder();
             String^ line;
             int lines = 0;
-            while (lines < 5000 && outQueue->TryDequeue(line)) { sb->Append(line)->Append("\r\n"); lines++; }
+            while (lines < 5000 && outQueue->TryDequeue(line))
+            {
+                lines++;
+                String^ rest;
+                if (!DebugEngine::Continues(line, rest)) { sb->Append(line)->Append("\r\n"); continue; }
+                // the rest of the program's unfinished line: on that line, before its line end
+                if (sb->Length >= 2) sb->Length -= 2;
+                else if (txtOutput->TextLength >= 2 && txtOutput->Text->EndsWith("\r\n"))
+                {
+                    txtOutput->Select(txtOutput->TextLength - 2, 2);
+                    txtOutput->SelectedText = String::Empty;
+                }
+                sb->Append(rest)->Append("\r\n");
+            }
             if (sb->Length > 0) txtOutput->AppendText(sb->ToString());
 
             BuildMessage^ m;
@@ -2741,7 +2810,7 @@ namespace Gride
             Color color = Color::DimGray;
             if (String::Equals(m->Severity, "error")) { type = "Error"; color = Color::Firebrick; errorCount++; }
             else if (String::Equals(m->Severity, "warning")) { type = "Warning"; color = Color::DarkOrange; warningCount++; }
-            String^ file = BuildMessage::Leaf(m->FilePath);
+            String^ file = String::IsNullOrEmpty(m->FilePath) ? String::Empty : Path::GetFileName(m->FilePath);
             String^ line = m->Line > 0 ? Convert::ToString(m->Line) : String::Empty;
             ListViewItem^ it = gcnew ListViewItem(gcnew array<String^>{
                 type, m->Code, m->Text, file, line, m->Tool == nullptr ? String::Empty : m->Tool });
@@ -3065,15 +3134,50 @@ namespace Gride
 
         void OnAbout(Object^ sender, EventArgs^ e)
         {
+            // cpp11 is asked for its version when the box opens, as White's About asks it: a number written
+            // here would be a second copy, and the stale one
+            ToolDefinition^ cpp11 = settings->GetTool(ToolIds::CompilerCpp11);
+            String^ exe = cpp11 == nullptr ? nullptr : cpp11->ResolvedPath();
+            String^ said = AskVersion(exe);
+            if (said->Length == 0) said = exe == nullptr ? "not found (Tools > Options > Toolchains)" : "no answer from " + exe;
             Ui::Info(this, String::Format(
                 "{0}  (version {1})\n\n"
-                "IDE for the C90, C++11 and Shalimar compilers.\n"
-                "Targets: Windows (MASM/LINK), Linux, macOS, TMS6747 DSP (ASM6x/LNK6x/RTS6747/VM6747).\n"
-                "Reads Code Composer Studio 7.4 / 5.5 projects and Visual Studio solutions (read-only).\n"
-                "Debugs with GRIDE's debuggers: sim6747 and vm6747, cdb (or lldb), a Shalimar program's own session.\n"
-                "Follows White's conventions; its Help is the one the three outlooks share, with the toolchain's manual (RIDE 5.17's).\n"
-                "Its example is cppparse, built with GRIDE's own cpp11, masm and link.\n\n"
-                "C++/CLI, .NET Framework 4.8, Windows Forms.", AppInfo::Name, AppInfo::Version));
+                "A 3-language, 4-target integrated development environment.\n\n"
+                "Languages:  C90 / C++11 / Shalimar\n"
+                "cpp11:  {2}\n"
+                "Targets:  Windows (MASM/LINK) / Linux / macOS / TMS320C6747\n"
+                "Debuggers:  gride-dbg / sim6747 / vm6747\n"
+                "Opens:  CCS 7.4 / 5.5 projects, Visual Studio solutions (read-only)\n\n"
+                ".NET Framework 4.8", AppInfo::Name, AppInfo::Version, said));
+        }
+
+        // the program's own words for `--version`: its banner without the copyright, then the version line cpp11
+        // writes beneath it ("C++03 with C++11 extensions, Version 1.30, sealed 23-10-2026"); empty when it cannot run
+        static String^ AskVersion(String^ exe)
+        {
+            if (String::IsNullOrEmpty(exe) || !File::Exists(exe)) return String::Empty;
+            try
+            {
+                System::Diagnostics::ProcessStartInfo^ si = gcnew System::Diagnostics::ProcessStartInfo(exe, "--version");
+                si->UseShellExecute = false; si->CreateNoWindow = true; si->RedirectStandardOutput = true; si->RedirectStandardInput = true;
+                si->StandardOutputEncoding = System::Text::Encoding::UTF8;
+                System::Diagnostics::Process^ p = System::Diagnostics::Process::Start(si);
+                p->StandardInput->Close();
+                String^ out = p->StandardOutput->ReadToEnd();
+                if (!p->WaitForExit(5000)) { try { p->Kill(); } catch (Exception^) { } return String::Empty; }
+                String^ banner = String::Empty;
+                String^ version = String::Empty;
+                for each (String^ raw in out->Split(gcnew array<wchar_t>{ L'\r', L'\n' }, StringSplitOptions::RemoveEmptyEntries))
+                {
+                    String^ line = raw->Trim();
+                    if (banner->Length == 0) banner = line;
+                    else if (version->Length == 0 && line->StartsWith("Version ")) version = line;
+                }
+                int owner = banner->IndexOf(" - ");
+                if (banner->Length > 0 && banner[0] == L'©' && owner > 0) banner = banner->Substring(owner + 3);
+                return version->Length == 0 ? banner : banner + ", " + version;
+            }
+            catch (Exception^) { return String::Empty; }
         }
 
         // ============================================================ drag & drop, closing

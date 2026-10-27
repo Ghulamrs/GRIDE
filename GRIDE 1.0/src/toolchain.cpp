@@ -461,10 +461,10 @@ bool emitsDebugInfo(ToolchainKind kind, const std::string& arch) {
     if (kind == ToolCxx) return true;
 
     // shalimar since D1 to D5 (2026-10-13, Compiler-Si's CLAUDE.md "Debug information for the debuggers
-    // GRIDE drives"): DWARF on the two GNU targets, CodeView on x86_64-windows through clang's assembler
-    // and link.exe /DEBUG, as c90's and cpp11's, and cl6x's .dwpsn for the C6000 as cpp11 writes it -
-    // which vm6747 --debug stops on, and sim6747 --run --debug through the .debug_line asm6x and lnk6x
-    // make of it.
+    // GRIDE drives"): DWARF on the two GNU targets, CodeView on x86_64-windows - its own MASM spelling
+    // since GRIDEx3, as c90's and cpp11's, for GRIDE's masm and link - and cl6x's .dwpsn for the C6000 as
+    // cpp11 writes it - which vm6747 --debug stops on, and sim6747 --run --debug through the .debug_line
+    // asm6x and lnk6x make of it.
     if (kind == ToolShc)
         return arch == "x86_64-linux" || arch == "arm64-darwin" || arch == "x86_64-windows" ||
                isEmulated(arch);
@@ -476,12 +476,26 @@ bool emitsDebugInfo(ToolchainKind kind, const std::string& arch) {
     return arch == "x86_64-linux" || arch == "arm64-darwin" || arch == "x86_64-windows";
 }
 
-// The CodeView path wants clang (the user, 2026-10-21: a Debug build on a Visual Studio without the
-// Clang tools had cpp11 refuse -masm=gnu): without it the build is the Release spelling, without -g,
-// masm and the linker making the program - and the debugger sees no lines.
 static bool wantsCodeView(ToolchainKind kind, const std::string& arch, Configuration config) {
     return config == ConfigDebug && arch == "x86_64-windows" &&
            (kind == ToolCc1 || kind == ToolCxx1 || kind == ToolShc) && emitsDebugInfo(kind, arch);
+}
+
+// The compilers that write their CodeView in the MASM spelling themselves - the .FILE and .LINE GRIDE's masm
+// makes a line table of: c90, shalimar, and cpp11 from 1.29 (GRIDEx3). One that does not takes clang's road.
+static bool writesOwnCodeView(ToolchainKind kind) {
+    return kind == ToolCc1 || kind == ToolCxx1 || kind == ToolShc;
+}
+
+bool ownCodeView(ToolchainKind kind, const std::string& arch, Configuration config) {
+    return wantsCodeView(kind, arch, config) && writesOwnCodeView(kind);
+}
+
+// Clang's road wants clang (the user, 2026-10-21: a Debug build on a Visual Studio without the Clang
+// tools had cpp11 refuse -masm=gnu): without it the build is the Release spelling, without -g, masm
+// and the linker making the program - and the debugger sees no lines.
+static bool wantsClang(ToolchainKind kind, const std::string& arch, Configuration config) {
+    return wantsCodeView(kind, arch, config) && !writesOwnCodeView(kind);
 }
 
 bool clangAvailable() {
@@ -503,13 +517,14 @@ bool clangAvailable() {
 }
 
 bool debugsWithCodeView(ToolchainKind kind, const std::string& arch, Configuration config) {
-    return wantsCodeView(kind, arch, config) && clangAvailable();
+    return wantsClang(kind, arch, config) && clangAvailable();
 }
 
 std::string lineTableNote(ToolchainKind kind, const std::string& arch, Configuration config) {
-    if (!wantsCodeView(kind, arch, config) || clangAvailable()) return std::string();
-    return "warning: clang not found - this Debug build has no source line table: masm and link make the "
-           "program, the debugger shows no lines (Visual Studio's \"C++ Clang tools for Windows\" add it)";
+    if (!wantsClang(kind, arch, config) || clangAvailable()) return std::string();
+    return "warning: " + std::string(toolchainName(kind)) + " writes no CodeView of its own and clang is not here "
+           "to carry it - this Debug build has no source line table: masm and link make the program, the "
+           "debugger shows no lines";
 }
 
 std::string configFlags(ToolchainKind kind, Configuration config,
@@ -520,8 +535,8 @@ std::string configFlags(ToolchainKind kind, Configuration config,
     // for shalimar off the emulator, where the runtime beside it is the release one.
     if (kind == ToolShc || kind == ToolCc1 || kind == ToolCxx1) {
         std::string flags = options::flags(options::active(), kind, config, arch);
-        // -g is CodeView here, which only clang's spelling carries: not without clang
-        if (wantsCodeView(kind, arch, config) && !clangAvailable()) {
+        // -g is CodeView here, which a compiler without its own carries only through clang: not without clang
+        if (wantsClang(kind, arch, config) && !clangAvailable()) {
             std::string kept;
             size_t at = 0;
             while (at < flags.size()) {
@@ -561,11 +576,16 @@ std::vector<std::string> debugNote(ToolchainKind kind, const std::string& arch) 
         said.push_back("about that one. What is below is the assembly the build produced,");
         said.push_back("read back out of itself; the editor stops at -S and assembles");
         said.push_back("nothing, so nothing has been linked or run.");
+    } else if (emitsDebugInfo(kind, arch) && arch == "x86_64-windows" && kind == ToolMsvc) {
+        said.push_back("cl writes CodeView for " + arch + " - line tables, types and objects -");
+        said.push_back("which link.exe /DEBUG makes a .pdb of, and gride-dbg or cdb reads. What");
+        said.push_back("is below is the assembly the build produced, read back out of itself.");
     } else if (emitsDebugInfo(kind, arch) && arch == "x86_64-windows") {
         said.push_back(std::string(toolchainName(kind)) + " writes CodeView for " + arch +
                        " - line tables, types and");
-        said.push_back("objects - which link.exe /DEBUG makes a .pdb of and cdb reads. What");
-        said.push_back("is below is the assembly the build produced, read back out of itself.");
+        said.push_back("objects - in the MASM spelling, which GRIDE's masm carries and GRIDE's link");
+        said.push_back("/DEBUG makes a .pdb of; gride-dbg, or cdb, reads it. What is below is the");
+        said.push_back("assembly the build produced, read back out of itself.");
     } else if (kind == ToolShc && isEmulated(arch)) {
         said.push_back("shalimar writes cl6x's .dwpsn before each statement for " + arch + " since D5");
         said.push_back("(2026-10-13) - the source position and nothing else, no types and no");
@@ -867,6 +887,16 @@ Recipe objectRecipe(const Toolchain& tool, ToolchainKind kind,
         return recipe;
     }
 
+    if (kind == ToolShc && arch == "x86_64-windows") {
+        // One compilation and one object: the file with main() and the files it calls into, which shalimar
+        // compiles as one, the object named so that it lands among the others.
+        objects.push_back(objectFor(objectDir, sources[0], ".obj"));
+        recipe.command = quote(programOf(tool, kind)) + named + " -c -o " + quote(objects[0]) +
+                         configFlags(kind, config, arch) + assemblerFlag(kind, arch, config);
+        recipe.leftovers = objects;
+        return recipe;
+    }
+
     recipe.command = "cd " + quote(objectDir) + " && " +
                      quote(programOf(tool, kind)) + " -c" +
                      languageFlag(kind, lang) + named +
@@ -879,9 +909,95 @@ Recipe objectRecipe(const Toolchain& tool, ToolchainKind kind,
     return recipe;
 }
 
+namespace {
+
+// GRIDE's runtime in its layers' order - start-up, compatibility names, C++ support, the C library, the
+// Windows layer - and GRIDE's import library for kernel32.dll.
+const char* const kGrtLibraries[] = {"grtstart.lib", "grtcompat.lib", "grtcxx.lib", "grtc.lib", "grtwin.lib", "kernel32.lib"};
+
+// Microsoft's runtime libraries, each refused to a link with GRIDE's: a library cl built names them by
+// /DEFAULTLIB (libcmt, oldnames ...), and what cl's code calls beyond the C library is grtcompat's.
+const char* const kMicrosoftRefused =
+    " /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd"
+    " /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd"
+    " /NODEFAULTLIB:libvcruntime /NODEFAULTLIB:libvcruntimed /NODEFAULTLIB:vcruntime /NODEFAULTLIB:vcruntimed"
+    " /NODEFAULTLIB:libcpmt /NODEFAULTLIB:libcpmtd /NODEFAULTLIB:msvcprt /NODEFAULTLIB:msvcprtd"
+    " /NODEFAULTLIB:oldnames /NODEFAULTLIB:legacy_stdio_definitions";
+
+// Microsoft's, by name through LIB: the Debug build's own where _DEBUG asks for them.
+std::string microsoftCrt(Configuration config) {
+    return config == ConfigDebug ? "libcmtd.lib libucrtd.lib libvcruntimed.lib kernel32.lib legacy_stdio_definitions.lib"
+                                 : "libcmt.lib libucrt.lib libvcruntime.lib kernel32.lib legacy_stdio_definitions.lib";
+}
+
+}
+
+std::string grtDirectory() {
+    const char* named = std::getenv("GRT");
+    if (named && *named) return named;
+    const std::string here = path::programDirectory();
+    return here.empty() ? std::string("lib") : path::join(here, "lib");
+}
+
+WindowsCrt windowsCrt(Configuration config, bool clObjects) {
+    WindowsCrt c;
+    const std::string choice = settings::windowsRuntime();
+    // Visual Studio is looked for only where the answer turns on it: automatic, with cl's objects or without GRIDE's
+    c.crt = choice != "auto" ? choice : clObjects && !visualStudioRoot().empty() ? "msvc" : "grt";
+    const std::string dir = grtDirectory();
+    if (c.crt == "grt") {
+        std::string libraries;
+        bool there = true;
+        for (size_t i = 0; there && i < sizeof kGrtLibraries / sizeof kGrtLibraries[0]; ++i) {
+            const std::string full = path::join(dir, kGrtLibraries[i]);
+            there = path::exists(full);
+            libraries += " " + quote(full);
+        }
+        if (there) {
+            c.libraries = libraries + kMicrosoftRefused;
+            c.said = "[GRIDE's C runtime: grtstart, grtcompat, grtcxx, grtc, grtwin and kernel32.lib from " + dir +
+                     " - no Visual Studio or Windows SDK library]";
+            if (clObjects)
+                c.warning = "warning: cl's objects name Microsoft's C runtime, and GRIDE's runtime is chosen "
+                            "(Tools > Windows C runtime): they may not link";
+            return c;
+        }
+        if (choice != "auto" || visualStudioRoot().empty()) {
+            c.error = "error: GRIDE's C runtime is not there: grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib "
+                      "and kernel32.lib are looked for in " + dir + " beside " + product::kName +
+                      " (Setup installs them; Build Solution writes them into x64\\<Configuration>\\lib)";
+            return c;
+        }
+        c.said = "[GRIDE's C runtime is not in " + dir + " - Microsoft's (Visual Studio's) is linked instead]\n";
+        c.crt = "msvc";
+    }
+    c.libraries = " " + microsoftCrt(config);
+    c.said += "[Microsoft's C runtime: " + microsoftCrt(config) + ", found through LIB]";
+    return c;
+}
+
+std::string windowsShalimarRuntime(const Toolchain& tool, const std::string& crt, bool debugRuntime) {
+    const std::string leaf = std::string("shmrt-x86_64-windows") + (crt == "grt" ? "-grt" : "") +
+                             (debugRuntime ? "-debug" : "") + ".lib";
+    if (crt == "grt") return path::join(grtDirectory(), leaf);
+    // Microsoft's is where shalimar takes it when it links: lib beside it
+    const std::string beside = path::parent(tool.shc);
+    return path::join(path::join(beside.empty() ? path::programDirectory() : beside, "lib"), leaf);
+}
+
+bool linkedHere(ToolchainKind kind, const std::string& arch) {
+#ifdef _WIN32
+    return arch == "x86_64-windows" && usesArch(kind);
+#else
+    (void)kind;
+    (void)arch;
+    return false;
+#endif
+}
+
 Recipe linkRecipe(const Toolchain& tool, const std::vector<std::string>& objects,
                   bool withCpp, const std::string& arch, Configuration config,
-                  const std::string& program) {
+                  const std::string& program, const std::string& crt, bool microsoftDebug) {
     (void)arch;
     Recipe recipe;
     recipe.assemblyPath = program;
@@ -891,19 +1007,18 @@ Recipe linkRecipe(const Toolchain& tool, const std::vector<std::string>& objects
     named += libraryArguments(tool);
 
 #ifdef _WIN32
-    (void)withCpp;
-
-    const char* crt = (config == ConfigDebug)
-                          ? " libcmtd.lib libucrtd.lib libvcruntimed.lib"
-                          : " libcmt.lib libucrt.lib libvcruntime.lib";
-    // Debug links with link.exe /DEBUG: the project's LINK writes no PDB, and without one cdb sees no line.
-    recipe.command = quote(config == ConfigDebug ? std::string(hostLinker()) : linkerNameFor(true, withCpp)) +
+    // A Debug link writes the PDB with /DEBUG: GRIDE's link over the compilers' own CodeView, Microsoft's
+    // link.exe where cl's objects or clang's CodeView are in it. A C++ program gets the 8 MB stack cpp11's
+    // own link gives it, which the other two targets give every program.
+    recipe.command = quote(config == ConfigDebug && microsoftDebug ? std::string("link.exe") : linkerNameFor(true, withCpp)) +
                      " /nologo /subsystem:console" +
+                     (withCpp ? std::string(" /stack:8388608") : std::string()) +
                      (config == ConfigDebug ? std::string(" /DEBUG") : std::string()) +
-                     " /out:" + quote(program) + named + crt +
-                     " kernel32.lib legacy_stdio_definitions.lib";
+                     " /out:" + quote(program) + named + (crt.empty() ? " " + microsoftCrt(config) : crt);
 #else
 
+    (void)crt;
+    (void)microsoftDebug;
     recipe.command = quote(linkerNameFor(false, withCpp)) +
                      (config == ConfigDebug ? std::string(" -g") : std::string()) +
                      named + " -o " + quote(program) + " -lm";
@@ -1052,8 +1167,9 @@ bool prepareFor(ToolchainKind kind, Configuration config, const std::string& arc
     importMsvcEnvironment();
     // The project's assembler, where one is named: all three compilers read
     // the variable, and cpp11 also needs -masm=masm - see assemblerFlag.
-    // Not for a Debug build with CodeView: the compilers take *_AS even for the GNU spelling, and the
-    // project's masm was handed clang's command line ("usage: asm -t x64") - so clang, by not naming one.
+    // Not for a Debug build whose CodeView clang carries: the compilers take *_AS even for the GNU spelling,
+    // and the project's masm was handed clang's command line ("usage: asm -t x64") - so clang, by not naming
+    // one. A Debug build with its own CodeView takes the project's masm, which reads its .FILE and .LINE.
     std::string as = debugsWithCodeView(kind, arch, config) ? std::string() : settings::assembler();
     _putenv_s("C90_AS", as.c_str());
     _putenv_s("CPP11_AS", as.c_str());
@@ -1061,7 +1177,8 @@ bool prepareFor(ToolchainKind kind, Configuration config, const std::string& arc
     // And the linker for x86_64-windows the same way, where one is named: each compiler links its
     // own program through what *_LD says, else link.exe. An empty value unsets the variable,
     // which is what a yes to the native tools needs (settings::forceNative).
-    // A Debug build that carries CodeView links with Microsoft's link.exe, the one linker that writes a PDB.
+    // A Debug build that carries clang's CodeView links with Microsoft's link.exe; one with its own CodeView
+    // with the project's link, whose /DEBUG writes the PDB from it.
     std::string ld = debugsWithCodeView(kind, arch, config) ? std::string() : settings::linker();
     _putenv_s("C90_LD", ld.c_str());
     _putenv_s("CPP11_LD", ld.c_str());
@@ -1088,8 +1205,11 @@ bool nativeToolsAvailable(const std::string& arch) {
 }
 
 std::string assemblerFlag(ToolchainKind kind, const std::string& arch, Configuration config) {
-    // **A Debug build's CodeView goes through clang's assembler**, whatever assembler is named:
-    // the project's masm carries no CodeView (M10, GRIDE docs/M10-ANALYSIS.md).
+    // **A Debug build's own CodeView is the MASM spelling** (GRIDEx3): -g -masm=masm writes the .FILE and
+    // .LINE GRIDE's masm makes the line table of, and GRIDE's link /DEBUG the PDB.
+    if (ownCodeView(kind, arch, config)) return " -masm=masm";
+    // **A Debug build's CodeView goes through clang's assembler** for a compiler with none of its own,
+    // whatever assembler is named: masm carries no GNU spelling (M10, GRIDE docs/M10-ANALYSIS.md).
     // shalimar has no -masm: its -g alone chooses the GNU spelling and clang on this target (D4).
     if (debugsWithCodeView(kind, arch, config) && kind != ToolShc) return " -masm=gnu";
     if (kind == ToolCxx1 && arch == "x86_64-windows" && !settings::assembler().empty())

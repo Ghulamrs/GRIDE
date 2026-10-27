@@ -57,9 +57,18 @@
 // with its arguments, `biggest<int>`, and a handler funclet is a procedure of its own with its lines,
 // cl's `` `f'::`1'::catch$0 ``, so a breakpoint in a catch block lands on its line and the stack names
 // the frame. Without -g the output is unchanged.
-#define CXX1_VERSION      "1.29"
-#define CXX1_SEAL_DATE    "22-10-2026"
-#define CXX1_SEAL_FILE    "cxx1-1.29.dat"
+//
+// 1.30 (2026-10-23): three fixes GRIDE's Windows runtime needs. `p - n` with n an integer narrower
+// than the pointer - an `unsigned`, and `unsigned long` on Windows - widens n before it negates it:
+// on every 64-bit target p - n was p + (2^32 - n) (RTS6x's `text_ + sizeof text_ - length_`); the
+// C6000's output is unchanged. In the MASM spelling a C name that is a MASM keyword - `fabs`, C90's
+// `div`, `length` - is the symbol's own name, given up with `OPTION NOKEYWORD:<...>` as ml64 has it,
+// where a definition had been renamed `$fabs`; in such a file a `div` instruction is written as its
+// bytes. And -g with a dynamic initialiser names the `$LNend$` and `$LNprolog$` labels its code
+// defines, so GRIDE's masm takes the file.
+#define CXX1_VERSION      "1.30"
+#define CXX1_SEAL_DATE    "23-10-2026"
+#define CXX1_SEAL_FILE    "cxx1-1.30.dat"
 
 // The line every run prints first; what it claims is docs/EXCLUSIONS.md's to measure (review of 2026-10-08).
 #define CXX1_BANNER "©2026 G. R. Akhtar - C++03 with C++11 extensions"

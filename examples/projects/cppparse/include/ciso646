@@ -1,0 +1,5 @@
+// ciso646 - cppparse's C++98 library: empty, as in every C++ implementation (the alternative tokens and, or, not,
+// bitand, bitor, xor, compl, and_eq, or_eq, xor_eq, not_eq are keywords of C++).
+#ifndef CPPPARSE_CISO646
+#define CPPPARSE_CISO646
+#endif

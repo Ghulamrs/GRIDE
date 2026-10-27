@@ -223,13 +223,16 @@ namespace Gride { namespace Settings {
             Directory = String::Empty; DirectoryEnv = String::Empty; Marker = String::Empty;
             Files = gcnew Dictionary<String^, String^>(); Aliases = gcnew List<String^>();
             AssemblyDirectories = gcnew Dictionary<String^, String^>(); AssemblyDirectoryEnv = gcnew Dictionary<String^, String^>();
-            When = "always";
+            When = "always"; Crt = String::Empty;
         }
         property String^ Id;
         property String^ Name;
         property String^ Description;
         property String^ Kind;             // runtime / printf / shalimarRuntime / hostCrt
         property String^ Target;           // arch
+        // the host C runtime the library belongs to: "grt" (GRIDE's), "msvc" (Microsoft's), "" either - which of
+        // two hostCrt entries, and which Shalimar runtime, a Windows link takes (Tools > Options, Windows runtime)
+        property String^ Crt;
         property String^ Directory;
         property String^ DirectoryEnv;
         property String^ Marker;
@@ -669,6 +672,18 @@ namespace Gride { namespace Settings {
             for each (LibraryDefinition^ l in Libraries)
                 if (l->Kind == kind && (String::IsNullOrEmpty(arch) || String::Compare(l->Target, arch, true) == 0)) return l;
             return nullptr;
+        }
+        // the one of that kind for a host C runtime ("grt" / "msvc"): an entry naming it, else one naming none
+        LibraryDefinition^ LibraryByKind(String^ arch, String^ kind, String^ crt)
+        {
+            LibraryDefinition^ either = nullptr;
+            for each (LibraryDefinition^ l in Libraries)
+            {
+                if (l->Kind != kind || (!String::IsNullOrEmpty(arch) && String::Compare(l->Target, arch, true) != 0)) continue;
+                if (String::Compare(l->Crt, crt, true) == 0) return l;
+                if (String::IsNullOrEmpty(l->Crt) && either == nullptr) either = l;
+            }
+            return either;
         }
         // the C runtime of a target (its "runtime" entry)
         LibraryDefinition^ RuntimeOf(Target target)
@@ -1313,6 +1328,7 @@ namespace Gride { namespace Settings {
                     d->Description = l->GetString("description", String::Empty);
                     d->Kind = l->GetString("kind", String::Empty);
                     d->Target = l->GetString("target", String::Empty);
+                    d->Crt = l->GetString("crt", String::Empty);
                     d->Directory = l->GetString("directory", String::Empty);
                     d->DirectoryEnv = l->GetString("directoryEnv", String::Empty);
                     d->Marker = l->GetString("marker", String::Empty);

@@ -1,0 +1,43 @@
+// cstdlib - cppparse's C++98 library: declarations of the C runtime's general utilities.
+// The functions resolve to the MSVC C runtime at link time.
+#ifndef CPPPARSE_CSTDLIB
+#define CPPPARSE_CSTDLIB
+
+#include <cstddef>
+
+extern "C" {
+    void*         malloc(size_t n);
+    void*         calloc(size_t count, size_t n);
+    void*         realloc(void* p, size_t n);
+    void          free(void* p);
+    __declspec(noreturn) void abort(void);
+    __declspec(noreturn) void exit(int code);
+    int           atexit(void (*fn)(void));
+    int           atoi(const char* s);
+    long          atol(const char* s);
+    double        atof(const char* s);
+    long          strtol(const char* s, char** end, int base);
+    unsigned long strtoul(const char* s, char** end, int base);
+    double        strtod(const char* s, char** end);
+    float         strtof(const char* s, char** end);
+    int           rand(void);
+    void          srand(unsigned seed);
+    int           abs(int v);
+    long          labs(long v);
+    char*         getenv(const char* name);
+    int           system(const char* command);
+    void          qsort(void* base, size_t count, size_t size, int (*compare)(const void*, const void*));
+}
+
+#define EXIT_SUCCESS 0
+#define EXIT_FAILURE 1
+#define RAND_MAX     0x7fff
+
+namespace std {
+    using ::malloc; using ::calloc; using ::realloc; using ::free;
+    using ::abort; using ::exit; using ::atexit;
+    using ::atoi; using ::atol; using ::atof; using ::strtol; using ::strtoul; using ::strtod; using ::strtof;
+    using ::rand; using ::srand; using ::abs; using ::labs; using ::getenv; using ::system; using ::qsort;
+}
+
+#endif

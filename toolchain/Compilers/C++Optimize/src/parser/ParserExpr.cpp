@@ -208,7 +208,14 @@ ExprPtr Parser::arithmetic(BinOp op, ExprPtr lhs, ExprPtr rhs, std::size_t pos) 
     }
     if (op == BinOp::Sub && lhs->type()->isPointer()) {
         if (rhs->type()->isInteger()) {
+            // **The index is widened to the pointer's width before it is negated** - zero- or
+            // sign-extended as its own type says - since [expr.add]/4 subtracts its value. Negated in
+            // its promoted type first, an `unsigned` n became 2^32 - n and `p - n` on a 64-bit target
+            // was p + (2^32 - n) (1.30, 2026-10-23: RTS6x's `text_ + sizeof text_ - length_`). A
+            // promoted type as wide as the pointer - every one on the C6000 - is negated as it was.
             const Type *lt = promote(rhs->type());
+            const Type *pd = ptrdiffType();
+            if (lt->size(target_) < pd->size(target_)) lt = pd;
             ExprPtr neg(new Unary('-', convert(std::move(rhs), lt)));
             neg->setType(lt);
             return pointerAdd(std::move(lhs), std::move(neg));

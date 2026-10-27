@@ -1,29 +1,27 @@
-# macOS
-.DS_Store
-
-# Visual Studio
-.vs/
-*.user
-*.suo
-*.aps
-*.VC.db
-*.VC.opendb
-
-# Build output
+# GRIDE - the sources of GRIDEd, GRIDE 2.0, GRIDE 1.0 and the toolchain and Help they share. This working
+# copy (D:\GRA\My Documents\GRIDEx3) builds; the repository it pushes to (GIT Test\GRIDE) only keeps.
+# Build output is never committed. Git matches these without regard to case on Windows, so
+# the toolchain's build\ folders are named by path: a plain `build/` would hide GRIDE 2.0's src\Build.
+x64/
 bin/
 obj/
-x64/
-x86/
-Debug/
-Release/
-# GRIDE 2.0's debugger source shares a name with a build folder
-!/GRIDE 2.0/src/Debug/
-# a tool's IntDir, ar6x's own output; the MSI and its checks
 /toolchain/**/build/
-/installer/dist/
-# what the toolchain demo leaves beside its sources
-/examples/toolchain-demo/out/
-
-# Python's caches, wherever a script ran (toolchain/copy-toolchain.py)
+.vs/
+sandbox/
+.gride/
+examples/toolchain-demo/out/
+*.user
+*.pdb
+*.ilk
+*.obj
+*.exe
+*.lib
+*.log
+*.tlog
+*.metagen
+installer/dist/
+# The third-party example's prebuilt library is a source of that example, not build output.
+!/examples/projects/thirdparty-mathx/third_party/mathx/libs/**/*.lib
+# The Mac's folder metadata and Python's byte-code caches are never committed.
+.DS_Store
 __pycache__/
-*.pyc

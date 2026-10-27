@@ -1,0 +1,60 @@
+// typeinfo - cppparse's C++98 library: std::type_info, std::bad_cast, std::bad_typeid (18.5).
+//
+// The compiler emits cl's RTTI data (a type descriptor "??_R0..." per type, the complete object locator before
+// every vftable with the class hierarchy behind it) and calls vcruntime's __RTtypeid, __RTDynamicCast and
+// __RTCastToVoid for typeid of a polymorphic object and dynamic_cast, so type_info is laid out as MSVC's: the
+// vftable pointer of vcruntime's type_info, then __std_type_info_data (the undecorated name, filled in when name()
+// is first called, and the decorated name ".?AUD@@"). Objects of this class exist only as the compiler's type
+// descriptors. bad_cast and bad_typeid are thrown by cppparse's own exception runtime (the throwing helpers below
+// are called by the generated code), not by vcruntime's throws, which cppparse frames do not catch.
+#ifndef CPPPARSE_TYPEINFO
+#define CPPPARSE_TYPEINFO
+
+#include <exception>
+
+struct __std_type_info_data {
+    const char* _UndecoratedName;
+    char        _DecoratedName[1];
+};
+struct __type_info_node;
+extern "C" int         __std_type_info_compare(const __std_type_info_data* a, const __std_type_info_data* b);
+extern "C" const char* __std_type_info_name(__std_type_info_data* data, __type_info_node* root);
+extern __type_info_node __type_info_root_node;
+
+namespace std {
+
+class type_info {
+public:
+    const char* name() const { return __std_type_info_name(&_Data, &__type_info_root_node); }
+    const char* raw_name() const { return _Data._DecoratedName; }
+    bool operator==(const type_info& o) const { return __std_type_info_compare(&_Data, &o._Data) == 0; }
+    bool operator!=(const type_info& o) const { return __std_type_info_compare(&_Data, &o._Data) != 0; }
+    bool before(const type_info& o) const { return __std_type_info_compare(&_Data, &o._Data) < 0; }
+private:
+    type_info(const type_info&);
+    type_info& operator=(const type_info&);
+    void*                        _Vfptr;     // vcruntime's ??_7type_info@@6B@ (the virtual destructor)
+    mutable __std_type_info_data _Data;
+};
+
+class bad_cast : public exception {
+public:
+    bad_cast() {}
+    virtual ~bad_cast() {}
+    virtual const char* what() const { return "Bad dynamic_cast!"; }           // MSVC's text
+};
+
+class bad_typeid : public exception {
+public:
+    bad_typeid() {}
+    virtual ~bad_typeid() {}
+    virtual const char* what() const { return "Attempted a typeid of nullptr pointer!"; }   // MSVC's text
+};
+
+// called by the code generated for dynamic_cast<T&> of an object that is no T, and for typeid(*p) with p null
+inline void __cppparse_throw_bad_cast() { throw bad_cast(); }
+inline void __cppparse_throw_bad_typeid() { throw bad_typeid(); }
+
+}
+
+#endif

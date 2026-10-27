@@ -1,0 +1,36 @@
+// ctime - cppparse's C++98 library: declarations of the C runtime's time functions (UCRT 64-bit time_t).
+#ifndef CPPPARSE_CTIME
+#define CPPPARSE_CTIME
+
+#include <cstddef>
+
+typedef long      clock_t;
+typedef long long time_t;
+
+struct tm {
+    int tm_sec, tm_min, tm_hour, tm_mday, tm_mon, tm_year, tm_wday, tm_yday, tm_isdst;
+};
+
+extern "C" {
+    clock_t    clock(void);
+    time_t     _time64(time_t* out);
+    struct tm* _localtime64(const time_t* t);
+    struct tm* _gmtime64(const time_t* t);
+    size_t     strftime(char* buffer, size_t n, const char* format, const struct tm* t);
+    double     _difftime64(time_t a, time_t b);
+    time_t     _mktime64(struct tm* t);
+}
+
+#define CLOCKS_PER_SEC 1000
+#define time      _time64
+#define localtime _localtime64
+#define gmtime    _gmtime64
+#define difftime  _difftime64
+#define mktime    _mktime64
+
+namespace std {
+    using ::clock_t; using ::time_t; using ::tm;
+    using ::clock; using ::strftime;
+}
+
+#endif

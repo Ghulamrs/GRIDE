@@ -6,7 +6,9 @@
 #include <cstdlib>
 #include <cstring>
 
-#ifdef _WIN32
+// cl's build (shc.vcxproj, the Microsoft runtime) asks Windows; cpp11's for GRIDE's runtime (grt.vcxproj)
+// asks getenv, which reads the same environment there
+#if defined(_WIN32) && defined(_MSC_VER)
 #include <windows.h>
 #endif
 
@@ -44,7 +46,7 @@ Debug &Debug::shared() {
 namespace {
 
 bool askedToDebug() {
-#ifdef _WIN32
+#if defined(_WIN32) && defined(_MSC_VER)
     char value[16];
     const DWORD n = GetEnvironmentVariableA("SHM_DEBUG", value, sizeof value);
     if (n == 0 || n >= sizeof value) return false;

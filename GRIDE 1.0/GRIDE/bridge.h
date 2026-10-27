@@ -200,6 +200,17 @@ const char* gride_linker(void);
 int gride_remember_linker(const char* file);
 const char* gride_tilinker(void);
 int gride_remember_tilinker(const char* file);
+// The C runtime a Windows program links - "auto", "grt" or "msvc" - as settings.json says it (the Tools menu's
+// check) and as it is in force (GRIDE_WINDOWS_RUNTIME in the environment wins); and the choice written back.
+const char* gride_windows_runtime_setting(void);
+const char* gride_windows_runtime(void);
+int gride_remember_windows_runtime(const char* choice);
+// The Windows debugger - "auto", "gride-dbg" or "cdb" - and the choice written back.
+const char* gride_windows_debugger(void);
+int gride_remember_windows_debugger(const char* choice);
+// How many of a program's parts compile at once - 0 one per processor, 1 one after another - and the choice written back.
+int gride_build_jobs(void);
+int gride_remember_build_jobs(int jobs);
 const char* gride_ti(void);
 const char* gride_tilib(void);
 int gride_remember_ti(const char* dir, const char* lib);
@@ -500,6 +511,25 @@ int gride_debugger_break(GRIDEDebugger* debugger, const char* file, int line);
 int gride_debugger_clear(GRIDEDebugger* debugger);
 
 void gride_debugger_run(GRIDEDebugger* debugger);
+/* F7 and F6 with nothing being debugged: the run to main's first line - its file and line, from
+   gride_main_line_in - and past main's prologue; gride_debugger_note says when the line was refused and the
+   run went on to a breakpoint or the end. */
+void gride_debugger_run_to_entry(GRIDEDebugger* debugger, const char* file, int line);
+const char* gride_debugger_note(GRIDEDebugger* debugger);
+// The line main() starts on in a source - C's and C++'s "int main(", Shalimar's "fun <> = main(" - or 0, and 0 in a header.
+int gride_main_line_in(const char* file);
+// Which program debugs - "gride-dbg", "cdb", "vm6747", "sim6747" ... - and why that one, where something else was asked for.
+const char* gride_debugger_backend(GRIDEDebugger* debugger);
+const char* gride_debugger_backend_why(GRIDEDebugger* debugger);
+/* The program's lines as a move goes, one call a line without its end, on the worker's thread; the rest of a line
+   told unfinished before comes after gride_debugger_continued_mark(). NULL stops it. */
+typedef void (*GRIDELine)(void* user, const char* line);
+void gride_debugger_on_output(GRIDEDebugger* debugger, GRIDELine onLine, void* user);
+const char* gride_debugger_continued_mark(void);
+// The program's own input, where its debugger hands it over (gride-dbg): whether it does, and a line handed - at
+// once, from the window's thread, even while a move waits on the worker's.
+int gride_debugger_takes_input(GRIDEDebugger* debugger);
+int gride_debugger_send_input(GRIDEDebugger* debugger, const char* line);
 void gride_debugger_resume(GRIDEDebugger* debugger);
 void gride_debugger_step_over(GRIDEDebugger* debugger);
 void gride_debugger_step_into(GRIDEDebugger* debugger);

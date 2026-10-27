@@ -144,7 +144,14 @@ void CoffSpelling::prologue(int frameSize) {
     ins("mov", reg("%rsp"), reg("%rbp"));
     o_ += "  .seh_setframe %rbp, 0\n";
     if (frameSize > 0) {
-        ins("sub", imm(frameSize), reg("%rsp"));
+        if (frameSize >= kStackProbeFrom) {
+            // a page or more: probed, as cl does (Spelling.h)
+            ins("mov", imm(frameSize), reg("%eax"));
+            ins("call", lbl("__chkstk"));
+            ins("sub", reg("%rax"), reg("%rsp"));
+        } else {
+            ins("sub", imm(frameSize), reg("%rsp"));
+        }
         o_ += "  .seh_stackalloc ";
         appendNum(o_, frameSize);
         o_ += '\n';

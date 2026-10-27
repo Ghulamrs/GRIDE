@@ -47,10 +47,11 @@ std::string msvcMangleDynamicInitializer(const sema::Symbol& v);
 std::string msvcMangleInitializerEntry(const sema::Symbol& v);
 // a static local: "?n@?1??counterA@@YAHXZ@4HA", the variable in block <discriminator> (2: the function's body)
 std::string msvcMangleStaticLocal(const sema::Symbol& v, const sema::Symbol& fn, long discriminator);
-// a vftable; forBase names one of several (??_7D@@6BPB@@@: D's vftable for PB), 0 for a class with one
-std::string msvcMangleVtableSymbol(const sema::Symbol& c, const sema::Symbol* forBase = 0);
+// a vftable; path names one of several (??_7D@@6BPB@@@: D's vftable for PB), empty for a class with one (6B@)
+std::string msvcMangleVtableSymbol(const sema::Symbol& c, const std::vector<const sema::Symbol*>& path);
 // a vbtable, named by the bases of its path (??_8D@@7B@, ??_8VX@@7BVL@@@, ??_8R@@7BB@@P@@@)
 std::string msvcMangleVbtableSymbol(const sema::Symbol& c, const std::vector<sema::Symbol*>& path);
+std::string msvcMangleDisplacementMap(const sema::Symbol& from, const sema::Symbol& to);   // ??_KW@@$CVW@@
 // an adjustor thunk of a virtual function: ?f@D@@WBA@EAAHXZ, D::f`adjustor{16}'
 std::string msvcMangleThunkSymbol(const sema::Symbol& fn, long adjust);
 // cl's vcall thunk of the virtual function at slotOffset (8 per slot) of a class's vftable: ??_9P@@$B7AA, P::`vcall'{8}'
@@ -58,9 +59,14 @@ std::string msvcMangleVcallThunk(const sema::Symbol& c, long slotOffset);
 // cl's return-adjusting thunk of the covariant override fn in the slot of root: fn as a non-virtual function with
 // root's return type, ?self@CD@@QEAAPEAUSB@@XZ
 std::string msvcMangleReturnThunk(const sema::Symbol& fn, const sema::Symbol& root);
+std::string msvcMangleReturnAdjustorThunk(const sema::Symbol& fn, const sema::Symbol& root, long adjust);   // ?g@D@@WBA@EAAPEAUX@@XZ
 // cl's vtordisp thunk of an overrider in the vftable inside a virtual base: ?f@VL@@$4PPPPPPPM@7EBAHXZ (the vtordisp
 // at -4 before the base, then the adjustment 8)
 std::string msvcMangleVtordispThunk(const sema::Symbol& fn, long adjust);
+// cl's vtordisp thunk to the return thunk of a covariant override in a vftable inside a virtual base, named with the
+// slot's return type: ?get@CV@@$4PPPPPPPM@A@EAAPEAUX@@XZ
+std::string msvcMangleReturnVtordispThunk(const sema::Symbol& fn, const sema::Symbol& root, long adjust);
+std::string msvcMangleVtordispexThunk(const sema::Symbol& fn, long vbptrOffset, long entryOffset, long nonVirtual);   // cl's ?f@VL@@$R4BI@7PPPPPPPM@BI@EBAHXZ
 // cl's thread-safe-static guard of a function's index-th guarded static local: "?$TSS0@?1??f@@YAAEAUCnt@@XZ@4HA"
 std::string msvcMangleStaticGuard(const sema::Symbol& fn, long discriminator, int index);
 // cl's RTTI: the name a type descriptor holds (".?AUD@@", ".H"), the type descriptor (??_R0?AUD@@@8), a class's
@@ -72,7 +78,7 @@ std::string msvcMangleTypeDescriptor(const sema::Type* t);
 std::string msvcMangleClassHierarchy(const sema::Symbol& c);
 std::string msvcMangleBaseClassArray(const sema::Symbol& c);
 std::string msvcMangleBaseClassDescriptor(const sema::Symbol& c, long mdisp, long pdisp, long vdisp, long attributes);
-std::string msvcMangleCompleteObjectLocator(const sema::Symbol& c, const sema::Symbol* forBase);
+std::string msvcMangleCompleteObjectLocator(const sema::Symbol& c, const std::vector<const sema::Symbol*>& path);
 
 } // namespace cppparse
 

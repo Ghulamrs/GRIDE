@@ -16,6 +16,7 @@ bool        endsWith(const std::string& s, const std::string& suffix);
 bool        iequals(const std::string& a, const std::string& b);
 void        split(const std::string& s, char sep, std::vector<std::string>& out, bool keepEmpty = false);
 std::string intToString(int v);
+std::string int64ToString(long long v);
 std::string replaceAll(const std::string& s, const std::string& from, const std::string& to);
 std::string padRight(const std::string& s, size_t width);
 bool        contains(const std::vector<std::string>& v, const std::string& s);

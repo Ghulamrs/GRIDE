@@ -1,0 +1,116 @@
+// __iterator - cppparse's C++98 library: the iterator categories, iterator_traits, reverse_iterator, advance and
+// distance (24.3, 24.4.1), the part of <iterator> the containers need without the streams.
+#ifndef CPPPARSE_ITERATOR_BASE
+#define CPPPARSE_ITERATOR_BASE
+
+#include <cstddef>
+
+namespace std {
+
+struct input_iterator_tag {};
+struct output_iterator_tag {};
+struct forward_iterator_tag : public input_iterator_tag {};
+struct bidirectional_iterator_tag : public forward_iterator_tag {};
+struct random_access_iterator_tag : public bidirectional_iterator_tag {};
+
+template <class Category, class T, class Distance = ptrdiff_t, class Pointer = T*, class Reference = T&>
+struct iterator {
+    typedef Category  iterator_category;
+    typedef T         value_type;
+    typedef Distance  difference_type;
+    typedef Pointer   pointer;
+    typedef Reference reference;
+};
+
+template <class It>
+struct iterator_traits {
+    typedef typename It::iterator_category iterator_category;
+    typedef typename It::value_type        value_type;
+    typedef typename It::difference_type   difference_type;
+    typedef typename It::pointer           pointer;
+    typedef typename It::reference         reference;
+};
+
+// const T* first: cppparse takes the first partial specialisation that matches, not the most specialised one
+template <class T>
+struct iterator_traits<const T*> {
+    typedef random_access_iterator_tag iterator_category;
+    typedef T         value_type;
+    typedef ptrdiff_t difference_type;
+    typedef const T*  pointer;
+    typedef const T&  reference;
+};
+
+template <class T>
+struct iterator_traits<T*> {
+    typedef random_access_iterator_tag iterator_category;
+    typedef T         value_type;
+    typedef ptrdiff_t difference_type;
+    typedef T*        pointer;
+    typedef T&        reference;
+};
+
+// advance and distance: a random access iterator moves in one step, the others step by step
+template <class It, class D>
+void __advance(It& it, D n, input_iterator_tag) { while (n > 0) { ++it; --n; } }
+template <class It, class D>
+void __advance(It& it, D n, bidirectional_iterator_tag) { if (n >= 0) { while (n > 0) { ++it; --n; } } else { while (n < 0) { --it; ++n; } } }
+template <class It, class D>
+void __advance(It& it, D n, random_access_iterator_tag) { it += n; }
+template <class It, class D>
+void advance(It& it, D n) { __advance(it, n, typename iterator_traits<It>::iterator_category()); }
+
+template <class It>
+typename iterator_traits<It>::difference_type __distance(It first, It last, input_iterator_tag)
+{
+    typename iterator_traits<It>::difference_type n = 0;
+    for (; first != last; ++first) ++n;
+    return n;
+}
+template <class It>
+typename iterator_traits<It>::difference_type __distance(It first, It last, random_access_iterator_tag) { return last - first; }
+template <class It>
+typename iterator_traits<It>::difference_type distance(It first, It last) { return __distance(first, last, typename iterator_traits<It>::iterator_category()); }
+
+template <class It>
+class reverse_iterator {
+public:
+    typedef It                                                  iterator_type;
+    typedef typename iterator_traits<It>::iterator_category     iterator_category;
+    typedef typename iterator_traits<It>::value_type            value_type;
+    typedef typename iterator_traits<It>::difference_type       difference_type;
+    typedef typename iterator_traits<It>::pointer               pointer;
+    typedef typename iterator_traits<It>::reference             reference;
+
+    reverse_iterator() : m_cur() {}
+    explicit reverse_iterator(It x) : m_cur(x) {}
+    reverse_iterator(const reverse_iterator& o) : m_cur(o.m_cur) {}
+    template <class U> reverse_iterator(const reverse_iterator<U>& o) : m_cur(o.base()) {}
+    It base() const { return m_cur; }
+    reference operator*() const { It tmp = m_cur; --tmp; return *tmp; }
+    pointer   operator->() const { It tmp = m_cur; --tmp; return &*tmp; }
+    reverse_iterator& operator++() { --m_cur; return *this; }
+    reverse_iterator  operator++(int) { reverse_iterator t(*this); --m_cur; return t; }
+    reverse_iterator& operator--() { ++m_cur; return *this; }
+    reverse_iterator  operator--(int) { reverse_iterator t(*this); ++m_cur; return t; }
+    reverse_iterator  operator+(difference_type n) const { return reverse_iterator(m_cur - n); }
+    reverse_iterator& operator+=(difference_type n) { m_cur -= n; return *this; }
+    reverse_iterator  operator-(difference_type n) const { return reverse_iterator(m_cur + n); }
+    reverse_iterator& operator-=(difference_type n) { m_cur += n; return *this; }
+    reference operator[](difference_type n) const { return *(*this + n); }
+private:
+    It m_cur;
+};
+
+template <class It> bool operator==(const reverse_iterator<It>& a, const reverse_iterator<It>& b) { return a.base() == b.base(); }
+template <class It> bool operator!=(const reverse_iterator<It>& a, const reverse_iterator<It>& b) { return !(a.base() == b.base()); }
+template <class It> bool operator<(const reverse_iterator<It>& a, const reverse_iterator<It>& b) { return b.base() < a.base(); }
+template <class It> bool operator>(const reverse_iterator<It>& a, const reverse_iterator<It>& b) { return b < a; }
+template <class It> bool operator<=(const reverse_iterator<It>& a, const reverse_iterator<It>& b) { return !(b < a); }
+template <class It> bool operator>=(const reverse_iterator<It>& a, const reverse_iterator<It>& b) { return !(a < b); }
+template <class It> typename reverse_iterator<It>::difference_type operator-(const reverse_iterator<It>& a, const reverse_iterator<It>& b) { return b.base() - a.base(); }
+template <class It> reverse_iterator<It> operator+(typename reverse_iterator<It>::difference_type n, const reverse_iterator<It>& a) { return a + n; }
+
+}
+
+#endif

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  grt - GRIDE's C and C++ runtime for x86_64-windows (docs\Runtime_Design.md), built with the solution's own c90,
+  cpp11, masm and link, never with cl, beside the programs in $(OutDir)lib. Five static libraries in layers, each
+  calling only itself and the layers below it, and kernel32's import library under them:
+    grtstart.lib    start\    mainCRTStartup, the initialiser tables' markers, __chkstk, _fltused
+    grtcompat.lib   compat\   legacy and Microsoft-compatibility names: the 32-bit time functions c90's <time.h>
+                              declares, POSIX's fileno, what cl's /GS objects call
+    grtcxx.lib      cxx\      C++ support: operator new and delete (rts6x-cxx.sources), RTTI, function-local
+                              statics, _purecall, std::exception's helpers; exceptions are stage 2's
+    grtc.lib        c\        the ISO C library: RTS6x's (rts6x-c.sources) and the Windows stream layer, mem*,
+                              setjmp, strerror, the 64-bit time functions
+    grtwin.lib      win\      the Windows layer, the only importer of kernel32: descriptors, the heap, errno's
+                              storage, the environment and argv, the clock and time zone, locks, the end
+    kernel32.lib              the import library kernel32.def names, written by link /LIB /DEF
+    shmrt-x86_64-windows-grt.lib         the Shalimar runtime (Compiler-Si\runtime) over them, by cpp11 -O2
+    shmrt-x86_64-windows-grt-debug.lib   and its debugging build (-O0 -DSHM_DEBUG=1, the session in Debug.cpp)
+  Each is checked as it is built: every name defined once across the layers, each library's undefined names
+  defined in itself or below it, only grtwin reaching kernel32, nothing left undefined but main (LibraryClosed),
+  no frame of a page or more without __chkstk (FrameCheck), and every entry catalogue.json says is done defined by
+  its library and declared by its header (CatalogueCheck; the runtime's public C ABI, docs\Runtime_Design.md 14.2). The libraries are compiled -O2 -DNDEBUG=1 (the
+  Release runtime; the Debug variants are stage 2's). A program linked with them depends on kernel32.dll alone.
+  The steps are MSBuild tasks (..\..\msbuild\Toolchain.targets): nothing runs through cmd.exe. Built after c90,
+  cpp11, masm and link.
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{4E8B2D17-9C3A-4F61-B5D2-7A0E3C9F1B48}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>grt</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <!-- standalone (no solution): the programs are looked for where a solution build puts them -->
+    <OutDir Condition="'$(SolutionDir)'=='' Or '$(SolutionDir)'=='*Undefined*'">$(ProjectDir)..\..\..\GRIDEd\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)build\$(Configuration)\</IntDir>
+    <!-- Visual Studio's own up-to-date check does not know the libraries; GrtLibraries' Inputs/Outputs decide -->
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+    <GrtC90>$(OutDir)c90.exe</GrtC90>
+    <GrtCpp11>$(OutDir)cpp11.exe</GrtCpp11>
+    <GrtMasm>$(OutDir)masm.exe</GrtMasm>
+    <GrtLink>$(OutDir)link.exe</GrtLink>
+    <GrtLibDir>$(OutDir)lib\</GrtLibDir>
+    <GrtRts6x>$(ProjectDir)..\..\TI\RTS6x\src\</GrtRts6x>
+    <GrtShalimar>$(ProjectDir)..\..\Compilers\Compiler-Si\runtime\</GrtShalimar>
+    <GrtFlags>-O2 -DNDEBUG=1 -DRTS6X_REFERENCE=1</GrtFlags>
+    <GrtIncludes>$(ProjectDir)internal;$(GrtRts6x)</GrtIncludes>
+    <GrtLayers>$(GrtLibDir)grtstart.lib;$(GrtLibDir)grtcompat.lib;$(GrtLibDir)grtcxx.lib;$(GrtLibDir)grtc.lib;$(GrtLibDir)grtwin.lib;$(GrtLibDir)kernel32.lib</GrtLayers>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="rts6x-c.sources" />
+    <None Include="rts6x-cxx.sources" />
+    <None Include="kernel32.def" />
+    <None Include="catalogue.json" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="..\..\msbuild\Toolchain.targets" />
+
+  <ItemGroup>
+    <GrtInput Include="$(ProjectDir)start\**;$(ProjectDir)compat\**;$(ProjectDir)cxx\**;$(ProjectDir)c\**;$(ProjectDir)win\**;$(ProjectDir)internal\**" />
+    <GrtInput Include="$(ProjectDir)rts6x-c.sources;$(ProjectDir)rts6x-cxx.sources;$(ProjectDir)kernel32.def;$(ProjectDir)catalogue.json" />
+    <GrtInput Include="$(GrtRts6x)**\*.cpp;$(GrtRts6x)**\*.h" />
+    <GrtInput Include="$(GrtShalimar)*.cpp;$(GrtShalimar)*.h" />
+  </ItemGroup>
+
+  <Target Name="GrtLibraries" AfterTargets="Build"
+          Inputs="@(GrtInput);$(GrtC90);$(GrtCpp11);$(GrtMasm);$(GrtLink)"
+          Outputs="$(GrtLayers);$(GrtLibDir)shmrt-x86_64-windows-grt.lib;$(GrtLibDir)shmrt-x86_64-windows-grt-debug.lib">
+    <Error Condition="!Exists('$(GrtC90)')" Text="grt: no c90.exe in $(OutDir) - c90 is built first in the solution" />
+    <Error Condition="!Exists('$(GrtCpp11)')" Text="grt: no cpp11.exe in $(OutDir) - cpp11 is built first in the solution" />
+    <Error Condition="!Exists('$(GrtMasm)')" Text="grt: no masm.exe in $(OutDir) - masm is built first in the solution" />
+    <Error Condition="!Exists('$(GrtLink)')" Text="grt: no link.exe in $(OutDir) - link is built first in the solution" />
+    <RemoveDir Directories="$(IntDir)obj;$(IntDir)shmrt;$(IntDir)shmrtd" />
+    <!-- the prototype's single library, if an older build left it -->
+    <Delete Files="$(GrtLibDir)grt.lib" />
+    <WindowsLibrary C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)obj\grtstart"
+                    Flags="$(GrtFlags)" IncludeDirs="$(GrtIncludes)" SourceDirs="$(ProjectDir)start"
+                    Library="$(GrtLibDir)grtstart.lib" />
+    <WindowsLibrary C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)obj\grtcompat"
+                    Flags="$(GrtFlags)" IncludeDirs="$(GrtIncludes)" SourceDirs="$(ProjectDir)compat"
+                    Library="$(GrtLibDir)grtcompat.lib" />
+    <WindowsLibrary C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)obj\grtcxx"
+                    Flags="$(GrtFlags)" IncludeDirs="$(GrtIncludes)"
+                    SourceList="$(ProjectDir)rts6x-cxx.sources" SourceListRoot="$(GrtRts6x)" SourceDirs="$(ProjectDir)cxx"
+                    Library="$(GrtLibDir)grtcxx.lib" />
+    <WindowsLibrary C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)obj\grtc"
+                    Flags="$(GrtFlags)" IncludeDirs="$(GrtIncludes)"
+                    SourceList="$(ProjectDir)rts6x-c.sources" SourceListRoot="$(GrtRts6x)" SourceDirs="$(ProjectDir)c"
+                    Library="$(GrtLibDir)grtc.lib" />
+    <WindowsLibrary C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)obj\grtwin"
+                    Flags="$(GrtFlags)" IncludeDirs="$(GrtIncludes)" SourceDirs="$(ProjectDir)win"
+                    Library="$(GrtLibDir)grtwin.lib" />
+    <RunTool Exe="$(GrtLink)" Quiet="true" Arguments="/LIB /DEF:&quot;$(ProjectDir)kernel32.def&quot; /OUT:&quot;$(GrtLibDir)kernel32.lib&quot;" />
+    <LibraryClosed Libraries="$(GrtLayers)" Allowed="main;__ImageBase" Layered="true" Importer="grtwin.lib" />
+    <FrameCheck ObjDirs="$(IntDir)obj" />
+    <CatalogueCheck Catalogue="$(ProjectDir)catalogue.json" LibDir="$(GrtLibDir)" IncludeDirs="$(OutDir)lib;$(OutDir)include" />
+    <WindowsLibrary C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)shmrt"
+                    Flags="-O2" IncludeDirs="$(GrtShalimar)"
+                    Sources="$(GrtShalimar)Shortest.cpp;$(GrtShalimar)Failure.cpp;$(GrtShalimar)Numbers.cpp;$(GrtShalimar)Array.cpp;$(GrtShalimar)Console.cpp;$(GrtShalimar)Runtime.cpp"
+                    Library="$(GrtLibDir)shmrt-x86_64-windows-grt.lib" />
+    <WindowsLibrary C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)shmrtd"
+                    Flags="-O0 -DSHM_DEBUG=1" IncludeDirs="$(GrtShalimar)"
+                    Sources="$(GrtShalimar)Shortest.cpp;$(GrtShalimar)Failure.cpp;$(GrtShalimar)Numbers.cpp;$(GrtShalimar)Array.cpp;$(GrtShalimar)Console.cpp;$(GrtShalimar)Runtime.cpp;$(GrtShalimar)Debug.cpp"
+                    Library="$(GrtLibDir)shmrt-x86_64-windows-grt-debug.lib" />
+    <LibraryClosed Libraries="$(GrtLibDir)shmrt-x86_64-windows-grt-debug.lib;$(GrtLayers)" Allowed="__ImageBase;shm_user_main;shm_init_globals;shm_name_files" />
+    <FrameCheck ObjDirs="$(IntDir)shmrt;$(IntDir)shmrtd" />
+  </Target>
+
+  <Target Name="GrtClean" AfterTargets="Clean">
+    <RemoveDir Directories="$(IntDir)obj;$(IntDir)shmrt;$(IntDir)shmrtd" />
+    <Delete Files="$(GrtLayers);$(GrtLibDir)grt.lib;$(GrtLibDir)shmrt-x86_64-windows-grt.lib;$(GrtLibDir)shmrt-x86_64-windows-grt-debug.lib" />
+  </Target>
+</Project>

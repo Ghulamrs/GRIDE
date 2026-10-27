@@ -1,0 +1,146 @@
+== stat
+stat "file.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 5 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "normal.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 6 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "readonly.txt": 0 errno 0 mode 100444 nlink 1 ino 0 uid 0 gid 0 size 7 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "prog.EXE": 0 errno 0 mode 100777 nlink 1 ino 0 uid 0 gid 0 size 8 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "run.Cmd": 0 errno 0 mode 100777 nlink 1 ino 0 uid 0 gid 0 size 9 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "x.cmd.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 10 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "sub/inner.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 11 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "sub\inner.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 11 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "./file.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 5 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "link1.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 12 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "link2.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 12 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "old.txt": 0 errno 22 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 13 dev the drive rdev =dev m -1 a 981176706 c -1
+stat "junc/inner.txt": 0 errno 0 mode 100666 nlink 1 ino 0 uid 0 gid 0 size 11 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "NUL": 0 errno 0 mode 20000 nlink 1 ino 0 uid 0 gid 0 size 0 dev -1 rdev =dev m 0 a 0 c 0
+stat "bin2/cmd.exe": 0 errno 0 mode 100777 nlink 1 ino 0 uid 0 gid 0 dev the drive rdev =dev m 981173106 a 981176706 c 981086706
+stat "sub": 0 errno 0 mode 40777 nlink 1 ino 0 uid 0 gid 0 dev the drive rdev =dev
+stat "sub/": 0 errno 0 mode 40777 nlink 1 ino 0 uid 0 gid 0 dev the drive rdev =dev
+stat "sub\": 0 errno 0 mode 40777 nlink 1 ino 0 uid 0 gid 0 dev the drive rdev =dev
+stat ".": 0 errno 0 mode 40777 nlink 1 ino 0 uid 0 gid 0 dev the drive rdev =dev
+stat "..": 0 errno 0 mode 40777 nlink 1 ino 0 uid 0 gid 0 dev the drive rdev =dev
+stat "junc": 0 errno 0 mode 40777 nlink 1 ino 0 uid 0 gid 0 dev the drive rdev =dev
+stat "missing.txt": -1 errno 2 zeroed
+stat "nodir/missing.txt": -1 errno 2 zeroed
+stat "*.txt": -1 errno 2 zeroed
+stat "": -1 errno 2 zeroed
+stat "file.txt/": -1 errno 2 zeroed
+stat "file.txt\": -1 errno 2 zeroed
+stat "big.bin": -1 errno 132 zeroed
+stat "<drive>:\": 0 errno 0 mode 40777 nlink 1 ino 0 uid 0 gid 0 dev the drive rdev =dev
+stat "<drive>:": -1 errno 2 zeroed
+exit 0
+== find
+findfirst "*": a handle errno 0
+  "." attrib 0x10
+  ".." attrib 0x10
+  "big.bin" attrib 0x20 size 2147483649 c 981086706 a 981176706 w 981173106
+  "bin1" attrib 0x10
+  "bin2" attrib 0x10
+  "file.txt" attrib 0x20 size 5 c 981086706 a 981176706 w 981173106
+  "junc" attrib 0x410
+  "link1.txt" attrib 0x20 size 12 c 981086706 a 981176706 w 981173106
+  "link2.txt" attrib 0x20 size 12 c 981086706 a 981176706 w 981173106
+  "normal.txt" attrib 0x0 size 6 c 981086706 a 981176706 w 981173106
+  "old.txt" attrib 0x20 size 13 c -1 a 981176706 w -1
+  "prog.EXE" attrib 0x20 size 8 c 981086706 a 981176706 w 981173106
+  "readonly.txt" attrib 0x21 size 7 c 981086706 a 981176706 w 981173106
+  "run.Cmd" attrib 0x20 size 9 c 981086706 a 981176706 w 981173106
+  "sub" attrib 0x10
+  "x.cmd.txt" attrib 0x20 size 10 c 981086706 a 981176706 w 981173106
+  findnext -1 errno 2
+  findnext again -1 errno 2
+  findclose 0 errno 0
+findfirst "sub/*": a handle errno 0
+  "." attrib 0x10
+  ".." attrib 0x10
+  "inner.txt" attrib 0x20 size 11 c 981086706 a 981176706 w 981173106
+  findnext -1 errno 2
+  findnext again -1 errno 2
+  findclose 0 errno 0
+findfirst "sub\*.txt": a handle errno 0
+  "inner.txt" attrib 0x20 size 11 c 981086706 a 981176706 w 981173106
+  findnext -1 errno 2
+  findnext again -1 errno 2
+  findclose 0 errno 0
+findfirst "*.TXT": a handle errno 0
+  "file.txt" attrib 0x20 size 5 c 981086706 a 981176706 w 981173106
+  "link1.txt" attrib 0x20 size 12 c 981086706 a 981176706 w 981173106
+  "link2.txt" attrib 0x20 size 12 c 981086706 a 981176706 w 981173106
+  "normal.txt" attrib 0x0 size 6 c 981086706 a 981176706 w 981173106
+  "old.txt" attrib 0x20 size 13 c -1 a 981176706 w -1
+  "readonly.txt" attrib 0x21 size 7 c 981086706 a 981176706 w 981173106
+  "x.cmd.txt" attrib 0x20 size 10 c 981086706 a 981176706 w 981173106
+  findnext -1 errno 2
+  findnext again -1 errno 2
+  findclose 0 errno 0
+findfirst "junc/*": a handle errno 0
+  "." attrib 0x10
+  ".." attrib 0x10
+  "inner.txt" attrib 0x20 size 11 c 981086706 a 981176706 w 981173106
+  findnext -1 errno 2
+  findnext again -1 errno 2
+  findclose 0 errno 0
+findfirst "missing/*": -1 errno 2
+  entry untouched
+findfirst "*.nomatch": -1 errno 2
+  entry untouched
+findfirst "a|b": -1 errno 22
+  entry untouched
+findfirst "": -1 errno 2
+  entry untouched
+findfirst "file.txt": a handle errno 0
+  "file.txt" attrib 0x20 size 5 c 981086706 a 981176706 w 981173106
+  findnext -1 errno 2
+  findnext again -1 errno 2
+  findclose 0 errno 0
+findfirst "sub": a handle errno 0
+  "sub" attrib 0x10
+  findnext -1 errno 2
+  findnext again -1 errno 2
+  findclose 0 errno 0
+findclose(0) -1 errno 22
+exit 0
+== cwd
+getcwd(buf, 1024): the directory errno 0 buf[0] 67
+getcwd(buf, length+1): the directory errno 0 buf[0] 67
+getcwd(buf, length): a null pointer errno 34 buf[0] 0
+getcwd(buf, 1): a null pointer errno 34 buf[0] 0
+getcwd(buf, 2): a null pointer errno 34 buf[0] 0
+getcwd(0, 0): the directory errno 0
+getcwd(0, 1): the directory errno 0
+getcwd(0, 4096): the directory errno 0
+exit 0
+== system: COMSPEC names a shell
+system(NULL): 1 errno 0
+  [shell.exe] [/c] [one] [two] [7]
+system("one two 7"): 7 errno 0
+  [shell.exe] [/c] [quoted words] [300]
+system(""quoted words" 300"): 300 errno 0
+  [shell.exe] [/c]
+system(""): 0 errno 0
+  [shell.exe] [/c] [-1]
+system("-1"): -1 errno 0
+exit 0
+== system: COMSPEC names nothing, cmd.exe in the working folder
+system(NULL): 0 errno 2
+  [cmd.exe] [/c] [one] [two] [7]
+system("one two 7"): 7 errno 0
+  [cmd.exe] [/c] [quoted words] [300]
+system(""quoted words" 300"): 300 errno 0
+  [cmd.exe] [/c]
+system(""): 0 errno 0
+  [cmd.exe] [/c] [-1]
+system("-1"): -1 errno 0
+exit 0
+== system: no COMSPEC, cmd.exe on PATH
+system(NULL): 0 errno 0
+  [cmd.exe] [/c] [one] [two] [7]
+system("one two 7"): 7 errno 0
+  [cmd.exe] [/c] [quoted words] [300]
+system(""quoted words" 300"): 300 errno 0
+  [cmd.exe] [/c]
+system(""): 0 errno 0
+  [cmd.exe] [/c] [-1]
+system("-1"): -1 errno 0
+exit 0

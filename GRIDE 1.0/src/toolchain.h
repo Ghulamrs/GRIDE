@@ -32,14 +32,36 @@ std::string configFlags(ToolchainKind kind, Configuration config,
 bool optimises(ToolchainKind kind);
 
 bool emitsDebugInfo(ToolchainKind kind, const std::string& arch);
-// **A c90 or cpp11 Debug build for x86_64-windows (M10)**: -g's CodeView, the GNU spelling clang
-// assembles, link.exe /DEBUG for the PDB, and cdb to read it - whatever masm and LINK settings name.
+// **A Debug build for x86_64-windows that writes its own CodeView** (GRIDEx3): c90, cpp11 and shalimar under
+// -g -masm=masm write it in the MASM spelling, GRIDE's masm carries it and GRIDE's link /DEBUG makes the PDB -
+// no clang, no Microsoft link.exe.
+bool ownCodeView(ToolchainKind kind, const std::string& arch, Configuration config);
+// **A Debug build whose CodeView clang must carry (M10)**: a compiler with none of its own - -g's GNU spelling,
+// clang's assembler, link.exe /DEBUG for the PDB. None of the three since GRIDEx3; the road is kept for one.
 bool debugsWithCodeView(ToolchainKind kind, const std::string& arch, Configuration config);
 // **Whether clang is here to assemble that CodeView** - Visual Studio's "C++ Clang tools", an LLVM
-// installation, or PATH, where cpp11 looks. Without it a Debug build is made the Release way.
+// installation, or PATH, where cpp11 looks. Without it such a build is made the Release way.
 bool clangAvailable();
-// The line a Debug build says first when clang is not here, "" otherwise.
+// The line such a Debug build says first when clang is not here, "" otherwise.
 std::string lineTableNote(ToolchainKind kind, const std::string& arch, Configuration config);
+
+// **The C runtime of a Windows link** (GRIDEx3): GRIDE's own - grtstart, grtcompat, grtcxx, grtc and grtwin.lib and
+// GRIDE's kernel32.lib, each by its full path, with Microsoft's libraries refused - or Microsoft's, libcmt and the
+// UCRT by name through LIB. settings::windowsRuntime() chooses; automatic is Microsoft's only where Visual Studio is
+// found and cl's objects are in the link. error is set where GRIDE's is needed and not there, and nothing links.
+struct WindowsCrt {
+    std::string crt;          // "grt" or "msvc"
+    std::string libraries;    // what the link line names after the objects and the project's libraries
+    std::string said;         // what a build says once about it: a line, or two split by "\n"
+    std::string warning;      // GRIDE's runtime chosen with cl's objects in the link
+    std::string error;
+};
+WindowsCrt windowsCrt(Configuration config, bool clObjects);
+// Where GRIDE's runtime is: $GRT, else lib beside the editor.
+std::string grtDirectory();
+// **Whether the program is linked here rather than by its compiler**: c90's, cpp11's and shalimar's for
+// x86_64-windows, whose own link names Microsoft's runtime by name - and GRIDE's is named by its paths.
+bool linkedHere(ToolchainKind kind, const std::string& arch);
 
 std::vector<std::string> debugNote(ToolchainKind kind, const std::string& arch);
 
@@ -98,6 +120,9 @@ struct Toolchain {
 std::string includeFlags(const Toolchain& tool, ToolchainKind kind);
 // The project's libraries, spelled for the link.
 std::string libraryArguments(const Toolchain& tool);
+// The Shalimar runtime built for a Windows C runtime (WindowsCrt::crt), by its full path: shmrt-x86_64-windows-grt.lib
+// over GRIDE's (grtDirectory), shmrt-x86_64-windows.lib over Microsoft's (lib beside shalimar); -debug for the session's.
+std::string windowsShalimarRuntime(const Toolchain& tool, const std::string& crt, bool debugRuntime);
 
 ToolchainKind resolve(const Toolchain& tool, Language lang);
 
@@ -183,7 +208,8 @@ std::string shownProgramCommand(const Toolchain& tool, ToolchainKind kind,
                                 const std::string& source, Language lang,
                                 const std::string& arch, Configuration config, bool emulate = false);
 
-// " -masm=masm" for cpp11 on x86_64-windows when settings name an assembler; " -masm=gnu" for a Debug build with CodeView.
+// " -masm=masm" for a Debug build with its own CodeView, and for cpp11 on x86_64-windows when settings name an
+// assembler; " -masm=gnu" for a Debug build whose CodeView clang carries.
 std::string assemblerFlag(ToolchainKind kind, const std::string& arch, Configuration config);
 Recipe targetRecipe(const Toolchain& tool, ToolchainKind kind,
                     const std::vector<std::string>& sources, Language lang,
@@ -195,9 +221,12 @@ Recipe objectRecipe(const Toolchain& tool, ToolchainKind kind,
                     const std::string& arch, Configuration config,
                     const std::string& objectDir, std::vector<std::string>& objects);
 
+// On Windows crt is the C runtime's part of the line (WindowsCrt::libraries), Microsoft's by name when empty;
+// microsoftDebug says a Debug link is Microsoft's link.exe's - cl's objects, or clang's CodeView, are in it.
 Recipe linkRecipe(const Toolchain& tool, const std::vector<std::string>& objects,
                   bool withCpp, const std::string& arch, Configuration config,
-                  const std::string& program);
+                  const std::string& program, const std::string& crt = std::string(),
+                  bool microsoftDebug = false);
 
 std::string linkerName(bool withCpp);
 

@@ -1642,8 +1642,8 @@ void X86_64Linux::emit(const Function &fn) {
         }
         // The spelling's own labels round the code - see CoffSpelling's and MasmSpelling's prologue
         // and functionEnd - as each spells a name: quoted for clang, bare for masm (1.29).
-        d.prologEnd = a_->labelText("$LNprolog$" + fn.symbol());
-        d.codeEnd = a_->labelText("$LNend$" + fn.symbol());
+        d.prologEnd = a_->codeLabelText("$LNprolog$", fn.symbol());
+        d.codeEnd = a_->codeLabelText("$LNend$", fn.symbol());
         d.mergeable = fn.isInline();
         dwarfFnAt_ = dwarfFns_.size();
         dwarfFns_.push_back(d);
@@ -2035,8 +2035,8 @@ void X86_64Linux::funcletDebugBegin(const std::string &symbol, std::size_t pos, 
     d.returns = parent.returns;
     d.locals = parent.locals;
     d.symbol = a_->labelText(symbol);
-    d.prologEnd = a_->labelText("$LNprolog$" + symbol);
-    d.codeEnd = a_->labelText("$LNend$" + symbol);
+    d.prologEnd = a_->codeLabelText("$LNprolog$", symbol);
+    d.codeEnd = a_->codeLabelText("$LNend$", symbol);
     d.mergeable = parent.mergeable;
     d.funclet = number;
     const int id = static_cast<int>(dwarfFns_.size());
@@ -2555,6 +2555,7 @@ void X86_64Linux::run(const Program &program) {
         finishChunk();
     }
 
+    a_->finishText(chunks_);
     a_->preamble(sink_);
     for (const std::string &chunk : chunks_) sink_ << chunk;
     // After every function, so the .pdata the linker sees is in address order.

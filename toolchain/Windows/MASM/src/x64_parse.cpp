@@ -36,7 +36,7 @@ static const RegName reg_names[] = {
 
 static const RegName *find_reg(const Token &k)
 {
-    if (k.kind != T_NAME)
+    if (k.kind != T_NAME || k.plain)
         return 0;
     std::string s = upper(k.text);
     for (size_t i = 0; i < sizeof reg_names / sizeof reg_names[0]; i++)
@@ -45,9 +45,16 @@ static const RegName *find_reg(const Token &k)
     return 0;
 }
 
+/* t[i] is the keyword w - not a word OPTION NOKEYWORD made a name */
 static bool is_word(const std::vector<Token> &t, size_t i, const char *w)
 {
-    return i < t.size() && t[i].kind == T_NAME && upper(t[i].text) == w;
+    return i < t.size() && t[i].kind == T_NAME && !t[i].plain && upper(t[i].text) == w;
+}
+
+/* the keyword t[i] would be, upper-cased: empty when it is a name OPTION NOKEYWORD listed */
+static std::string keyword(const std::vector<Token> &t, size_t i)
+{
+    return i < t.size() && t[i].kind == T_NAME && !t[i].plain ? upper(t[i].text) : std::string();
 }
 
 static int ptr_size(const std::vector<Token> &t, size_t i)
@@ -56,7 +63,10 @@ static int ptr_size(const std::vector<Token> &t, size_t i)
     if (is_word(t, i, "WORD")) return 16;
     if (is_word(t, i, "DWORD")) return 32;
     if (is_word(t, i, "QWORD")) return 64;
-    if (is_word(t, i, "XMMWORD")) return 128;
+    if (is_word(t, i, "XMMWORD") || is_word(t, i, "OWORD")) return 128;
+    /* the real types are their widths, as ml64 takes them: movss xmm0, REAL4 PTR [rcx] */
+    if (is_word(t, i, "REAL4")) return 32;
+    if (is_word(t, i, "REAL8")) return 64;
     return 0;
 }
 
@@ -73,7 +83,7 @@ static int data_width(const std::string &w)
    - which they are unless PTR follows, as in `mov DWORD PTR [r11], eax` */
 static int type_data_width(const std::vector<Token> &t, size_t i)
 {
-    if (i >= t.size() || t[i].kind != T_NAME || is_word(t, i + 1, "PTR")) return 0;
+    if (i >= t.size() || t[i].kind != T_NAME || t[i].plain || is_word(t, i + 1, "PTR")) return 0;
     const std::string &w = t[i].text;
     if (w == "BYTE" || w == "SBYTE") return 1;
     if (w == "WORD" || w == "SWORD") return 2;
@@ -214,6 +224,10 @@ bool X64Target::finished() const
 
 void X64Target::statement(Unit &u, std::vector<Token> &t)
 {
+    if (!u.nokeyword.empty())
+        for (size_t i = 0; i < t.size(); i++)
+            if (t[i].kind == T_NAME && u.nokeyword.count(upper(t[i].text)))
+                t[i].plain = true;
     if (t.size() >= 2 && t[0].kind == T_NAME && is_punct(t, 1, ':')) {
         /* `name::` is MASM's label visible outside its PROC, which every label is here;
            `@@:` is an anonymous label, the nearest one back being @B and forward @F */
@@ -235,7 +249,7 @@ void X64Target::statement(Unit &u, std::vector<Token> &t)
         return;
     /* LOCK and the REP family are one prefix byte in front of the instruction they qualify */
     {
-        std::string w = upper(t[0].text);
+        std::string w = keyword(t, 0);
         unsigned prefix = w == "LOCK" ? 0xF0 : (w == "REP" || w == "REPE" || w == "REPZ") ? 0xF3
                         : (w == "REPNE" || w == "REPNZ") ? 0xF2 : 0;
         if (prefix != 0) {
@@ -243,6 +257,11 @@ void X64Target::statement(Unit &u, std::vector<Token> &t)
             if (u.cur() && u.cur()->code) u.emit8(prefix);
             t.erase(t.begin());
         }
+    }
+    if (t[0].plain) {
+        /* a word OPTION NOKEYWORD listed is a name, so it cannot be the instruction: ml64's A2008 */
+        u.error("syntax error: '" + t[0].text + "' is a name after OPTION NOKEYWORD, not an instruction");
+        return;
     }
 
     std::vector<Operand> ops;
@@ -267,7 +286,7 @@ void X64Target::statement(Unit &u, std::vector<Token> &t)
 
 bool X64Target::directive(Unit &u, std::vector<Token> &t)
 {
-    std::string w = upper(t[0].text);
+    std::string w = keyword(t, 0);
 
     if (w == ".CODE" || w == ".DATA" || w == ".CONST" || w == ".DATA?") {
         /* the simplified segments: .text$mn, .data, .rdata (read-only) and .bss (uninitialised),
@@ -476,7 +495,7 @@ bool X64Target::directive(Unit &u, std::vector<Token> &t)
     if (t.size() < 2 || t[1].kind != T_NAME)
         return false;
 
-    std::string w2 = upper(t[1].text);
+    std::string w2 = keyword(t, 1);
     if (w2 == "SEGMENT") {
         segment(u, t);
         return true;
@@ -560,7 +579,8 @@ bool X64Target::directive(Unit &u, std::vector<Token> &t)
         else u.constant(t[0].text, v);
         return true;
     }
-    width = data_width(w2);
+    /* REAL4 and REAL8 are data directives and operand types: `movss REAL4 PTR [rcx], xmm0` is an instruction */
+    width = is_word(t, 2, "PTR") ? 0 : data_width(w2);
     if (!width) width = type_data_width(t, 1);
     if (width) {
         if (u.define(t[0].text, width))
@@ -571,7 +591,12 @@ bool X64Target::directive(Unit &u, std::vector<Token> &t)
 }
 
 /* OPTION name[:value], ...: the ones the compilers write are taken; DOTNAME and NOSCOPED describe
-   what this assembler does anyway (dotted names are lexed, labels are file-scoped) */
+   what this assembler does anyway (dotted names are lexed, labels are file-scoped).
+
+   NOKEYWORD:<name name, name> is ml64's: the words listed - apart by spaces or commas, in any
+   case - are names from this line to the end of the file, never the instruction, register,
+   operator or directive they were, so a C function can be called fabs or div. There may be
+   several such OPTION lines; options before NOKEYWORD on its line count, ones after it do not */
 void X64Target::option(Unit &u, const std::vector<Token> &t)
 {
     size_t k = 1;
@@ -580,12 +605,17 @@ void X64Target::option(Unit &u, const std::vector<Token> &t)
         std::string name = upper(t[k].text);
         k++;
         std::string value;
+        std::vector<std::string> words;
         if (is_punct(t, k, ':')) {
             k++;
             if (is_punct(t, k, '<')) {
-                /* NOKEYWORD:<name name> - a text in angle brackets */
+                /* a text in angle brackets: NOKEYWORD's names */
                 k++;
-                while (k < t.size() && !is_punct(t, k, '>')) k++;
+                while (k < t.size() && !is_punct(t, k, '>')) {
+                    if (t[k].kind == T_NAME) words.push_back(upper(t[k].text));
+                    else if (!is_punct(t, k, ',')) { u.error("OPTION " + name + ":<...> takes names, apart by spaces or commas"); return; }
+                    k++;
+                }
                 if (k >= t.size()) { u.error("'>' expected"); return; }
                 value = "<>";
                 k++;
@@ -603,6 +633,10 @@ void X64Target::option(Unit &u, const std::vector<Token> &t)
             else { u.error("OPTION PROC needs PRIVATE, PUBLIC or EXPORT"); return; }
         } else if (name == "NOKEYWORD") {
             if (value != "<>") { u.error("OPTION NOKEYWORD needs <names>"); return; }
+            u.nokeyword.insert(words.begin(), words.end());
+            /* ml64 reads no further: an option after the list on its line is ignored, a second
+               NOKEYWORD and PROC:PRIVATE alike, and so it is here - the object is ml64's */
+            return;
         } else if (name == "CASEMAP") {
             if (value != "NONE" && value != "NOTPUBLIC" && value != "ALL") { u.error("OPTION CASEMAP needs NONE, NOTPUBLIC or ALL"); return; }
         } else if (name == "PROLOGUE" || name == "EPILOGUE") {
@@ -677,7 +711,7 @@ void X64Target::unwind(Unit &u, const std::vector<Token> &t, const std::string &
     } else if (w == ".SAVEREG" || w == ".SAVEXMM128") {
         bool xmm = w == ".SAVEXMM128";
         int num = -1;
-        if (t.size() > 1 && xmm) {
+        if (t.size() > 1 && xmm && !t[1].plain) {
             std::string x = upper(t[1].text);
             if (x.size() > 3 && x.compare(0, 3, "XMM") == 0) num = atoi(x.c_str() + 3);
             if (num < 0 || num > 15) num = -1;
@@ -1084,14 +1118,15 @@ bool X64Target::operand(Unit &u, const std::vector<Token> &t, size_t a, size_t b
     return true;
 }
 
-/* a bare label takes its symbol's type: a data label's width when no PTR said one, or NEAR for a
-   code label or PROC (whose bare use in MOV is its address, as ml64 reads it) */
+/* a label takes its symbol's type: a data label's width when no PTR said one - indexed too, as
+   ml64 reads `table[rcx*4]` - or, bare, NEAR for a code label or PROC (whose bare use in MOV is
+   its address, as ml64 reads it) */
 void X64Target::typed(Unit &u, Operand &o)
 {
-    if (!o.label || o.sym < 0)
+    if (o.kind != O_MEM || o.sym < 0)
         return;
     const Symbol &sy = u.symbols[o.sym];
-    if (sy.type == SYM_NEAR) o.near = true;
+    if (sy.type == SYM_NEAR) { if (o.label) o.near = true; }
     else if (sy.type > 0 && !o.ptr && o.size == 0) o.size = sy.type * 8;
 }
 

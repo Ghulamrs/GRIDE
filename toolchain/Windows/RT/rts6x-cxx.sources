@@ -1,0 +1,16 @@
+# The sources of RTS6x's C++ support (toolchain\TI\RTS6x\src\cxx) that grtcxx compiles for x86_64-windows
+# with cpp11, beside grtcxx's own cxx\: the allocation functions and std::nothrow. RTTI, the guards of
+# function-local statics and the pure virtual slot are the Microsoft ABI's (cxx\rtti.cpp, cxx\support.cpp).
+cxx/Allocation.cpp
+cxx/BadAlloc.cpp
+cxx/get_new_handler.cpp
+cxx/set_new_handler.cpp
+cxx/nothrow.cpp
+cxx/operator_new.cpp
+cxx/operator_new_array.cpp
+cxx/operator_new_nothrow.cpp
+cxx/operator_new_array_nothrow.cpp
+cxx/operator_delete.cpp
+cxx/operator_delete_array.cpp
+cxx/operator_delete_nothrow.cpp
+cxx/operator_delete_array_nothrow.cpp

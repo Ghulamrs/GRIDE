@@ -56,8 +56,20 @@
     <ClCompile Include="src\coff.cpp" />
     <ClCompile Include="src\image.cpp" />
     <ClCompile Include="src\layout.cpp" />
+    <ClCompile Include="src\librarian.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\pdb.cpp" />
   </ItemGroup>
+  <!-- the static VC++ runtime, as c90 and shalimar have it: the program needs no VC++ redistributable -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

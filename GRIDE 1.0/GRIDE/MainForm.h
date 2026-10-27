@@ -118,6 +118,7 @@ public:
     literal int StepOver = 10;
     literal int StepInto = 11;
     literal int StepOut = 12;
+    literal int DebugToEntry = 13;  // F7 / F6 with nothing debugged: the run to main's line, source and line
 
     int what;
     Toolchain^ tools;
@@ -129,6 +130,7 @@ public:
     int config;
     int toolKind;
     int toShalimar;
+    int line;
 
     GRIDEBuild* build;
     GRIDEProgram* made;
@@ -136,13 +138,15 @@ public:
     int result;
     bool stopped;       // Build > Stop ended it: what it made is what was there when it died
 
-    Job(int what) : what(what), build(nullptr), made(nullptr), converted(nullptr),
+    Job(int what) : what(what), line(0), build(nullptr), made(nullptr), converted(nullptr),
                     result(0), stopped(false) {}
     ~Job() { delete tools; delete source; delete program; delete into; }
 };
 
 // The bridge's GRIDEOutput for a program the window runs: defined after MainForm, which it posts to.
 void OutputToWindow(void* user, const char* bytes, int size, int stream);
+// And its GRIDELine for the lines of a program being debugged, as a move goes.
+void DebugLineToWindow(void* user, const char* line);
 
 // ---- Compiler Options: a tabbed dialog drawn from the bridge's table (src/options.h) ------------
 // One tab per compiler and one row per option; what each does, or why it is greyed for this target,
@@ -554,6 +558,24 @@ public:
         } catch (Exception^) { }
     }
 
+    // Called on the worker's thread while a move goes: a line the program being debugged printed, kept under the
+    // same lock and shown by one message at a time - and what is left when the move ends, before its stop.
+    void PostDebugLine(String^ line) {
+        try {
+            if (IsDisposed || !IsHandleCreated) return;
+            bool post;
+            System::Threading::Monitor::Enter(outLock_);
+            try {
+                debugLines_->Add(line);
+                post = !debugPosted_;
+                debugPosted_ = true;
+            } finally {
+                System::Threading::Monitor::Exit(outLock_);
+            }
+            if (post) BeginInvoke(gcnew Action(this, &MainForm::DrainDebugLines));
+        } catch (Exception^) { }
+    }
+
 protected:
     virtual void OnFormClosing(System::Windows::Forms::FormClosingEventArgs^ e) override {
         // Nothing the worker holds is freed under it: the close waits for the work to stop.
@@ -622,6 +644,7 @@ protected:
             gride_running_free(running_);
             running_ = nullptr;
         }
+        if (debugger_ != nullptr) gride_debugger_on_output(debugger_, nullptr, nullptr);
         if (self_.IsAllocated) self_.Free();
         if (project_ != nullptr) {
             gride_project_free(project_);
@@ -773,6 +796,17 @@ private:
     bool outPosted_;
     bool outDropped_;
     bool heardProgram_;
+    // The lines of the program being debugged, posted as a move goes; and where the Output's last line of the
+    // program's ends, which the rest of a line it had not finished goes on while nothing was written after it.
+    System::Collections::Generic::List<String^>^ debugLines_;
+    bool debugPosted_;
+    int programLineEnd_;
+    // Tools > Windows C runtime and Tools > Windows debugger: each choice's item, its settings.json word in Tag.
+    System::Collections::Generic::List<ToolStripMenuItem^>^ runtimeItems_;
+    System::Collections::Generic::List<ToolStripMenuItem^>^ debuggerItems_;
+    // Tools > Parts compiled at once: each count's item, the count in Tag; the last one shows a count written by hand.
+    System::Collections::Generic::List<ToolStripMenuItem^>^ jobsItems_;
+    ToolStripMenuItem^ jobsOther_;
     bool finding_;
     TextBox^ debug_;
     DebugView^ debugView_;
@@ -821,6 +855,9 @@ private:
         outPosted_ = false;
         outDropped_ = false;
         heardProgram_ = false;
+        debugLines_ = gcnew System::Collections::Generic::List<String^>();
+        debugPosted_ = false;
+        programLineEnd_ = -1;
         finding_ = false;
         project_ = gride_project_new();
         arch_ = "x86_64-windows";
@@ -842,6 +879,8 @@ private:
         job_ = nullptr;
         running_ = nullptr;
         self_ = Runtime::InteropServices::GCHandle::Alloc(this);
+        gride_debugger_on_output(debugger_, &DebugLineToWindow,
+                                 Runtime::InteropServices::GCHandle::ToIntPtr(self_).ToPointer());
         closeWhenIdle_ = false;
         treeStale_ = false;
         projectName_ = nullptr;
@@ -1242,6 +1281,50 @@ private:
                                   gcnew EventHandler(this, &MainForm::OnLocateAssembler));
         tools->DropDownItems->Add("Linker for x86_64-windows...", nullptr,
                                   gcnew EventHandler(this, &MainForm::OnLocateLinker));
+        // The C runtime a Windows program links and the debugger that reads it, one of each checked, as
+        // settings.json's windowsRuntime and windowsDebugger say them; a choice is written there.
+        ToolStripMenuItem^ runtime = gcnew ToolStripMenuItem("Windows C runtime");
+        runtimeItems_ = gcnew System::Collections::Generic::List<ToolStripMenuItem^>();
+        array<String^>^ runtimeWords = gcnew array<String^>{"auto", "grt", "msvc"};
+        array<String^>^ runtimeNames = gcnew array<String^>{"Automatic", "GRIDE's runtime", "Microsoft's CRT"};
+        for (int i = 0; i < runtimeWords->Length; ++i) {
+            ToolStripMenuItem^ one = gcnew ToolStripMenuItem(runtimeNames[i], nullptr,
+                                                             gcnew EventHandler(this, &MainForm::OnWindowsRuntime));
+            one->Tag = runtimeWords[i];
+            runtimeItems_->Add(one);
+            runtime->DropDownItems->Add(one);
+        }
+        runtime->DropDownOpening += gcnew EventHandler(this, &MainForm::OnWindowsChoicesOpening);
+        tools->DropDownItems->Add(runtime);
+        ToolStripMenuItem^ windowsDebugger = gcnew ToolStripMenuItem("Windows debugger");
+        debuggerItems_ = gcnew System::Collections::Generic::List<ToolStripMenuItem^>();
+        array<String^>^ debuggerWords = gcnew array<String^>{"auto", "gride-dbg", "cdb"};
+        array<String^>^ debuggerNames = gcnew array<String^>{"Automatic", "gride-dbg", "cdb"};
+        for (int i = 0; i < debuggerWords->Length; ++i) {
+            ToolStripMenuItem^ one = gcnew ToolStripMenuItem(debuggerNames[i], nullptr,
+                                                             gcnew EventHandler(this, &MainForm::OnWindowsDebugger));
+            one->Tag = debuggerWords[i];
+            debuggerItems_->Add(one);
+            windowsDebugger->DropDownItems->Add(one);
+        }
+        windowsDebugger->DropDownOpening += gcnew EventHandler(this, &MainForm::OnWindowsChoicesOpening);
+        tools->DropDownItems->Add(windowsDebugger);
+        // How many of a program's parts compile at once, as settings.json's buildJobs says it; a choice is written there.
+        ToolStripMenuItem^ jobs = gcnew ToolStripMenuItem("Parts compiled at once");
+        jobsItems_ = gcnew System::Collections::Generic::List<ToolStripMenuItem^>();
+        array<int>^ jobsCounts = gcnew array<int>{0, 1, 2, 4, 8, 16};
+        for (int i = 0; i < jobsCounts->Length; ++i) {
+            String^ name = jobsCounts[i] == 0 ? String::Format("One per processor ({0} here)", System::Environment::ProcessorCount)
+                         : jobsCounts[i] == 1 ? "One part at a time" : jobsCounts[i].ToString();
+            ToolStripMenuItem^ one = gcnew ToolStripMenuItem(name, nullptr, gcnew EventHandler(this, &MainForm::OnBuildJobs));
+            one->Tag = jobsCounts[i];
+            jobsItems_->Add(one);
+            jobs->DropDownItems->Add(one);
+        }
+        jobsOther_ = gcnew ToolStripMenuItem("", nullptr, gcnew EventHandler(this, &MainForm::OnBuildJobs));
+        jobs->DropDownItems->Add(jobsOther_);
+        jobs->DropDownOpening += gcnew EventHandler(this, &MainForm::OnWindowsChoicesOpening);
+        tools->DropDownItems->Add(jobs);
         tools->DropDownItems->Add("TI compiler for tms6747...", nullptr,
                                   gcnew EventHandler(this, &MainForm::OnLocateTi));
         tools->DropDownItems->Add("Linker for tms6747...", nullptr,
@@ -3495,6 +3578,57 @@ private:
     void OnLocateLinker(Object^, EventArgs^) { PickLinker(false); }
     void OnLocateTilinker(Object^, EventArgs^) { PickLinker(true); }
 
+    // The three submenus' checks, as settings.json says them now - a hand edit of the file included.
+    void OnWindowsChoicesOpening(Object^, EventArgs^) {
+        String^ runtime = FromUtf8(gride_windows_runtime_setting());
+        for each (ToolStripMenuItem^ one in runtimeItems_) one->Checked = String::Equals(safe_cast<String^>(one->Tag), runtime);
+        String^ debugger = FromUtf8(gride_windows_debugger());
+        for each (ToolStripMenuItem^ one in debuggerItems_) one->Checked = String::Equals(safe_cast<String^>(one->Tag), debugger);
+        int jobs = gride_build_jobs();
+        bool listed = false;
+        for each (ToolStripMenuItem^ one in jobsItems_) {
+            one->Checked = safe_cast<int>(one->Tag) == jobs;
+            if (one->Checked) listed = true;
+        }
+        jobsOther_->Visible = !listed;
+        jobsOther_->Text = String::Format("{0} (settings.json)", jobs);
+        jobsOther_->Tag = jobs;
+        jobsOther_->Checked = true;
+    }
+
+    // **Tools > Parts compiled at once**: settings.json's buildJobs - one per processor (0), or one part after another
+    // (1), as before 2026-10-26. The parts are said in the project's order either way, and the first part to fail
+    // stops the rest. From the next build.
+    void OnBuildJobs(Object^ sender, EventArgs^) {
+        String^ file = FromUtf8(gride_install_file());
+        ToolStripMenuItem^ item = safe_cast<ToolStripMenuItem^>(sender);
+        if (gride_remember_build_jobs(safe_cast<int>(item->Tag)) == 0) { what_->Text = "cannot write " + file; return; }
+        what_->Text = "Parts compiled at once: " + item->Text + " - written to " + file + ", from the next build";
+    }
+
+    // **Tools > Windows C runtime**: GRIDE's own (lib\grt*.lib and its kernel32.lib - no Visual Studio, no Windows SDK),
+    // Microsoft's (libcmt and the UCRT, through LIB), or automatic - Microsoft's only where Visual Studio is found and
+    // cl's objects are in the link. From the next build; GRIDE_WINDOWS_RUNTIME in the environment wins over it.
+    void OnWindowsRuntime(Object^ sender, EventArgs^) {
+        String^ file = FromUtf8(gride_install_file());
+        ToolStripMenuItem^ item = safe_cast<ToolStripMenuItem^>(sender);
+        Utf8 word(safe_cast<String^>(item->Tag));
+        if (gride_remember_windows_runtime(word.c()) == 0) { what_->Text = "cannot write " + file; return; }
+        String^ inForce = FromUtf8(gride_windows_runtime());
+        what_->Text = "Windows C runtime: " + item->Text + " - written to " + file +
+                      (String::Equals(inForce, safe_cast<String^>(item->Tag)) ? "" : " (GRIDE_WINDOWS_RUNTIME=" + inForce + " in the environment wins)");
+    }
+
+    // **Tools > Windows debugger**: gride-dbg, GRIDE's own, beside the editor; cdb, Debugging Tools for Windows'; or
+    // automatic - gride-dbg where it is, else cdb. The one named stands in for the other where that one is not there.
+    void OnWindowsDebugger(Object^ sender, EventArgs^) {
+        String^ file = FromUtf8(gride_install_file());
+        ToolStripMenuItem^ item = safe_cast<ToolStripMenuItem^>(sender);
+        Utf8 word(safe_cast<String^>(item->Tag));
+        if (gride_remember_windows_debugger(word.c()) == 0) { what_->Text = "cannot write " + file; return; }
+        what_->Text = "Windows debugger: " + item->Text + " - written to " + file + ", from the next F8";
+    }
+
     // TI's C6000 compiler directory (CCS's ti-cgt-c6000_x.y.z), whose lnk6x links what asm6x made
     // of a tms6747 build into a .out - and a second directory, asked for next, for the exception-
     // handling runtime CCS does not ship (Cancel there keeps none). Clear the setting by hand in settings.json; the console's `-` does it there.
@@ -4273,6 +4407,9 @@ private:
         table->Append("  Ctrl+PageDown     the next open file, Ctrl+PageUp the one before\r\n");
         table->Append("  Enter             on the Console, go to the place that line names\r\n");
         table->Append("  Enter, Ctrl+Z     in the Console's input line: send it, end the input\r\n");
+        table->Append("\r\nDebugging\r\n");
+        table->Append("  F7, F6            with nothing debugged: build, start, stop at main's first line\r\n");
+        table->Append("  Enter             in the input line while gride-dbg debugs: the program's input\r\n");
 
         msclr::auto_handle<Form> box(gcnew Form());
         box->Text = "Keys";
@@ -4412,7 +4549,7 @@ private:
         delete job;
         if (made == nullptr) { what_->Text = finished ? "nothing was built" : "stopped"; return; }
 
-        Say(FromUtf8(gride_program_output(made)));
+        Say(Shown(FromUtf8(gride_program_output(made))));
         CollectIssues(source);
         if (!finished) {
             gride_program_free(made);
@@ -4654,7 +4791,9 @@ private:
             int stream = chunk->stream < 0 || chunk->stream > 2 ? GRIDE_STREAM_OUT : chunk->stream;
             array<wchar_t>^ chars = gcnew array<wchar_t>(decoders_[stream]->GetCharCount(chunk->bytes, 0, chunk->bytes->Length));
             decoders_[stream]->GetChars(chunk->bytes, 0, chunk->bytes->Length, chars, 0);
-            text->Append(chars);
+            // the build's lines come a whole line at a time
+            if (stream == GRIDE_STREAM_BUILD) text->Append(Shown(gcnew String(chars)));
+            else text->Append(chars);
             if (stream != GRIDE_STREAM_BUILD) program = true;
         }
         SayCapped(text->ToString());
@@ -4684,6 +4823,16 @@ private:
     void OnInputKey(Object^, KeyEventArgs^ e) {
         if (e->KeyCode != Keys::Enter) return;
         e->SuppressKeyPress = true;
+        // The program being debugged, where its debugger hands it the line (gride-dbg's .input): at once, while a
+        // move waits for it as well; not echoed here either - its console echoes it among its own lines.
+        if (running_ == nullptr && gride_debugger_takes_input(debugger_) != 0) {
+            String^ typed = input_->Text;
+            input_->Clear();
+            Utf8 line(typed);
+            if (gride_debugger_send_input(debugger_, line.c()) == 0)
+                what_->Text = "the program being debugged could not be given that line";
+            return;
+        }
         if (running_ == nullptr) return;
         String^ line = input_->Text;
         input_->Clear();
@@ -4807,7 +4956,7 @@ private:
             return;
         }
 
-        Say(FromUtf8(gride_build_output(made)));
+        Say(Shown(FromUtf8(gride_build_output(made))));
         CollectIssues(nullptr);
         if (!finished) {
             gride_build_free(made);
@@ -4932,6 +5081,7 @@ private:
             case Job::StepOver:    gride_debugger_step_over(debugger_); break;
             case Job::StepInto:    gride_debugger_step_into(debugger_); break;
             case Job::StepOut:     gride_debugger_step_out(debugger_); break;
+            case Job::DebugToEntry: gride_debugger_run_to_entry(debugger_, job->source->c(), job->line); break;
             default: break;
         }
     }
@@ -5063,20 +5213,72 @@ private:
         }
     }
 
-    void OnDebug(Object^, EventArgs^) { Debug(false); }
-    void OnDebugProject(Object^, EventArgs^) { Debug(true); }
+    void OnDebug(Object^, EventArgs^) { Debug(false, false); }
+    void OnDebugProject(Object^, EventArgs^) { Debug(true, false); }
 
     // One step of a session already running, on the worker; a stop on the way ends the session.
-    void DebugStep(int what) {
-        if (!WhileBusy(gcnew Job(what))) {
+    void DebugStep(int what) { DebugStep(gcnew Job(what)); }
+
+    void DebugStep(Job^ job) {
+        bool finished = WhileBusy(job);
+        DrainDebugLines();
+        if (!finished) {
             EndDebugging();
             what_->Text = "debugging stopped";
             return;
         }
+        String^ note = FromUtf8(gride_debugger_note(debugger_));
+        if (note->Length > 0) Say(note + "\n");
         ShowStop();
     }
 
-    void Debug(bool project) {
+    // The lines the program being debugged printed, posted as the move went: each on a line of its own, but the
+    // rest of one it had not finished, which goes on that line while nothing else was written after it.
+    void DrainDebugLines() {
+        System::Collections::Generic::List<String^>^ batch;
+        System::Threading::Monitor::Enter(outLock_);
+        try {
+            batch = debugLines_;
+            debugLines_ = gcnew System::Collections::Generic::List<String^>();
+            debugPosted_ = false;
+        } finally {
+            System::Threading::Monitor::Exit(outLock_);
+        }
+        if (batch->Count == 0) return;
+        String^ mark = FromUtf8(gride_debugger_continued_mark());
+        for each (String^ line in batch) {
+            if (line->StartsWith(mark) && programLineEnd_ >= 2 && programLineEnd_ == console_->TextLength) {
+                console_->Select(programLineEnd_ - 2, 0);
+                console_->SelectedText = line->Substring(mark->Length);
+            } else {
+                console_->AppendText((line->StartsWith(mark) ? line->Substring(mark->Length) : line) + "\r\n");
+            }
+            programLineEnd_ = console_->TextLength;
+        }
+        ShowConsoleEnd();
+    }
+
+    // The main() a run to it stops in: the file debugged's, or the first of the project's sources with one.
+    bool FindMain(bool project, String^% file, int% line) {
+        System::Collections::Generic::List<String^>^ sources = gcnew System::Collections::Generic::List<String^>();
+        if (!project && debugSource_ != nullptr) sources->Add(debugSource_);
+        for (int i = 0; project && i < gride_project_target_sources(project_); ++i) {
+            String^ named = FromUtf8(gride_project_target_source(project_, i));
+            if (!System::IO::Path::IsPathRooted(named)) {
+                Utf8 relative(named);
+                named = FromUtf8(gride_project_absolute(project_, relative.c()));
+            }
+            sources->Add(named);
+        }
+        for each (String^ one in sources) {
+            Utf8 name(one);
+            int at = gride_main_line_in(name.c());
+            if (at > 0) { file = one; line = at; return true; }
+        }
+        return false;
+    }
+
+    void Debug(bool project, bool atEntry) {
         if (busy_) { what_->Text = StillWorking(); return; }
         if (gride_debugger_running(debugger_) != 0) {
             DebugStep(Job::DebugResume);
@@ -5183,7 +5385,7 @@ private:
             return;
         }
 
-        Say(FromUtf8(project ? gride_build_output(targetBuilt_) : gride_program_output(built_)));
+        Say(Shown(FromUtf8(project ? gride_build_output(targetBuilt_) : gride_program_output(built_))));
         if (!finished) { EndDebugging(); what_->Text = "stopped"; return; }
 
         if (result == 0) { DebugBuildFailed(project, kind); return; }
@@ -5211,8 +5413,35 @@ private:
             return;
         }
 
+        // Which program debugs, and why that one where the setting or the build asked for another
+        String^ backend = FromUtf8(gride_debugger_backend(debugger_));
+        String^ why = FromUtf8(gride_debugger_backend_why(debugger_));
+        if (backend->Length > 0) Say("[debugging with " + backend + (why->Length > 0 ? " - " + why : "") + "]\n");
+        // The program's input line, for a debugger that hands it over - shown without the focus, which the
+        // editor keeps for F7 and F6
+        if (running_ == nullptr && gride_debugger_takes_input(debugger_) != 0) {
+            input_->Clear();
+            input_->Enabled = true;
+        }
+        programLineEnd_ = -1;
+
         SetEveryBreakpoint();
-        DebugStep(Job::DebugGo);
+        if (!atEntry) { DebugStep(Job::DebugGo); return; }
+        // F7 and F6: main's first line, a breakpoint there for once; without a main(), the run F8 makes
+        String^ mainFile = nullptr;
+        int mainLine = 0;
+        if (!FindMain(project, mainFile, mainLine)) {
+            Say("[no main() in the sources - running to a breakpoint or the end]\n");
+            DebugStep(Job::DebugGo);
+            return;
+        }
+        Job^ toEntry = gcnew Job(Job::DebugToEntry);
+        toEntry->source = gcnew Utf8(mainFile);
+        toEntry->line = mainLine;
+        DebugStep(toEntry);
+        // the session's breakpoint on main's line, and cdb's, which stays: the person's own again
+        if (gride_debugger_running(debugger_) != 0 && gride_stop_stopped(debugger_) != 0) SetEveryBreakpoint();
+        delete toEntry;
     }
 
     void DebugBuildFailed(bool project, int kind) {
@@ -5254,6 +5483,11 @@ private:
 
     void Step(int how) {
         if (busy_) { what_->Text = StillWorking(); return; }
+        // F7 and F6 with nothing being debugged build, start and stop at main's first line (Visual Studio's way)
+        if (gride_debugger_running(debugger_) == 0 && how != 2) {
+            Debug(ProjectMode(), true);
+            return;
+        }
         if (gride_debugger_running(debugger_) == 0) {
             what_->Text = "nothing is running - F8 starts it";
             return;
@@ -5275,6 +5509,7 @@ private:
 
     void EndDebugging() {
         gride_debugger_stop(debugger_);
+        if (running_ == nullptr) input_->Enabled = false;
 
         if (built_ != nullptr) { gride_program_free(built_); built_ = nullptr; }
         if (targetBuilt_ != nullptr) { gride_build_free(targetBuilt_); targetBuilt_ = nullptr; }
@@ -5529,10 +5764,35 @@ private:
         what_->Text = String::Format("{0}:{1}:{2}", System::IO::Path::GetFileName(file), line, column);
     }
 
-    // The Errors tab from the Output tab's text, after every build; its title counts the errors.
+    // The Errors tab from the Output tab's text, after every build; its title counts the errors. A file the
+    // Output names from the project's folder is the project's, by its full path there.
     void CollectIssues(String^ source) {
-        int count = errors_->Collect(console_->Text, source);
+        String^ dir = project_ != nullptr && gride_project_loaded(project_) != 0 ? projectDirectory_ : nullptr;
+        int count = errors_->Collect(console_->Text, source, dir);
         errorsPage_->Text = count > 0 ? String::Format("Errors ({0})", count) : "Errors";
+    }
+
+    // A tool's lines as the Output shows them: a file of the project named by its full path ("C:\...\proj\src\a.c:7:5:
+    // error: ...") from the project's folder ("src\a.c:7:5: error: ..."), so the message stays in view; the Errors
+    // tab keeps the full path, which a click goes to.
+    String^ Shown(String^ text) {
+        if (String::IsNullOrEmpty(text) || project_ == nullptr || gride_project_loaded(project_) == 0 ||
+            String::IsNullOrEmpty(projectDirectory_))
+            return text;
+        // the compilers name a source as they were given it, "C:/.../proj/src/a.c" as often as "C:\...\proj\src\a.c"
+        String^ dir = projectDirectory_->TrimEnd(gcnew array<wchar_t>{L'\\', L'/'});
+        array<String^>^ heads = gcnew array<String^>{dir->Replace(L'/', L'\\') + "\\", dir->Replace(L'\\', L'/') + "/"};
+        array<String^>^ lines = text->Split('\n');
+        for (int i = 0; i < lines->Length; ++i) {
+            String^ t = lines[i]->TrimStart();
+            String^ lead = lines[i]->Substring(0, lines[i]->Length - t->Length);
+            for each (String^ head in heads)
+                if (t->StartsWith(head, StringComparison::OrdinalIgnoreCase) && t->Length > head->Length) {
+                    lines[i] = lead + t->Substring(head->Length);
+                    break;
+                }
+        }
+        return String::Join("\n", lines);
     }
 
     String^ StopLine() {
@@ -5999,6 +6259,13 @@ void OutputToWindow(void* user, const char* bytes, int size, int stream) {
         if (size > 0) Runtime::InteropServices::Marshal::Copy(IntPtr(const_cast<char*>(bytes)), copy, 0, size);
     }
     form->Post(copy, stream);
+}
+
+void DebugLineToWindow(void* user, const char* line) {
+    MainForm^ form = dynamic_cast<MainForm^>(
+        Runtime::InteropServices::GCHandle::FromIntPtr(IntPtr(user)).Target);
+    if (form == nullptr || line == nullptr) return;
+    form->PostDebugLine(gcnew String(line, 0, static_cast<int>(std::strlen(line)), System::Text::Encoding::UTF8));
 }
 
 }

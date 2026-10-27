@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRIDE Design and Development</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&display=swap">
+<style>
+/* Layout: one A4-like column of running text with wide tables in their own scrollers; numbered
+   sections in the margin's rhythm, a document-control block up front, print-ready. */
+:root {
+  --paper: #fbfbf8;
+  --sheet: #ffffff;
+  --ink: #1c2430;
+  --muted: #566173;
+  --rule: #d8dce2;
+  --band: #eef1f4;
+  --accent: #9b5520;      /* copper, a PCB trace */
+  --accent-ink: #7a3f12;
+  --code-bg: #f3f4f1;
+  --ok: #2f6b3a;
+  --warn: #8a5a00;
+  --display: "Archivo", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --body: "Literata", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+  --measure: 70ch;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #11151b; --sheet: #161b22; --ink: #e4e7ec; --muted: #9aa5b4; --rule: #2b333e;
+    --band: #1c232c; --accent: #e08c4e; --accent-ink: #f0a874; --code-bg: #1d232b;
+    --ok: #7cc48a; --warn: #e2b04a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #11151b; --sheet: #161b22; --ink: #e4e7ec; --muted: #9aa5b4; --rule: #2b333e;
+  --band: #1c232c; --accent: #e08c4e; --accent-ink: #f0a874; --code-bg: #1d232b;
+  --ok: #7cc48a; --warn: #e2b04a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.62;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+.doc { max-width: 880px; margin: 0 auto; background: var(--sheet); border: 1px solid var(--rule);
+  padding-block: 48px; padding-inline: clamp(18px, 6vw, 72px); }
+h1, h2, h3, h4 { font-family: var(--display); text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(28px, 4.2vw, 40px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 23px; font-weight: 650; margin-top: 2.4em; padding-top: 0.6em; border-top: 2px solid var(--ink); display: flex; gap: 0.6em; align-items: baseline; }
+h3 { font-size: 18px; font-weight: 600; margin-top: 1.8em; display: flex; gap: 0.55em; align-items: baseline; }
+h4 { font-size: 15px; font-weight: 600; margin-top: 1.4em; }
+.num { font-family: var(--mono); font-size: 0.78em; color: var(--accent); font-weight: 500; min-width: 2.4em; }
+p, ul, ol { max-width: var(--measure); margin: 0.7em 0; }
+li { margin: 0.25em 0; }
+a { color: var(--accent-ink); }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--code-bg); padding: 0.05em 0.3em; border-radius: 3px; overflow-wrap: anywhere; }
+pre { font-family: var(--mono); font-size: 13px; line-height: 1.5; background: var(--code-bg); border: 1px solid var(--rule);
+  padding: 12px 14px; overflow-x: auto; max-width: 100%; }
+.eyebrow { font-family: var(--display); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+.subtitle { font-size: 18px; color: var(--muted); margin-top: 0.5em; max-width: 60ch; }
+.control { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0; margin-top: 28px; border: 1px solid var(--rule); }
+.control div { padding: 10px 12px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); min-width: 0; }
+.control dt { font-family: var(--display); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.control dd { margin: 2px 0 0; font-family: var(--mono); font-size: 13px; }
+.status { color: var(--warn); font-weight: 600; }
+.tbl { overflow-x: auto; margin: 1em 0; max-width: 100%; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+thead th { font-family: var(--display); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+  border-bottom: 2px solid var(--ink); background: var(--band); }
+td.n, th.n { text-align: right; }
+.yes { color: var(--ok); font-weight: 600; }
+.part { color: var(--warn); font-weight: 600; }
+.no { color: var(--muted); }
+.note { border-left: 3px solid var(--accent); padding: 6px 14px; margin: 1.2em 0; max-width: var(--measure); color: var(--muted); }
+.toc { columns: 2 260px; column-gap: 32px; margin-top: 12px; padding-left: 0; list-style: none; }
+.toc li { break-inside: avoid; font-family: var(--display); font-size: 14px; }
+.toc .num { display: inline-block; }
+figure { margin: 1.2em 0; }
+figcaption { font-family: var(--display); font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+.small { font-size: 13.5px; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 560px) { body { font-size: 15px; } .doc { padding-block: 28px; border: 0; } }
+@media print {
+  body { background: #fff; padding: 0; }
+  .doc { border: 0; max-width: none; padding: 0; }
+  h2 { break-before: auto; break-after: avoid; } h3 { break-after: avoid; }
+  table, figure, pre { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<main class="doc">
+
+<p class="eyebrow">Software Design and Development Report</p>
+<h1>GRIDE: an IDE and its own compiler toolchain</h1>
+<p class="subtitle">The design, implementation and verification of GRIDE, its GUI, and of the compiler toolchain it drives: three compilers, two assemblers, two linkers, three run-time libraries, a simulator, an emulator and a debugger, for Windows and the TMS320C6747 first, and for Linux and macOS.</p>
+
+<dl class="control">
+  <div><dt>Document</dt><dd>GRIDE-SDD</dd></div>
+  <div><dt>Version</dt><dd>2.0</dd></div>
+  <div><dt>Date</dt><dd>2026-10-27</dd></div>
+  <div><dt>Status</dt><dd class="status">Issued for review</dd></div>
+  <div><dt>Baseline</dt><dd>GRIDE ede17c0 · cpp11 1.30 · cppparse bf0c3f7</dd></div>
+  <div><dt>Supersedes</dt><dd>1.0 of 2026-10-22</dd></div>
+  <div><dt>Product owner</dt><dd>G. R. Akhtar</dd></div>
+</dl>
+
+<h3 style="margin-top:28px">Contents</h3>
+<ol class="toc">
+  <li><span class="num">1</span> Introduction</li>
+  <li><span class="num">2</span> System overview</li>
+  <li><span class="num">3</span> Platforms: hosts and targets</li>
+  <li><span class="num">4</span> Languages: implemented in, and implemented</li>
+  <li><span class="num">5</span> The GUI: GRIDE</li>
+  <li><span class="num">6</span> The compiler toolchain</li>
+  <li><span class="num">7</span> Optimisation: size and speed</li>
+  <li><span class="num">8</span> Development and verification</li>
+  <li><span class="num">9</span> Known limits and open work</li>
+  <li><span class="num">10</span> References</li>
+  <li><span class="num">A</span> Revision history</li>
+  <li><span class="num">B</span> Glossary</li>
+</ol>
+
+<!-- ============================================================ 1 -->
+<h2><span class="num">1</span>Introduction</h2>
+<h3><span class="num">1.1</span>Purpose</h3>
+<p>This report records how GRIDE is designed, how it is built, and how far it has been verified. It is written for the engineers who maintain or extend GRIDE and for reviewers who need its scope, its standards, its measured quality and its limits in one place.</p>
+
+<h3><span class="num">1.2</span>Scope</h3>
+<ul>
+  <li><b>The GUI:</b> GRIDE, version 1.5.0.0: editor, projects and workspaces, build, run and debug.</li>
+  <li><b>The whole toolchain</b> GRIDE drives: c90, cpp11, shalimar, asm6x, lnk6x, RTS6747 with ar6x, SIM6747, VM6747, masm, link with its librarian, gride-dbg and grt.</li>
+  <li><b>Four targets:</b> 1. x86_64-windows and 2. tms6747 (the TI TMS320C6747 DSP), the two complete ones; 3. x86_64-linux and 4. arm64-darwin, reached as far as assembly.</li>
+  <li><b>The Setup</b> that installs GRIDE and its toolchain, and the project that builds it.</li>
+</ul>
+
+<h3><span class="num">1.3</span>Baseline</h3>
+<p>Facts are taken from the GRIDE repository at commit <code>ede17c0</code> (2026-10-27), 60 commits after 1.0's baseline <code>6090472</code>. It holds cpp11 1.30 and the cppparse example at its repository's <code>bf0c3f7</code>, whose sources are those of that repository's latest commit, <code>2dec723</code>. The records and reviews used are listed in chapter 10. No work above the baseline is described. Where the old RIDE 5.17 manual and the source disagree, the source is followed.</p>
+
+<h3><span class="num">1.4</span>Conventions</h3>
+<ul>
+  <li><b>Target numbers.</b> The four targets keep the numbers 1 to 4 of §1.2 throughout.</li>
+  <li><b>Ratios</b> are GRIDE's figure divided by the reference's: below 1 means GRIDE's tool is faster or smaller.</li>
+  <li><b>Refused by name</b> means the compiler stops with a message that names the unsupported feature, rather than compiling it wrongly. It is the toolchain's rule for anything it does not implement.</li>
+  <li><b>An oracle</b> is a reference compiler, simulator or run-time whose result decides what is right (§8.2).</li>
+  <li>A <b>†</b> in chapter 10 marks a standard the sources name by subject but not by number.</li>
+</ul>
+
+<h3><span class="num">1.5</span>What changed since 1.0</h3>
+<p>The Windows side of the toolchain grew most: two components came in under <code>toolchain\Windows</code>, gride-dbg and grt, and masm and link gained what they need. The table lists every change this version records.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Area</th><th>Change</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td>New: gride-dbg</td><td>GRIDE's own debugger for target 1, version 1.1: the Win32 debug API and dbghelp, answering in cdb's words</td><td>§6.5</td></tr>
+    <tr><td>New: grt</td><td>GRIDE's own C and C++ run-time for target 1: five layered static libraries and kernel32's import library, built by GRIDE's toolchain; a program imports <code>kernel32.dll</code> alone; locked for programs with threads</td><td>§6.6</td></tr>
+    <tr><td>link</td><td>The PDB under <code>/DEBUG</code>; a librarian under <code>/LIB</code>: COFF archives, import libraries from a <code>.def</code>, <code>/LIST</code></td><td>§6.3, §6.4</td></tr>
+    <tr><td>masm</td><td>CodeView from <code>.FILE</code>/<code>.LINE</code>; the instructions grt needs; <code>OPTION NOKEYWORD</code>; lookup by index</td><td>§6.3</td></tr>
+    <tr><td>Debug builds, target 1</td><td>GRIDE's own road, on the branch <code>pdb</code> in 1.0, merged and wired; cpp11's part in 1.29. No clang and no Microsoft link.exe</td><td>§3.3, §6.4</td></tr>
+    <tr><td>Compilers</td><td>cpp11 1.28 (the review's wrong-code set), 1.29 (its own CodeView), 1.30 (three fixes grt needs); c90's stack probe and <code>setjmp</code>; shalimar's errors with a caret</td><td>§4.2, §9.1</td></tr>
+    <tr><td>RTS6747</td><td>C99's <code>log2</code>, <code>hypot</code>, <code>cbrt</code>, <code>strtoll</code>, <code>strtoull</code>, <code>strtof</code>, <code>strtold</code> and <code>vsnprintf</code>; <code>log</code> and <code>pow</code> fixed; its C library also grt's</td><td>§6.2, §6.6</td></tr>
+    <tr><td>The toolchain's programs</td><td>On the static VC++ run-time (<code>/MT</code>): only GRIDE.exe needs the VC++ DLLs</td><td>§3.1</td></tr>
+    <tr><td>The GUI</td><td>A project's files compiled side by side; gride-dbg first; F10/F11 to <code>main</code>; the debugged program's input; the Windows C run-time chosen; errors located from the project's folder</td><td>chapter 5</td></tr>
+    <tr><td>Setup</td><td>A Setup project in the solutions, with nothing third-party; Setup 1.5.0, installing one of three outlooks</td><td>§8.1</td></tr>
+    <tr><td>Examples</td><td>cpp-sampleext, CCS's SampleExt as a Windows project: 29 projects</td><td>§5.7</td></tr>
+    <tr><td>Versions stated</td><td>Every outlook's Help › About asks cpp11 for its version when it opens; the texts that name the version in use say 1.30</td><td>§5.8</td></tr>
+    <tr><td>cppparse</td><td>The triage of 2026-10-21 finished, taken over from Fable 5.1 by Opus 5.5</td><td>§8.5</td></tr>
+  </tbody>
+</table></div>
+
+<!-- ============================================================ 2 -->
+<h2><span class="num">2</span>System overview</h2>
+<p>GRIDE is a Windows IDE built around its own compiler toolchain. The GUI holds the editor, projects and workspaces, the build, the run and the debugger. Every tool it starts, and every switch it passes, is defined in <code>toolchain.json</code>, so the GUI itself names no tool. Projects are <code>.pro</code> files, the settings live in one <code>settings.json</code>, and the Help is a set of HTML pages beside the program.</p>
+<figure>
+<pre class="mermaid">
+flowchart LR
+  P[".pro project"] --> IDE["GRIDE (the GUI)"]
+  TJ["toolchain.json"] --> IDE
+  IDE --> C["c90 · cpp11 · shalimar"]
+  C -->|1 x86_64-windows| M["masm"] --> L["link + grt"] --> EXE[".exe + .pdb"] --> D1["gride-dbg"]
+  C -->|2 tms6747| A["asm6x"] --> K["lnk6x + RTS6747"] --> OUT[".out"] --> S["SIM6747"]
+  C -->|2 tms6747, .s| V["VM6747"]
+  C -->|3 x86_64-linux, 4 arm64-darwin| ASM[".s only on Windows"]
+</pre>
+<figcaption>Figure 1. What GRIDE starts for each target. On target 1, Release and Debug builds take the same road: under <code>-g</code>, masm carries the CodeView and link writes the PDB that gride-dbg reads (§6.4, §6.5). The program links against grt or against Microsoft's run-time (§6.6).</figcaption>
+</figure>
+
+<h3><span class="num">2.1</span>Components</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Component</th><th>Role</th><th>Version</th></tr></thead>
+  <tbody>
+    <tr><td>GRIDE</td><td>The GUI: edit, build, run, debug</td><td>1.5.0.0</td></tr>
+    <tr><td>c90</td><td>C compiler, ISO C90</td><td>1.3</td></tr>
+    <tr><td>cpp11</td><td>C++ compiler, C++03 with C++11 extensions</td><td>1.30</td></tr>
+    <tr><td>shalimar</td><td>The Shalimar micro compiler</td><td>1.3</td></tr>
+    <tr><td>asm6x, lnk6x</td><td>C6000 assembler and linker, TI ELF</td><td>1.4, 1.2</td></tr>
+    <tr><td>RTS6747 (rts6x.lib), ar6x</td><td>C and C++ run-time for the C6747, and its archiver</td><td>1.2, 1.0</td></tr>
+    <tr><td>SIM6747, VM6747</td><td>Cycle-level simulator of a linked image; emulator of the assembly</td><td>1.3, 1.1</td></tr>
+    <tr><td>masm, link</td><td>x64 assembler (MS COFF, with CodeView) and linker (PE32+, with its PDB), and link's librarian (<code>/LIB</code>)</td><td>RIDE 5.17's, extended</td></tr>
+    <tr><td>gride-dbg</td><td>Debugger for target 1: the Win32 debug API and dbghelp, in cdb's dialect</td><td>1.1</td></tr>
+    <tr><td>grt</td><td>C and C++ run-time for target 1: five static libraries and kernel32's import library</td><td>Stage 1; stage 2 in part</td></tr>
+    <tr><td>Setup</td><td>One MSI, written through Windows Installer's own automation, per user, no elevation; built by the Setup project</td><td>1.5.0</td></tr>
+  </tbody>
+</table></div>
+
+<h3><span class="num">2.2</span>Design principles</h3>
+<ul>
+  <li><b>The toolchain is data.</b> A renamed program or a changed switch is a change to <code>toolchain.json</code>, not to the GUI.</li>
+  <li><b>Own tools end to end on the two complete targets.</b> From source to a running, debuggable program, neither target needs a vendor tool, though either may use one. Since this version's baseline that holds for target 1's Debug builds, its run-time and its debugger as well.</li>
+  <li><b>Refuse by name.</b> A feature a tool does not implement stops it with a message naming the feature.</li>
+  <li><b>Measured against oracles.</b> Every tool was written against a reference: cl, g++, clang, TI's cl6x, ml64 and link.exe, and Microsoft's run-time for grt (§8.2).</li>
+  <li><b>Inspiration, not copies.</b> Microsoft's run-time sources are read for behaviour, layouts and edge cases; none of their text is in GRIDE.</li>
+  <li><b>No shell.</b> Every tool starts the next one directly, so builds, and the Setup's build, work where cmd.exe is disabled by policy.</li>
+</ul>
+
+<!-- ============================================================ 3 -->
+<h2><span class="num">3</span>Platforms: hosts and targets</h2>
+<h3><span class="num">3.1</span>Hosts</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Component</th><th>Windows x64</th><th>Linux</th><th>macOS</th></tr></thead>
+  <tbody>
+    <tr><td>GRIDE (the GUI)</td><td class="yes">Runs (.NET Framework 4.8, WinForms)</td><td class="no">No</td><td class="no">No (an older Xcode tree exists, never built)</td></tr>
+    <tr><td>The toolchain programs and RTS6747</td><td class="yes">Builds and runs (Visual Studio solution)</td><td class="part">Source has POSIX branches; no build files in the tree</td><td class="part">Source has <code>__APPLE__</code> branches; a package script exists, never run</td></tr>
+    <tr><td>gride-dbg and grt</td><td class="yes">Builds and runs</td><td class="no">No: Windows only by design</td><td class="no">No: Windows only by design</td></tr>
+  </tbody>
+</table></div>
+<p>The project's own discipline has been a three-machine release: a Mac, a Linux box and a Windows box each build the tools and run their suites (§8.2). The present working copy builds on Windows only, through Visual Studio 2022's v143 toolset, and opens in Visual Studio 2022 and 2026. The toolchain's programs carry the static VC++ run-time (<code>/MT</code>, <code>/MTd</code>), so only GRIDE.exe, a C++/CLI program, needs the VC++ DLLs, and the Setup puts them beside it. A program GRIDE builds for target 1 on grt needs nothing but Windows (§6.6).</p>
+
+<h3><span class="num">3.2</span>Targets</h3>
+<p>GRIDE has two complete targets, built, run and debugged on Windows with the toolchain's own tools: <b>1. x86_64-windows</b> and <b>2. tms6747</b>. Targets 3 and 4 are reached as far as assembly; their objects and programs are made by the tools of their own machines.</p>
+<div class="tbl"><table>
+  <thead><tr><th class="n">#</th><th>Target</th><th>On a Windows host</th><th>Tools in the chain</th><th>ABI</th></tr></thead>
+  <tbody>
+    <tr><td class="n">1</td><td><code>x86_64-windows</code></td><td class="yes">Build, run, debug</td><td>compiler → masm → link, in Release and Debug (the PDB by link <code>/DEBUG</code>), against grt or Microsoft's CRT; gride-dbg, or cdb or lldb in its place</td><td>Microsoft x64</td></tr>
+    <tr><td class="n">2</td><td><code>tms6747</code></td><td class="yes">Build, run, debug</td><td>compiler → asm6x → lnk6x with RTS6747 → SIM6747; or the assembly straight on VM6747</td><td>TI C6000 EABI</td></tr>
+    <tr><td class="n">3</td><td><code>x86_64-linux</code></td><td class="part">Assembly only (<code>-S</code>)</td><td>GNU as, gcc / g++ and gdb on a Linux machine</td><td>System V AMD64</td></tr>
+    <tr><td class="n">4</td><td><code>arm64-darwin</code></td><td class="part">Assembly only (<code>-S</code>)</td><td>as, cc and lldb on a Mac</td><td>AAPCS64, Apple variant</td></tr>
+  </tbody>
+</table></div>
+
+<h3><span class="num">3.3</span>The pipelines</h3>
+<ul>
+  <li><b>Target 1, Release:</b> the compiler writes MASM-spelled assembly (<code>-S -masm=masm</code>); masm makes an MS COFF object; link makes a PE32+ console program against the C run-time GRIDE chose for the build.</li>
+  <li><b>Target 1, Debug:</b> the same road with <code>-g</code>. The compiler writes the <code>.FILE</code> and <code>.LINE</code> directives and its CodeView records in the MASM spelling (<code>-g -masm=masm</code>); masm carries them in <code>.debug$S</code> and <code>.debug$T</code>; link <code>/DEBUG</code> writes the PDB that gride-dbg, cdb and Visual Studio read. No clang and no Microsoft link.exe are needed. That older road, the GNU spelling assembled by clang and linked by link.exe, is kept for a compiler that names no CodeView spelling of its own in <code>toolchain.json</code>; since cpp11 1.29 none of GRIDE's three needs it.</li>
+  <li><b>Target 1, the C run-time:</b> <i>grt</i>, GRIDE's own: its five libraries and its <code>kernel32.lib</code> named by their paths, Microsoft's libraries refused with <code>/NODEFAULTLIB</code>; or <i>Microsoft's</i> static CRT (libcmt, libucrt, libvcruntime, kernel32, legacy_stdio_definitions) found through <code>LIB</code>. The setting's default, <i>auto</i>, takes Microsoft's only where Visual Studio is found and the build has cl's objects, grt otherwise; <code>GRIDE_WINDOWS_RUNTIME=grt</code> or <code>msvc</code> in the environment at start wins. The Shalimar run-time follows the choice, and the Output says it once a build.</li>
+  <li><b>Target 2:</b> the compiler writes TI C6000 assembly; asm6x makes TI ELF objects; lnk6x links them with RTS6747 under a linker command file (GRIDE's own when the project has none); SIM6747 runs the image. <i>Emulate</i> runs the assembly on VM6747 instead, and <i>Verify</i> runs both and compares their output line by line.</li>
+  <li><b>Targets 3 and 4:</b> assembly only on Windows; on their own machines the host's assembler and C or C++ driver finish the build.</li>
+  <li><b>A lone file</b> with a <code>main</code>, opened with no project, builds as its own program beside the file.</li>
+</ul>
+
+<!-- ============================================================ 4 -->
+<h2><span class="num">4</span>Languages: implemented in, and implemented</h2>
+<h3><span class="num">4.1</span>What GRIDE is written in</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Component</th><th>Language and standard</th><th>Toolset</th><th class="n">Files</th><th class="n">Lines</th></tr></thead>
+  <tbody>
+    <tr><td>GRIDE (the GUI)</td><td>C++/CLI on .NET Framework 4.8, WinForms</td><td>v143</td><td class="n">60</td><td class="n">27,576</td></tr>
+    <tr><td>The ten toolchain programs (c90 … gride-dbg)</td><td>ISO C++14 (<code>/std:c++14</code>, ConformanceMode, <code>/W4 /WX</code>; <code>-std=c++14</code> off Windows), on the static VC++ run-time</td><td>v143</td><td class="n">371</td><td class="n">131,768</td></tr>
+    <tr><td>RTS6747 (C6747 run-time) and ar6x</td><td>C++ compiled by cpp11 for tms6747, plus TI C6000 assembly; ar6x in C++14</td><td>cpp11, asm6x, ar6x</td><td class="n">388</td><td class="n">12,973</td></tr>
+    <tr><td>grt (Windows run-time)</td><td>C compiled by c90, C++ by cpp11 and x64 assembly by masm, packed by link <code>/LIB</code>; its C library is RTS6747's, compiled for Windows</td><td>c90, cpp11, masm, link</td><td class="n">66</td><td class="n">4,598</td></tr>
+  </tbody>
+</table></div>
+<p>Every tool project builds Debug and Release for x64 with the v143 toolset, Windows SDK 10.0, warning level 4 and warnings as errors; grt is built by GRIDE's own tools, as RTS6747 is. The tools' own source is held to strict C++14 so that it builds unchanged with cl, g++ and clang; g++ on Linux has been the judge of that (§8.2). The figures were counted afresh at the baseline: each tree's sources and headers, the headers and run-time sources a compiler ships included, without tests, benchmarks, build output or documents. They are not directly comparable with 1.0's, which were counted otherwise.</p>
+
+<h3><span class="num">4.2</span>What GRIDE compiles</h3>
+<h4>C: c90 1.3</h4>
+<p>c90 implements ISO/IEC 9899:1990 (C90, ANSI X3.159-1989) for all four targets and ships its own 16 C90 headers. It refuses C++ source by suffix. It optimises (<code>-O1</code>, <code>-O2</code>) in its x86-64 back end only. Since 1.0 it probes a frame of a page or more with <code>__chkstk</code> on target 1, as cl does; calls <code>setjmp</code> with nothing parked on the stack, so <code>(n = setjmp(jb)) == 0</code> no longer loops at <code>-O0</code>; takes function declarators in a file-scope declaration list; and writes its own CodeView under <code>-g -masm=masm</code> (§6.4).</p>
+
+<h4>C++: cpp11 1.30</h4>
+<p>cpp11's claim is its banner: <b>C++03 with C++11 extensions</b>. It compiles ISO/IEC 14882:2003 and a large part of ISO/IEC 14882:2011, ships 39 C++ and 23 C headers of its own, and refuses by name what it does not implement. Its source cites the standard by its stable clause names, 423 of them.</p>
+<div class="tbl"><table>
+  <thead><tr><th>C++11 area</th><th>State in 1.30</th></tr></thead>
+  <tbody>
+    <tr><td>rvalue references, move semantics, implicit move members</td><td class="yes">Compiled; the lifetime and implicit-member defects of 1.25 fixed in 1.26</td></tr>
+    <tr><td>Variadic templates, alias templates, template template parameters</td><td class="yes">Compiled; pack expansion in a base list and some partly explicit argument forms still refused (§9.1)</td></tr>
+    <tr><td>Lambdas, <code>auto</code>, <code>decltype</code>, trailing return types</td><td class="yes">Compiled; <code>decltype</code> of comparisons, string literals and conditionals fixed in 1.27</td></tr>
+    <tr><td>List-initialisation, <code>std::initializer_list</code></td><td class="yes">Compiled, including a braced list inside the braces that call a constructor (1.25)</td></tr>
+    <tr><td><code>constexpr</code>, <code>static_assert</code>, <code>noexcept</code></td><td class="part">Compiled; <code>constexpr</code> over string literals, arrays and addresses still refused</td></tr>
+    <tr><td>range-for, <code>enum class</code>, <code>nullptr</code>, user-defined literals, inline namespaces</td><td class="yes">Compiled</td></tr>
+    <tr><td>Delegating and inheriting constructors, defaulted and deleted functions, <code>override</code>, <code>final</code></td><td class="yes">Compiled</td></tr>
+    <tr><td>Exceptions</td><td class="part">Compiled on every target; on target 1 <code>throw;</code>, function-try-blocks and two polymorphic bases are refused by name</td></tr>
+    <tr><td>Brace member initialisers <code>: m{…}</code>, <code>thread_local</code>, two-phase name lookup</td><td class="no">Not implemented (refused, or by design; §9.1)</td></tr>
+  </tbody>
+</table></div>
+<p>An independent review measured this breadth on 268 valid programs judged by cl and by clang++ in strict C++11 (§8.4). cpp11 1.25 ran 99 of them as cl does and refused 134. cpp11 1.27 runs 164 as cl does, differs on 11 and refuses 85, with no program that worked before going wrong.</p>
+<p>Since 1.27: 1.28 fixed the review's wrong-code set and three of its four accepted ill-formed programs (§9.1); 1.29 writes its own CodeView for GRIDE's masm, every name whole with its namespaces as cl's PDB spells it (§6.4); 1.30 made three fixes grt needed: <code>p - n</code> with <code>n</code> narrower than the pointer is widened before it is negated, a C name that is a MASM keyword (<code>fabs</code>, C90's <code>div</code>) stays the symbol's name, and a dynamic initialiser under <code>-g</code> names the labels its code defines. Its <code>&lt;algorithm&gt;</code> gained both forms of <code>std::equal</code>, and an enum inside a class is mangled through the class. The review's programs were run again as a gate of 1.30's fixes and recorded unchanged; the counts above are still 1.27's, as no later run counted them again.</p>
+
+<h4>Shalimar: shalimar 1.3, the micro compiler</h4>
+<p>Shalimar is a micro language: a small compiled language of its own, defined by its author's Shalimar 1.3 specification. Every Shalimar file has a <code>main</code>, and the Shalimar run-time owns the program's entry point, so a program is one compilation of the file with <code>main</code> and the files it calls into. shalimar compiles for all four targets and links with its run-time on targets 1 and 2. Since 1.0 its errors take the form c90 and cpp11 use, <code>file:line:col: error:</code> with the source line and a caret, and it writes its own CodeView under <code>-g -masm=masm</code>.</p>
+
+<h3><span class="num">4.3</span>What GRIDE emits</h3>
+<div class="tbl"><table>
+  <thead><tr><th class="n">#</th><th>Target</th><th>Assembly</th><th>Object / image</th><th>Debug information</th><th>C++ names and exceptions</th></tr></thead>
+  <tbody>
+    <tr><td class="n">1</td><td>x86_64-windows</td><td>MASM (ml64 spelling), with <code>.FILE</code>/<code>.LINE</code> and CodeView data under <code>-g</code>; GNU spelling for clang</td><td>MS COFF AMD64 / PE32+</td><td>CodeView C13 in <code>.debug$S</code> and <code>.debug$T</code>; the PDB by GRIDE's link <code>/DEBUG</code> (§6.4)</td><td>Microsoft decoration; Microsoft x64 exception tables and RTTI</td></tr>
+    <tr><td class="n">2</td><td>tms6747</td><td>TI C6000, compact 16-bit forms by default</td><td>TI ELF32 (EM_TI_C6000) / ELF EXEC <code>.out</code></td><td>TI <code>.dwpsn</code> lines and <code>.dwtag</code> variables; DWARF 3 line tables by asm6x</td><td>Itanium C++ ABI; ARM EHABI-style unwind tables</td></tr>
+    <tr><td class="n">3</td><td>x86_64-linux</td><td>GNU (AT&amp;T)</td><td>ELF64, by the host's tools</td><td>DWARF 4</td><td>Itanium C++ ABI and its EH ABI</td></tr>
+    <tr><td class="n">4</td><td>arm64-darwin</td><td>Apple arm64</td><td>Mach-O, by the host's tools</td><td>DWARF 4</td><td>Itanium C++ ABI and its EH ABI</td></tr>
+  </tbody>
+</table></div>
+<p>The calling conventions are the platforms' own: Microsoft x64, TI's C6000 EABI, System V AMD64 and Apple's AAPCS64. On target 1 the review proved that objects from cpp11 and from cl link in both directions, with calls, decorated names, RTTI and exceptions passing between them (§8.4). The same objects link with grt or with Microsoft's run-time (§6.6).</p>
+
+<!-- ============================================================ 5 -->
+<h2><span class="num">5</span>The GUI: GRIDE</h2>
+<p>GRIDE is a C++/CLI WinForms application of 60 source files. Its class map and main flows are documented in the source tree's <code>ARCHITECTURE.md</code>. The Setup installs it in one of three outlooks: Black, the default; Grey; and White, The Simple. Each outlook is a solution of its own over the one toolchain, and on 2026-10-26 Grey and White were brought to Black's features. This report describes GRIDE in the Black outlook.</p>
+<h3><span class="num">5.1</span>What it offers</h3>
+<ul>
+  <li><b>Editing:</b> a code editor with syntax colouring for C, C++, Shalimar and assembly; docking panes; three themes; Visual Studio's keys, or the simple key set on request; snippets; external tools; a terminal pane.</li>
+  <li><b>Projects:</b> <code>.pro</code> projects and <code>.grws</code> workspaces of several projects with a startup project, dependencies and build order. Code Composer Studio 7.4 and 5.5 projects, and Visual Studio solutions and projects, are read as they are, read-only.</li>
+  <li><b>Build:</b> build and rebuild a workspace, a project or a file; clean; assemble only; link only; batch build; a configuration manager. A project's files are compiled side by side, one per processor, and the Output pane and the Error List keep the project's order (§5.3).</li>
+  <li><b>Run:</b> an output pane with an input line; <i>Emulate</i> on VM6747; <i>Verify</i> on SIM6747 and VM6747 together.</li>
+  <li><b>Debug:</b> breakpoints, stepping, the call stack, locals, watch and memory, through gride-dbg, cdb, SIM6747, VM6747, gdb, lldb or the Shalimar run-time's own session. F10 or F11 with nothing being debugged builds the program, starts it and stops at <code>main</code>'s first statement; the debugged program reads the line typed under the Output pane (§5.5).</li>
+  <li><b>Choices for target 1</b>, under Tools &gt; Options: the Windows debugger (auto, gride-dbg or cdb) and the C run-time a program links (auto, grt or Microsoft's).</li>
+  <li><b>Help:</b> F1 opens the Help the three outlooks share; Help › About names cpp11's version as cpp11 itself gives it (§5.8).</li>
+</ul>
+
+<h3><span class="num">5.2</span>Layers</h3>
+<p>Each layer uses only the layers above it in this table.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Layer</th><th>Holds</th><th>Main classes</th></tr></thead>
+  <tbody>
+    <tr><td>Core</td><td>JSON reader and writer, paths, languages and targets, Win32 calls (job objects, pseudo-consoles)</td><td><code>JsonValue</code>, <code>JsonParser</code>, <code>JsonWriter</code>, <code>PathUtil</code>, <code>NativeMethods</code></td></tr>
+    <tr><td>Model</td><td>Projects, workspaces, build configurations; the CCS and Visual Studio readers</td><td><code>GrideProject</code>, <code>Workspace</code>, <code>BuildConfiguration</code>, <code>CcsProjectReader</code>, <code>VsProjectReader</code></td></tr>
+    <tr><td>Settings</td><td>The settings file; <code>toolchain.json</code> and its definitions; compiler options</td><td><code>SettingsManager</code>, <code>ToolchainDefinitions</code>, <code>ToolchainSettings</code>, <code>CompilerOptionStore</code></td></tr>
+    <tr><td>Services</td><td>Tool lookup, build, macro expansion, tool and program runners, Visual Studio discovery, diagnostics, debug engines</td><td><code>BuildEngine</code>, <code>MacroExpander</code>, <code>ToolRunner</code>, <code>ProgramRunner</code>, <code>DebuggerChoice</code>, <code>ProcessDebugger</code>, <code>DebugTranscript</code>, <code>ShalimarSession</code></td></tr>
+    <tr><td>UI</td><td>The main form, commands and key sets, the editor, docking, panes, dialogs, themes</td><td><code>MainForm</code>, <code>CommandRegistry</code>, <code>KeySets</code>, <code>CodeEditor</code>, <code>DockArea</code>, <code>Theme</code></td></tr>
+  </tbody>
+</table></div>
+
+<h3><span class="num">5.3</span>How a build runs</h3>
+<ol>
+  <li>The main form starts the build engine on a worker thread.</li>
+  <li>For each project, in build order: Clean and Rebuild are honoured, a project folder that cannot be written is refused, and the macros of the project and configuration are set.</li>
+  <li>For each source, the compiler is chosen: the group's word, else the project's, else the language's. A Shalimar program is compiled as one unit.</li>
+  <li>The tool's command line comes from <code>toolchain.json</code> (§5.4), each <code>$(…)</code> placeholder filled by the macro expander; an unknown placeholder is left visible rather than dropped.</li>
+  <li>Every compile and assembly of the project is decided first, in project order, with its checks: a refusal, a tool not found, a step already up to date. The steps then run side by side, the largest source first, each on a runner of its own. Each finished step is read back in project order, so the Output pane, the Error List and the first error are what one tool after another would have given. The first step to fail stops the others, and a failed step's output file is removed, so half an object never looks up to date. <i>Files compiled at once</i> under Tools &gt; Options (<code>buildJobs</code>: 0, the default, one per processor; 1, one at a time) sets how many run.</li>
+  <li>The objects are linked: masm and link on target 1, against the C run-time chosen for the build (§3.3); asm6x and lnk6x with RTS6747 on target 2. If the toolchain's own assembler or linker fails, GRIDE offers the vendor's tools for that build.</li>
+  <li>Each tool is started directly, in a job object, with no shell. cmd.exe is used only when the user configures a setup script.</li>
+  <li>Output, messages and the finish event return to the Output pane and the Error List. The Output pane shows a project's file by its path from the project's folder, and the Error List keeps the full path for navigation. A tool's output is capped at 40 lines in the pane, and GRIDE never opens a generated <code>.s</code> as if it were the source of an error.</li>
+</ol>
+<p>On cppparse's Release rebuild on 12 processors, the side-by-side build took 49.6 s against 190.3 s one tool at a time, with the same 134 lines of output (2026-10-26).</p>
+
+<h3><span class="num">5.4</span>How <code>toolchain.json</code> drives the tools</h3>
+<p>The file has these sections: <code>installation</code> (where the toolchain lives), <code>ccs</code> (reading CCS projects), <code>compilerOptions</code> (17 options on four tabs), <code>visualStudio</code> (finding cl, link.exe, clang and the Windows SDK without vcvars), <code>placeholders</code> (44), <code>targets</code> (4), <code>tools</code> (23), <code>libraries</code> (7) and <code>linkerCommandFiles</code>. A target names a tool for each role (C, C++ and Shalimar compilers, assembler, linker, debug assembler, debug linker, the vendor's assembler and linker, simulator, emulator, GRIDE's own debugger, the debugger and its fall-back) and its C run-time. A tool names its operations, each a command line such as cpp11's:</p>
+<pre>-S "$(Source)" -o "$(AsmFile)" $(ArchFlag) $(ConfigFlags) $(AsmSyntaxFlag) $(IncludeFlags) $(DefineFlags) $(CompileFlags)</pre>
+<p>Since 1.0 the file names gride-dbg, in the role <code>ownDebugger</code> with a session in cdb's dialect, and two libraries: grt and the Shalimar run-time built over it. A library for target 1 says which C run-time it belongs to (<code>crt</code>: <code>grt</code> or <code>msvc</code>), so GRIDE links the Shalimar run-time that matches the program's. A tool is found by its environment variable, then beside GRIDE.exe and in the installation's bin, then in Visual Studio's or TI's folders when its lookup says so, then on PATH. The user's own <code>%APPDATA%\GRIDE\toolchain.json</code> overrides the shipped file field by field. The shipped file is crisp: settings only, 59 KB, with one-line labels where the Options pages show them; what every entry means is in the Help (<code>Settings_Files.html</code>).</p>
+
+<h3><span class="num">5.5</span>How debugging runs</h3>
+<p>F5 builds, then the debugger choice picks an engine from the target's roles and the tool's session. For target 1 it is gride-dbg (§6.5) when it is beside GRIDE, else cdb, else lldb; the setting can name gride-dbg or cdb, the other standing in where the one named is missing, and the Output says which and why. For target 2 it is SIM6747 or VM6747; on their own machines gdb or lldb; for a Debug Shalimar program the Shalimar run-time's own session. The process debugger sends one command at a time, ended by a marker, over pipes or a pseudo-console; the transcript reader turns the gdb-, lldb- or cdb-shaped answers into stops, frames and variables, and a stop refreshes the panes. gride-dbg answers in cdb's shapes, so the same reader serves both. When nothing can debug a build, GRIDE says why.</p>
+<ul>
+  <li><b>Starting at main.</b> F10 or F11 with nothing being debugged builds, starts and stops at <code>main</code>'s first statement, as Visual Studio does: a one-shot breakpoint on <code>main</code>'s line (C's and C++'s <code>int main(</code>, Shalimar's <code>fun &lt;&gt; = main</code>), then one step past its prologue. F5 still runs to a breakpoint or the end.</li>
+  <li><b>The program's input and output.</b> The line typed under the Output pane goes to the debugged program at once, even while it runs (gride-dbg's <code>.input</code>). The program's output is shown while it runs and at every stop. A line it has not finished is shown as far as it goes and joined to its rest when that comes, never repeated.</li>
+  <li><b>Values as the language shows them.</b> A Shalimar array by its elements, cpp11's <code>vector</code>, <code>string</code> and <code>initializer_list</code> by what they hold, a reference as what it refers to. A watch of a name the stop cannot see says "not in scope here".</li>
+</ul>
+
+<h3><span class="num">5.6</span>Files</h3>
+<div class="tbl"><table>
+  <thead><tr><th>File</th><th>Where</th><th>Holds</th></tr></thead>
+  <tbody>
+    <tr><td><code>.pro</code></td><td>Beside the sources</td><td>JSON with comments: <code>name</code>, <code>toolchain</code>, <code>arch</code>, <code>groups</code> (named file lists), <code>include</code>, <code>libraries</code>, <code>build</code> (<code>target</code>, <code>groups</code>, <code>args</code>), <code>emulateOnly</code>, <code>options</code>, and the configurations and dependencies a workspace needs. Saving keeps keys GRIDE does not know, and writes one layout, so saving an unchanged project changes nothing. The format did not change in this version.</td></tr>
+    <tr><td><code>.grws</code></td><td>Beside the projects</td><td>A workspace: its projects, the startup project, dependencies and build order.</td></tr>
+    <tr><td><code>toolchain.json</code></td><td>Beside GRIDE.exe; the user's overrides in <code>%APPDATA%\GRIDE</code></td><td>The toolchain (§5.4).</td></tr>
+    <tr><td><code>settings.json</code></td><td><code>%APPDATA%\GRIDE</code>, or beside GRIDE.exe for a portable copy</td><td>The editor, build (with the files compiled at once), paths, CCS, the debuggers and the Windows C run-time, recent items and the window. One key per setting is proposed (§9.2).</td></tr>
+    <tr><td>Help</td><td>Beside GRIDE.exe</td><td>HTML pages: GRIDE's help, the language references, the toolchain's manual, and <code>Settings_Files.html</code>, which explains every entry of the three files above. In <code>docs</code> beside them: this report and grt's design.</td></tr>
+    <tr><td><code>Setup.vcxproj</code>, <code>Setup.sln</code></td><td><code>installer\windows</code></td><td>The Setup project, in each outlook's solution and in a solution of its own (§8.1).</td></tr>
+  </tbody>
+</table></div>
+
+<h3><span class="num">5.7</span>Examples</h3>
+<p>One examples folder ships beside GRIDE: 29 projects in the <code>.pro</code> format (C, C++ and Shalimar; among them cppparse, a 39-source C++ program; cpp-sampleext, the CCS sample SampleExt as a Windows project; and three self-checking showcase projects that print the same on targets 1 and 2), 3 CCS projects, 11 single-file programs and the toolchain demo. On 2026-10-21 every example then present was built and run from that folder: 41 of 42 returned 0, the 42nd being a Mac program, and the 16 that state their expected output printed every line of it. cpp-sampleext, added on 2026-10-27 with its four sources unchanged, builds in Debug and Release on grt and on Microsoft's run-time; all four builds run with exit code 0 and print the same 34 lines as cl's build of the same sources.</p>
+
+<h3><span class="num">5.8</span>Where GRIDE states versions</h3>
+<p>A version number written into GRIDE would be a second copy of the tool's own, and the one that goes stale. So GRIDE states cpp11's version by asking cpp11, and the few texts that name it say 1.30.</p>
+<ul>
+  <li><b>Help › About</b>, in each outlook, runs the cpp11 the toolchain resolves with <code>--version</code> when the box opens. It shows cpp11's banner without the copyright, then the version line cpp11 writes beneath it: "C++03 with C++11 extensions, Version 1.30, sealed 23-10-2026". When cpp11 is not found or does not answer, the box says so. White shows it among its rows for shalimar, c90 and c2s, which give their own banners; shalimar's and c2s's carry their numbers, c90's names none.</li>
+  <li><b>Written texts</b> that name the version in use say 1.30: the Help's version table, the installer test's default, and GRIDEd's Help › Release Notes, which also lists gride-dbg and grt. <code>Runtime_Design.md</code> said 1.29 there, and the macOS tree's help page RIDE's 1.5 and 1.8; both were corrected on 2026-10-27. Versions named as history, such as when a feature came in or the 1.29 bugs that 1.30 fixed, stay as they are.</li>
+  <li><b>Where the number comes from.</b> cpp11's own <code>Version.h</code>: <code>CXX1_VERSION "1.30"</code>, the seal file <code>cxx1-1.30.dat</code> and the seal date 23-10-2026, with a history line for each version (§4.2).</li>
+</ul>
+
+<!-- ============================================================ 6 -->
+<h2><span class="num">6</span>The compiler toolchain</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Tool</th><th>Version</th><th>Does</th><th class="n">Source lines</th></tr></thead>
+  <tbody>
+    <tr><td>c90</td><td>1.3</td><td>C90 to assembly, objects or a program, for all four targets; its own CodeView for masm under <code>-g</code></td><td class="n">15,971</td></tr>
+    <tr><td>cpp11</td><td>1.30</td><td>C++ to assembly, objects or a program, for all four targets; optimiser at <code>-O1</code>, <code>-O2</code>, <code>-Os</code>; its own CodeView for masm under <code>-g</code></td><td class="n">67,008</td></tr>
+    <tr><td>shalimar</td><td>1.3</td><td>The Shalimar micro compiler: Shalimar to assembly, or a program with its run-time</td><td class="n">9,606</td></tr>
+    <tr><td>asm6x</td><td>1.4</td><td>C6000 assembly to TI ELF objects</td><td class="n">3,728</td></tr>
+    <tr><td>lnk6x</td><td>1.2</td><td>TI ELF objects and libraries to a C6747 <code>.out</code>, under a TI linker command file</td><td class="n">3,340</td></tr>
+    <tr><td>RTS6747 (rts6x.lib) / ar6x</td><td>1.2 / 1.0</td><td>The C and C++ run-time for the C6747, and its archiver (§6.2)</td><td class="n">12,973</td></tr>
+    <tr><td>SIM6747</td><td>1.3</td><td>Runs a linked <code>.out</code> on a model of the C674x pipeline; debugs it (§6.2)</td><td class="n">8,805</td></tr>
+    <tr><td>VM6747</td><td>1.1</td><td>Runs the compilers' assembly straight, without assembling or linking; debugs it (§6.2)</td><td class="n">4,762</td></tr>
+    <tr><td>masm</td><td>RIDE 5.17's, extended</td><td>MASM to MS COFF objects, byte for byte with ml64 on the compilers' output; CodeView in <code>.debug$S</code> and <code>.debug$T</code> (§6.3)</td><td class="n">4,055</td></tr>
+    <tr><td>link</td><td>RIDE 5.17's, extended</td><td>COFF objects and libraries to a PE32+ console program, byte for byte with link.exe on its test bed; the PDB under <code>/DEBUG</code>; a librarian under <code>/LIB</code> (§6.3)</td><td class="n">4,286</td></tr>
+    <tr><td>gride-dbg</td><td>1.1</td><td>Debugs a program of target 1 from its PDB, on the Win32 debug API and dbghelp, answering in cdb's words (§6.5)</td><td class="n">1,740</td></tr>
+    <tr><td>grt</td><td>Stage 1; stage 2 in part</td><td>The C and C++ run-time for target 1: five static libraries and kernel32's import library (§6.6)</td><td class="n">4,598</td></tr>
+  </tbody>
+</table></div>
+<p class="small">Source lines at the baseline: a compiler's own <code>src</code> folder, without the headers and run-time it ships; for the other tools, their sources and headers. grt's figure is its own code; its C library is RTS6747's, compiled for Windows.</p>
+
+<h3><span class="num">6.1</span>The compilers' design</h3>
+<p>Each compiler is one program, and each runs its phases in one process, without a shell. cpp11, the largest, is described here as an independent review read it (§8.4); c90 and shalimar follow the same shape on a smaller scale.</p>
+<ul>
+  <li><b>Preprocessor.</b> Works on text lines: macros are body strings and <code>#if</code> is evaluated on 64-bit integers. Its output is one preprocessed text and a map back to the source lines. Since 1.27 it handles a UTF-8 byte-order mark, unsigned arithmetic in <code>#if</code>, <code>_Pragma</code>, and the rescan of a macro name left at the end of an expansion.</li>
+  <li><b>Lexer.</b> Turns the whole text into one vector of tokens.</li>
+  <li><b>Parser, with semantic analysis and lowering in the same pass.</b> A recursive-descent parser of about 26,000 lines. As it reads, it resolves names and overloads, lays out classes, builds vtables, RTTI records and the target's exception tables, and lowers the program to a C-level tree: variables with frame offsets, member accesses with byte offsets, calls with decorated names, references as pointers.</li>
+  <li><b>Templates by token replay.</b> A template is kept as its range of tokens. An instantiation re-reads that range with the parameters bound, until no instantiation is pending. Partial specialisations are matched as patterns, and SFINAE is a trial parse whose failure is a substitution failure.</li>
+  <li><b>Back ends.</b> One walker per target emits instructions through a spelling interface: MASM or GNU for x86-64, Apple arm64, TI C6000. The optimiser sits in front of the spelling as a decorator (chapter 7). Under <code>-g</code> the MASM spelling also carries the lines and the CodeView records, as data directives that GRIDE's masm assembles (§6.4). Both C++ name manglers, Microsoft's and Itanium's, live in one module.</li>
+  <li><b>Diagnostics.</b> The first error stops the compilation with <code>file:line:col</code>, a sentence that names the rule or the limit, and the candidates where overloads are concerned. Since 1.26 the compiler runs on a 256 MB stack and bounds its nesting by name, where 80 parentheses or a 40-deep template recursion used to crash it.</li>
+</ul>
+
+<h3><span class="num">6.2</span>The C6747 chain: RTS6747, VM6747 and SIM6747</h3>
+<p>A build for target 2 runs: source → c90, cpp11 or shalimar with <code>-arch tms6747</code> → C6000 assembly → asm6x (TI ELF objects) → lnk6x, with RTS6747 and a linker command file → <code>.out</code>. GRIDE can run the program at two points of that chain. VM6747 runs the assembly itself, before anything is assembled. SIM6747 runs the linked <code>.out</code>, the build's final output. Neither needs TI's tools or a board: the whole C6747 path, from compiling to debugging, is GRIDE's own.</p>
+
+<h4>RTS6747: the C and C++ run-time (rts6x.lib)</h4>
+<ul>
+  <li><b>What it holds.</b> The library every C6747 program links against: the C library (stdio, stdlib, string, ctype, math, time, locale); the C++ support (new and delete, exception handling with a variant without it, RTTI helpers); program start-up (the C auto-initialisation of <code>.cinit</code>, zero-filling and RLE24 decompression, then <code>main</code> and <code>exit</code>); and the EABI helper routines the compilers call for division, conversions and 64-bit arithmetic.</li>
+  <li><b>Host I/O.</b> <code>printf</code> and file I/O reach the host through TI's CIO protocol, a buffer at <code>C$$IO$$</code> that the simulator or a debugger services. The program's end is signalled at <code>C$$EXIT</code>. SIM6747 answers both.</li>
+  <li><b>Built by the toolchain itself.</b> 364 C++ files and 24 assembly files, 12,973 lines in all,, compiled for tms6747 by GRIDE's own cpp11, assembled by asm6x and packed by ar6x. All of it runs as build steps of the Visual Studio solution, with no batch file. There are two variants: <code>rts6x.lib</code> at <code>-O2</code> for Release, and <code>rts6xd.lib</code> at <code>-O0</code> with <code>_DEBUG</code> for Debug. The printf family is also packed on its own as <code>printf6x.lib</code>.</li>
+  <li><b>Beside it.</b> The Shalimar run-time for the C6747 (<code>shmrt6x.lib</code>, linked before the C run-time it calls), and GRIDE's own linker command file for a project that brings none: one flat memory, every section placed, <code>--rom_model</code>, a 16 KB stack and a 1 MB heap.</li>
+  <li><b>Why it matters.</b> TI's run-time (<code>rts6740_elf.lib</code>) is not needed. A project may still name TI's linker and run-time from a CCS or ti-cgt-c6000 installation.</li>
+  <li><b>Since 1.0.</b> C99's <code>log2</code>, <code>hypot</code>, <code>cbrt</code>, <code>strtoll</code>, <code>strtoull</code>, <code>strtof</code>, <code>strtold</code> and <code>vsnprintf</code>, for both targets; <code>log</code> no longer depends on the order of evaluation, and <code>pow(-1, y)</code> is ±1 however large <code>y</code> is. Its C library is also the base of grt's, compiled for Windows (§6.6); the C6747's code is unchanged by that.</li>
+</ul>
+
+<h4>VM6747: the emulator</h4>
+<ul>
+  <li><b>What it does.</b> Runs the compilers' C6000 assembly directly, a <code>.s</code> file or a folder of them, without asm6x or lnk6x. It models the C674x as far as the code needs: the two register files (A0–A15, B0–B15), the program counter, and the pipeline's visible property. A result lands some cycles after its instruction issues, and a branch takes effect five packets later, which is what the NOPs in the compilers' output are for. Parallel packets and the software-pipelined loop buffer are modelled too.</li>
+  <li><b>The C library, answered natively.</b> A call to a C library or EABI helper lands on a stub, and the emulator answers it in C: it reads the arguments by the C6000 calling convention and returns in A4 (A5:A4). The heap sits above the program's data. So a program runs before any run-time library is linked. A Shalimar program takes its run-time as a folder of assembly.</li>
+  <li><b>Debugger.</b> <code>vm6747 --debug</code> takes gdb's commands and answers in gdb's shapes: break, run, next, step, continue, finish, backtrace, info registers, args and locals, print, whatis, x, set. GRIDE drives it as it drives gdb. Since 2026-10-17 it also shows the variables of a <code>-g</code> build, from the <code>.dwtag</code> records the compilers write.</li>
+  <li><b>In GRIDE.</b> Emulate, Run for a project marked "emulate only", and the debugger whenever the build has no <code>.out</code> with a line table.</li>
+</ul>
+
+<h4>SIM6747: the simulator</h4>
+<ul>
+  <li><b>What it does.</b> Loads the program image as TI's tools leave it: an ELF (EABI) or COFF <code>.out</code>, a hex6x image (TI-TXT, Intel or Motorola-S), or a raw binary. It runs the machine code cycle by cycle. Execute packets are fetched from memory and issued one a cycle, and each instruction reads and writes in the pipeline phases that TI's CPU reference (SPRUFE8, chapter 4) gives it: a result is seen only after its last delay slot, a branch lands after five, a load's word comes back in E5 and a store goes out in E3. Multi-cycle NOPs, the compact-header PROT bit, the control registers and the loop buffer (chapter 7) are modelled. At the end it prints <code>CYCLES count=…</code>, and the program's status is its exit code.</li>
+  <li><b>Host side.</b> It services CIO through <code>C$$IO$$</code> and stops at <code>C$$EXIT</code>, so a program linked against RTS6747 prints on the console as it would on a board under Code Composer Studio. It models no interrupts and no memory stalls.</li>
+  <li><b>Debugger.</b> <code>sim6747 --run --debug</code> is GRIDE's debugging back end for target 2: the same gdb-shaped session as VM6747, but on the real linked program, stepping by the line table (TI's <code>.dwpsn</code>). Since 2026-10-17 it also shows variables, from the <code>.gride.dwtag</code> section that lnk6x carries into the image.</li>
+  <li><b>In GRIDE.</b> Run for target 2, and the debugger when the <code>.out</code> is this build's and carries <code>-g</code>.</li>
+</ul>
+
+<div class="tbl"><table>
+  <thead><tr><th></th><th>VM6747</th><th>SIM6747</th></tr></thead>
+  <tbody>
+    <tr><td>Runs</td><td>The compilers' assembly (<code>.s</code>)</td><td>The linked image (<code>.out</code>, hex6x, binary)</td></tr>
+    <tr><td>Needs</td><td>Nothing else: the C library is answered natively</td><td>asm6x, lnk6x and RTS6747 (or TI's run-time)</td></tr>
+    <tr><td>Models</td><td>Registers, delay slots, branches, packets, loop buffer</td><td>The C674x pipeline phases cycle by cycle, memory map, CIO host I/O</td></tr>
+    <tr><td>Reports</td><td>Output and exit status</td><td>Output, exit status and the cycle count</td></tr>
+    <tr><td>Debugs by</td><td>Assembly lines and <code>.dwtag</code> variables</td><td>The <code>.dwpsn</code> line table and <code>.dwtag</code> variables</td></tr>
+    <tr><td>Size</td><td>14 files, 4,762 lines of C++14</td><td>33 files, 8,805 lines of C++14 (13 shared with VM6747)</td></tr>
+  </tbody>
+</table></div>
+
+<h4>Why two runners</h4>
+<p>VM6747 answers before anything is linked, so the compilers' output is checked on its own and quickly. SIM6747 runs exactly what would be loaded onto the board, with RTS6747 and the memory layout lnk6x chose, and counts its cycles. GRIDE's Verify command runs both and compares the program's output line by line. That catches a fault in the assembler, the linker or the run-time that the emulator alone would not see.</p>
+
+
+
+<h3><span class="num">6.3</span>The Windows tools: masm and link</h3>
+<p>Both came from RIDE 5.17 and have grown in GRIDE since 1.0, masm by 706 lines and link by 1,777, for the debug information of §6.4 and for grt (§6.6). Both are built on the static VC++ run-time, as the other toolchain programs are.</p>
+<ul>
+  <li><b>masm</b> assembles the MASM spelling the compilers write into MS COFF AMD64 objects, with COMDAT and associative sections and the <code>.pdata</code>/<code>.xdata</code> unwind tables of <code>PROC FRAME</code>. It was held to ml64 byte for byte on the compilers' output. It takes the directives that output uses (sections, <code>PROC</code>/<code>ENDP</code> with the unwind directives, data definitions, <code>EQU</code>, <code>PUBLIC</code>/<code>EXTERN</code>, <code>OPTION</code>, and <code>OPTION NOKEYWORD</code> as ml64 takes it); it has no macros and no conditional assembly. New since 1.0:
+    <ul>
+      <li><b>CodeView.</b> A <code>.debug$S</code> section per object: the object name and compiler records, a procedure record and <code>S_FRAMEPROC</code> for each <code>PROC</code>, and a line table from the <code>.FILE</code> and <code>.LINE</code> directives (or the assembly's own lines under <code>/Zi</code>, as ml64); an associative <code>.debug$S</code> for each COMDAT procedure; the compilers' type records carried in <code>.debug$T</code>. A repeated <code>.LINE</code> makes a line entry of its own, so a one-line function's body has a line after its prologue.</li>
+      <li><b>The instructions grt needs</b>, for its start-up, its <code>mem*</code> routines and <code>setjmp</code>, each checked byte for byte against ml64.</li>
+      <li><b>Lookup by name</b> through an index, not a walk of every symbol.</li>
+    </ul></li>
+  <li><b>link</b> links MS COFF objects and libraries, short import members included, into a PE32+ console program with the Rich header, base relocations, the load-configuration and TLS directories, and a debug directory. It resolves Microsoft's C run-time through libcmt's default libraries, takes the usual switches (<code>/out</code>, <code>/entry</code>, <code>/subsystem</code>, <code>/stack</code>, <code>/libpath</code>, <code>/nodefaultlib</code>, <code>/opt:ref,icf</code>, <code>/map</code> …) and was held to link.exe byte for byte on its test bed. Without <code>/DEBUG</code> its images are as they were. New since 1.0:
+    <ul>
+      <li><b>The PDB.</b> <code>/DEBUG</code> (and <code>/PDB:file</code>) writes an MSF PDB and names it in the image's debug directory (§6.4).</li>
+      <li><b>The librarian.</b> <code>link /LIB</code> (or <code>-lib</code>) writes COFF archives: the first and second linker members, the longnames member, deterministic headers, and a warning for a name two members define unless both are COMDAT. From a <code>.def</code> file (<code>/DEF</code>) it writes an import library in the Windows SDK's layout: the import descriptor, the null descriptor and the null thunk, then one short import member per export, with the hint its sorted place gives it. <code>/LIST</code> prints an archive's names, and <code>@</code>response files work in both modes (<code>src\librarian.cpp</code>).</li>
+      <li><b>Why it matters.</b> grt's five libraries and its <code>kernel32.lib</code> are written this way, so neither lib.exe nor the Windows SDK's libraries are needed to build a program for target 1.</li>
+    </ul></li>
+</ul>
+
+<h3><span class="num">6.4</span>Windows debug information in GRIDE's own toolchain</h3>
+<p>In 1.0 this was work on the branch <code>pdb</code>, checked but not merged. It was merged on 2026-10-22 (<code>6b0f3c0</code>), cpp11 took its part in 1.29, and GRIDE's Debug builds for target 1 take it: no clang and no Microsoft link.exe.</p>
+<pre>c90, cpp11 or shalimar -g -masm=masm  →  masm  →  link /DEBUG  →  program.exe + program.pdb</pre>
+<div class="tbl"><table>
+  <thead><tr><th>Step</th><th>What it adds</th><th>Commit</th></tr></thead>
+  <tbody>
+    <tr><td>A. masm</td><td>A <code>.debug$S</code> section per object: object name and compiler records, per procedure <code>S_GPROC32</code>/<code>S_LPROC32</code>, <code>S_FRAMEPROC</code> from the unwind directives, and a line table; an associative <code>.debug$S</code> for each COMDAT procedure. Source lines come from the new <code>.FILE</code> and <code>.LINE</code> directives, or the assembly's own lines under <code>/Zi</code>, as ml64.</td><td><code>77bbefd</code></td></tr>
+    <tr><td>B. c90 and shalimar</td><td>Under <code>-g -masm=masm</code> they write <code>.FILE</code>/<code>.LINE</code> and their CodeView records, translated from the GNU spelling into MASM data directives: one writer of the records, two spellings.</td><td><code>cf4ef16</code></td></tr>
+    <tr><td>C. link</td><td><code>/DEBUG</code> (and <code>/PDB:file</code>) writes an MSF PDB, with the information stream, the module and section tables, globals and publics, and a CodeView RSDS entry in the image's debug directory. Without <code>/DEBUG</code> the image is byte-identical to before.</td><td><code>15f6cc3</code></td></tr>
+    <tr><td>D. variables and types</td><td>The compilers' type records carried by masm, and the type and ID streams of every object merged by link (indices remapped, duplicates removed, hashed so forward references resolve). The C run-time's own types are merged where its objects carry them.</td><td><code>70917cd</code></td></tr>
+    <tr><td>E. cpp11 (1.29)</td><td><code>.FILE</code>/<code>.LINE</code> and its CodeView, as <code>.debug$S</code> and <code>.debug$T</code> segments, a mergeable function's associative with its COMDAT; every name whole, with its namespaces, as cl's PDB spells it; a template specialisation with its arguments; a handler funclet as a procedure of its own with its lines, so a breakpoint in a catch block lands on its line.</td><td><code>afade80</code>, <code>43b5a83</code>, <code>230289e</code></td></tr>
+    <tr><td>F. GRIDE's Debug build</td><td>A compiler whose <code>toolchain.json</code> entry names a CodeView spelling of its own compiles with <code>-g</code> in it; masm carries the records and link <code>/DEBUG</code> writes the PDB. clang's road is kept for a compiler without one. c90 and shalimar write a one-line function's line again where its body starts, so its parameters are read once stored.</td><td><code>9afdd22</code>, <code>1b30460</code>, <code>4880298</code></td></tr>
+  </tbody>
+</table></div>
+<ul>
+  <li><b>What it gives.</b> A PDB that dbghelp (the reader of gride-dbg, cdb and WinDbg) and DIA (the reader of Visual Studio) accept: breakpoints at <code>file:line</code>, line stepping, call stacks into the C run-time, and parameters, locals, block locals, statics and globals with their types and values.</li>
+  <li><b>How it was checked.</b> With a stepping harness on the Win32 debug API and dbghelp, a dbghelp and a DIA reader, and LLVM's PDB dumper. Every PDB was compared with link.exe's for the same objects: the same functions, lines and publics, and the same variables with the same types and values. Output without <code>-g</code> is unchanged (c90's byte for byte), and so are masm's objects for cpp11's output and link's images without <code>/DEBUG</code>. Since the wiring, GRIDE's debugging exercise runs on it (§8.3).</li>
+  <li><b>Its size.</b> Measured, not changed: of 7.8 MB for a small C program on Microsoft's debug CRT, the types are 0.6 MB; the rest is that CRT's own symbols and line tables, so merging only the reachable types would not shrink it.</li>
+  <li><b>What is left.</b> cpp11's repeated line for a one-line function's parameters; a run under cdb itself, which is not installed on the checking machine; source checksums; the line records of inlined calls; PDBs whose types sit in a type server.</li>
+</ul>
+
+<h3><span class="num">6.5</span>gride-dbg: the debugger for target 1</h3>
+<p>gride-dbg (<code>toolchain\Windows\DBG</code>, one C++14 source of 1,740 lines, version 1.1) debugs a console program of target 1. It runs the program under the Win32 debug API and reads its PDB through dbghelp, whether GRIDE's link or Microsoft's link.exe wrote it. GRIDE drives it as it drives cdb: one command a line on its input, answered in cdb's words on its output, each answer ended by GRIDE's marker. So the transcript reader that reads cdb reads it too, and either can stand in for the other. A machine without Debugging Tools for Windows now debugs target 1.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Command</th><th>Does</th></tr></thead>
+  <tbody>
+    <tr><td><code>bp [/1] `file:line`</code></td><td>A breakpoint at every address of the line; <code>/1</code> a one-shot one. A line with no code takes the next line that has code, or the line above when it continues a statement begun there</td></tr>
+    <tr><td><code>bc *</code></td><td>Clears every breakpoint</td></tr>
+    <tr><td><code>g</code></td><td>Runs to a breakpoint or the end</td></tr>
+    <tr><td><code>p</code>, <code>t</code>, <code>gu</code></td><td>Steps over a line, into a call, out of the function</td></tr>
+    <tr><td><code>.lastevent</code>, <code>ln</code></td><td>What stopped the program, and where: <code>file(line)</code>, <code>module!function</code></td></tr>
+    <tr><td><code>k</code>, <code>.frame N</code></td><td>The call stack; a frame chosen for <code>dv</code> and <code>??</code></td></tr>
+    <tr><td><code>dv [/t /V]</code></td><td>The frame's locals and parameters with types and values</td></tr>
+    <tr><td><code>?? expr</code>, <code>?? a = v</code></td><td>A value (names, <code>.</code>, <code>-&gt;</code>, <code>[]</code>, <code>*</code>, <code>&amp;</code>); an assignment</td></tr>
+    <tr><td><code>r</code>, <code>db addr Ln</code></td><td>Registers; memory</td></tr>
+    <tr><td><code>.step_filter "pat"</code></td><td>Functions a step into passes over (<code>module!name</code>, <code>*</code>)</td></tr>
+    <tr><td><code>.input text</code></td><td>A line for the program's own input, taken at once, even while the program runs</td></tr>
+    <tr><td><code>.printf</code>, <code>.echo</code>, <code>q</code></td><td>GRIDE's marker, text, the end</td></tr>
+  </tbody>
+</table></div>
+<ul>
+  <li><b>Stepping.</b> A step into stops only in a function whose source is on this machine, past its prologue; a step out of the program's own code into code with no source runs on. GRIDE's session filters the Shalimar run-time and the C++ library (<code>*!shm_*</code>, <code>*!shm::*</code>, <code>*!std::*</code>).</li>
+  <li><b>The program's console.</b> The program has a pseudo-console of its own. Its screen is read at every stop and while the program runs, so what it prints comes in order with the stops. A line it has not finished is told as far as it goes; the rest comes later after the mark <code>&lt;&lt;more&gt;&gt;</code>, which GRIDE joins to it, never the same text twice. GRIDE's lines are heard on a thread of their own, so <code>.input</code> reaches a program that waits on its input while a move is pending.</li>
+  <li><b>Values.</b> Structures, arrays, enums, strings, the object behind a pointer and <code>this</code>'s members, with their types; a Shalimar array by its elements, not its run-time descriptor; cpp11's <code>vector</code>, <code>string</code> and <code>initializer_list</code> by what they hold. A name the stop cannot see is "not in scope here".</li>
+  <li><b>In GRIDE.</b> The role <code>ownDebugger</code> in <code>toolchain.json</code>, found by <code>GRIDE_DBG</code> or beside GRIDE.exe; GRIDE takes it first, then cdb, then lldb (§5.5). <code>GRIDE_DBG_TRACE=1</code> traces every instruction a step takes.</li>
+  <li><b>Checked</b> by GRIDE's debugging exercise (§8.3): 12 examples in C, C++ and Shalimar, 80 moves, 70 stops where expected, 10 runs to the end with the right status.</li>
+</ul>
+
+<h3><span class="num">6.6</span>grt: the run-time for target 1</h3>
+<p>grt (<code>toolchain\Windows\RT</code>) is GRIDE's own C and C++ run-time for Windows. A program linked against it imports <code>kernel32.dll</code> alone and runs on any machine with Windows and GRIDE's installation, without Visual Studio and without the Windows SDK. Its design is <code>docs\Runtime_Design.md</code>, draft 3, accepted on 2026-10-23.</p>
+<ul>
+  <li><b>Built by GRIDE's toolchain only.</b> c90 compiles its C, cpp11 its C++, masm its assembly, and link <code>/LIB</code> packs its libraries and writes <code>kernel32.lib</code> from <code>kernel32.def</code>. cl, ml64, lib.exe and Microsoft's link.exe never build it.</li>
+  <li><b>Correctness is the gate, efficiency the aim.</b> A program on grt prints what the same objects print when linked with Microsoft's static CRT: stdout and stderr byte for byte, and the same exit code. It is to be at least as fast as that CRT on the benchmark set, every test within 5 % or faster from stage 2's exit, and its programs smaller.</li>
+  <li><b>Microsoft's sources are inspiration only.</b> vcruntime and the UCRT are read for sequences, data layouts and edge cases, such as the tables cpp11 emits, the initialiser order and what <code>printf</code> prints for a NaN. None of their text is in GRIDE. RTS6747's C library is the base of grt's: the same sources, compiled for Windows, under a stream layer of Windows' own.</li>
+  <li><b>Limits.</b> Target 1 only; console programs (<code>main</code>) first; the "C" locale, with narrow characters in the ANSI code page.</li>
+</ul>
+<h4>The libraries</h4>
+<p>Five static libraries in layers, each calling only itself and the layers below it, linked in a fixed order, and the import library:</p>
+<div class="tbl"><table>
+  <thead><tr><th>Library</th><th>Holds</th></tr></thead>
+  <tbody>
+    <tr><td><code>grtstart</code></td><td><code>mainCRTStartup</code>, the initialiser tables, the TLS directory, <code>__chkstk</code>, <code>_fltused</code></td></tr>
+    <tr><td><code>grtcompat</code></td><td>c90's 32-bit time names, POSIX names such as <code>fileno</code>, and <code>/GS</code>'s cookie, check and handler for cl-built objects</td></tr>
+    <tr><td><code>grtcxx</code></td><td><code>operator new</code> and <code>delete</code> (array and nothrow), <code>_purecall</code>, <code>type_info</code> and RTTI (<code>__RTtypeid</code>, <code>__RTDynamicCast</code>, <code>__RTCastToVoid</code>), function-local statics, static destructors at exit; exceptions are stage 2</td></tr>
+    <tr><td><code>grtc</code></td><td>The ISO C library, RTS6747's compiled for Windows, with grt's stream layer, <code>mem*</code> and <code>sqrt</code> in assembly, <code>setjmp</code>, <code>strerror</code> and the 64-bit time functions</td></tr>
+    <tr><td><code>grtwin</code></td><td>The Windows layer and the one importer of kernel32: descriptors, the heap, <code>errno</code>'s storage, the environment and <code>argv</code>, the clock and time zone, the filing functions, <code>system</code>, locks, the end of the process</td></tr>
+    <tr><td><code>kernel32.lib</code></td><td>Written by link <code>/LIB</code> from <code>kernel32.def</code>: the kernel32 functions grt and the compilers' <code>&lt;windows.h&gt;</code> call</td></tr>
+  </tbody>
+</table></div>
+<p>The build checks each library as it is made (<code>toolchain\msbuild\Toolchain.targets</code>): <b>Layered</b>, no name defined twice, none calling a layer above, <code>grtwin</code> the one importer; <b>FrameCheck</b>, no frame of 4 KB or more without <code>__chkstk</code>; <b>CatalogueCheck</b>, every entry of <code>catalogue.json</code> marked done is defined by its library and declared by its header.</p>
+<h4>What is inside</h4>
+<ul>
+  <li><b>Streams.</b> A <code>FILE</code> has a 4 KB buffer. Files, pipes and NUL are fully buffered; a console and stderr are written as each call ends, as Microsoft's are, so output is identical and a debugger sees an unfinished line. Reads keep raw bytes and translate CR LF and CTRL+Z as they hand them out, so a position never costs a seek per fill. A large binary <code>fread</code> or <code>fwrite</code> bypasses the buffer, as the UCRT's does, and the character functions have buffer fast paths. Up to 512 <code>FILE</code>s and 8,192 descriptors, as Microsoft's.</li>
+  <li><b>Memory.</b> <code>memcpy</code>, <code>memmove</code> and <code>memset</code> in tiers: SSE2, AVX where Windows has it, <code>rep movsb</code>/<code>stosb</code> from 2 KB where the processor reports ERMSB; the 4 KB aliasing case is copied backwards.</li>
+  <li><b>Microsoft's behaviour where a program can see it.</b> <code>abort</code>, a failed <code>assert</code>, <code>_purecall</code> and a null <code>FILE *</code> end by the fast fail (0xC0000409), as Microsoft's Release run-time does. A domain error answers <code>-nan(ind)</code>; <code>strtod</code> gives <code>ERANGE</code> only for a zero or infinite result. <code>system</code> runs <code>%COMSPEC% /c</code> as the UCRT's does; where cmd.exe is refused by policy it prints the refusal and answers 255.</li>
+</ul>
+<h4>The stages</h4>
+<div class="tbl"><table>
+  <thead><tr><th>Stage</th><th>Contents</th><th>State</th></tr></thead>
+  <tbody>
+    <tr><td>0 Design</td><td>The design, reviewed independently and accepted with ten decisions</td><td class="yes">Done 2026-10-23</td></tr>
+    <tr><td>1 Baseline</td><td>First the fixes the tools needed: cpp11 1.30, c90's stack probe and <code>setjmp</code>, masm's instructions, RTS6747's <code>log</code> and <code>pow</code> and its C99 additions, link <code>/LIB</code>, the toolchain on <code>/MT</code>. Then the five libraries, start-up and exit, the Windows layer, the stream layer, <code>mem*</code>, enough of the library for the example sets and every name shalimar emits, the catalogue of 157 entries, the build checks and the benchmark harness</td><td class="yes">Done 2026-10-23</td></tr>
+    <tr><td>2 Widening</td><td>The rest of the C library; exceptions; threads; the allocator; SSE2 <code>str*</code>; <code>printf</code> and <code>scanf</code> fast paths; the math kernels; the Debug variants and CodeView; GRIDE's choice of run-time; the Setup</td><td class="part">In progress: the <code>mem*</code> tiers (2026-10-23); GRIDE's choice and the Setup's libraries (2026-10-23 to 26); the filing functions and <code>system</code> (2026-10-26); the tables locked for threads (2026-10-27)</td></tr>
+    <tr><td>3 Layout</td><td>One tree of headers and libraries, and its migration</td><td class="no">Not started</td></tr>
+    <tr><td>4 Shalimar's direct access</td><td>A generated table of built-ins, the Shalimar run-time over grt, both targets</td><td class="no">Not started</td></tr>
+    <tr><td>Later</td><td><code>wmain</code> and <code>WinMain</code>, UTF-8, wide characters, a DLL variant</td><td class="no">Not started</td></tr>
+  </tbody>
+</table></div>
+<ul>
+  <li><b>Stage 1's exit test.</b> Both example sets, 180 of 180 builds in Debug and Release, identical to the builds on Microsoft's CRT with Visual Studio cleared from the machine, every program importing <code>KERNEL32.dll</code> alone; the UCRT probes byte-identical at <code>-O2</code> and <code>-O0</code>, math identical or within 1 ulp; the completeness test, 141 of 141 link names; the debugging exercise unchanged; the benchmarks recorded, slower than the prototype on none.</li>
+  <li><b>Stage 2 so far.</b> <code>memcpy</code> is 0.35 to 1.01 times Microsoft's, <code>memset</code> 0.93 to 1.00, <code>memmove</code> 0.71. <code>_getcwd</code>, <code>_findfirst64i32</code>, <code>_findnext64i32</code>, <code>_findclose</code>, <code>_stat64i32</code> and <code>system</code> are in <code>grtwin</code>; the catalogue has 153 of 157 entries done. The filing test gives the same 146 lines on both run-times, and cppparse builds and links on grt in Release and Debug, its <code>--health . -j 1</code> printing what Microsoft's build prints.</li>
+  <li><b>The tables locked (2026-10-27).</b> The descriptors, the streams and the <code>atexit</code> list take the UCRT's locks, behind <code>grtwin</code>'s own <code>CreateThread</code>, and only once a second thread exists, so a single-threaded program takes none. Every public function that takes a <code>FILE</code> locks it for the whole call, so one <code>printf</code> is one piece of the output. RTS6747's stdio entry points that take a <code>FILE</code> are <code>grtc</code>'s own files now, RTS6747's bodies with the lock around them; RTS6747's sources, and so the C6747's code, are unchanged. cppparse's <code>--health .</code> with its worker threads gave output byte-identical to the build on Microsoft's CRT in 30 runs of 30 in Release and in Debug, where the build before the locks failed 5 runs of 5: 3.0 s against 3.0 s in Release, 5.1 s against 10.1 s in Debug. A probe of eight threads matched the UCRT's transcript in 30 runs of 30; the UCRT probes and the filing test are unchanged, and the completeness test links 147 of 147 names.</li>
+</ul>
+<h4>Speed, stage 1</h4>
+<p class="small">2026-10-23, Core i5-10400T: <code>bench.c</code> compiled once by c90 <code>-O2</code>, linked against each run-time, best of 5 runs. Ratio grt ÷ Microsoft's static CRT: below 1, grt is faster.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Group</th><th>Tests and ratios</th><th>Stage 2's work</th></tr></thead>
+  <tbody>
+    <tr><td>Standard I/O</td><td>printf of ints 1.68, of floats 1.32, of strings 1.28, to the console 0.45; fwrite 1.04, fread 1.00, fgets 0.89; putc 0.22 and getc 0.21, added with the locks</td><td><code>printf</code>'s fast paths</td></tr>
+    <tr><td>Memory</td><td>memcpy of 4 KB 5.14 (then 0.35 to 1.01 after the tiers); malloc of small blocks 1.04, of mixed sizes 0.50</td><td>The allocator</td></tr>
+    <tr><td>Strings</td><td>strlen 3.95, strcmp 5.32, strchr 44.27</td><td>SSE2 <code>str*</code> in place of RTS6747's byte loops</td></tr>
+    <tr><td>Math</td><td>sqrt 0.75; sin 3.61, exp 2.01, log 3.71, pow 3.32</td><td>Faster kernels</td></tr>
+    <tr><td>General</td><td>qsort 1.14; a program's start to exit 0.82; its size 0.36 (51,712 against 144,896 bytes; 55,296 with the locks)</td><td>–</td></tr>
+  </tbody>
+</table></div>
+<h4>The decisions</h4>
+<p>Decided on 2026-10-23: static libraries only, with a DLL kept possible; five layered libraries and <code>kernel32.lib</code>, with the build checks; console output written as each call ends, as Microsoft's; the 64-bit <code>time_t</code> for c90 too, with the 32-bit names in <code>grtcompat</code>; exceptions in stage 2; the layout as stage 3; CodeView in both variants, the run-time stepped over by its source path, with a setting to step in; Debug's <code>abort</code> with Microsoft's words but no dialog; the compilers' fixes made in this work, each under its compiler's gates; the prototype as stage 1's start, rewritten where the design replaces it.</p>
+
+<h3><span class="num">6.7</span>cpp11 beside cppparse</h3>
+<p>cppparse is a separate compiler, strict C++98 for target 1 only, written by Fable 5.1, carried on by Opus 5.5 since 2026-10-23, and self-hosting. It also serves GRIDE as its largest example program. The two designs answer the same problems differently, and the review drew the comparison (§8.4).</p>
+<div class="tbl"><table>
+  <thead><tr><th></th><th>cpp11 1.30</th><th>cppparse (bf0c3f7)</th></tr></thead>
+  <tbody>
+    <tr><td>Language</td><td>C++03 with much of C++11</td><td>Strict C++98</td></tr>
+    <tr><td>Targets</td><td>Four, both C++ ABIs and both exception models</td><td>Target 1 only, Microsoft's ABI</td></tr>
+    <tr><td>Front end</td><td>Text preprocessor; one pass parses, analyses and lowers</td><td>Token preprocessor; a syntax tree as written; a separate semantic pass on the tree</td></tr>
+    <tr><td>Templates</td><td>Token replay; no two-phase lookup</td><td>Instantiated on the tree, with a dependent type kind</td></tr>
+    <tr><td>Middle and back end</td><td>Optimiser over the emitted x86 text; register allocation, loop passes, division by multiplication</td><td>A three-address IR with basic blocks and SSA; an IR optimiser; its own COFF writer, no assembler</td></tr>
+    <tr><td>Diagnostics</td><td>One error, then stop; sentences that name the rule</td><td>Coded diagnostics; carries on after an error</td></tr>
+    <tr><td>Beyond compiling</td><td>Measured against four oracles; every refusal tied to its exclusions list</td><td>An analyser: code-base model, reports and health checks</td></tr>
+  </tbody>
+</table></div>
+<p>What each could take from the other, in the review's words reduced: cpp11 a syntax tree with a separate semantic pass, a token preprocessor and an instantiation stack for its diagnostics; cppparse cpp11's measurement discipline, its register allocation and loop passes, and its Microsoft exception tables.</p>
+<!-- ============================================================ 7 -->
+<h2><span class="num">7</span>Optimisation: size and speed</h2>
+<p>This chapter says what each optimisation level does and what it was measured to be worth, on targets 1 and 2 in full and on targets 3 and 4 in brief. Every figure comes from cpp11's own records, with its date. Ratios are cpp11 ÷ reference: below 1 means cpp11 is faster or smaller.</p>
+<p class="note">All figures are from cpp11 1.5–1.8, dated 2026-09-21 to 2026-10-05. Versions 1.9 to 1.30 have correctness records only (§8.6); nothing yet measures 1.30.</p>
+
+<h3><span class="num">7.1</span>What the levels do</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Level</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>-O0</code></td><td>The default. No optimiser runs: the code is the walker's stack-machine output.</td></tr>
+    <tr><td><code>-O1</code></td><td>The same pipeline as <code>-O2</code>, driven by size costs: fewer callee-saved registers for locals, <code>rep movsq</code> string copies, a tighter inliner, no division-by-constant rewrite, no invariant hoisting, no loop alignment.</td></tr>
+    <tr><td><code>-O2</code></td><td>The same pipeline driven by speed costs: references weighted 8 per loop depth, unrolled block moves, the inliner's speed budgets, invariant hoisting, loop alignment. The model is Microsoft's: the level picks space or speed, not an amount of work.</td></tr>
+    <tr><td><code>-Os</code></td><td><code>-O1</code> choosing the smaller code where the two differ. Implemented for target 2 only (division helpers kept when the function already calls something, the duplicated entry test off, a global's address held in a register); on the other targets <code>-Os</code> is <code>-O1</code>.</td></tr>
+  </tbody>
+</table></div>
+<ul>
+  <li><b>Target 1 (x86-64), after GCC's RTL scheme.</b> Rounds of scalar passes (forward values, remove unreachable and dead code, coalesce copies, fold loads and offsets, thread jumps, divide by a constant), then the frame group (webs, locals into registers, register allocation, dead stores), then index folding, invariant hoisting, frame finishing, loop shrinking and alignment. A cost-driven inliner after GCC's <code>ipa-inline</code> decides calls in badness order under three budgets.</li>
+  <li><b>Target 2 (C6000), a pass over the emitted text.</b> Locals in registers; list scheduling into execute packets with the branch delay slots filled; CALLP and BNOP; division by a constant; folded addressing; fills that store doublewords; frame-slot reuse; an inliner for callees of at most 12 AST nodes, nested up to three deep. At <code>-O2</code> also software pipelining (modulo scheduling) and invariant hoisting.</li>
+  <li><b>Not built:</b> vectorisation and unrolling on x86-64 (the matmul gap below), SPLOOP on the C6000, tail calls, if-conversion (<code>cmov</code>), global value numbering, an IR verifier.</li>
+  <li><b>What it declines.</b> <code>CPP11_DECLINES</code> prints each transformation the optimiser holds back. The record of 2026-09-27 counts its declines per target and concludes that they do not explain the speed gap: none is in a hot loop.</li>
+</ul>
+
+<h3><span class="num">7.2</span>Target 1: x86_64-windows</h3>
+<h4>Speed and size against cl /O2, 2026-09-27</h4>
+<p class="small">Medians of 15 interleaved rounds, milliseconds; <code>.text</code> in bytes.</p>
+<div class="tbl"><table>
+  <thead><tr><th></th><th class="n">fib</th><th class="n">sieve</th><th class="n">matmul</th><th class="n">isort</th><th class="n">hash</th><th class="n">virtual</th><th class="n">total</th><th class="n">.text</th></tr></thead>
+  <tbody>
+    <tr><td>cpp11 <code>-O2</code></td><td class="n">7</td><td class="n">54</td><td class="n">8</td><td class="n">13</td><td class="n">198</td><td class="n">103</td><td class="n">383</td><td class="n">3,819</td></tr>
+    <tr><td>cl <code>/O2</code></td><td class="n">7</td><td class="n">45</td><td class="n">3</td><td class="n">6</td><td class="n">133</td><td class="n">102</td><td class="n">297</td><td class="n">3,831</td></tr>
+    <tr><td><b>Ratio</b></td><td class="n">1.00</td><td class="n">1.20</td><td class="n">2.67</td><td class="n">2.17</td><td class="n">1.49</td><td class="n">1.01</td><td class="n"><b>1.29</b></td><td class="n"><b>1.00</b></td></tr>
+  </tbody>
+</table></div>
+<h4>A real program: Compiler++ built by each compiler</h4>
+<div class="tbl"><table>
+  <thead><tr><th>cpp11 ÷ cl, 2026-09-25</th><th class="n"><code>-O1</code> ÷ <code>/O1</code></th><th class="n"><code>-O2</code> ÷ <code>/O2</code></th></tr></thead>
+  <tbody>
+    <tr><td>Build time</td><td class="n">0.18</td><td class="n">0.21</td></tr>
+    <tr><td><code>.text</code></td><td class="n">1.07</td><td class="n">1.11</td></tr>
+    <tr><td>Its tests' workload</td><td class="n">1.12</td><td class="n">1.11</td></tr>
+    <tr><td>Its <code>bench.cpp</code></td><td class="n">2.60</td><td class="n">1.55</td></tr>
+  </tbody>
+</table></div>
+<ul>
+  <li><b>2026-10-04/05</b> (the O2 report): six kernels <b>1.365× cl /O2</b>, the worst matmul 2.87, isort 2.17 and hash 1.58; Compiler++ <b>0.965× cl</b>, that is faster than cl.</li>
+  <li><b>Code size, Compiler++ <code>.text</code></b>: cpp11 <code>-O1</code> 600,302 bytes and <code>-O2</code> 739,406 (after the inliner got its cost budgets; 854,782 before), against cl 19.44's <code>/Od</code> 716,052, <code>/O1</code> 519,348 and <code>/O2</code> 623,092. <code>align-loops</code> costs 2.1 % of <code>.text</code>, all of it padding.</li>
+  <li><b>The levels' gain</b>: on the Compiler++ bench, <code>-O1</code> 1,181 ms and <code>-O2</code> about 842 ms, about 1.4×; cl's own levels on the same bench are <code>/Od</code> 1,498, <code>/O1</code> 390, <code>/O2</code> 371 ms. No cpp11 <code>-O0</code> against <code>-O2</code> timing on x86-64 is recorded.</li>
+</ul>
+
+<h3><span class="num">7.3</span>Target 2: tms6747</h3>
+<p>Measured as <code>cycle.Total</code> on TI's cycle-accurate C6747 simulator (CCS 5.5), against TI's own compiler: 744 is cl6x 7.4.4, 822 is cl6x 8.2.2.</p>
+<h4>Cycles, the six kernels, 2026-10-05</h4>
+<div class="tbl"><table>
+  <thead><tr><th></th><th class="n">822 <code>-O2</code></th><th class="n">822 <code>-ms3</code></th><th class="n">cpp11 <code>-O1</code></th><th class="n">cpp11 <code>-O2</code></th><th class="n">cpp11 <code>-Os</code></th><th class="n"><code>-O2</code> ÷ 822 <code>-O2</code></th><th class="n"><code>-Os</code> ÷ 822 <code>-ms3</code></th></tr></thead>
+  <tbody>
+    <tr><td>fib</td><td class="n">5,568,115</td><td class="n">19,000,781</td><td class="n">4,273,094</td><td class="n">4,273,094</td><td class="n">7,925,221</td><td class="n">0.76</td><td class="n">0.41</td></tr>
+    <tr><td>hash</td><td class="n">6,014,015</td><td class="n">60,048,607</td><td class="n">9,023,182</td><td class="n">6,807,670</td><td class="n">9,023,182</td><td class="n">1.13</td><td class="n">0.15</td></tr>
+    <tr><td>isort</td><td class="n">5,309,586</td><td class="n">6,329,124</td><td class="n">6,158,024</td><td class="n">5,956,804</td><td class="n">6,170,768</td><td class="n">1.12</td><td class="n">0.97</td></tr>
+    <tr><td>matmul</td><td class="n">982,933</td><td class="n">1,488,552</td><td class="n">1,591,212</td><td class="n">980,582</td><td class="n">1,591,212</td><td class="n">0.99</td><td class="n">1.06</td></tr>
+    <tr><td>sieve</td><td class="n">2,577,500</td><td class="n">3,282,414</td><td class="n">3,737,076</td><td class="n">3,117,562</td><td class="n">3,737,076</td><td class="n">1.20</td><td class="n">1.13</td></tr>
+    <tr><td>virt</td><td class="n">3,268,908</td><td class="n">9,129,360</td><td class="n">3,632,077</td><td class="n">3,631,729</td><td class="n">3,632,077</td><td class="n">1.11</td><td class="n">0.39</td></tr>
+  </tbody>
+</table></div>
+<p>The recorded verdict: the speed goal, within 1.3× of CCS 7.4, is <b>met at <code>-O2</code> on every kernel (0.76× to 1.20×)</b>. From <code>-O1</code> to <code>-O2</code>, hash gains 1.33×, matmul 1.62× and sieve 1.20×; fib and virt are unchanged. TI's <code>-ms3</code> size option costs it 3 to 10 times the cycles on fib, hash and virt.</p>
+<h4>Real programs, 2026-10-04 (the O2 report, cpp11 1.5)</h4>
+<div class="tbl"><table>
+  <thead><tr><th>Program</th><th class="n">÷ 744 <code>-O2</code></th><th class="n">÷ 822 <code>-O2</code></th></tr></thead>
+  <tbody>
+    <tr><td>Compiler++ harness, ten files (7.90 G against 9.36 G cycles)</td><td class="n"><b>0.84</b></td><td class="n"><b>0.87</b></td></tr>
+    <tr><td>compilerpp project / SampleExt / Sample</td><td class="n">1.06 / 1.21 / 0.97</td><td class="n">0.93 / 0.96 / 0.73</td></tr>
+    <tr><td>243 test cases, geometric mean</td><td class="n">1.04</td><td class="n">–</td></tr>
+    <tr><td>Index over 19 programs</td><td class="n">1.019</td><td class="n">1.039</td></tr>
+  </tbody>
+</table></div>
+<p>The way there: the first run, on 2026-09-28, was 2.76× to 15.35× cl6x on the kernels, because every local was loaded and stored at each use. Locals in registers and the C6000 inliner brought the harness to 0.885× by 2026-09-30 and 0.84× by 2026-10-04. No wrong answer was caused by <code>-O2</code>; 338 of 363 programs agree with the oracle.</p>
+<h4>Code bytes, the six kernels, 2026-10-05</h4>
+<div class="tbl"><table>
+  <thead><tr><th></th><th class="n">744 <code>-O2</code></th><th class="n">744 <code>-ms3</code></th><th class="n">822 <code>-ms3</code></th><th class="n">cpp11 <code>-O1</code></th><th class="n">cpp11 <code>-O2</code></th><th class="n">cpp11 <code>-Os</code></th><th class="n"><code>-Os</code> ÷ 744 <code>-ms3</code></th></tr></thead>
+  <tbody>
+    <tr><td>fib</td><td class="n">128</td><td class="n">128</td><td class="n">128</td><td class="n">192</td><td class="n">192</td><td class="n">160</td><td class="n">1.25</td></tr>
+    <tr><td>hash</td><td class="n">352</td><td class="n">256</td><td class="n">288</td><td class="n">384</td><td class="n">768</td><td class="n">384</td><td class="n">1.50</td></tr>
+    <tr><td>isort</td><td class="n">480</td><td class="n">352</td><td class="n">384</td><td class="n">544</td><td class="n">1,056</td><td class="n">512</td><td class="n">1.45</td></tr>
+    <tr><td>matmul</td><td class="n">1,152</td><td class="n">416</td><td class="n">448</td><td class="n">672</td><td class="n">1,280</td><td class="n">672</td><td class="n">1.62</td></tr>
+    <tr><td>sieve</td><td class="n">416</td><td class="n">352</td><td class="n">320</td><td class="n">480</td><td class="n">992</td><td class="n">480</td><td class="n">1.36</td></tr>
+    <tr><td>virt</td><td class="n">672</td><td class="n">640</td><td class="n">640</td><td class="n">1,184</td><td class="n">1,248</td><td class="n">1,184</td><td class="n">1.85</td></tr>
+    <tr><td><b>total</b></td><td class="n">3,200</td><td class="n">2,144</td><td class="n">2,208</td><td class="n">3,456</td><td class="n">5,536</td><td class="n">3,392</td><td class="n"><b>1.58</b></td></tr>
+  </tbody>
+</table></div>
+<p>The size goal, within 1.3× of TI's smallest, is <b>not met on the kernels</b> (<code>-Os</code> is 1.25× to 1.85× <code>-ms3</code>) but <b>met on the real program</b>: the Compiler++ harness is 520,192 bytes at <code>-O1</code>, 0.94× CCS 7.4's <code>-O1</code>, and 519,680 at <code>-Os</code>, 1.08× its <code>-ms3</code> build of 482,400; at <code>-O2</code> it is 584,288 against 685,728, 0.85×. The size work left open: inline a static function called once, load 0.0 with <code>ZERO</code>, keep B3 in B9 around a leaf's helper call.</p>
+
+<h3><span class="num">7.4</span>Targets 3 and 4 in brief</h3>
+<div class="tbl"><table>
+  <thead><tr><th class="n">#</th><th>Target, 2026-09-27</th><th class="n">Time ÷ reference</th><th class="n"><code>.text</code> ÷ reference</th></tr></thead>
+  <tbody>
+    <tr><td class="n">3</td><td>x86_64-linux against g++ 11.5 <code>-O2</code> (687 against 535 ms)</td><td class="n">1.28</td><td class="n">1.24 (6,460 against 5,228)</td></tr>
+    <tr><td class="n">4</td><td>arm64-darwin against clang 17 <code>-O2</code> (681 against 171 ms)</td><td class="n">3.98</td><td class="n">0.57 (5,468 against 9,580)</td></tr>
+  </tbody>
+</table></div>
+<p>On target 3 the O2 report of 2026-10-04 has six kernels at 1.290× g++ and Compiler++ at 1.195×. On target 4 the levels were new on 2026-09-27: <code>-O2</code> had emitted the same bytes as <code>-O0</code>, and three rounds of the arm64 rewriter brought the kernels from 2,485 ms to 688 ms, a 3.6× gain, against clang's 174 ms.</p>
+
+<h3><span class="num">7.5</span>Compile speed</h3>
+<ul>
+  <li>The independent review (2026-10-21, cpp11 1.25): a median compile of 35 ms at <code>-O0</code> and 39 ms at <code>-O2</code> over its small programs, against cl's 326 ms and clang's 76 ms for syntax alone; a file of a million statements took 21.5 s, against cl's 4.2 s and clang's 3.7 s.</li>
+  <li>The Compiler++ harness for target 2 compiles in 16 s against cl6x's 533 s; at each level <code>-O1</code> 3.9 s, <code>-O2</code> 5.3 s, <code>-Os</code> 4.3 s (2026-10-07).</li>
+  <li>The sixteen Compiler++ sources at <code>-O0</code>, source to object (2026-09-05): Windows 0.29 s against cl's 0.94 s (8 jobs); Linux 1.20 s against g++'s 6.69 s (2 jobs); Mac 0.50 s against clang's 0.81 s (12 jobs).</li>
+</ul>
+
+<p>A build in GRIDE gains from its own side-by-side compiles (§5.3): cppparse's Release rebuild took 49.6 s against 190.3 s on 12 processors. The toolchain's own configuration matters more: a cpp11 built in Debug is about 14 times slower than the Release one (<code>Html.cpp</code> 131 s against 9 s), which is why the owner measured 24 minutes for a build of the cppparse example that takes 59 s with the toolchain built in Release (2026-10-26).</p>
+
+<h3><span class="num">7.6</span>What the figures do not cover</h3>
+<ul>
+  <li>cpp11 1.9 to 1.30. Their records are correctness gates, not timings.</li>
+  <li>A cpp11 <code>-O0</code> against <code>-O2</code> timing on target 1.</li>
+  <li>The earlier four-machine run that the 2026-09-27 table says it repeats; clang's version is known only from the 2026-09-05 benchmark page.</li>
+  <li>cppparse's own measurements (2026-10-20) measure the separate C++98 compiler, not cpp11; they are a contrast only. Against cl <code>/O2</code> its code is 1.41× the size.</li>
+</ul>
+
+
+<!-- ============================================================ 8 -->
+<h2><span class="num">8</span>Development and verification</h2>
+<h3><span class="num">8.1</span>Repository and build</h3>
+<ul>
+  <li><b>Repository.</b> GRIDE lives in a local bare repository (<code>GIT Test\GRIDE</code>); the working copy is <code>GRIDE3</code>. Each tool tree inside it is a minimal copy of the tool's own repository: source, project files and headers, without tests, build output or release seals. gride-dbg and grt live only here, with grt's tests and benchmarks beside its sources.</li>
+  <li><b>Build.</b> Three Visual Studio solutions, one per outlook (<code>GRIDEd\GRIDE.sln</code>, <code>GRIDE 2.0\GRIDE.sln</code> and <code>GRIDE 1.0\GRIDE.sln</code>), each build GRIDE and the whole toolchain into <code>x64\Debug</code> and <code>x64\Release</code>: every tool program, gride-dbg, RTS6747 in both variants, grt's five libraries and <code>kernel32.lib</code>, and the Shalimar run-time for both complete targets, on Windows over Microsoft's CRT and over grt. The run-time builds are MSBuild steps, so no step goes through cmd.exe and a build inside Visual Studio does what a command-line build does. The solutions are built one at a time, since their tool projects share their build folders.</li>
+  <li><b>Verified in Visual Studio before every commit</b>, with Visual Studio's own build (devenv) in Release and Debug. A Rebuild of one solution after another deletes the earlier one's programs, so a Rebuild is followed by plain Builds; projects with custom build steps turn off Visual Studio's fast up-to-date check, so those steps always run.</li>
+  <li><b>The Setup project.</b> <code>installer\windows\Setup.vcxproj</code> is a C++ Utility project in each solution, listed after GRIDE and not built with it, and the one project of <code>installer\windows\Setup.sln</code>. Its Release build runs <code>build-setup.ps1</code>, which writes the MSI through Windows Installer's own automation interface (msi.dll) and makecab, then <code>validate-msi.ps1</code>, which runs the Windows SDK's ICE suite where the SDK is installed. An inline MSBuild task starts each program directly, never through cmd.exe, and shows its lines as they come; Debug refuses, naming Release. <code>Setup.sln</code> builds the three solutions one after another, each in an MSBuild of its own, then the package. Nothing beyond Visual Studio's C++ workload is needed: no WiX, no Inno Setup, no NuGet package and no Installer Projects extension.</li>
+  <li><b>Setup 1.5.0.</b> One MSI that installs one outlook per user, without elevation: Black by default, Grey or White when chosen on its second screen. Each outlook comes with the toolchain beside it, grt's libraries and gride-dbg, the Help and the docs, the examples, and Visual Studio's VC++ run-time DLLs beside GRIDE.exe, the one program that needs them. It is validated by the ICE suite and by an install test that installs each outlook in turn, checks it, repairs it and removes it. Signing is ready in the script and waits for a certificate (§9.2).</li>
+</ul>
+
+<h3><span class="num">8.2</span>Oracles</h3>
+<p>cpp11 was developed against four reference compilers on three machines. A release needs all of them green. grt is held to Microsoft's own run-time.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Oracle</th><th>Machine</th><th>Settles</th></tr></thead>
+  <tbody>
+    <tr><td><b>cl 19.44.35228</b> (Visual Studio 2022 17.14)</td><td>Windows 11, Core i7-12700</td><td>The <b>Microsoft ABI</b>: decorated names (292 agree, 16 differ at the 1.7 gate), objects linked half by cpp11 and half by cl both ways; speed and size reference for target 1</td></tr>
+    <tr><td><b>TI cl6x 7.4.4</b> (CCS 5.5)</td><td>Windows and Linux</td><td><b>Target 2</b>: program output, <code>cycle.Total</code> on CCS 5.5's cycle-accurate C6747 simulator, and code bytes. Never byte identity. Since 2026-10-05 every release is gated on TI's simulator</td></tr>
+    <tr><td><b>TI cl6x 8.2.2</b> (CCS 7.4)</td><td>Windows</td><td>A second TI reference for cycles and size; its builds run on CCS 5.5's simulator, since CCS 7.4 has none</td></tr>
+    <tr><td><b>g++ 11.5</b></td><td>Linux: Amazon Linux 2023, Xeon Platinum 8259CL</td><td>Builds the toolchain with <code>-Werror</code> and runs the suites on real libstdc++; the judge of strict C++14 for the toolchain's own sources; a third opinion on language rules; speed and size reference for target 3. Since 2026-10-07 its <code>-O2</code> run blocks a merge</td></tr>
+    <tr><td><b>clang 17</b></td><td>Mac: Apple M4 Pro</td><td>The program's answer (every recorded <code>.expected</code> output is clang's), language verdicts and overload resolution asked live on every run, Itanium and Microsoft names; speed reference for target 4</td></tr>
+    <tr><td><b>Microsoft's static CRT and the UCRT</b> (MSVC 14.44, Windows SDK 10.0.26100)</td><td>Windows 11, Core i5-10400T</td><td><b>grt</b>: each program's output and exit code byte for byte against the same objects on Microsoft's CRT, the UCRT probes, and the speed reference</td></tr>
+  </tbody>
+</table></div>
+<ul>
+  <li><b>Who wins where they disagree.</b> cl is the ABI authority and no authority on the language: where clang and g++ agree against cl, cpp11 follows them (for example <code>const A a;</code> on a POD, CWG 253). cl6x is C++03, so the C++11 cases fall back to clang's recorded output. VM6747, GRIDE's own emulator, is not an oracle: it once agreed with two wrong outputs that only TI's simulator exposed.</li>
+  <li><b>The checks of 2026-10-21</b> ran on one Windows machine: cl from Visual Studio 2026 for run-time behaviour (it has no C++11 mode; its oldest is <code>/std:c++14</code>), and clang++ 22.1.3 with <code>-std=c++11 -pedantic-errors</code> on cpp11's own headers for strict C++11 judgement. g++ is not installed there.</li>
+  <li><b>ml64 and link.exe</b> are the references for masm and link; <b>link.exe's PDB</b>, read by dbghelp and DIA, for GRIDE's; <b>cdb's answers</b> for gride-dbg's; <b>TI's asm6x and lnk6x</b> for GRIDE's.</li>
+</ul>
+
+<h3><span class="num">8.3</span>Test assets</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Asset</th><th>What it proves</th></tr></thead>
+  <tbody>
+    <tr><td>cpp11's own suite: 706 cases</td><td>Each case compiled at <code>-O0</code> and <code>-O2</code>, run, and compared with its recorded output (clang's), or refused with its recorded message. Every refusal is tied to an entry of cpp11's exclusions list.</td></tr>
+    <tr><td>Probe programs</td><td>One program per fix or suspected defect, built by cl and by cpp11 and compared on output; invalid ones checked for refusal by cpp11 and clang.</td></tr>
+    <tr><td>cppparse built by cpp11</td><td>A real 39-source C++ program compiled, assembled with masm and linked with link; its <code>--health</code> report over its own sources compared with cl's build line by line, on Microsoft's run-time and on grt.</td></tr>
+    <tr><td>The toolchain demo</td><td>Every tool in one run on both complete targets: a C program through masm and link, a C++ program through asm6x, lnk6x and RTS6747 to SIM6747, and a Shalimar program three ways, each printing what the C program prints.</td></tr>
+    <tr><td>The examples</td><td>Every example project built and run from the shipped folder; the self-checking ones compared with their stated output.</td></tr>
+    <tr><td>The debugging exercise</td><td>12 examples (4 C, 4 C++, 4 Shalimar) built in Debug with their own PDB and debugged through GRIDE's engine and gride-dbg: every stop on its expected line, recursion, calls across files, watches, setting a value, breakpoints added and removed while stopped, input typed while <code>scanf</code> waits, an unfinished line, F10 from idle.</td></tr>
+    <tr><td>The error-format test</td><td>Two sets of 15 examples in C, C++ and Shalimar, each as it is and with a syntax and a semantic error injected, in Debug and Release: 180 builds through GRIDE's build engine. Each error must be one entry at its exact line, with a column.</td></tr>
+    <tr><td>The side-by-side build</td><td>The same Output, line for line, as one tool at a time; a failing file stops the build at that file with one error; Cancel leaves no tool running and no partial object.</td></tr>
+    <tr><td>grt's tests</td><td>Both example sets linked against grt and against Microsoft's CRT and compared; the UCRT probes; the completeness test of the catalogue's link names; the filing test; the thread probe; the build checks; the benchmarks against Microsoft's static CRT.</td></tr>
+    <tr><td>C6747 variables</td><td>A <code>-g</code> build under VM6747's debugger: <code>info args</code>, <code>info locals</code>, <code>print sum * 2 + n</code> and <code>whatis i</code> answered with the right values and types.</td></tr>
+    <tr><td>Setup tests</td><td>ICE validation; an install of each outlook in turn that finds every file, the shortcut and the registry values, starts GRIDE and cpp11, repairs a deleted program and removes everything.</td></tr>
+  </tbody>
+</table></div>
+
+<h3><span class="num">8.4</span>The independent review of cpp11</h3>
+<p>On 2026-10-21 Fable 5.1, the author of cppparse, reviewed cpp11 1.25 as a C++11 compiler against ISO/IEC 14882:2011, with cl as the behavioural reference and clang++ in strict C++11 as the language reference. About 480 programs were written and run.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Suite</th><th class="n">Programs</th><th>Method</th></tr></thead>
+  <tbody>
+    <tr><td>Valid programs, by area</td><td class="n">268</td><td>Built by cl, checked by clang, built by cpp11 at <code>-O0</code> and <code>-O2</code>, outputs compared</td></tr>
+    <tr><td>Ill-formed programs</td><td class="n">80</td><td>Must be refused; clang's and cl's verdicts recorded beside cpp11's</td></tr>
+    <tr><td>Robustness</td><td class="n">83</td><td>Deep, large and malformed inputs, timed; depth limits found by bisection</td></tr>
+    <tr><td>ABI interoperation on target 1</td><td class="n">12 × 3</td><td>Half a program by cpp11 and half by cl, the reverse, and both by cpp11, each against cl alone</td></tr>
+    <tr><td>Diagnostics</td><td class="n">20</td><td>Everything each compiler said, side by side</td></tr>
+  </tbody>
+</table></div>
+<div class="tbl"><table>
+  <thead><tr><th>Measure</th><th class="n">cpp11 1.25</th><th class="n">cpp11 1.27</th></tr></thead>
+  <tbody>
+    <tr><td>Valid programs that run as cl's build does</td><td class="n">99</td><td class="n">164</td></tr>
+    <tr><td>Valid programs that run differently</td><td class="n">24</td><td class="n">11</td></tr>
+    <tr><td>Valid programs refused</td><td class="n">134</td><td class="n">85</td></tr>
+    <tr><td>Ill-formed programs accepted (of 80)</td><td class="n">6</td><td class="n">6</td></tr>
+    <tr><td>Compiler crashes in the robustness set</td><td class="n">12</td><td class="n">fixed in 1.26: a 256 MB stack, nesting refused by name past its limit</td></tr>
+    <tr><td>Programs whose output changed between <code>-O0</code> and <code>-O2</code></td><td class="n">0</td><td class="n">0</td></tr>
+    <tr><td>Programs that ran as cl's build does and then stopped</td><td class="n">–</td><td class="n">0 (1.27 against 1.26)</td></tr>
+  </tbody>
+</table></div>
+<ul>
+  <li><b>Verdict on 1.25.</b> "Not a C++11 compiler; its own banner is the honest claim." It found 15 silent miscompiles, compiler crashes at small depths, and many valid programs refused by wrong rules rather than by name.</li>
+  <li><b>Strengths it found.</b> The Microsoft x64 calling convention, name decoration, RTTI and exceptions interoperate with cl's objects in both directions. The optimiser never changed a program's output. cpp11 is fast on small files: a median compile of 35 ms at <code>-O0</code> and 39 ms at <code>-O2</code>, against cl's 326 ms and clang's 76 ms for syntax alone. Its diagnostics prose, suite and exclusions discipline are exemplary.</li>
+  <li><b>Where it stands after 1.26 and 1.27.</b> 1.26 fixed the five most harmful items: the lifetimes of temporaries bound to references, a static local whose initialiser throws, the implicit move members, and the crashes by depth. 1.27 fixed the breadth and library items. Its gates: the 706 cases identical at <code>-O0</code> and <code>-O2</code>, 35 probes with no difference, cppparse's report equal to cl's, and six Visual Studio builds with no failure. What remains is chapter 9.</li>
+  <li><b>Its design findings</b> are summarised in §6.1 and §6.7: parsing and lowering in one pass, templates by token replay, a line-based preprocessor and an optimiser over text are each tied to defects it found.</li>
+</ul>
+
+<h3><span class="num">8.5</span>cppparse, the example program</h3>
+<p>cppparse, GRIDE's largest example, works down a triage of what its reviews left, made by Fable 5.1 on 2026-10-21. Fable 5.1 brought it to <code>1c0399e</code> that day with fourteen fixes, one commit each, among them four silent differences from cl (template static members' initialisers, placement array new, placement delete on a throwing constructor, <code>typeid</code> of arrays) and eight valid C++98 forms that had been refused, and added explicit instantiation definitions on 2026-10-22.</p>
+<p>On 2026-10-23 Opus 5.5 took the triage's remaining items over: cl's order of evaluation for calls, assignments and operators; two silent differences that the library's tests found (a class object passed to a <code>const T&amp;</code> of another class, a member <code>operator()</code> template called without its object); 64-bit constant expressions; pointers to members as template arguments; the vtordispex thunk, covariant returns and member-pointer conversions through virtual bases; ambiguous member lookup; a user-declared <code>&amp;&amp;</code> and <code>||</code>; a base named through a typedef; and the library round, with <code>basic_string</code> and <code>wstring</code>, clause 27's streams, <code>&lt;complex&gt;</code>, <code>&lt;valarray&gt;</code>, <code>&lt;strstream&gt;</code> and <code>&lt;locale&gt;</code>. Every row of the triage is now fixed or recorded as won't fix with its reason, and five findings of those rounds are recorded as next work. Before every commit cppparse rebuilt itself twice and the two generations were identical, and its full suite passed.</p>
+<p>GRIDE's example is at <code>bf0c3f7</code>, whose sources are those of the cpp repository's latest commit, <code>2dec723</code>. cpp11 1.30 builds it, and its <code>--health</code> report matches cl's build: 3,087 lines. On grt it builds and links in Release and Debug, and since grt's locks of 2026-10-27 its <code>--health .</code> with its worker threads prints what Microsoft's build prints, 30 runs of 30 (§6.6).</p>
+
+<h3><span class="num">8.6</span>Evidence</h3>
+<div class="tbl"><table>
+  <thead><tr><th>Check</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>Visual Studio builds</td><td>2026-10-27: <code>Setup.sln</code> built the three solutions in Release and the Setup, 0 failed, in 7 min 48 s. Every change since 1.0 was built in Visual Studio in Release and Debug before its commit</td></tr>
+    <tr><td>cpp11's 706 cases, <code>-O0</code> and <code>-O2</code></td><td>1.27, the last run whose counts are recorded: 427 run as expected, 231 refused as expected, 28 skipped; 17 flagged, of which 15 are old expectations of refusal for features now supported (their output equals cl's) and 2 are refusals reworded. 2026-10-23: run again at <code>-O0</code> and <code>-O2</code> as a gate of 1.30's fixes and recorded unchanged; the counts are still 1.27's</td></tr>
+    <tr><td>cpp11's release gates (records)</td><td>2026-10-07: Windows cases 603 / 0 at <code>-O0</code>, <code>-O1</code> and <code>-O2</code>. 2026-10-13, the 1.7 gate: 1,108 / 0 (854 at <code>-O2</code>), names against cl 292 agree and 16 differ, the release check passed on TI's simulator</td></tr>
+    <tr><td>cppparse built by cpp11</td><td>cpp11 1.30 and cppparse <code>bf0c3f7</code>: <code>--health</code> equal to cl's build, 3,087 lines</td></tr>
+    <tr><td>cppparse on grt</td><td>2026-10-26: built and linked in Release and Debug, importing <code>KERNEL32.dll</code> alone; <code>--health . -j 1</code> as Microsoft's build prints it</td></tr>
+    <tr><td>The examples</td><td>2026-10-21: 41 of 42 built and returned 0 (the 42nd is a Mac program); all 16 self-checking ones printed every expected line. 2026-10-27: cpp-sampleext in Debug and Release on both run-times, exit 0, the same 34 lines as cl's build</td></tr>
+    <tr><td>The debugging exercise</td><td>2026-10-22: 80 moves, 70 stops where expected (23 at breakpoints), 10 runs to the end with the right status; run again after the debugger's changes, every stop on the same line</td></tr>
+    <tr><td>The error-format test</td><td>2026-10-22: 180 builds; 60 as-is builds built and ran, 120 injected errors each one entry at the exact line; the valid programs' assembly byte-identical to before, 42 of 42</td></tr>
+    <tr><td>The side-by-side build</td><td>2026-10-26: cppparse's Release rebuild 49.6 s against 190.3 s on 12 processors, its 134 lines of output the same; a syntax error stopped at its file; Cancel ended the build in 0.2 s</td></tr>
+    <tr><td>grt, stage 1</td><td>2026-10-23: 180 of 180 builds identical to Microsoft's CRT with Visual Studio cleared, each importing <code>KERNEL32.dll</code> alone; the UCRT probes byte-identical at <code>-O2</code> and <code>-O0</code>, math within 1 ulp; 141 of 141 link names</td></tr>
+    <tr><td>grt's filing functions</td><td>2026-10-26: the filing test 146 of 146 lines identical on both run-times; the catalogue 153 of 157 entries done</td></tr>
+    <tr><td>grt's locks</td><td>2026-10-27: cppparse with its worker threads byte-identical to Microsoft's build in 30 of 30 runs in Release and 30 of 30 in Debug (5 of 5 failed before); the eight-thread probe 30 of 30 as the UCRT's; the UCRT probes unchanged; 147 of 147 link names</td></tr>
+    <tr><td>C6747 variables</td><td>2026-10-21: <code>n = 4</code>; <code>i = 5</code>, <code>sum = 10</code>; <code>sum * 2 + n = 24</code>; <code>whatis i = int</code></td></tr>
+    <tr><td>Setup 1.5.0</td><td>2026-10-27, built from <code>a69071a</code> and the Setup project: 24.7 MB, 1,152 files (384 per outlook); ICE 104 of 104, 0 errors, 0 warnings; all 92 install checks pass for Black, Grey and White. Rebuilt the same day at <code>ede17c0</code>, with the About boxes below: ICE 104 of 104, 0 errors, 0 warnings; the install checks not run again</td></tr>
+    <tr><td>cpp11's version, wherever GRIDE states it</td><td>2026-10-27: <code>Version.h</code> says 1.30; the six built <code>cpp11.exe</code>, Release and Debug of each outlook, answer "Version 1.30, sealed 23-10-2026"; each outlook's Help › About, opened in its Release build, reads "C++03 with C++11 extensions, Version 1.30, sealed 23-10-2026"; the MSI carries that <code>cpp11.exe</code> in each outlook</td></tr>
+  </tbody>
+</table></div>
+
+<!-- ============================================================ 9 -->
+<h2><span class="num">9</span>Known limits and open work</h2>
+<h3><span class="num">9.1</span>cpp11 after 1.30</h3>
+<p>What the review left open, by kind, in the order Fable 5.1 recommends. 1.28 closed the wrong-code row, both fails-to-build rows and three of the four accepted ill-formed programs that 1.0 listed; this is what remains.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Kind</th><th>Item</th><th>Weight</th></tr></thead>
+  <tbody>
+    <tr><td>Accepted, ill-formed</td><td>A lambda returning <code>int</code> and <code>double</code></td><td>–</td></tr>
+    <tr><td>Valid, refused</td><td><code>enable_if</code> in a return type; the declared-only member template idiom (<code>sizeof(test&lt;T&gt;(0))</code>); pack expansion in a base list; trailing <code>decltype</code> over a pack; partly explicit template arguments; <code>constexpr</code> over string literals, arrays and addresses; <code>N</code> from <code>T[N]</code> in a partial specialisation; partial ordering of <code>f(T)</code>, <code>f(T*)</code>, <code>f(const T*)</code>; a lambda in a member initialiser; a constructor template deduced against its own class</td><td>Medium to low</td></tr>
+    <tr><td>Debug information</td><td>A one-line function's line written again where its body starts, as c90 and shalimar write it, so its parameters are read once stored (§6.4)</td><td>Small</td></tr>
+    <tr><td>Limit, documented</td><td>On target 1: <code>throw;</code>, function-try-blocks, destructible locals in handlers, <code>dynamic_cast&lt;T&amp;&gt;</code>, two polymorphic bases. Refused by name; the Itanium targets compile them</td><td>Weeks of work</td></tr>
+    <tr><td>Limit, by design</td><td>Two-phase name lookup, which token replay cannot give; one error per compilation and no warnings</td><td>Architectural</td></tr>
+    <tr><td>By decision</td><td>Brace member initialisers <code>H() : v{1, 2, 3} {}</code>; <code>thread_local</code></td><td>–</td></tr>
+  </tbody>
+</table></div>
+<p>Fable's estimate, made before 1.28: three sessions of the size of 1.26 clear all the wrong code and the small, valuable template fixes; everything short of the documented limits takes five.</p>
+
+<h3><span class="num">9.2</span>GRIDE and its files</h3>
+<ul>
+  <li><b><code>settings.json</code></b> stores some settings under more than one name. One key per setting, in sections (<code>editor</code>, <code>build</code>, <code>paths</code>, <code>ccs</code>, <code>recent</code>, the window), is proposed and waits for the owner's decision.</li>
+  <li><b>The outlooks.</b> Grey keeps <code>toolchain.json</code>'s lookup folders for cdb but does not read them yet, so it does not find an SDK-installed cdb by itself; with gride-dbg beside it, that matters only when cdb is asked for. The outlooks' windows were checked through their build engines and harnesses after the port of 2026-10-26, not yet clicked through by hand.</li>
+  <li><b>The repository's loose ends.</b> The test harnesses load from a folder git ignores, and the RIDE-port scripts start an old path; Windows on ARM64 is untried.</li>
+  <li><b>Code signing</b> waits for a code-signing certificate in the product owner's name; <code>build-setup.ps1</code> signs when given one, and Setup 1.5.0 is unsigned.</li>
+</ul>
+
+<h3><span class="num">9.3</span>The other tools</h3>
+<ul>
+  <li><b>masm</b> has no macros and no conditional assembly; the compilers do not need them.</li>
+  <li><b>link</b>'s PDB has the open points of §6.4: source checksums, inlined calls' lines, type servers.</li>
+  <li><b>gride-dbg</b> debugs console programs of target 1; cdb and lldb remain its stand-ins.</li>
+  <li><b>SIM6747</b> models no interrupts and no memory stalls.</li>
+  <li><b>VM6747</b> is not an oracle: it once agreed with two wrong outputs that only TI's simulator exposed.</li>
+  <li><b>c90</b> does not optimise on target 2.</li>
+</ul>
+
+<h3><span class="num">9.4</span>grt</h3>
+<ul>
+  <li><b>Exceptions</b> are stage 2's next step: on grt, <code>_CxxThrowException</code> ends the program saying what was thrown. A C++ program that throws needs Microsoft's run-time until then.</li>
+  <li><b>Threads.</b> The tables are locked (§6.6), but <code>errno</code>, <code>strtok</code>'s state and <code>localtime</code>'s result are still shared, not one per thread, and a thread started without grt's <code>CreateThread</code> is not seen.</li>
+  <li><b>Speed.</b> <code>str*</code> 4 to 44 times Microsoft's, <code>sin</code>, <code>exp</code>, <code>log</code> and <code>pow</code> 2 to 3.7 times, <code>printf</code> to a file 1.3 to 1.7 times: stage 2's SSE2 <code>str*</code>, kernels and fast paths.</li>
+  <li><b>The catalogue.</b> <code>_access</code>, <code>_chdir</code>, <code>_mkdir</code> and <code>_rmdir</code> are left, 153 of 157 done.</li>
+  <li><b>Found, to settle in stage 2.</b> The UCRT returns an sNaN quieted, sets no <code>ERANGE</code> on <code>exp</code>'s and <code>pow</code>'s underflow and has its own NaN rules for <code>pow</code>; its <code>printf</code> fails fast on <code>%n</code> and pads <code>%s</code> with zeros under the <code>0</code> flag.</li>
+  <li><b>Later.</b> The layout of stage 3, Shalimar's direct access of stage 4, then <code>wmain</code>, <code>WinMain</code>, UTF-8, wide characters and a DLL.</li>
+</ul>
+
+<h3><span class="num">9.5</span>Hosts</h3>
+<p>GRIDE runs on Windows x64 only. The tools' sources carry their Linux and macOS branches, but the working copy holds no Linux or macOS build files, and nothing has been built on those hosts from this tree. On Windows, targets 3 and 4 end at assembly.</p>
+
+<!-- ============================================================ 10 -->
+<h2><span class="num">10</span>References</h2>
+<p class="small">† added in this report; the sources name the subject but not the document.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Reference</th><th>Used for</th></tr></thead>
+  <tbody>
+    <tr><td>ISO/IEC 9899:1990, Programming languages — C †</td><td>c90; cited in the source as "ISO C 90", clauses 6.1.x</td></tr>
+    <tr><td>ISO/IEC 9899:1999, Programming languages — C</td><td>RTS6x clause numbers (7.19 stdio, 7.20 stdlib …), snprintf</td></tr>
+    <tr><td>ISO/IEC 14882:2003 and 14882:2011, Programming languages — C++ †</td><td>cpp11; cited by stable names ([lex.name] …, 423 of them), Annex E</td></tr>
+    <tr><td>Itanium C++ ABI, incl. its exception-handling ABI</td><td>Mangling and EH on targets 2–4 (the C6747, Linux, macOS)</td></tr>
+    <tr><td>ARM EHABI (Exception Handling ABI for the Arm Architecture)</td><td>C6000 unwinding tables</td></tr>
+    <tr><td>AAPCS64, Apple's variant</td><td>Target 4, arm64-darwin: calls</td></tr>
+    <tr><td>System V AMD64 psABI</td><td>Target 3, x86_64-linux: calls</td></tr>
+    <tr><td>Microsoft x64 calling convention; Microsoft PE/COFF Specification, its archive and import library formats included †</td><td>Target 1, x86_64-windows; masm, link and link <code>/LIB</code></td></tr>
+    <tr><td>DWARF Debugging Information Format, Versions 3 and 4</td><td>asm6x line tables; the compilers' <code>-g</code></td></tr>
+    <tr><td>CodeView C13 (Microsoft)</td><td>Windows debug information</td></tr>
+    <tr><td>TI SPRAB89, The C6000 Embedded Application Binary Interface</td><td>Target 2, tms6747: RTS6x, lnk6x, sim6747, the compilers' back ends</td></tr>
+    <tr><td>TI SPRUFE8, TMS320C674x DSP CPU and Instruction Set Reference Guide</td><td>sim6747, vm6747, RTS6x helpers</td></tr>
+    <tr><td>TI SPRS377, TMS320C6747 data sheet</td><td>sim6747's memory map</td></tr>
+    <tr><td>System V gABI (ELF), SysV ar format</td><td>asm6x, lnk6x, ar6x</td></tr>
+    <tr><td>IEEE 754, Floating-point arithmetic (edition not stated)</td><td>RTS6x helpers; all targets</td></tr>
+    <tr><td>cpp11's project records: O2 report (2026-10-04), O1–O2 study (2026-09-21), optimiser architecture, GCC-scheme gap table (2026-09-24), C6000 size handovers (2026-10-02, 2026-10-05), declines (2026-09-27), benchmark page (2026-09-05), CLAUDE.md measurement entries</td><td>Chapter 7 and §8.2: every size and speed figure, the oracles and their versions</td></tr>
+    <tr><td>Fable 5.1: cpp11 1.25 (C++03 with C++11 extensions), a critical review against ISO/IEC 14882:2011, 2026-10-21; its plan for what is left after 1.26 and 1.27, 2026-10-22</td><td>§6.1, §6.7, §8.4, §9.1</td></tr>
+    <tr><td>cpp11 release notes in its <code>Version.h</code>: 1.24 to 1.30</td><td>Chapters 4 and 9</td></tr>
+    <tr><td>cppparse records: <code>docs/next-targets.md</code> and <code>docs/gap-analysis-cpp98.txt</code>, the triage of 2026-10-21 and its rows to 2026-10-23</td><td>§8.5</td></tr>
+    <tr><td>GRIDE's own Windows debug path: progress notes and the branch <code>pdb</code>, merged on 2026-10-22 (<code>6b0f3c0</code>)</td><td>§6.4</td></tr>
+    <tr><td>Microsoft: the PDB (MSF) format and CodeView C13 records, as LLVM documents them and dbghelp and DIA read them †</td><td>§6.4, §6.5</td></tr>
+    <tr><td>GRIDE's runtime for Windows: <code>docs\Runtime_Design.md</code>, draft 3, accepted 2026-10-23, with its stage records to 2026-10-27; <code>toolchain\Windows\RT\bench\results.md</code></td><td>§6.6, §9.4</td></tr>
+    <tr><td>Microsoft: the sources of vcruntime (MSVC 14.44.35207) and of the UCRT (Windows Kits 10.0.26100.0), read for behaviour only, never copied †</td><td>§6.6</td></tr>
+    <tr><td>Microsoft: the Win32 debugging functions, the DbgHelp library and the pseudo-console API †</td><td>§6.5</td></tr>
+    <tr><td>Microsoft: module-definition (<code>.def</code>) files †</td><td>§6.3, §6.6</td></tr>
+    <tr><td>GRIDE's <code>docs\MASM_LINK_Reference.html</code>, with its section on link <code>/LIB</code></td><td>§6.3</td></tr>
+    <tr><td>Microsoft: Windows Installer's automation interface (msi.dll), makecab and the Windows SDK's ICE suite †</td><td>§8.1</td></tr>
+    <tr><td>GRIDE's commit records, <code>6090472</code> to <code>ede17c0</code> (60 commits), and its README's table of known issues</td><td>Throughout; §9.2</td></tr>
+    <tr><td>ECMA-372, C++/CLI; .NET Framework 4.8 †</td><td>GRIDE's GUI</td></tr>
+  </tbody>
+</table></div>
+
+<h2><span class="num">A</span>Revision history</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Version</th><th>Date</th><th>Change</th></tr></thead>
+  <tbody>
+    <tr><td>0.1</td><td>2026-10-21</td><td>Basic draft: structure, key facts, references</td></tr>
+    <tr><td>0.2</td><td>2026-10-21</td><td>The owner's comments: the report's toolchain narrowed to the compilers and their build, run and debug tools; Shalimar called a micro language and its compiler a micro compiler; the two complete targets, 1. x86_64-windows and 2. tms6747, listed first and numbered throughout</td></tr>
+    <tr><td>0.3</td><td>2026-10-21</td><td>The owner's comment: the GUI is presented as GRIDE, the one GUI</td></tr>
+    <tr><td>0.4</td><td>2026-10-21</td><td>The owner's request: §6.1, a longer description of RTS6747, VM6747 and SIM6747 and their role in the C6747 chain</td></tr>
+    <tr><td>0.5</td><td>2026-10-21</td><td>The owner's comments: the oracles as recorded, g++ 11.5 on Linux among them; chapter 7, optimisation, with the recorded size and speed figures for targets 1 and 2 in full and 3 and 4 in brief; chapters 7–9 renumbered 8–10</td></tr>
+    <tr><td>1.0</td><td>2026-10-22</td><td>The detailed version: every chapter written in full; cpp11 at 1.27 and the independent review in chapters 4, 8 and 9; the compilers' design (§6.1); GRIDE's own Windows debug information (§6.4); cpp11 beside cppparse (§6.5); a glossary</td></tr>
+    <tr><td>2.0</td><td>2026-10-27</td><td>The owner's request: the report matched with GRIDE3 as it is at <code>8b93826</code>. The same day, at the owner's request: the review-gate sentences of §4.2 and §8.6 corrected; the About boxes' cpp11 line and the version texts added (§5.8, §8.6); the baseline moved to <code>ede17c0</code>. The components that came in under <code>toolchain\Windows</code> since 1.0: gride-dbg (§6.5) and grt (§6.6), with masm's CodeView and link's PDB and librarian (§6.3); GRIDE's own Debug road merged and wired, cpp11's part included (§3.3, §6.4); cpp11 1.28 to 1.30; the GUI's side-by-side compiles, debugging and run-time choice (chapter 5); the Setup project and Setup 1.5.0 (§8.1); 29 example projects; the cppparse triage finished (§8.5); the evidence, the open work and the references brought up to date; what changed listed in §1.5; cpp11 beside cppparse renumbered §6.7, hosts §9.5</td></tr>
+  </tbody>
+</table></div>
+
+<h2><span class="num">B</span>Glossary</h2>
+<div class="tbl"><table>
+  <thead><tr><th>Term</th><th>Meaning here</th></tr></thead>
+  <tbody>
+    <tr><td>ABI</td><td>Application binary interface: how calls pass arguments, how objects are laid out, how names are decorated and how exceptions unwind</td></tr>
+    <tr><td>Archive</td><td>A COFF library (<code>.lib</code>): object members behind two linker members that index their names; link <code>/LIB</code> writes them</td></tr>
+    <tr><td>CIO</td><td>TI's C I/O protocol: a C6747 program's <code>printf</code> and file I/O written to a buffer at <code>C$$IO$$</code> that the simulator or a debugger services</td></tr>
+    <tr><td>CodeView</td><td>Microsoft's debug-information records (C13), held in an object's <code>.debug$S</code> and <code>.debug$T</code> sections and gathered into a PDB</td></tr>
+    <tr><td>COMDAT</td><td>A section the linker keeps once however many objects define it: inline functions, template instances, their data</td></tr>
+    <tr><td>dbghelp, DIA</td><td>Microsoft's two PDB readers: dbghelp behind gride-dbg, cdb and WinDbg, DIA behind Visual Studio</td></tr>
+    <tr><td>DWARF</td><td>The debug-information format of ELF and Mach-O targets; versions 3 and 4 here</td></tr>
+    <tr><td>EABI</td><td>TI's C6000 Embedded ABI (SPRAB89): calling convention, ELF use, run-time helpers</td></tr>
+    <tr><td>ERMSB</td><td>Enhanced <code>rep movsb</code>/<code>stosb</code>: a processor feature, reported by CPUID, that makes those instructions fast on large blocks; grt's <code>mem*</code> use it from 2 KB</td></tr>
+    <tr><td>Fast fail</td><td>The end with status 0xC0000409 that Microsoft's Release run-time gives <code>abort</code>, a failed <code>assert</code> and <code>_purecall</code>, and grt gives them too</td></tr>
+    <tr><td>grt</td><td>GRIDE's C and C++ run-time for target 1 (§6.6)</td></tr>
+    <tr><td>gride-dbg</td><td>GRIDE's debugger for target 1 (§6.5)</td></tr>
+    <tr><td>ICE</td><td>Internal Consistency Evaluators: Microsoft's validation suite for Windows Installer packages</td></tr>
+    <tr><td>Import library</td><td>A library of short import members that tells the linker which DLL exports a name; link <code>/LIB</code> writes grt's <code>kernel32.lib</code> from a <code>.def</code> file</td></tr>
+    <tr><td>MSF, PDB</td><td>The multi-stream file a PDB is: streams for the information block, types, modules, globals and publics</td></tr>
+    <tr><td>Oracle</td><td>A reference whose result decides what is right: cl, g++, clang, TI's cl6x and its simulator, and Microsoft's run-time for grt</td></tr>
+    <tr><td>Outlook</td><td>One of the three looks GRIDE is installed in: Black, the default; Grey; White, The Simple. Each is a solution of its own over the one toolchain</td></tr>
+    <tr><td>PE32+, MS COFF</td><td>The 64-bit Windows program format, and its object format</td></tr>
+    <tr><td>Pseudo-console</td><td>A Windows console whose screen another program reads; GRIDE and gride-dbg give the program they run one, so it sees a real console</td></tr>
+    <tr><td>Refused by name</td><td>Stopped with a message that names the unsupported feature, never compiled wrongly</td></tr>
+    <tr><td>RSDS</td><td>The CodeView entry in a program's debug directory that names its PDB and matches the two by GUID and age</td></tr>
+    <tr><td>SFINAE</td><td>Substitution failure is not an error: a template whose substitution fails drops out of overload resolution</td></tr>
+    <tr><td>SPLOOP</td><td>The C674x's software-pipelined loop buffer, which SIM6747 and VM6747 model and the compilers do not yet use</td></tr>
+    <tr><td>Static VC++ run-time</td><td>Microsoft's C++ run-time linked into a program (<code>/MT</code>) rather than loaded from DLLs; the toolchain's programs use it, GRIDE.exe does not</td></tr>
+    <tr><td>Step filter</td><td>The functions a step into passes over: gride-dbg's <code>.step_filter</code></td></tr>
+    <tr><td>TLS</td><td>Thread-local storage: the program's TLS directory, its callbacks, and the variables each thread has a copy of</td></tr>
+    <tr><td>Token replay</td><td>cpp11's way of instantiating a template: re-reading its saved tokens with the parameters bound</td></tr>
+    <tr><td>UCRT</td><td>Microsoft's Universal C Runtime, the C library of Windows 10 and later; grt's reference for behaviour</td></tr>
+  </tbody>
+</table></div>
+
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>try { mermaid.initialize({ startOnLoad: true, theme: (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "neutral", securityLevel: "strict" }); } catch (e) {}</script>
+</body>
+</html>

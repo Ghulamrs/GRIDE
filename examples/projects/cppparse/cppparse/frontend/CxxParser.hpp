@@ -139,6 +139,7 @@ private:
     size_t                      m_pos;
     std::vector<Scope>          m_scopes;
     std::map<std::string, NamedScope> m_named;        // qualified class/namespace name -> its known type names
+    std::map<std::string, std::string> m_aliases;     // qualified name of a typedef naming a class -> the class's key in m_named
     std::vector<ParseDiag>      m_diags;
     int                         m_tentative;          // > 0: errors are not reported (tentative parse)
     int                         m_errors;

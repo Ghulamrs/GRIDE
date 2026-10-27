@@ -182,19 +182,19 @@ const Parser::NamedScope* Parser::findNamedScope(const QualifiedName& n, size_t 
 {
     std::string rel;
     for (size_t i = 0; i < parts; ++i) { if (i) rel += "::"; rel += n.parts[i].ident; }
-    if (n.global) {
-        std::map<std::string, NamedScope>::const_iterator it = m_named.find(rel);
-        if (it != m_named.end() && key) *key = it->first;
-        return it == m_named.end() ? 0 : &it->second;
-    }
-    // relative to each enclosing named scope, innermost first, then global
-    for (size_t q = m_qualifierStack.size(); q > 0; --q) {
-        std::map<std::string, NamedScope>::const_iterator it = m_named.find(m_qualifierStack[q - 1] + "::" + rel);
+    // relative to each enclosing named scope, innermost first, then global (only global for "::x"); a typedef that
+    // names a class stands for the class ("std::streambuf" for std::basic_streambuf)
+    const size_t levels = n.global ? 0 : m_qualifierStack.size();
+    for (size_t q = levels + 1; q > 0; --q) {
+        const std::string full = q == 1 ? rel : m_qualifierStack[q - 2] + "::" + rel;
+        std::map<std::string, NamedScope>::const_iterator it = m_named.find(full);
+        if (it == m_named.end()) {
+            std::map<std::string, std::string>::const_iterator a = m_aliases.find(full);
+            if (a != m_aliases.end()) it = m_named.find(a->second);
+        }
         if (it != m_named.end()) { if (key) *key = it->first; return &it->second; }
     }
-    std::map<std::string, NamedScope>::const_iterator it = m_named.find(rel);
-    if (it != m_named.end() && key) *key = it->first;
-    return it == m_named.end() ? 0 : &it->second;
+    return 0;
 }
 
 bool Parser::isTypeName(const QualifiedName& n) const
@@ -671,8 +671,18 @@ bool Parser::tryTypeId(TypeId*& out)
 void Parser::registerDeclaredNames(const DeclSpec& spec, const Declarator& d)
 {
     if (d.name.parts.size() != 1 || d.name.global) return;
-    if (spec.isTypedef) declareType(d.name.parts[0].ident);
-    else declareOther(d.name.parts[0].ident);
+    if (!spec.isTypedef) { declareOther(d.name.parts[0].ident); return; }
+    const std::string& name = d.name.parts[0].ident;
+    declareType(name);
+    // a typedef of a class names the class's scope as well: a base class or a qualifier spelled with it
+    // ("class B : public std::streambuf", "std::streambuf::int_type") sees the class's member types (namespace scope
+    // and class scope; a block's typedef is left alone)
+    std::string target;
+    if (spec.kind == DeclSpec::Named && d.parts.empty() && !spec.name.empty() && (m_scopes.size() == 1 || !m_scopes.back().name.empty())
+        && findNamedScope(spec.name, spec.name.parts.size(), &target)) {
+        const std::string q = m_scopes.size() == 1 || m_qualifierStack.empty() ? name : m_qualifierStack.back() + "::" + name;
+        if (q != target && !m_named.count(q)) m_aliases[q] = target;
+    }
 }
 
 bool Parser::braceElements(std::vector<Expr*>& out)

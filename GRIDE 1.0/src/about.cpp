@@ -1,11 +1,13 @@
 #include "about.h"
 #include "compile.h"
+#include "debugger.h"
 #include "path.h"
 #include "product.h"
 #include "settings.h"
 #include "toolchain.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <algorithm>
 #include <ctime>
 #include <utility>
@@ -30,28 +32,32 @@ std::string askVersion(const std::string& program) {
     if (found.empty()) return std::string();
 
     // Quoted, because a path may hold a space. `--version` is the flag all four answer: cc1, shc
-    // and c2s write one line and stop, cxx1 writes its banner first and its version second, so
-    // the line kept is the last one naming a version - and the first when none does. Run as the
-    // builds run their tools, with no cmd (GRIDE 1.0), and its two streams already as one.
+    // and c2s write one line and stop, cxx1 writes its banner first and its version second. Run as
+    // the builds run their tools, with no cmd (GRIDE 1.0), and its two streams already as one.
     std::string out;
     if (runCaptured("\"" + found + "\" --version", out) < 0) return std::string();
 
-    // The first line is the banner, which is what About shows: every one of the four opens with
-    // one, and cxx1's version line beneath is detail. Its own copyright is taken off, since the box
-    // ends with it once - so a row reads "cpp11 - ISO C++ 11" beside "c90 - ISO C 90".
-    std::string first;
-    for (size_t at = 0; at < out.size() && first.empty();) {
+    // The first line is the banner: every one of the four opens with one, and shc's and c2s's carry
+    // their number. cxx1's number is on its version line beneath ("Version 1.30, sealed ..."), which
+    // is kept after the banner, so its row says the version too. The copyright is taken off, since
+    // the box ends with it once - so a row reads "cpp11 - C++03 with C++11 extensions, Version 1.30, ...".
+    std::string first, versionLine;
+    for (size_t at = 0; at < out.size();) {
         size_t end = out.find('\n', at);
         if (end == std::string::npos) end = out.size();
         std::string line = out.substr(at, end - at);
         while (!line.empty() && (line[line.size() - 1] == '\n' || line[line.size() - 1] == '\r'))
             line.resize(line.size() - 1);
-        if (!line.empty()) first = line;
+        if (!line.empty()) {
+            if (first.empty()) first = line;
+            else if (versionLine.empty() && line.compare(0, 8, "Version ") == 0) versionLine = line;
+        }
         at = end + 1;
     }
 
     const std::string owner = "\xC2\xA9""2026 G. R. Akhtar - ";
     if (first.compare(0, owner.size(), owner) == 0) first.erase(0, owner.size());
+    if (!versionLine.empty()) first += ", " + versionLine;
     return first;
 }
 
@@ -118,6 +124,20 @@ std::vector<std::string> environment() {
     said.push_back("x86_64-windows");
     named(said, "assembler", settings::assembler(), "cpp11's own choice: masm.exe beside it, else clang");
     named(said, "linker", settings::linker(), "Microsoft's link.exe");
+    // The C runtime a program links and the debugger that reads its PDB: as asked, and what is here answers.
+    const char* given = std::getenv("GRIDE_WINDOWS_RUNTIME");
+    const std::string asked = given && *given ? "GRIDE_WINDOWS_RUNTIME=" + std::string(given)
+                                              : "settings.json \"windowsRuntime\": " + settings::windowsRuntimeSetting();
+    const WindowsCrt crt = windowsCrt(ConfigRelease, false);
+    if (!crt.error.empty()) row(said, "C runtime", "", asked + " - GRIDE's is not in " + grtDirectory());
+    else if (crt.crt == "grt") row(said, "C runtime", grtDirectory(), asked + " - GRIDE's: grtstart ... grtwin.lib, kernel32.lib");
+    else row(said, "C runtime", "libcmt, libucrt, libvcruntime", asked + " - Microsoft's, through LIB" +
+             (settings::windowsRuntime() == "auto" ? " (GRIDE's is not in " + grtDirectory() + ")" : std::string()));
+    std::string why;
+    const std::string backend = dbg_windowsBackend(&why);
+    row(said, "debugger", backend == "gride-dbg" ? dbg_grideDbg() : backend == "cdb" ? std::string(dbg_program(DebuggerCdb)) : std::string(),
+        "settings.json \"windowsDebugger\": " + settings::windowsDebugger() +
+            (backend.empty() ? std::string(" - neither gride-dbg nor cdb is here") : why.empty() ? std::string() : " - " + why));
 #ifdef _WIN32
     const std::string vs = settings::vcvars();
     if (!vs.empty()) row(said, "Visual Studio", vs, "settings.json");

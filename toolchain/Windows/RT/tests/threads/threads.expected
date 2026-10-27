@@ -1,0 +1,5 @@
+own files: 0 bad lines or rounds
+shared: 2400 fprintf, 2400 fputs lines, 0 torn
+statics made: 8
+statics destroyed
+exit 0x00000000

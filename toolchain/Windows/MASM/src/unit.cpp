@@ -23,6 +23,7 @@ void Unit::begin_pass(int n)
     current = -1;
     fixups.clear();
     errors.clear();
+    nokeyword.clear();
     files.clear();
     lines.clear();
     procs.clear();

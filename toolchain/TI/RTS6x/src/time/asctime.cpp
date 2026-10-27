@@ -6,6 +6,10 @@ extern "C" char *asctime(const struct tm *tm)
 {
     static char result[32];
     rts6x::TimeFormatter f(result, sizeof result);
+#if defined(_WIN32)   // grt: the Microsoft runtime writes the day with two digits, "Sep 06"
+    f.run("%a %b %d %H:%M:%S %Y\n", tm);
+#else
     f.run("%a %b %e %H:%M:%S %Y\n", tm);
+#endif
     return result;
 }

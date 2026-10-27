@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Toolchain.targets - the toolchain's build steps as MSBuild tasks, so no step runs through cmd.exe (it is blocked
-  on this machine, and nothing here needs it). Imported by rts6x.vcxproj and shc.vcxproj.
+  on this machine, and nothing here needs it). Imported by rts6x.vcxproj, shc.vcxproj and grt.vcxproj.
 
     RunTool        runs one program with its arguments, in a folder, optionally with Visual Studio's INCLUDE,
                    LIB and PATH (for cl and lib); fails the build when it exits non-zero
     Rts6xVariant   RTS6x's build.cmd :variant - every folder of src\ through cpp11 (its .cpp) and asm6x (its .s),
                    then the library's members packed by ar6x into rts6x<tag>.lib and printf6x<tag>.lib
     PackObjects    a folder of .s through asm6x and the objects packed by ar6x into one library (shmrt6x[d].lib)
+    WindowsLibrary x86_64-windows sources through GRIDE's own toolchain - .c by c90, .cpp by cpp11, each to MASM
+                   assembly, then GRIDE's masm; .asm by masm - and the objects packed by GRIDE's link /LIB (grtc.lib ...)
+    LibraryClosed  a set of libraries checked to leave nothing undefined but what a program brings (main); Layered,
+                   they are layers: no name defined twice, none calling a layer above, one importer of kernel32
+    FrameCheck     no frame of a page or more without __chkstk in the assembly WindowsLibrary wrote
+    CatalogueCheck the runtime's catalogue.json against its libraries and headers
 -->
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
@@ -218,6 +224,438 @@ public class Rts6xVariant : Task
         if (!run(Ar6x, "-r \"" + Library + "\" @\"" + list + "\"")) return false;
         Log.LogMessage(MessageImportance.Normal, "rts6x: " + Library + " (" + objs.Length + " members)");
         // (the task factory ends the fragment with return !Log.HasLoggedErrors)
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <UsingTask TaskName="WindowsLibrary" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+// A library for x86_64-windows built by GRIDE's own toolchain and nothing of Visual Studio's: each .c through
+// c90 and each .cpp through cpp11 (-S -arch x86_64-windows -masm=masm, Flags, the include folders), the
+// assembly through GRIDE's masm, each .asm through masm alone; then every object packed by GRIDE's link /LIB.
+// The sources: the files a .sources list names under its root (`folder/*.cpp`, `folder/file.cpp`, `-` to take
+// one back), the files of SourceDirs (every .c, .cpp and .asm under them, internal\ left out), and Sources.
+// Objects go to ObjDir under the source's own relative path, so two files of one name stay two members.
+public class WindowsLibrary : Task
+{
+    [Required] public string C90 { get; set; }
+    [Required] public string Cpp11 { get; set; }
+    [Required] public string Masm { get; set; }
+    [Required] public string Link { get; set; }
+    [Required] public string ObjDir { get; set; }
+    [Required] public string Library { get; set; }
+    public string Flags { get; set; }
+    public string IncludeDirs { get; set; }
+    public string SourceList { get; set; }
+    public string SourceListRoot { get; set; }
+    public string SourceDirs { get; set; }
+    public string Sources { get; set; }
+
+    static int Exec(string exe, string args, out string output)
+    {
+        var psi = new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        var lines = new List<string>(); object gate = new object();
+        using (var p = new Process { StartInfo = psi })
+        {
+            p.OutputDataReceived += (s, e) => { if (e.Data != null) lock (gate) lines.Add(e.Data); };
+            p.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (gate) lines.Add(e.Data); };
+            p.Start(); p.BeginOutputReadLine(); p.BeginErrorReadLine(); p.WaitForExit();
+            output = string.Join(Environment.NewLine, lines);
+            return p.ExitCode;
+        }
+    }
+
+    static string[] Split(string s) { return (s ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).ToArray(); }
+
+    // (source, object) pairs, in a stable order
+    List<Tuple<string, string>> Gather()
+    {
+        var all = new List<Tuple<string, string>>();
+        if (!string.IsNullOrEmpty(SourceList))
+        {
+            var taken = new List<string>();
+            foreach (string raw in File.ReadAllLines(SourceList))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#")) continue;
+                bool remove = line.StartsWith("-");
+                string rel = (remove ? line.Substring(1) : line).Trim().Replace('/', '\\');
+                string dir = Path.Combine(SourceListRoot, Path.GetDirectoryName(rel));
+                string[] files = Path.GetFileName(rel).Contains("*")
+                    ? Directory.GetFiles(dir, Path.GetFileName(rel)).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray()
+                    : new[] { Path.Combine(SourceListRoot, rel) };
+                foreach (string f in files)
+                {
+                    if (remove) { taken.RemoveAll(x => string.Equals(x, f, StringComparison.OrdinalIgnoreCase)); continue; }
+                    if (!File.Exists(f)) throw new FileNotFoundException(SourceList + ": no " + f);
+                    if (!taken.Contains(f, StringComparer.OrdinalIgnoreCase)) taken.Add(f);
+                }
+            }
+            string tag = Path.GetFileNameWithoutExtension(SourceList);
+            foreach (string f in taken)
+                all.Add(Tuple.Create(f, Path.Combine(ObjDir, tag, Path.ChangeExtension(f.Substring(SourceListRoot.TrimEnd('\\').Length + 1), ".obj"))));
+        }
+        foreach (string d in Split(SourceDirs))
+        {
+            string root = d.TrimEnd('\\');
+            foreach (string f in Directory.GetFiles(root, "*.*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                string ext = Path.GetExtension(f).ToLowerInvariant();
+                if (ext != ".c" && ext != ".cpp" && ext != ".asm") continue;
+                string rel = f.Substring(root.Length + 1);
+                if (rel.StartsWith("internal\\", StringComparison.OrdinalIgnoreCase)) continue;
+                all.Add(Tuple.Create(f, Path.Combine(ObjDir, Path.GetFileName(root), Path.ChangeExtension(rel, ".obj"))));
+            }
+        }
+        foreach (string f in Split(Sources))
+            all.Add(Tuple.Create(f, Path.Combine(ObjDir, Path.ChangeExtension(Path.GetFileName(f), ".obj"))));
+        return all;
+    }
+
+    public override bool Execute()
+    {
+        List<Tuple<string, string>> units;
+        try { units = Gather(); }
+        catch (Exception e) { Log.LogError(e.Message); return false; }
+        string includes = string.Join(" ", Split(IncludeDirs).Select(d => "\"-I" + d.TrimEnd('\\') + "\""));
+        var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+        System.Threading.Tasks.Parallel.ForEach(units, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, u =>
+        {
+            string src = u.Item1, obj = u.Item2, output;
+            Directory.CreateDirectory(Path.GetDirectoryName(obj));
+            string ext = Path.GetExtension(src).ToLowerInvariant();
+            string asm = src;
+            if (ext != ".asm")
+            {
+                asm = Path.ChangeExtension(obj, ".s");
+                string cc = ext == ".c" ? C90 : Cpp11;
+                string args = "-S \"" + src + "\" -o \"" + asm + "\" -arch x86_64-windows -masm=masm -nologo " + (Flags ?? "") + " " + includes;
+                if (Exec(cc, args, out output) != 0) { failures.Add(Path.GetFileName(cc) + " " + args + Environment.NewLine + output); return; }
+            }
+            string margs = "-t x64 \"" + asm + "\" -o \"" + obj + "\"";
+            if (Exec(Masm, margs, out output) != 0) failures.Add("masm " + margs + Environment.NewLine + output);
+        });
+        if (!failures.IsEmpty)
+        {
+            foreach (string f in failures.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) Log.LogError(f);
+            return false;
+        }
+        string list = Path.Combine(ObjDir, Path.GetFileNameWithoutExtension(Library) + ".objs");
+        File.WriteAllLines(list, units.Select(u => "\"" + u.Item2 + "\""));
+        Directory.CreateDirectory(Path.GetDirectoryName(Library));
+        if (File.Exists(Library)) File.Delete(Library);
+        string o;
+        string largs = "/LIB /OUT:\"" + Library + "\" @\"" + list + "\"";
+        if (Exec(Link, largs, out o) != 0) { Log.LogError("link " + largs + Environment.NewLine + o); return false; }
+        if (o.Length > 0) Log.LogMessage(MessageImportance.High, o);
+        Log.LogMessage(MessageImportance.Normal, Path.GetFileName(Library) + ": " + units.Count + " members");
+        return true;
+    }
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <UsingTask TaskName="LibraryClosed" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+// Libraries that must be whole between them: every external a member leaves undefined is defined by some member
+// of one of them (an import library's short members define __imp_X and X), except the names a program brings
+// (Allowed: main, and the linker's own __ImageBase). An unresolved name is a build error here rather than a
+// link error in every program built with them.
+public class LibraryClosed : Task
+{
+    [Required] public string Libraries { get; set; }
+    public string Allowed { get; set; }
+    // Layered: the Libraries are layers, the first the top (docs\Runtime_Design.md 4.2); Importer: the one library
+    // that may call the last, the import library.
+    public bool Layered { get; set; }
+    public string Importer { get; set; }
+
+    static uint U32(byte[] b, int at) { return BitConverter.ToUInt32(b, at); }
+
+    static string Name(byte[] b, int sym, int strtab)
+    {
+        if (U32(b, sym) == 0)
+        {
+            int at = strtab + (int)U32(b, sym + 4), end = at;
+            while (end < b.Length && b[end] != 0) end++;
+            return Encoding.ASCII.GetString(b, at, end - at);
+        }
+        int n = 0;
+        while (n < 8 && b[sym + n] != 0) n++;
+        return Encoding.ASCII.GetString(b, sym, n);
+    }
+
+    public override bool Execute()
+    {
+        var defined = new HashSet<string>();
+        var wanted = new Dictionary<string, string>();
+        // per library, in the order given: what it defines and what it leaves undefined
+        var libs = Libraries.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).ToList();
+        var defs = libs.Select(x => new HashSet<string>()).ToList();
+        var needs = libs.Select(x => new Dictionary<string, string>()).ToList();
+        var comdats = libs.Select(x => new HashSet<string>()).ToList();
+        for (int li = 0; li < libs.Count; li++)
+        {
+            string lib = libs[li];
+            byte[] b = File.ReadAllBytes(lib);
+            int p = 8;
+            while (p + 60 <= b.Length)
+            {
+                string mname = Encoding.ASCII.GetString(b, p, 16).Trim();
+                int size = int.Parse(Encoding.ASCII.GetString(b, p + 48, 10).Trim());
+                int d = p + 60;
+                if (mname != "/" && mname != "//" && size >= 20)
+                {
+                    if (BitConverter.ToUInt16(b, d) == 0 && BitConverter.ToUInt16(b, d + 2) == 0xFFFF)
+                    {
+                        int end = d + 20;
+                        while (b[end] != 0) end++;
+                        string sym = Encoding.ASCII.GetString(b, d + 20, end - d - 20);
+                        defined.Add("__imp_" + sym);
+                        defs[li].Add("__imp_" + sym);
+                        if ((BitConverter.ToUInt16(b, d + 18) & 3) == 0) { defined.Add(sym); defs[li].Add(sym); }
+                    }
+                    else
+                    {
+                        int symptr = (int)U32(b, d + 8), nsym = (int)U32(b, d + 12);
+                        int strtab = d + symptr + 18 * nsym;
+                        for (int i = 0; i < nsym; i++)
+                        {
+                            int s = d + symptr + 18 * i;
+                            uint value = U32(b, s + 8);
+                            short section = BitConverter.ToInt16(b, s + 12);
+                            byte storage = b[s + 16], aux = b[s + 17];
+                            if (storage == 2)
+                            {
+                                string n = Name(b, s, strtab);
+                                string who = Path.GetFileName(lib) + "(" + mname.TrimEnd('/') + ")";
+                                if (section != 0 || value != 0)
+                                {
+                                    defined.Add(n);
+                                    defs[li].Add(n);
+                                    if (section > 0 && Comdat(b, d, section)) comdats[li].Add(n);
+                                }
+                                else
+                                {
+                                    if (!wanted.ContainsKey(n)) wanted[n] = who;
+                                    if (!needs[li].ContainsKey(n)) needs[li][n] = who;
+                                }
+                            }
+                            i += aux;
+                        }
+                    }
+                }
+                p += 60 + size;
+                if ((p & 1) != 0) p++;
+            }
+        }
+        var allowed = new HashSet<string>((Allowed ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries));
+        var missing = wanted.Where(w => !defined.Contains(w.Key) && !allowed.Contains(w.Key)).OrderBy(w => w.Key, StringComparer.Ordinal).ToList();
+        foreach (var m in missing) Log.LogError("undefined in " + Libraries + ": " + m.Key + " (asked for by " + m.Value + ")");
+        int faults = missing.Count;
+        if (Layered)
+        {
+            // The libraries are layers, the first the top: a name defined by two of them is an error, and so is a
+            // library calling a layer above it, or any library but Importer reaching the last (the import library).
+            for (int i = 0; i < libs.Count; i++)
+                for (int j = i + 1; j < libs.Count; j++)
+                    foreach (string n in defs[i].Where(x => defs[j].Contains(x) && !(comdats[i].Contains(x) && comdats[j].Contains(x))).OrderBy(x => x, StringComparer.Ordinal))
+                    {
+                        Log.LogError("layers: " + n + " is defined by both " + Path.GetFileName(libs[i]) + " and " + Path.GetFileName(libs[j]));
+                        faults++;
+                    }
+            for (int i = 0; i < libs.Count; i++)
+                foreach (var w in needs[i].OrderBy(x => x.Key, StringComparer.Ordinal))
+                {
+                    if (defs[i].Contains(w.Key) || allowed.Contains(w.Key)) continue;
+                    int owner = -1;
+                    for (int k = i; k < libs.Count && owner < 0; k++) if (defs[k].Contains(w.Key)) owner = k;
+                    for (int k = 0; k < i && owner < 0; k++) if (defs[k].Contains(w.Key)) owner = k;
+                    if (owner < 0) continue;
+                    if (owner < i)
+                    {
+                        Log.LogError("layers: " + w.Value + " calls " + w.Key + ", which " + Path.GetFileName(libs[owner]) + ", a layer above, defines");
+                        faults++;
+                    }
+                    else if (owner == libs.Count - 1 && !string.IsNullOrEmpty(Importer) &&
+                             !string.Equals(Path.GetFileName(libs[i]), Importer, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Log.LogError("layers: " + w.Value + " reaches " + Path.GetFileName(libs[owner]) + " (" + w.Key + "); only " + Importer + " may");
+                        faults++;
+                    }
+                }
+        }
+        if (faults == 0) Log.LogMessage(MessageImportance.Normal, (Layered ? "closed and layered: " : "closed: ") + Libraries);
+        return faults == 0;
+    }
+
+    // Whether the section numbered section (1-based) of the object at d is a COMDAT one: its own definitions may
+    // repeat another member's, and the linker keeps one.
+    static bool Comdat(byte[] b, int d, int section)
+    {
+        int optional = BitConverter.ToUInt16(b, d + 16);
+        int header = d + 20 + optional + 40 * (section - 1);
+        return (U32(b, header + 36) & 0x1000) != 0;
+    }
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <UsingTask TaskName="FrameCheck" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+// No function in the assembly WindowsLibrary wrote (the .s files under ObjDirs) allocates a frame of a page
+// (4,096 bytes) or more without __chkstk first: Windows grows the stack one guard page at a time, so a larger
+// step skips the guard page and faults (docs\Runtime_Design.md 2 and 12.3).
+public class FrameCheck : Task
+{
+    [Required] public string ObjDirs { get; set; }
+
+    public override bool Execute()
+    {
+        var sub = new Regex(@"^\s*sub\s+rsp,\s*(\d+)\s*$", RegexOptions.IgnoreCase);
+        int faults = 0, files = 0;
+        foreach (string dir in ObjDirs.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!Directory.Exists(dir.Trim())) continue;
+            foreach (string f in Directory.GetFiles(dir.Trim(), "*.s", SearchOption.AllDirectories))
+            {
+                files++;
+                string[] lines = File.ReadAllLines(f);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    Match m = sub.Match(lines[i]);
+                    if (!m.Success || long.Parse(m.Groups[1].Value) < 4096) continue;
+                    bool probed = false;
+                    for (int k = Math.Max(0, i - 3); k < i; k++) probed |= lines[k].Contains("__chkstk");
+                    if (probed) continue;
+                    Log.LogError(f + "(" + (i + 1) + "): a frame of " + m.Groups[1].Value + " bytes without __chkstk");
+                    faults++;
+                }
+            }
+        }
+        Log.LogMessage(MessageImportance.Normal, "frames checked in " + files + " files");
+        return faults == 0;
+    }
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <UsingTask TaskName="CatalogueCheck" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+// The runtime's catalogue (catalogue.json, one entry per line) against what is built and shipped
+// (docs\Runtime_Design.md 9.4, 14.2): every entry done for Target is defined, under its link name, by the library
+// it names in LibDir, and declared by one of the headers it names (in IncludeDirs) - a function as name(, a macro
+// by its name.
+public class CatalogueCheck : Task
+{
+    [Required] public string Catalogue { get; set; }
+    [Required] public string LibDir { get; set; }
+    [Required] public string IncludeDirs { get; set; }
+    public string Target { get; set; }
+
+    // the names a library's first linker member lists
+    static HashSet<string> Symbols(string path)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        byte[] b = File.ReadAllBytes(path);
+        if (b.Length < 68 || Encoding.ASCII.GetString(b, 8, 16).Trim() != "/") return names;
+        int body = 68, n = (b[body] << 24) | (b[body + 1] << 16) | (b[body + 2] << 8) | b[body + 3];
+        int at = body + 4 + 4 * n;
+        for (int i = 0; i < n && at < b.Length; i++)
+        {
+            int end = at;
+            while (end < b.Length && b[end] != 0) end++;
+            names.Add(Encoding.ASCII.GetString(b, at, end - at));
+            at = end + 1;
+        }
+        return names;
+    }
+
+    public override bool Execute()
+    {
+        string target = string.IsNullOrEmpty(Target) ? "x86_64-windows" : Target;
+        var libs = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var dirs = IncludeDirs.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(d => d.Trim()).ToArray();
+        var texts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        int entries = 0, done = 0, faults = 0;
+        foreach (string line in File.ReadAllLines(Catalogue))
+        {
+            if (!line.TrimStart().StartsWith("{\"name\"")) continue;
+            entries++;
+            string name = Regex.Match(line, "\"name\": \"([^\"]+)\"").Groups[1].Value;
+            string kind = Regex.Match(line, "\"kind\": \"(\\w+)\"").Groups[1].Value;
+            Match t = Regex.Match(line, "\"" + Regex.Escape(target) + "\": \\{([^}]*)\\}");
+            if (!t.Success || Regex.Match(t.Groups[1].Value, "\"status\": \"(\\w+)\"").Groups[1].Value != "done") continue;
+            done++;
+            string link = Regex.Match(t.Groups[1].Value, "\"link\": \"([^\"]*)\"").Groups[1].Value;
+            string library = Regex.Match(t.Groups[1].Value, "\"library\": \"([^\"]*)\"").Groups[1].Value;
+            string path = Path.Combine(LibDir, library + ".lib");
+            if (!libs.ContainsKey(library)) libs[library] = File.Exists(path) ? Symbols(path) : new HashSet<string>();
+            if (!libs[library].Contains(link))
+            {
+                Log.LogError("catalogue: " + name + " is not defined by " + library + ".lib (as " + link + ")");
+                faults++;
+            }
+            var headers = Regex.Matches(Regex.Match(line, "\"headers\": \\[([^\\]]*)\\]").Groups[1].Value, "\"([^\"]+)\"").Cast<Match>().Select(m => m.Groups[1].Value);
+            var pattern = new Regex(kind == "macro" ? "\\b" + Regex.Escape(name) + "\\b" : "\\b" + Regex.Escape(name) + "\\s*\\(");
+            bool declared = false;
+            foreach (string h in headers)
+                foreach (string d in dirs)
+                {
+                    string f = Path.Combine(d, h.Replace('/', '\\'));
+                    if (!File.Exists(f)) continue;
+                    if (!texts.ContainsKey(f)) texts[f] = File.ReadAllText(f);
+                    declared |= pattern.IsMatch(texts[f]);
+                }
+            if (!declared)
+            {
+                Log.LogError("catalogue: " + name + " is not declared by " + string.Join(" or ", headers));
+                faults++;
+            }
+        }
+        Log.LogMessage(MessageImportance.High, "catalogue: " + entries + " entries, " + done + " done for " + target + (faults == 0 ? ", each defined and declared" : ""));
+        return faults == 0;
+    }
+}
       ]]></Code>
     </Task>
   </UsingTask>

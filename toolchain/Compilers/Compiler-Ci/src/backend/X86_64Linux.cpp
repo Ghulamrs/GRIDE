@@ -650,6 +650,79 @@ void X86_64Linux::visit(const Cast &n) {
     genConversion(n.value().type(), n.type());
 }
 
+// **A function that returns twice is called with nothing of the compiler's on the stack.** A binary
+// operator evaluates its right operand first and parks it on the stack while the left one is worked out.
+// setjmp's second return, from longjmp, restores rsp to where the first left it, but the parked bytes sit
+// below the frame, where every call and push made since setjmp's first return has written: in
+// `if ((n = setjmp(jb)) == 0) f(7);` the 0 pushed before the call became the 7 pushed for f's argument, or
+// the r9 a variadic callee spilled into its home slot, and the comparison sent longjmp's 7 back round
+// the loop for ever, at -O0 and, through the CRT's printf, at -O2 too. So an operand that calls such a
+// function is evaluated first, when nothing is parked (Binary, genFloatBinary). Every form C90 7.6.2.1
+// allows, and the assignment `n = setjmp(jb)` (its value is evaluated before its address, visit(Assign)),
+// then calls setjmp with nothing below rsp to lose. The names are GCC's (special_function_p): setjmp,
+// sigsetjmp, savectx, vfork and getcontext with one or two underscores in front or none, and the
+// UCRT's _setjmpex. A call by pointer is not known for one.
+static bool returnsTwiceName(const std::string &name) {
+    std::size_t at = 0;
+    while (at < 2 && at < name.size() && name[at] == '_') at++;
+    static const char *const kNames[] = { "setjmp", "setjmpex", "sigsetjmp", "savectx", "vfork", "getcontext" };
+    for (const char *k : kNames)
+        if (name.compare(at, std::string::npos, k) == 0) return true;
+    return false;
+}
+
+namespace {
+
+// The search, one virtual call a node.
+class TwiceFinder final : public Visitor {
+public:
+    bool in(const Expr &e) { e.accept(*this); return found_; }
+
+    void visit(const Num &) override { found_ = false; }
+    void visit(const Var &) override { found_ = false; }
+    void visit(const StrLit &) override { found_ = false; }
+    void visit(const VaStart &n) override { found_ = in(n.list()); }
+    void visit(const VaArg &n) override { found_ = in(n.list()); }
+    void visit(const Assign &n) override { found_ = in(n.value()) || in(n.target()); }
+    void visit(const Unary &n) override { found_ = in(n.operand()); }
+    void visit(const Postfix &n) override { found_ = in(n.target()); }
+    void visit(const Cast &n) override { found_ = in(n.value()); }
+    void visit(const MemberAccess &n) override { found_ = in(n.object()); }
+    void visit(const Comma &n) override { found_ = in(n.left()) || in(n.right()); }
+    void visit(const Conditional &n) override {
+        found_ = in(n.cond()) || in(n.thenArm()) || in(n.elseArm());
+    }
+    void visit(const Call &n) override {
+        bool yes = n.callee() == nullptr ? returnsTwiceName(n.name()) : in(*n.callee());
+        for (std::size_t i = 0; !yes && i < n.args().size(); i++) yes = in(*n.args()[i]);
+        found_ = yes;
+    }
+    void visit(const Binary &n) override { found_ = in(n.lhs()) || in(n.rhs()); }
+    // statements are never inside an expression
+    void visit(const ExprStmt &) override {}
+    void visit(const Return &) override {}
+    void visit(const Block &) override {}
+    void visit(const If &) override {}
+    void visit(const While &) override {}
+    void visit(const For &) override {}
+    void visit(const DoWhile &) override {}
+    void visit(const Switch &) override {}
+    void visit(const Case &) override {}
+    void visit(const Goto &) override {}
+    void visit(const Label &) override {}
+    void visit(const Break &) override {}
+    void visit(const Continue &) override {}
+
+private:
+    bool found_ = false;
+};
+
+}
+
+// Not searched inside an operand already found free of one (clean_): every Binary asks about its left
+// operand, and a chain `a + b + c + ...` is then walked once, not once a link.
+bool X86_64Linux::returnsTwice(const Expr &e) { return clean_ == 0 && TwiceFinder().in(e); }
+
 void X86_64Linux::genX87Binary(const Binary &n) {
     n.lhs().accept(*this);
     pushX87();
@@ -703,10 +776,24 @@ void X86_64Linux::genFloatBinary(const Binary &n) {
     bool isDouble = genKind(t) == Kind::Double;
     const char *sfx = isDouble ? "sd" : "ss";
 
-    n.rhs().accept(*this);
-    pushF();
-    n.lhs().accept(*this);
-    popF("%xmm1");
+    const bool twice = returnsTwice(n.lhs());
+    if (twice && !returnsTwice(n.rhs())) {
+        // setjmp's operand first, with nothing parked (returnsTwice)
+        n.lhs().accept(*this);
+        pushF();
+        clean_++;
+        n.rhs().accept(*this);
+        clean_--;
+        a_->ins("movapd", reg("%xmm0"), reg("%xmm1"));
+        popF("%xmm0");
+    } else {
+        n.rhs().accept(*this);
+        pushF();
+        if (!twice) clean_++;
+        n.lhs().accept(*this);
+        if (!twice) clean_--;
+        popF("%xmm1");
+    }
 
     switch (n.op()) {
     case BinOp::Add: a_->ins(std::string("add") + sfx, reg("%xmm1"), reg("%xmm0")); return;
@@ -768,10 +855,24 @@ void X86_64Linux::visit(const Binary &n) {
 
     if (n.lhs().type()->isFloating()) { genFloatBinary(n); return; }
 
-    n.rhs().accept(*this);
-    push();
-    n.lhs().accept(*this);
-    pop(abi_.scratch);
+    const bool twice = returnsTwice(n.lhs());
+    if (twice && !returnsTwice(n.rhs())) {
+        // setjmp's operand first, with nothing parked (returnsTwice)
+        n.lhs().accept(*this);
+        push();
+        clean_++;
+        n.rhs().accept(*this);
+        clean_--;
+        a_->ins("mov", reg("%rax"), reg(abi_.scratch));
+        pop("%rax");
+    } else {
+        n.rhs().accept(*this);
+        push();
+        if (!twice) clean_++;
+        n.lhs().accept(*this);
+        if (!twice) clean_--;
+        pop(abi_.scratch);
+    }
 
     const Type *t = n.lhs().type();
     const char *a = acc(t);
@@ -1210,6 +1311,7 @@ void X86_64Linux::finishChunk() {
 
 void X86_64Linux::emit(const Function &fn) {
     depth_ = 0;
+    clean_ = 0;
     resetLabels();
     labelPrefix_ = ".L." + fn.name() + ".";
     returnLabel_ = ".L.return." + fn.name();

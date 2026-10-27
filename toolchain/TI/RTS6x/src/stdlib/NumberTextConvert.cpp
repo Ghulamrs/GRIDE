@@ -23,6 +23,14 @@ unsigned long NumberText::convert(const unsigned char *p, char **end, int base, 
         negative = 0;
     }
     unsigned b = (unsigned)base;
+#if defined(_WIN32)
+    // GRIDE's runtime for Windows: the Microsoft runtime takes a 0x with no hexadecimal digit after it as no
+    // number at all, where C would read the 0
+    if ((b == 0 || b == 16) && c == '0' && (p[1] | 0x20) == 'x' && digit_[p[2]] >= 16) {
+        if (end) *end = (char *)s;
+        return 0;
+    }
+#endif
     if (b != 10) {
         if (b - 2 > 34) {
             // 0 chooses by the prefix; 1, past 36 and negative bases have no subject sequence.

@@ -33,6 +33,18 @@ bool dbg_imageHasLines(const std::string& out, std::string* why = 0);
 // GRIDE_DEBUG_VM6747=1 force one. why says what decided it when the fallback was taken.
 std::string dbg_c6xBackend(const std::string& executable, std::string* why = 0);
 
+// gride-dbg, GRIDE's own debugger for x86_64-windows (the PDB of GRIDE's link or link.exe's, read through dbghelp, and
+// answers in cdb's words): $GRIDE_DBG, else the one beside the editor; "" when there is none.
+std::string dbg_grideDbg();
+// Which program reads a Windows program's PDB: "gride-dbg" or "cdb", as settings.json's windowsDebugger asks and what
+// is here allows - the one named stands in for the other where that one is not there; "" when neither is. why says
+// what put it there when the setting asked otherwise.
+std::string dbg_windowsBackend(std::string* why = 0);
+
+// The line main() starts on in a source: C's and C++'s "int main(", Shalimar's "fun <> = main("; 0 where there is
+// none, and in a header.
+size_t dbg_mainLineIn(const std::string& file);
+
 DebuggerKind dbg_here();
 const char* dbg_name(DebuggerKind kind);
 const char* dbg_program(DebuggerKind kind);
@@ -67,9 +79,17 @@ struct Stop {
     size_t line;
     std::string function;
     std::string said;
+    // The program's lines in said were told as they came (Debugger::tellProgram): none is left to show.
+    bool told;
 
-    Stop() : stopped(false), exited(false), status(0), line(0) {}
+    Stop() : stopped(false), exited(false), status(0), line(0), told(false) {}
 };
+
+// A line the program printed, told while a move goes on.
+typedef void (*ProgramSink)(void* context, const std::string& line);
+
+// What starts the rest of a program line told unfinished before ("Enter n: ", then "5" once typed): gride-dbg's mark.
+const char* dbg_continuedMark();
 
 // address is where the variable lives, "0x..." as the engine said it, and empty in a register.
 struct Variable {
@@ -107,7 +127,9 @@ public:
                const std::string& program = std::string());
     bool running() const { return kind_ != DebuggerNone && child_.running(); }
     DebuggerKind kind() const { return kind_; }
-    // The program behind the C6x kind - "vm6747" or "sim6747" - and why vm6747 when the simulator was not chosen.
+    // The program behind the kind - "vm6747" or "sim6747" for C6x, "gride-dbg" or "cdb" for cdb's words - and why
+    // that one: vm6747 when the simulator was not chosen; cdb named by the setting over gride-dbg, or either one
+    // standing in for the other the setting named.
     const std::string& backend() const { return backend_; }
     const std::string& backendWhy() const { return backendWhy_; }
     void stop();
@@ -120,6 +142,22 @@ public:
     Stop stepOver();
     Stop stepInto();
     Stop stepOut();
+    // **F7 and F6 with nothing being debugged**: the run to main's first line, a breakpoint there for once, and
+    // past main's prologue when the stop is its first instruction - as a step into a function goes on to its first
+    // line. A line refused says so in note() and the run goes on to a breakpoint or the end.
+    Stop runToEntry(const std::string& file, size_t line);
+    // What the last move had to say beside its stop, or "".
+    const std::string& note() const { return note_; }
+
+    // **The program's lines as a move goes**, each told as it comes - a prompt among them before the program waits
+    // for its input - not when the move ends; the Stop then says so (Stop::told). Read off the debugger's pipe, a
+    // little at a time; a debugger on a console is read whole, and its lines told at the end of the move.
+    void tellProgram(ProgramSink sink, void* context) { sink_ = sink; sinkContext_ = context; }
+    // **The program's own input** while it is debugged, where the engine hands it over (gride-dbg's .input): at
+    // once, even while a move waits for the program, which may be waiting for this very line. Not echoed: the
+    // program's console echoes it among its own lines.
+    bool takesInput() const;
+    bool sendInput(const std::string& line);
 
     std::vector<Variable> locals();
 
@@ -144,7 +182,7 @@ public:
     const std::vector<Watch>& watches() const { return watches_; }
     void readWatches();
 
-    std::string ask(const std::string& command);
+    std::string ask(const std::string& command, int timeoutMs = 30000);
 
 private:
     Debugger(const Debugger&);
@@ -154,11 +192,19 @@ private:
 
     Stop afterStepping(const std::string& command);
 
+    // A move's answer, waited for as long as the program may take; told: how much of it was told already.
+    std::string askMoving(const std::string& command, size_t* told);
+    void tell(const std::string& said);
+    bool ownDebugger() const { return kind_ == DebuggerCdb && backend_ == "gride-dbg"; }
+
     Process child_;
     DebuggerKind kind_;
     std::string backend_, backendWhy_;
     bool onConsole_;
     std::string executable_;
+    std::string note_;
+    ProgramSink sink_;
+    void* sinkContext_;
 
     Stop last_;
 

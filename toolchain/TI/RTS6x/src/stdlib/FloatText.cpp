@@ -63,6 +63,20 @@ unsigned long long FloatText::special(const FloatFormat &format, bool negative, 
     if (!matchWord(s, "nan")) return format.zero(negative);
     const char *p = s + 3;
     *end = p;
+#if defined(_WIN32)
+    // grt: the Microsoft runtime's NaNs - NAN(IND) the indefinite one (the sign and the quiet bit alone, whatever
+    // sign is written), NAN(SNAN) a signalling one (the lowest fraction bit), any other every fraction bit set
+    if (*p == '(') {
+        const char *q = p + 1;
+        while (CharacterClass::alnum((unsigned char)*q) || *q == '_') q++;
+        if (*q == ')') {
+            *end = q + 1;
+            if (q - p == 4 && matchWord(p + 1, "ind")) return format.nan() | format.signBit();
+            if (q - p == 5 && matchWord(p + 1, "snan")) return format.infinity(negative) | 1u;
+        }
+    }
+    return format.infinity(negative) | format.fractionMask();
+#endif
     unsigned long long payload = 0;
     if (*p == '(') {
         const char *q = p + 1;

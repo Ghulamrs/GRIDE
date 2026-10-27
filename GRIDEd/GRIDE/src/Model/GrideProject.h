@@ -182,8 +182,6 @@ namespace Gride { namespace Model {
 
         // ---- content ----------------------------------------------------------
         property List<Target>^ Targets;
-        // the "arch" the file said, written back as it was while the target is still the one it reads as
-        property String^ ArchWritten;
         property List<ProjectFolder^>^ Folders;
         property List<BuildConfiguration^>^ Configurations;
         property List<String^>^ DependsOn;    // other project names in the workspace
@@ -423,8 +421,7 @@ namespace Gride { namespace Model {
             for each (String^ t in j->GetStringList("targets")) p->Targets->Add(TargetInfo::Parse(t));
             // the one format's "arch" is the platform built for (White's Target menu)
             String^ arch = j->GetString("arch", String::Empty);
-            p->ArchWritten = arch;
-            if (!String::IsNullOrWhiteSpace(arch) && !p->Targets->Contains(TargetOfProjectArch(arch))) p->Targets->Insert(0, TargetOfProjectArch(arch));
+            if (!String::IsNullOrWhiteSpace(arch) && !p->Targets->Contains(TargetOfArch(arch))) p->Targets->Insert(0, TargetOfArch(arch));
 
             // the folders: the one format's "groups" - a list of files, or { "files", "toolchain" } for a group
             // with its own compiler - else the "folders" GRIDEd wrote before it
@@ -503,9 +500,7 @@ namespace Gride { namespace Model {
             // ---- the one format: White's keys, in White's order
             j->SetString("name", Name);
             j->SetString("toolchain", String::IsNullOrWhiteSpace(Toolchain) ? "auto" : Toolchain);
-            if (Targets->Count > 0)
-                j->SetString("arch", !String::IsNullOrWhiteSpace(ArchWritten) && TargetOfProjectArch(ArchWritten) == Targets[0]
-                                         ? ArchWritten : ArchOf(Targets[0]));
+            if (Targets->Count > 0) j->SetString("arch", ArchOf(Targets[0]));
             JsonValue^ groups = JsonValue::MakeObject();
             for each (ProjectFolder^ f in Folders)
             {
@@ -567,13 +562,6 @@ namespace Gride { namespace Model {
             case Target::C6747:  return "tms6747";
             default:             return "x86_64-windows";
             }
-        }
-        // **Another machine's host target means this machine's**, as White (project.cpp) and Grey read a .pro: a project
-        // saved on the Mac says arm64-darwin, which only reaches -S here. The emulated target is bound to no machine and stays.
-        static Target TargetOfProjectArch(String^ arch)
-        {
-            const Target t = TargetOfArch(arch);
-            return t == Target::Linux || t == Target::MacOS ? Target::Windows : t;
         }
         static Target TargetOfArch(String^ arch)
         {

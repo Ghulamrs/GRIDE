@@ -169,6 +169,40 @@ void TypeTable::memberPointerModel(const Symbol* cls, bool& multiple, bool& virt
     }
 }
 
+namespace { bool nonVirtualOffset(const Symbol* derived, const Symbol* base, int& off, int depth); }
+
+int TypeTable::vbptrOrigin(const Symbol* cls)
+{
+    if (!cls || cls->vbptrOffset < 0) return 0;
+    for (size_t t = 0; t < cls->vbtables.size(); ++t)
+        if (cls->vbtables[t].offset == cls->vbptrOffset && !cls->vbtables[t].entries.empty()) return cls->vbptrOffset + cls->vbtables[t].entries[0];
+    return 0;
+}
+
+void TypeTable::memberPointerValue(const Symbol* m, int& offset, int& adjust, int& vbptr, int& vbindex)
+{
+    offset = adjust = vbptr = vbindex = 0;
+    const Symbol* cls = m ? m->ownerClass : 0;
+    if (!cls) return;
+    bool multiple = false, virt = false;
+    memberPointerModel(cls, multiple, virt, 0);
+    const bool unspecified = !cls->isDefinition || cls->memberPointerUnspecified;
+    const int origin = virt && !unspecified ? vbptrOrigin(cls) : 0;
+    if (m->kind != Symbol::Function) { offset = m->offset - origin; return; }
+    if (m->isVirtual && m->vfptrVbase) {
+        for (size_t t = 0; t < cls->vbtables.size(); ++t) {
+            const VbTable& vt = cls->vbtables[t];
+            if (vt.offset != cls->vbptrOffset) continue;
+            for (size_t k = 0; k < vt.order.size() && !vbindex; ++k) {
+                int o = 0;
+                if (nonVirtualOffset(vt.order[k], m->vfptrVbase, o, 0)) { vbindex = 4 * static_cast<int>(k + 1); adjust = o; }
+            }
+        }
+        if (vbindex) { if (unspecified) vbptr = cls->vbptrOffset; return; }
+    }
+    adjust = m->thisAdjust - origin;
+}
+
 bool TypeTable::holdsMemberPointer(const Type* t, int depth)
 {
     while (t && (t->kind == Type::Array || t->kind == Type::Reference)) { if (t->kind == Type::Reference) return false; t = t->inner; }
@@ -275,7 +309,7 @@ Symbol::Symbol()
       isDestructor(false), isConversion(false), isOperator(false), isFriendDecl(false), hasBody(false), isExternC(false),
       definition(0), declAst(0), body(0), vtableSlot(-1), thisAdjust(0), vfptrOffset(0), vfptrVbase(0), overrides(0), ownerClass(0), offset(0), index(0), isMember(false), isParam(false),
       isLocal(false), isMutable(false), init(0), initCtor(0), hasConstValue(false), constValue(0), declAlign(0), bitWidth(-1), bitOffset(0),
-      anonHost(0), anonOf(0), templateAst(0), instantiatedFrom(0),
+      anonHost(0), anonOf(0), templateAst(0), instantiatedFrom(0), memberArg(0),
       isDependentContext(false), isImplicitInstantiation(false), isLazyInstantiation(false), instantiationFailed(false), isExplicitInstantiation(false), isImplicit(false), requiredParams(0), hasUserCtor(false), hasCopyCtor(false), hasDtor(false),
       hasCopyAssign(false), hasDefaultCtor(false), memberPointerUnspecified(false), defOrder(0), friendsUnknown(false), isUsed(false), isNoreturn(false) {}
 
@@ -430,6 +464,84 @@ bool Sema::lookupMember(Symbol* cls, const std::string& name, std::vector<Symbol
     return found;
 }
 
+namespace {
+
+// a base subobject whose class is the first on its path to declare a name (10.2/2): path is the complete object or
+// a virtual base (one subobject however it is reached) followed by the non-virtual bases down to the subobject
+struct MemberHit {
+    Symbol*              cls;
+    std::vector<Symbol*> path;
+    bool                 nonStatic;   // the declarations include a non-static data member or member function
+};
+
+void collectMemberHits(Symbol* cls, const std::string& name, const std::vector<Symbol*>& path, std::vector<MemberHit>& hits, int depth)
+{
+    if (!cls || !cls->members || depth > 32) return;
+    if (const std::vector<Symbol*>* v = cls->members->find(name)) {
+        for (size_t i = 0; i < hits.size(); ++i) if (hits[i].path == path) return;   // a virtual base reached again
+        MemberHit h; h.cls = cls; h.path = path; h.nonStatic = false;
+        for (size_t i = 0; i < v->size(); ++i) {
+            const Symbol* s = (*v)[i];
+            if ((s->kind == Symbol::Variable || s->kind == Symbol::Function || s->kind == Symbol::FunctionTemplate) && !s->isStatic) h.nonStatic = true;
+        }
+        hits.push_back(h);
+        return;
+    }
+    for (size_t b = 0; b < cls->bases.size(); ++b) {
+        Symbol* bc = cls->bases[b].cls;
+        if (!bc) continue;
+        std::vector<Symbol*> sub;
+        if (!cls->bases[b].isVirtual) sub = path;
+        sub.push_back(bc);
+        collectMemberHits(bc, name, sub, hits, depth + 1);
+    }
+}
+
+// y is a base class subobject of x (10.2/6): below x on x's own path, or inside a virtual base of x's class
+bool isBaseSubobject(const MemberHit& y, const MemberHit& x)
+{
+    if (y.path.size() > x.path.size() && std::equal(x.path.begin(), x.path.end(), y.path.begin())) return true;
+    return !y.path.empty() && std::find(x.cls->vbases.begin(), x.cls->vbases.end(), y.path[0]) != x.cls->vbases.end();
+}
+
+} // namespace
+
+// 10.2/2: the lookup of a name in cls that its bases declare is ambiguous (cl C2385) when the declarations left after
+// those in a subobject's own bases are hidden (10.2/6, dominance) come from subobjects of different classes
+// (`struct B : A { int a; }; struct C : A {}; struct D : B, C {}`: B::a on one path, A::a on the other), or include
+// a non-static member and come from more than one subobject of one class
+bool Sema::memberLookupAmbiguous(Symbol* cls, const std::string& name)
+{
+    if (!cls || !cls->members || cls->members->find(name)) return false;
+    std::vector<MemberHit> hits;
+    collectMemberHits(cls, name, std::vector<Symbol*>(1, cls), hits, 0);
+    if (hits.size() < 2) return false;
+    std::vector<size_t> kept;
+    for (size_t i = 0; i < hits.size(); ++i) {
+        bool hidden = false;
+        for (size_t k = 0; k < hits.size() && !hidden; ++k) if (k != i && isBaseSubobject(hits[i], hits[k])) hidden = true;
+        if (!hidden) kept.push_back(i);
+    }
+    for (size_t i = 1; i < kept.size(); ++i) if (hits[kept[i]].cls != hits[kept[0]].cls) return true;
+    if (kept.size() > 1) for (size_t i = 0; i < kept.size(); ++i) if (hits[kept[i]].nonStatic) return true;
+    return false;
+}
+
+// a data member or member function named without an object (`a`, `f()`, `D::a`, `&D::a`): the class whose member
+// lookup found it (the qualifier's, or the innermost enclosing class that has it, 3.4.1/8) must find it unambiguously
+bool Sema::ambiguousMemberName(const cxx::QualifiedName& n, Symbol* s, Scope* in, const cxx::Loc& loc)
+{
+    if (!s || !s->ownerClass || (s->kind != Symbol::Variable && s->kind != Symbol::Function && s->kind != Symbol::FunctionTemplate) || s->isDestructor || s->isConstructor) return false;
+    Symbol* cls = 0;
+    if (n.parts.size() > 1) { Scope* q = scopeForQualifier(n, in); if (q && q->kind == Scope::Class) cls = q->owner; }
+    else if (!n.global)
+        for (Scope* sc = in; sc && !cls; sc = sc->parent)
+            if (sc->kind == Scope::Class && sc->owner && (sc->owner == s->ownerClass || derivesFrom(sc->owner, s->ownerClass, 0))) cls = sc->owner;
+    if (!cls || cls == s->ownerClass || !memberLookupAmbiguous(cls, n.parts.back().ident)) return false;
+    error(loc, "S144", "ambiguous access of '" + n.parts.back().ident + "' in '" + cls->qualifiedName() + "' (cl C2385)");
+    return true;
+}
+
 bool Sema::lookupInScope(Scope* s, const std::string& name, bool typesOnly, std::vector<Symbol*>& out, std::set<Scope*>& seen)
 {
     if (!s || seen.count(s)) return false;
@@ -582,7 +694,7 @@ Symbol* Sema::resolveName(const cxx::QualifiedName& n, Scope* from, bool typesOn
 Symbol* Sema::lookupQualified(const cxx::QualifiedName& n, Scope* from, bool typesOnly) { return resolveName(n, from, typesOnly, 0); }
 
 
-bool Sema::templateArgText(const std::vector<cxx::TemplateArg>& args, Scope* from, std::vector<const Type*>& types, std::vector<long>& ints, std::string& text)
+bool Sema::templateArgText(const std::vector<cxx::TemplateArg>& args, Scope* from, std::vector<const Type*>& types, std::vector<long long>& ints, std::string& text, const std::vector<Symbol*>* params, std::vector<Symbol*>* syms)
 {
     text = "<";
     for (size_t i = 0; i < args.size(); ++i) {
@@ -622,14 +734,64 @@ bool Sema::templateArgText(const std::vector<cxx::TemplateArg>& args, Scope* fro
                     continue;
                 }
             }
-            long v;
+            // a pointer to member (&C::m): the member, which the instantiation binds the parameter to; a data
+            // member's offset is the value cl mangles ($0BA@)
+            if (et && et->kind == Type::MemberPointer) {
+                Symbol* m = memberPointerArg(a.expr, params && i < params->size() ? (*params)[i] : 0);
+                if (!m) return false;
+                types.push_back(0); ints.push_back(m->kind == Symbol::Variable ? m->offset : 0);
+                if (syms) { syms->resize(types.size() - 1, 0); syms->push_back(m); }
+                text += "&" + m->qualifiedName();
+                continue;
+            }
+            long long v;
             if (!constantValue(a.expr, v)) return false;
+            if (params && i < params->size() && (*params)[i] && (*params)[i]->type && (*params)[i]->type->isIntegral()) v = constantIn(v, a.expr->semaType, (*params)[i]->type);   // in the parameter's type
             types.push_back(0); ints.push_back(v);
             std::ostringstream s; s << v; text += s.str();
         }
     }
     text += ">";
+    if (syms) syms->resize(types.size(), 0);
     return true;
+}
+
+// a template parameter bound to the pointer to member &m: an expression naming it becomes &C::m (Sema::exprName)
+void Sema::bindMemberArg(Symbol* b, Symbol* m)
+{
+    b->type = m_types.memberPointer(m_types.classType(m->ownerClass), m->type);
+    b->memberArg = m;
+}
+
+bool Sema::anyMemberArg(const std::vector<Symbol*>& syms)
+{
+    for (size_t i = 0; i < syms.size(); ++i) if (syms[i]) return true;
+    return false;
+}
+
+// &C::m as a template argument (14.3.2/1): a non-static member named with its class, of the parameter's type (no
+// conversion applies, 14.3.2/5: the class is the member's own; of overloaded member functions the one of that
+// type), of a class of any inheritance model (SemaMangler::templateName spells each as cl does); 0 when the argument
+// is none of that
+Symbol* Sema::memberPointerArg(cxx::Expr* x, const Symbol* param)
+{
+    while (x && x->kind == cxx::Expr::Paren && x->kids.size() == 1) x = x->kids[0];
+    if (!x || x->kind != cxx::Expr::Unary || x->text != "&" || x->kids.size() != 1) return 0;
+    cxx::Expr* n = x->kids[0];
+    Symbol* m = n->semaSym;
+    if (n->kind != cxx::Expr::Name || n->name.parts.size() < 2 || !m || m->isStatic || !m->ownerClass) return 0;
+    if (m->kind != Symbol::Function && !(m->kind == Symbol::Variable && m->isMember)) return 0;
+    const Type* pt = param && param->type ? m_types.unqualified(param->type) : 0;
+    if (pt && pt->kind == Type::MemberPointer && !pt->isDependent()) {
+        if (m->kind == Symbol::Function && pt->inner && m->type != pt->inner) {
+            std::vector<Symbol*> cands;
+            lookupMember(m->ownerClass, m->name, cands);
+            for (size_t k = 0; k < cands.size(); ++k) if (cands[k]->kind == Symbol::Function && !cands[k]->isStatic && cands[k]->type == pt->inner) { m = cands[k]; break; }
+        }
+        const Type* mc = m_types.classType(m->ownerClass);
+        if (pt->memberClass != mc || pt->inner != m->type) return 0;
+    }
+    return m;
 }
 
 const Type* Sema::namedType(const cxx::QualifiedName& n, Scope* in, const std::string& elaborated, const cxx::Loc& loc)
@@ -724,10 +886,14 @@ const Type* Sema::applyDeclarator(const Type* base, const cxx::Declarator& d, Sc
         case cxx::DeclaratorPart::Pointer: t = m_types.qualified(m_types.pointer(t), p.isConst, p.isVolatile); break;
         case cxx::DeclaratorPart::Reference: t = m_types.reference(t); break;
         case cxx::DeclaratorPart::Array: {
-            long n = -1;
+            long long n = -1;
             if (p.arraySize) expr(p.arraySize, in);
             if (p.arraySize && !constantValue(p.arraySize, n)) { if (!(p.arraySize->semaType && p.arraySize->semaType->kind == Type::Dependent)) error(d.loc, "S114", "array bound is not a constant"); n = -1; }
-            t = m_types.array(t, n);
+            // the bound in its own type (an unsigned one of 4 bytes is not negative); cl's arrays hold at most
+            // 0x7fffffff bytes (C2148)
+            if (n != -1 && p.arraySize) n = exprConstantIn(p.arraySize, m_types.basic(Type::LongLong));
+            if (n > 0x7FFFFFFFLL) { std::ostringstream s; s << n; error(d.loc, "S114", "array bound " + s.str() + ": an array must not exceed 0x7fffffff bytes (cl C2148)"); n = -1; }
+            t = m_types.array(t, static_cast<long>(n));
             break;
         }
         case cxx::DeclaratorPart::MemberPointer: {
@@ -875,19 +1041,20 @@ Symbol* Sema::declareEnum(cxx::EnumDecl* e, Scope* in, cxx::Access access)
     if (!en) { en = m_prog.newSymbol(Symbol::Enum, e->name, in); en->loc = e->loc; en->access = access; en->type = m_types.enumType(en); en->size = 4; en->align = 4; en->layoutDone = true; }
     if (!e->isDefinition) return en;
     en->isDefinition = true;
-    long next = 0;
+    long long next = 0;
     for (size_t i = 0; i < e->enumerators.size(); ++i) {
         const cxx::Enumerator& x = e->enumerators[i];
         Symbol* s = m_prog.newSymbol(Symbol::Enumerator, x.name, in);     // enumerators live in the enclosing scope
         s->loc = x.loc; s->access = access; s->type = en->type; s->ownerClass = in->kind == Scope::Class ? in->owner : 0;
         if (x.value) {
             expr(x.value, in);
-            long v;
+            long long v;
             // in a template's pattern the value may depend on the parameters (sizeof of a dependent type): checked per instantiation
             const bool dependent = in->kind == Scope::TemplateParams || (in->kind == Scope::Class && in->owner && in->owner->isDependentContext);
             if (constantValue(x.value, v)) next = v;
             else if (!dependent) error(x.loc, "S114", "enumerator value is not a constant");
         }
+        next = fitConstant(next, en->type);   // an int, as cl's enumerators (0xFFFFFFFFu is -1)
         s->hasConstValue = true; s->constValue = next; s->index = static_cast<int>(i);
         ++next;
     }
@@ -1215,6 +1382,8 @@ Symbol* Sema::declareFunction(cxx::Decl* d, cxx::Declarator* dcl, const cxx::Dec
     Symbol* fn = m_prog.newSymbol(Symbol::Function, name, target);
     fn->loc = dcl->loc; fn->access = access; fn->type = ft; fn->params = params; fn->declAst = d; fn->ownerClass = owner;
     fn->isStatic = spec.isStatic; fn->isExtern = spec.isExtern; fn->isExplicit = spec.isExplicit;
+    // a class's allocation and deallocation functions are static members whether declared so or not (12.5/1, 12.5/6)
+    if (owner && (name == "operator new" || name == "operator new[]" || name == "operator delete" || name == "operator delete[]")) fn->isStatic = true;
     fn->isInline = spec.isInline || (in->kind == Scope::Class && d->kind == cxx::Decl::Function);   // defined in the class body
     fn->isVirtual = spec.isVirtual; fn->isConstructor = ctor; fn->isDestructor = dtor; fn->isConversion = conv;
     fn->isOperator = name.compare(0, 8, "operator") == 0 && !conv;
@@ -1296,7 +1465,7 @@ void Sema::declareSimple(cxx::Decl* d, Scope* in, cxx::Access access)
             continue;
         }
         // a bit-field: its width is a constant; an unnamed one (": n") only shapes the layout
-        long width = -1;
+        long long width = -1;
         if (dcl->bitfield && in->kind == Scope::Class && in->owner) {
             if (!in->owner->isDependentContext) {
                 expr(dcl->bitfield, in);
@@ -1348,7 +1517,24 @@ void Sema::declareSimple(cxx::Decl* d, Scope* in, cxx::Access access)
         if (!var->declAst || id.init.kind != cxx::Initializer::None) var->declAst = d;   // the declaration carrying the initializer
         if (id.init.kind != cxx::Initializer::None) {
             var->init = id.init.args.empty() ? 0 : id.init.args[0];
-            if (!var->isDependentContext && !var->isMember) { PendingBody pb; pb.fn = var; pb.def = d; pb.scope = in; queueBody(pb); }
+            if (!var->isDependentContext && !var->isMember) {
+                // a const integral object of namespace scope initialised by a constant is a constant from its
+                // declaration on (5.19/1: "const long long kN = 1LL << 41; char a[kN >> 40];"): a copy of its
+                // initializer is folded now, quietly; the queued analysis types the initializer itself and reports
+                if (in->isNamespaceLike() && var->type->isConst && !var->type->isVolatile && var->type->isIntegral() && id.init.kind == cxx::Initializer::Assign && id.init.args.size() == 1 && var->init) {
+                    const size_t mark = m_diags.size();
+                    const SemaStats savedStats = m_stats;
+                    const std::set<std::string> savedUnknown = m_reportedUnknown;
+                    cxx::Expr* copy = cxx::cloneExpr(var->init, nodeArena());
+                    expr(copy, in);
+                    long long v = 0;
+                    if (constantValue(copy, v)) { var->hasConstValue = true; var->constValue = exprConstantIn(copy, var->type); }
+                    m_diags.resize(mark);
+                    m_stats = savedStats;
+                    m_reportedUnknown = savedUnknown;
+                }
+                PendingBody pb; pb.fn = var; pb.def = d; pb.scope = in; queueBody(pb);
+            }
             else if (var->isMember && var->isStatic && var->init && !var->isDependentContext) {
                 // a static const integral member's in-class initializer is a constant for the members that follow it
                 // (9.4.2/4: "static const int kN = 4; int arr[kN];"): folded now, quietly; the queued analysis reports
@@ -1356,8 +1542,8 @@ void Sema::declareSimple(cxx::Decl* d, Scope* in, cxx::Access access)
                 if (in->kind == Scope::Class && var->type->isConst && var->type->isIntegral() && id.init.kind == cxx::Initializer::Assign && id.init.args.size() == 1) {
                     const size_t mark = m_diags.size();
                     expr(var->init, in);
-                    long v = 0;
-                    if (constantValue(var->init, v)) { var->hasConstValue = true; var->constValue = v; }
+                    long long v = 0;
+                    if (constantValue(var->init, v)) { var->hasConstValue = true; var->constValue = exprConstantIn(var->init, var->type); }
                     m_diags.resize(mark);
                 }
                 PendingBody pb; pb.fn = var; pb.def = d; pb.scope = in; queueBody(pb);
@@ -1378,7 +1564,7 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
         const cxx::TemplateParam* p = d->templateParams[i];
         Symbol* ps = m_prog.newSymbol(Symbol::TemplateParam, p->name.empty() ? std::string("$T") : p->name, tscope);
         ps->loc = p->loc; ps->index = static_cast<int>(i);
-        if (p->kind == cxx::TemplateParam::NonType) { ps->kind = Symbol::Variable; ps->type = p->nonType ? typeOf(p->nonType->spec, tscope) : m_types.basic(Type::Int); ps->isDependentContext = true; ps->hasConstValue = false; ps->init = p->nonType ? p->nonType->defaultValue : 0; ps->kind = Symbol::TemplateParam; }
+        if (p->kind == cxx::TemplateParam::NonType) { ps->kind = Symbol::Variable; ps->type = p->nonType ? typeOf(p->nonType->spec, tscope) : m_types.basic(Type::Int); if (p->nonType && p->nonType->decl && !p->nonType->decl->parts.empty()) ps->type = applyDeclarator(ps->type, *p->nonType->decl, tscope, 0);   /* int P::*M, int (P::*F)() */ ps->isDependentContext = true; ps->hasConstValue = false; ps->init = p->nonType ? p->nonType->defaultValue : 0; ps->kind = Symbol::TemplateParam; }
         else ps->type = m_types.dependent(ps);
         tparams.push_back(ps);
     }
@@ -1462,8 +1648,8 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
             if (!primary) { error(d->loc, "S111", "specialisation of unknown template '" + name + "'"); return; }
             if (d->explicitSpecialization) {
                 // a full specialisation is an ordinary class registered under its argument text
-                std::vector<const Type*> types; std::vector<long> ints; std::string key;
-                if (!templateArgText(classAst->name.parts.back().templateArgs, in, types, ints, key)) { error(d->loc, "S111", "bad specialisation arguments"); return; }
+                std::vector<const Type*> types; std::vector<long long> ints; std::string key;
+                if (!templateArgText(classAst->name.parts.back().templateArgs, in, types, ints, key, &primary->templateParams)) { error(d->loc, "S111", "bad specialisation arguments"); return; }
                 cxx::ClassDecl copy = *classAst;
                 copy.name.parts.back().hasTemplateArgs = false;
                 copy.name.parts.back().ident = name + key;
@@ -1571,7 +1757,7 @@ void Sema::declareTemplateMemberDefinition(Symbol* tmpl, Symbol* cls, Symbol* mt
     for (size_t i = 0; i < cls->templateArgs.size() && i < mt->templateParams.size(); ++i) {
         const Type* ta = cls->templateArgs[i];
         Symbol* b = m_prog.newSymbol(ta ? Symbol::Typedef : Symbol::Enumerator, mt->templateParams[i]->name, mscope);
-        if (ta) b->type = ta; else { b->type = m_types.basic(Type::Int); b->hasConstValue = true; b->constValue = i < cls->templateIntArgs.size() ? cls->templateIntArgs[i] : 0; }
+        if (ta) b->type = ta; else if (i < cls->templateSymArgs.size() && cls->templateSymArgs[i]) bindMemberArg(b, cls->templateSymArgs[i]); else { b->type = valueParamType(mt->templateParams[i]); b->hasConstValue = true; b->constValue = i < cls->templateIntArgs.size() ? cls->templateIntArgs[i] : 0; }
     }
     Symbol* inj2 = m_prog.newSymbol(Symbol::Typedef, tmpl->name, mscope); inj2->type = cls->type;
     if (def->kind == cxx::Decl::Function && def->declarator) {
@@ -1648,7 +1834,7 @@ void Sema::declareFunctionSpecialization(cxx::Decl* d, cxx::Decl* inner, cxx::De
     if (primaries.empty()) { error(d->loc, "S111", "explicit specialisation of unknown function template '" + name + "'"); return; }
     for (size_t t = 0; t < primaries.size(); ++t) {
         Symbol* tmpl = primaries[t];
-        std::map<std::string, const Type*> bind; std::map<std::string, long> ints;
+        std::map<std::string, const Type*> bind; std::map<std::string, long long> ints;
         if (!matchFunctionTemplate(tmpl, dcl, ft, in, bind, ints)) continue;
         std::string key = "<";
         for (size_t i = 0; i < tmpl->templateParams.size(); ++i) {
@@ -1662,7 +1848,7 @@ void Sema::declareFunctionSpecialization(cxx::Decl* d, cxx::Decl* inner, cxx::De
         for (size_t i = 0; i < tmpl->templateParams.size(); ++i) {
             const std::string& pn = tmpl->templateParams[i]->name;
             Symbol* b = m_prog.newSymbol(bind.count(pn) ? Symbol::Typedef : Symbol::Enumerator, pn, iscope);
-            if (bind.count(pn)) b->type = bind[pn]; else { b->type = m_types.basic(Type::Int); b->hasConstValue = true; b->constValue = ints[pn]; }
+            if (bind.count(pn)) b->type = bind[pn]; else { b->type = valueParamType(tmpl->templateParams[i]); b->hasConstValue = true; b->constValue = ints[pn]; }
         }
         dcl->name.parts.back().ident = name + key;
         dcl->name.parts.back().hasTemplateArgs = false;
@@ -1691,7 +1877,7 @@ void Sema::declareFunctionSpecialization(cxx::Decl* d, cxx::Decl* inner, cxx::De
 // the function template tmpl matches a declaration with the declarator dcl and the function type ft (an explicit
 // specialisation, 14.7.3, or an explicit instantiation, 14.7.2): the template arguments written on the name bind
 // the first parameters, the rest are deduced from the declared parameter types; every parameter must be bound
-bool Sema::matchFunctionTemplate(Symbol* tmpl, cxx::Declarator* dcl, const Type* ft, Scope* in, std::map<std::string, const Type*>& bind, std::map<std::string, long>& ints)
+bool Sema::matchFunctionTemplate(Symbol* tmpl, cxx::Declarator* dcl, const Type* ft, Scope* in, std::map<std::string, const Type*>& bind, std::map<std::string, long long>& ints)
 {
     cxx::Decl* tdecl = tmpl->declAst;
     cxx::Declarator* tdcl = tdecl ? (tdecl->kind == cxx::Decl::Function ? tdecl->declarator : (tdecl->declarators.empty() ? 0 : tdecl->declarators[0].decl)) : 0;
@@ -1703,8 +1889,8 @@ bool Sema::matchFunctionTemplate(Symbol* tmpl, cxx::Declarator* dcl, const Type*
     m_fixedTemplateParams.clear();
     bool ok = true;
     if (dcl->name.parts.back().hasTemplateArgs) {
-        std::vector<const Type*> etypes; std::vector<long> eints; std::string etext;
-        if (dcl->name.parts.back().templateArgs.size() > tmpl->templateParams.size() || !templateArgText(dcl->name.parts.back().templateArgs, in, etypes, eints, etext)) ok = false;
+        std::vector<const Type*> etypes; std::vector<long long> eints; std::string etext;
+        if (dcl->name.parts.back().templateArgs.size() > tmpl->templateParams.size() || !templateArgText(dcl->name.parts.back().templateArgs, in, etypes, eints, etext, &tmpl->templateParams)) ok = false;
         for (size_t i = 0; ok && i < etypes.size(); ++i) {
             const std::string& pn = tmpl->templateParams[i]->name;
             if (etypes[i]) bind[pn] = etypes[i]; else ints[pn] = eints[i];
@@ -1766,11 +1952,11 @@ void Sema::declareExplicitInstantiation(cxx::Decl* d, Scope* in)
     // every primary template that matches; of several, the most specialised (14.5.5.2)
     std::vector<Symbol*> matched;
     std::vector<std::map<std::string, const Type*> > binds;
-    std::vector<std::map<std::string, long> > intss;
+    std::vector<std::map<std::string, long long> > intss;
     for (size_t t = 0; t < cands.size(); ++t) {
         Symbol* tmpl = cands[t];
         if (tmpl->kind != Symbol::FunctionTemplate || tmpl->ownerClass) continue;
-        std::map<std::string, const Type*> bind; std::map<std::string, long> ints;
+        std::map<std::string, const Type*> bind; std::map<std::string, long long> ints;
         if (!matchFunctionTemplate(tmpl, dcl, ft, in, bind, ints)) continue;
         matched.push_back(tmpl); binds.push_back(bind); intss.push_back(ints);
     }
@@ -2227,6 +2413,8 @@ void Sema::completeClass(Symbol* cls)
             nt.vtordisp = v < cls->vtordisp.size() && cls->vtordisp[v];
             nt.returnOf.resize(nt.fns.size(), 0);
             nt.returnAdjust.resize(nt.fns.size(), 0);
+            nt.slotClass.assign(nt.fns.size(), 0);
+            const size_t ownSlots = nt.fns.size();
             for (size_t b = 0; b < cls->bases.size(); ++b) {
                 Symbol* bc = cls->bases[b].cls;
                 if (!bc || bc == vb) continue;
@@ -2236,12 +2424,20 @@ void Sema::completeClass(Symbol* cls)
                 for (size_t k = 0; k < bc->vftables.size(); ++k) {
                     const VfTable& bt = bc->vftables[k];
                     if (bt.vbase != vb || bt.offset - bc->vbaseOffsets[bv] != rel) continue;
-                    for (size_t s = 0; s < bt.fns.size() && s < nt.fns.size(); ++s) {
+                    for (size_t s = 0; s < bt.fns.size() && s < ownSlots; ++s) {
                         if (bt.fns[s] == vb->vftables[t].fns[s]) continue;
                         if (nt.fns[s] == vb->vftables[t].fns[s]) {
                             nt.fns[s] = bt.fns[s];
                             if (s < bt.returnOf.size()) { nt.returnOf[s] = bt.returnOf[s]; nt.returnAdjust[s] = bt.returnAdjust[s]; }
                         } else if (bt.fns[s] != nt.fns[s]) contested.push_back(std::make_pair(std::make_pair(tables.size(), s), std::make_pair(nt.fns[s], bt.fns[s])));
+                    }
+                    // the slots a base appended to the table (covariant overrides' own slots) follow, the first base's
+                    if (nt.fns.size() == ownSlots) for (size_t s = ownSlots; s < bt.fns.size(); ++s) {
+                        nt.fns.push_back(bt.fns[s]);
+                        nt.thunks.push_back(0);
+                        nt.returnOf.push_back(s < bt.returnOf.size() ? bt.returnOf[s] : 0);
+                        nt.returnAdjust.push_back(s < bt.returnAdjust.size() ? bt.returnAdjust[s] : 0);
+                        nt.slotClass.push_back(s < bt.slotClass.size() ? bt.slotClass[s] : 0);
                     }
                 }
             }
@@ -2323,15 +2519,52 @@ void Sema::completeClass(Symbol* cls)
                 v.thunks[hits[h].second] = v.offset - m->thisAdjust;
             }
         } else {
-            if (first > 0) {
+            // a slot of the primary table whose function returns m's own type takes m itself, which is reached through
+            // it; m's slot of its own then goes at the end of the first table that needs a return thunk, with an
+            // adjustor (cl: D : A, B { Y* g(); } over A::g returning Y* and B::g returning X*: A's slot holds D::g,
+            // B's table the adjustor to the return thunk and, last, the adjustor to D::g)
+            // the same for a slot of a table inside a virtual base whose function returns m's type: one a base appended
+            // there (cl: CV2 : CV { Y* get(); } takes the slot CV appended to VB's table, with the vtordisp thunk, and
+            // VB's own slot the return thunk; no slot of its own)
+            size_t direct = hits.size();
+            for (int pass = 0; pass < 2 && direct == hits.size(); ++pass)
+                for (size_t h = 0; h < hits.size(); ++h) {
+                    const size_t t = hits[h].first, s = hits[h].second;
+                    if (pass == 0 ? t != 0 : (t == 0 || !tables[t].vbase)) continue;
+                    Symbol* root = tables[t].returnOf[s] ? tables[t].returnOf[s] : t == 0 ? cls->vtable[s] : tables[t].fns[s];
+                    if (root && root->type && m->type && root->type->kind == Type::Function && m->type->kind == Type::Function && root->type->inner == m->type->inner) { direct = h; break; }
+                }
+            if (direct < hits.size()) {
+                const size_t td = hits[direct].first;
+                size_t firstAdj = tables.size();
+                for (size_t h = 0; h < hits.size(); ++h) if (h != direct && (firstAdj == tables.size() || tables[hits[h].first].offset < tables[firstAdj].offset)) firstAdj = hits[h].first;
+                const size_t s0 = hits[direct].second;
+                if (td == 0) cls->vtable[s0] = m;
+                else {
+                    tables[td].fns[s0] = m;
+                    m->vfptrOffset = m->thisAdjust = tables[td].offset;
+                    m->vfptrVbase = tables[td].vbase;
+                }
+                tables[td].thunks[s0] = 0; tables[td].returnOf[s0] = 0; tables[td].returnAdjust[s0] = 0;
+                m->vtableSlot = static_cast<int>(s0);
+                placed = true;
+                if (firstAdj < tables.size() && firstAdj > 0 && firstAdj != td) {
+                    VfTable& own = tables[firstAdj];
+                    own.fns.push_back(m); own.thunks.push_back(own.offset - m->thisAdjust); own.returnOf.push_back(0); own.returnAdjust.push_back(0);
+                    if (own.vbase) { own.slotClass.resize(own.fns.size() - 1, 0); own.slotClass.push_back(cls); }
+                }
+            }
+            else if (first > 0) {
                 VfTable& own = tables[first];
                 m->vtableSlot = static_cast<int>(own.fns.size());
                 m->vfptrOffset = m->thisAdjust = own.offset;
                 m->vfptrVbase = own.vbase;
                 own.fns.push_back(m); own.thunks.push_back(0); own.returnOf.push_back(0); own.returnAdjust.push_back(0);
+                if (own.vbase) { own.slotClass.resize(own.fns.size() - 1, 0); own.slotClass.push_back(cls); }
                 placed = true;
             }
             for (size_t h = 0; h < hits.size(); ++h) {
+                if (h == direct) continue;
                 VfTable& v = tables[hits[h].first];
                 const size_t s = hits[h].second;
                 Symbol* root = v.returnOf[s] ? v.returnOf[s] : hits[h].first == 0 ? cls->vtable[s] : v.fns[s];
@@ -2369,15 +2602,24 @@ void Sema::completeClass(Symbol* cls)
     // moves nothing
     for (size_t t = 1; t < tables.size(); ++t) {
         if (!tables[t].vbase) continue;
+        tables[t].vtordispexVbase.assign(tables[t].fns.size(), 0);
+        tables[t].vtordispex = 0;
         for (size_t s = 0; s < tables[t].fns.size(); ++s) {
             Symbol* fn = tables[t].fns[s];
             int eo = 0;
             if (!fn || !completeOffset(cls, fn->ownerClass, eo)) continue;
             tables[t].thunks[s] = tables[t].offset - (eo + fn->thisAdjust);
-            // an overrider that lies in another virtual base: its distance from this base is not fixed (cl's
-            // vtordispex thunk reads the vbtable)
+            // an overrider whose class is another virtual base of this class: its distance from this base is not fixed
+            // while a base's constructor of a bigger object runs, so with a vtordisp cl's vtordispex thunk finds it
+            // through the vbtable (this - vtordisp - the vbptr's distance, plus the base's entry, plus the overrider's
+            // own adjustor); one in a non-virtual base of another virtual base gets the $4 thunk of the static layout
             int nv = 0;
-            if (!nonVirtualOffset(cls, fn->ownerClass, nv, 0) && !nonVirtualOffset(tables[t].vbase, fn->ownerClass, nv, 0)) tables[t].vtordispex = fn;
+            if (!tables[t].vtordisp || nonVirtualOffset(cls, fn->ownerClass, nv, 0) || nonVirtualOffset(tables[t].vbase, fn->ownerClass, nv, 0)) continue;
+            if (std::find(cls->vbases.begin(), cls->vbases.end(), fn->ownerClass) == cls->vbases.end()) continue;
+            bool indexed = false;
+            for (size_t k = 0; k < cls->vbtables.size(); ++k)
+                if (cls->vbtables[k].offset == cls->vbptrOffset && std::find(cls->vbtables[k].order.begin(), cls->vbtables[k].order.end(), fn->ownerClass) != cls->vbtables[k].order.end()) indexed = true;
+            if (indexed) tables[t].vtordispexVbase[s] = fn->ownerClass; else tables[t].vtordispex = fn;
         }
     }
     if (cls->vptrOffset != 0) tables.erase(tables.begin());   // no vfptr of its own: only the inherited tables
@@ -2390,8 +2632,8 @@ void Sema::completeClass(Symbol* cls)
 
 const Type* Sema::instantiateClassTemplate(Symbol* tmpl, const std::vector<cxx::TemplateArg>& args, Scope* from, const cxx::Loc& loc)
 {
-    std::vector<const Type*> types; std::vector<long> ints; std::string key;
-    if (!templateArgText(args, from, types, ints, key)) { error(loc, "S111", "bad template arguments for '" + tmpl->name + "'"); return m_types.error(); }
+    std::vector<const Type*> types; std::vector<long long> ints; std::vector<Symbol*> syms; std::string key;
+    if (!templateArgText(args, from, types, ints, key, &tmpl->templateParams, &syms)) { error(loc, "S111", "bad template arguments for '" + tmpl->name + "'"); return m_types.error(); }
     for (size_t i = 0; i < types.size(); ++i) if (types[i] && types[i]->isDependent()) return m_types.dependent(tmpl);
     if (key.find('?') != std::string::npos) return m_types.dependent(tmpl);
     // defaults
@@ -2400,9 +2642,9 @@ const Type* Sema::instantiateClassTemplate(Symbol* tmpl, const std::vector<cxx::
         for (size_t i = types.size(); i < nparams; ++i) {
             const cxx::TemplateParam* p = tmpl->templateAst->templateParams[i];
             Scope* tmp = m_prog.newScope(Scope::Instantiation, tmpl->scope, tmpl);
-            for (size_t k = 0; k < i; ++k) { Symbol* b = m_prog.newSymbol(types[k] ? Symbol::Typedef : Symbol::Enumerator, tmpl->templateParams[k]->name, tmp); if (types[k]) b->type = types[k]; else { b->type = m_types.basic(Type::Int); b->hasConstValue = true; b->constValue = ints[k]; } }
-            if (p->kind == cxx::TemplateParam::Type && p->defaultType) { const Type* t = applyDeclarator(typeOf(p->defaultType->spec, tmp), *p->defaultType->decl, tmp, 0); types.push_back(t); ints.push_back(0); key = key.substr(0, key.size() - 1) + (types.size() > 1 ? ", " : "") + t->text() + ">"; }
-            else if (p->kind == cxx::TemplateParam::NonType && p->nonType && p->nonType->defaultValue) { long v; expr(p->nonType->defaultValue, tmp); if (!constantValue(p->nonType->defaultValue, v)) v = 0; types.push_back(0); ints.push_back(v); std::ostringstream s; s << v; key = key.substr(0, key.size() - 1) + (types.size() > 1 ? ", " : "") + s.str() + ">"; }
+            for (size_t k = 0; k < i; ++k) { Symbol* b = m_prog.newSymbol(types[k] ? Symbol::Typedef : Symbol::Enumerator, tmpl->templateParams[k]->name, tmp); if (types[k]) b->type = types[k]; else if (k < syms.size() && syms[k]) bindMemberArg(b, syms[k]); else { b->type = valueParamType(tmpl->templateParams[k]); b->hasConstValue = true; b->constValue = ints[k]; } }
+            if (p->kind == cxx::TemplateParam::Type && p->defaultType) { const Type* t = applyDeclarator(typeOf(p->defaultType->spec, tmp), *p->defaultType->decl, tmp, 0); types.push_back(t); ints.push_back(0); syms.push_back(0); key = key.substr(0, key.size() - 1) + (types.size() > 1 ? ", " : "") + t->text() + ">"; }
+            else if (p->kind == cxx::TemplateParam::NonType && p->nonType && p->nonType->defaultValue) { long long v; expr(p->nonType->defaultValue, tmp); if (!constantValue(p->nonType->defaultValue, v)) v = 0; else v = exprConstantIn(p->nonType->defaultValue, valueParamType(tmpl->templateParams[i])); types.push_back(0); ints.push_back(v); syms.push_back(0); std::ostringstream s; s << v; key = key.substr(0, key.size() - 1) + (types.size() > 1 ? ", " : "") + s.str() + ">"; }
             else { error(loc, "S111", "too few template arguments for '" + tmpl->name + "'"); return m_types.error(); }
         }
     }
@@ -2412,17 +2654,17 @@ const Type* Sema::instantiateClassTemplate(Symbol* tmpl, const std::vector<cxx::
     if (!tmpl->classAst || !tmpl->classAst->isDefinition) {
         // only declared: an incomplete class type
         Symbol* cls = m_prog.newSymbol(Symbol::Class, tmpl->name + key, tmpl->scope);
-        cls->type = m_types.classType(cls); cls->instantiatedFrom = tmpl; cls->templateArgs = types; cls->templateIntArgs = ints; cls->loc = loc;
+        cls->type = m_types.classType(cls); cls->instantiatedFrom = tmpl; cls->templateArgs = types; cls->templateIntArgs = ints; cls->templateSymArgs = syms; cls->loc = loc;
         tmpl->instantiations[key] = cls;
         return cls->type;
     }
     // choose a partial specialisation whose pattern matches
     Symbol* chosen = tmpl;
-    std::map<std::string, const Type*> bind; std::map<std::string, long> ibind;
+    std::map<std::string, const Type*> bind; std::map<std::string, long long> ibind;
     for (size_t p = 0; p < tmpl->partialSpecs.size(); ++p) {
         Symbol* ps = tmpl->partialSpecs[p];
-        if (ps->kind != Symbol::ClassTemplate || ps->patternArgs.size() != types.size()) continue;
-        std::map<std::string, const Type*> b; std::map<std::string, long> ib;
+        if (ps->kind != Symbol::ClassTemplate || ps->patternArgs.size() != types.size() || anyMemberArg(syms)) continue;   // a pointer-to-member argument: the primary
+        std::map<std::string, const Type*> b; std::map<std::string, long long> ib;
         bool ok = true;
         for (size_t i = 0; i < types.size() && ok; ++i) {
             const cxx::TemplateArg& pa = ps->patternArgs[i];
@@ -2435,7 +2677,7 @@ const Type* Sema::instantiateClassTemplate(Symbol* tmpl, const std::vector<cxx::
             } else if (pa.expr) {
                 if (types[i]) { ok = false; break; }
                 if (pa.expr->kind == cxx::Expr::Name && pa.expr->name.parts.size() == 1) { ib[pa.expr->name.parts[0].ident] = ints[i]; }
-                else { long v; if (!constantValue(pa.expr, v) || v != ints[i]) ok = false; }
+                else { long long v; if (!constantValue(pa.expr, v) || exprConstantIn(pa.expr, valueParamType(tmpl->templateParams[i])) != ints[i]) ok = false; }
             }
         }
         if (ok) { chosen = ps; bind = b; ibind = ib; break; }
@@ -2456,7 +2698,7 @@ const Type* Sema::instantiateClassTemplate(Symbol* tmpl, const std::vector<cxx::
                 continue;
             }
             Symbol* b = m_prog.newSymbol(types[i] ? Symbol::Typedef : Symbol::Enumerator, tmpl->templateParams[i]->name, iscope);
-            if (types[i]) b->type = types[i]; else { b->type = tmpl->templateParams[i]->type ? tmpl->templateParams[i]->type : m_types.basic(Type::Int); b->hasConstValue = true; b->constValue = ints[i]; }
+            if (types[i]) b->type = types[i]; else if (i < syms.size() && syms[i]) bindMemberArg(b, syms[i]); else { b->type = tmpl->templateParams[i]->type ? tmpl->templateParams[i]->type : m_types.basic(Type::Int); b->hasConstValue = true; b->constValue = ints[i]; }
         }
     } else {
         for (size_t i = 0; i < chosen->templateParams.size(); ++i) {
@@ -2467,11 +2709,11 @@ const Type* Sema::instantiateClassTemplate(Symbol* tmpl, const std::vector<cxx::
                 continue;
             }
             Symbol* b = m_prog.newSymbol(bind.count(pn) ? Symbol::Typedef : Symbol::Enumerator, pn, iscope);
-            if (bind.count(pn)) b->type = bind[pn]; else { b->type = m_types.basic(Type::Int); b->hasConstValue = true; b->constValue = ibind.count(pn) ? ibind[pn] : 0; }
+            if (bind.count(pn)) b->type = bind[pn]; else { b->type = valueParamType(chosen->templateParams[i]); b->hasConstValue = true; b->constValue = ibind.count(pn) ? ibind[pn] : 0; }
         }
     }
     Symbol* cls = m_prog.newSymbol(Symbol::Class, tmpl->name + key, iscope);
-    cls->type = m_types.classType(cls); cls->instantiatedFrom = tmpl; cls->templateArgs = types; cls->templateIntArgs = ints; cls->loc = loc;
+    cls->type = m_types.classType(cls); cls->instantiatedFrom = tmpl; cls->templateArgs = types; cls->templateIntArgs = ints; cls->templateSymArgs = syms; cls->loc = loc;
     cls->isImplicitInstantiation = true;
     tmpl->instantiations[key] = cls;
     ++m_stats.classInstantiations;

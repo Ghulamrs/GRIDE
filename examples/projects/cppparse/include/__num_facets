@@ -1,0 +1,777 @@
+// __num_facets - cppparse's C++98 library: the stream buffer iterators (24.5.3, 24.5.4) and the numeric facets num_put
+// and num_get (22.2.2), through which the streams write and read numbers (27.6.2.5.2, 27.6.1.2.2); <ostream> includes
+// it. A locale that holds neither facet uses the library's own (as if the classic locale held them, which every
+// locale is made from): __default_facet gives use_facet and has_facet one, made once. The streams call a facet the
+// program installed through its virtual functions; the library's own facet's work (the same formatting code) they do
+// in place, which saves the iterator and virtual calls on every number written.
+#ifndef CPPPARSE_NUM_FACETS
+#define CPPPARSE_NUM_FACETS
+
+#include <cfloat>
+#include <climits>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <__iterator>
+#include <streambuf>
+
+namespace std {
+
+template <class charT, class traits> class basic_istream;
+template <class charT, class traits> class basic_ostream;
+
+// 24.5.3 istreambuf_iterator: the characters of a stream buffer; the end iterator is one at the end of its buffer
+template <class charT, class traits = char_traits<charT> >
+class istreambuf_iterator {
+public:
+    typedef input_iterator_tag            iterator_category;
+    typedef charT                         value_type;
+    typedef typename traits::off_type     difference_type;
+    typedef charT*                        pointer;
+    typedef charT                         reference;
+    typedef charT                         char_type;
+    typedef traits                        traits_type;
+    typedef typename traits::int_type     int_type;
+    typedef basic_streambuf<charT, traits> streambuf_type;
+    typedef basic_istream<charT, traits>   istream_type;
+    istreambuf_iterator() throw() : m_sb(0), m_got(false), m_c() {}
+    istreambuf_iterator(istream_type& s) throw() : m_sb(s.rdbuf()), m_got(false), m_c() {}
+    istreambuf_iterator(streambuf_type* s) throw() : m_sb(s), m_got(false), m_c() {}
+    charT operator*() const { peek(); return m_c; }
+    istreambuf_iterator& operator++() { if (m_sb) m_sb->sbumpc(); m_got = false; return *this; }
+    istreambuf_iterator  operator++(int) { peek(); istreambuf_iterator t(*this); ++*this; return t; }
+    bool equal(const istreambuf_iterator& b) const { return atEnd() == b.atEnd(); }
+private:
+    void peek() const
+    {
+        if (m_got || !m_sb) return;
+        int_type c = m_sb->sgetc();
+        if (traits::eq_int_type(c, traits::eof())) m_sb = 0; else { m_c = traits::to_char_type(c); m_got = true; }
+    }
+    bool atEnd() const { if (m_got) return false; peek(); return m_sb == 0; }
+    mutable streambuf_type* m_sb;
+    mutable bool            m_got;
+    mutable charT           m_c;
+};
+template <class charT, class traits>
+bool operator==(const istreambuf_iterator<charT, traits>& a, const istreambuf_iterator<charT, traits>& b) { return a.equal(b); }
+template <class charT, class traits>
+bool operator!=(const istreambuf_iterator<charT, traits>& a, const istreambuf_iterator<charT, traits>& b) { return !a.equal(b); }
+
+// 24.5.4 ostreambuf_iterator: each character assigned is put into the stream buffer
+template <class charT, class traits = char_traits<charT> >
+class ostreambuf_iterator {
+public:
+    typedef output_iterator_tag iterator_category;
+    typedef void value_type; typedef void difference_type; typedef void pointer; typedef void reference;
+    typedef charT                          char_type;
+    typedef traits                         traits_type;
+    typedef basic_streambuf<charT, traits> streambuf_type;
+    typedef basic_ostream<charT, traits>   ostream_type;
+    ostreambuf_iterator(ostream_type& s) throw() : m_sb(s.rdbuf()), m_failed(false) {}
+    ostreambuf_iterator(streambuf_type* s) throw() : m_sb(s), m_failed(false) {}
+    ostreambuf_iterator& operator=(charT c)
+    {
+        if (!m_failed && (!m_sb || traits::eq_int_type(m_sb->sputc(c), traits::eof()))) m_failed = true;
+        return *this;
+    }
+    ostreambuf_iterator& operator*() { return *this; }
+    ostreambuf_iterator& operator++() { return *this; }
+    ostreambuf_iterator& operator++(int) { return *this; }
+    bool failed() const throw() { return m_failed; }
+private:
+    streambuf_type* m_sb;
+    bool            m_failed;
+};
+
+// the exact decimal expansion of a finite double >= 0, one digit at a time: first the digits of the integer
+// part, then those of the fraction, kept as the binary fraction num / 2^bits and multiplied by ten per digit
+struct __decimal_digits {
+    char         intDigits[320];   // most significant first, no leading zeros
+    int          intCount;
+    int          used;             // integer digits handed out so far
+    unsigned int num[36];          // 32-bit limbs, least significant first
+    int          bits;
+
+    explicit __decimal_digits(double v) : intCount(0), used(0), bits(0)
+    {
+        unsigned long long raw;
+        memcpy(&raw, &v, sizeof raw);
+        const unsigned long long one = 1;
+        int biased = static_cast<int>((raw >> 52) & 0x7FF);
+        unsigned long long mant = raw & ((one << 52) - 1);
+        if (biased != 0) mant |= one << 52;
+        int e = biased != 0 ? biased - 1075 : -1074;
+        for (int i = 0; i < 36; ++i) num[i] = 0;
+        if (mant == 0) return;
+        if (e >= 0) { shiftedWhole(mant, e); return; }
+        bits = -e;
+        unsigned long long whole = bits < 64 ? mant >> bits : 0;
+        unsigned long long frac = bits < 64 ? mant & ((one << bits) - 1) : mant;
+        num[0] = static_cast<unsigned int>(frac);
+        num[1] = static_cast<unsigned int>(frac >> 32);
+        char tmp[24];
+        int k = 0;
+        while (whole > 0) { tmp[k++] = static_cast<char>('0' + whole % 10); whole /= 10; }
+        while (k > 0) intDigits[intCount++] = tmp[--k];
+    }
+    // mant * 2^e in base 10^9 limbs, then printed
+    void shiftedWhole(unsigned long long mant, int e)
+    {
+        unsigned int limb[40];
+        int n = 0;
+        while (mant > 0) { limb[n++] = static_cast<unsigned int>(mant % 1000000000); mant /= 1000000000; }
+        for (int s = 0; s < e; ++s) {
+            unsigned int carry = 0;
+            for (int i = 0; i < n; ++i) { unsigned int t = limb[i] * 2 + carry; carry = t >= 1000000000 ? 1 : 0; limb[i] = t - carry * 1000000000; }
+            if (carry) limb[n++] = 1;
+        }
+        char tmp[16];
+        int k = 0;
+        unsigned int top = limb[n - 1];
+        while (top > 0) { tmp[k++] = static_cast<char>('0' + top % 10); top /= 10; }
+        while (k > 0) intDigits[intCount++] = tmp[--k];
+        for (int i = n - 2; i >= 0; --i) {
+            unsigned int x = limb[i];
+            for (int d = 8; d >= 0; --d) { intDigits[intCount + d] = static_cast<char>('0' + x % 10); x /= 10; }
+            intCount += 9;
+        }
+    }
+    int fractionDigit()
+    {
+        if (bits == 0) return 0;
+        const int limb = bits / 32, shift = bits % 32;
+        unsigned long long carry = 0;
+        for (int i = 0; i <= limb + 1; ++i) { unsigned long long t = static_cast<unsigned long long>(num[i]) * 10 + carry; num[i] = static_cast<unsigned int>(t); carry = t >> 32; }
+        unsigned long long high = num[limb] | (static_cast<unsigned long long>(num[limb + 1]) << 32);
+        int d = static_cast<int>((high >> shift) & 15);
+        num[limb] &= shift ? (static_cast<unsigned int>(1) << shift) - 1 : 0;
+        num[limb + 1] = 0;
+        return d;
+    }
+    int digit() { return used < intCount ? intDigits[used++] - '0' : fractionDigit(); }
+    bool restIsZero() const
+    {
+        for (int i = used; i < intCount; ++i) if (intDigits[i] != '0') return false;
+        for (int i = 0; i < 36; ++i) if (num[i]) return false;
+        return true;
+    }
+    // whether the digits not taken yet round the last taken one up; an exact half rounds to even, as printf does
+    bool roundsUp(int lastDigit)
+    {
+        int d = digit();
+        if (d != 5) return d > 5;
+        return !restIsZero() || (lastDigit & 1) != 0;
+    }
+};
+
+// stage 1 of num_put (22.2.2.2.2): a number as the narrow text printf would make of it with the conversion the flags
+// select, for every character type (stage 2 widens it)
+struct __number_text {
+    // u's digits with the base prefix and the sign, written backwards to end just before end; returns the first
+    // character, and their count in n (72 characters is the most). As printf: '+' (showpos) only for a signed
+    // conversion, the 0x of showbase not for zero. A value of 32 bits is divided by ten as a multiplication by its
+    // reciprocal, and no pointers are subtracted: -O0 code makes a division instruction of both
+    static char* integer(unsigned long long u, bool negative, bool isSigned, ios_base::fmtflags f, char* end, size_t& n)
+    {
+        char* p = end;
+        size_t k = 0;
+        if (!(f & (ios_base::hex | ios_base::oct))) {
+            if (u <= 0xFFFFFFFFULL) {
+                unsigned long long v = u;
+                do {
+                    const unsigned long long q = (v * 0xCCCCCCCDULL) >> 35;   // v / 10 for every v below 2^32
+                    *--p = static_cast<char>('0' + (v - q * 10));
+                    v = q;
+                    ++k;
+                } while (v != 0);
+            } else {
+                do { *--p = static_cast<char>('0' + u % 10); u /= 10; ++k; } while (u != 0);
+            }
+            if (negative) { *--p = '-'; ++k; }
+            else if (isSigned && (f & ios_base::showpos)) { *--p = '+'; ++k; }
+            n = k;
+            return p;
+        }
+        const bool upper = (f & ios_base::uppercase) != 0;
+        if (f & ios_base::hex) {
+            const bool zero = u == 0;
+            const char* digits = upper ? "0123456789ABCDEF" : "0123456789abcdef";
+            do { *--p = digits[u & 15]; u >>= 4; ++k; } while (u != 0);
+            if ((f & ios_base::showbase) && !zero) { *--p = upper ? 'X' : 'x'; *--p = '0'; k += 2; }
+        } else {
+            do { *--p = static_cast<char>('0' + (u & 7)); u >>= 3; ++k; } while (u != 0);
+            if ((f & ios_base::showbase) && *p != '0') { *--p = '0'; ++k; }
+        }
+        if (negative) { *--p = '-'; ++k; }
+        n = k;
+        return p;
+    }    static void digits(unsigned long long u, char* out, size_t& n)
+    {
+        char tmp[24];
+        size_t k = 0;
+        if (u == 0) tmp[k++] = '0';
+        while (u > 0) { tmp[k++] = static_cast<char>('0' + u % 10); u /= 10; }
+        while (k > 0) out[n++] = tmp[--k];
+    }
+    // ++ on a digit string; false when it carried out of the first digit (all digits are then '0')
+    static bool roundDigitsUp(char* d, int digitCount)
+    {
+        int i = digitCount - 1;
+        while (i >= 0 && d[i] == '9') { d[i] = '0'; --i; }
+        if (i < 0) return false;
+        ++d[i];
+        return true;
+    }
+    // fixed notation with p digits after the point, correctly rounded. The point is written when digits follow it
+    // or showpoint asks for it
+    static void fixedDigits(double v, int p, bool point, char* out, size_t& n)
+    {
+        __decimal_digits g(v);
+        char d[340];
+        int whole = g.intCount, digitCount = 0;
+        while (digitCount < whole + p) d[digitCount++] = static_cast<char>('0' + g.digit());
+        if (g.roundsUp(digitCount > 0 ? d[digitCount - 1] - '0' : 0) && !roundDigitsUp(d, digitCount)) {
+            for (int k = digitCount; k > 0; --k) d[k] = d[k - 1];
+            d[0] = '1';
+            ++digitCount;
+            ++whole;
+        }
+        if (whole == 0) out[n++] = '0';
+        for (int i = 0; i < whole; ++i) out[n++] = d[i];
+        if (p > 0 || point) out[n++] = '.';
+        for (int i = whole; i < digitCount; ++i) out[n++] = d[i];
+    }
+    // scientific notation with p digits after the point, correctly rounded; returns the exponent
+    static int scientificDigits(double v, int p, bool point, char* out, size_t& n, bool upper)
+    {
+        __decimal_digits g(v);
+        char d[340];
+        int e = 0;
+        int first = g.digit();
+        if (g.intCount > 0) e = g.intCount - 1;
+        else if (v > 0) { e = -1; while (first == 0) { first = g.digit(); --e; } }
+        d[0] = static_cast<char>('0' + first);
+        int digitCount = 1;
+        while (digitCount < p + 1) d[digitCount++] = static_cast<char>('0' + g.digit());
+        if (g.roundsUp(d[digitCount - 1] - '0') && !roundDigitsUp(d, digitCount)) { d[0] = '1'; ++e; }
+        out[n++] = d[0];
+        if (p > 0 || point) out[n++] = '.';
+        for (int i = 1; i < digitCount; ++i) out[n++] = d[i];
+        const int exponent = e;
+        out[n++] = upper ? 'E' : 'e';
+        out[n++] = e < 0 ? '-' : '+';
+        if (e < 0) e = -e;
+        if (e < 10) out[n++] = '0';
+        digits(static_cast<unsigned long long>(e), out, n);
+        return exponent;
+    }
+    static void stripZeros(char* out, size_t& n, size_t from)
+    {
+        // general notation: trailing zeros of the fraction and a bare point go
+        size_t end = n;
+        size_t expAt = n;
+        for (size_t i = from; i < n; ++i) if (out[i] == 'e' || out[i] == 'E') { expAt = i; break; }
+        bool hasPoint = false;
+        for (size_t i = from; i < expAt; ++i) if (out[i] == '.') hasPoint = true;
+        if (!hasPoint) return;
+        size_t cut = expAt;
+        while (cut > from && out[cut - 1] == '0') --cut;
+        if (cut > from && out[cut - 1] == '.') --cut;
+        if (cut < expAt) { for (size_t i = expAt; i < end; ++i) out[cut + i - expAt] = out[i]; n = cut + (end - expAt); }
+    }
+    static size_t floating(double v, ios_base::fmtflags f, streamsize precision, char* out /* 400 */)
+    {
+        size_t n = 0;
+        if (v != v) { out[n++] = 'n'; out[n++] = 'a'; out[n++] = 'n'; return n; }
+        if (v < 0 || (v == 0 && 1 / v < 0)) { out[n++] = '-'; v = -v; }   // -0 keeps its sign, as cl prints it
+        else if (f & ios_base::showpos) out[n++] = '+';
+        if (v > 1.7976931348623157e308) { out[n++] = 'i'; out[n++] = 'n'; out[n++] = 'f'; return n; }
+        int p = static_cast<int>(precision);
+        if (p < 0) p = 6;
+        if (p > 300) p = 300;
+        bool upper = (f & ios_base::uppercase) != 0;
+        bool point = (f & ios_base::showpoint) != 0;
+        size_t from = n;
+        if ((f & ios_base::floatfield) == ios_base::fixed) { if (v < 1e19) fixedDigits(v, p, point, out, n); else scientificDigits(v, p, point, out, n, upper); return n; }
+        if ((f & ios_base::floatfield) == ios_base::scientific) { scientificDigits(v, p, point, out, n, upper); return n; }
+        if (p == 0) p = 1;
+        // the exponent that decides between the notations is that of the value rounded to p digits
+        char sci[340];
+        size_t sn = 0;
+        int e = scientificDigits(v, p - 1, point, sci, sn, upper);
+        if (e < -4 || e >= p) { memcpy(out + n, sci, sn); n += sn; }
+        else fixedDigits(v, p - 1 - e, point, out, n);
+        if (!(f & ios_base::showpoint)) stripZeros(out, n, from);
+        return n;
+    }
+    static char* pointer(const void* v, char* end)
+    {
+        unsigned long long u = reinterpret_cast<unsigned long long>(v);
+        char* p = end;
+        for (int i = 0; i < 16; ++i) { int d = static_cast<int>(u & 15); *--p = static_cast<char>(d < 10 ? '0' + d : 'A' + d - 10); u >>= 4; }
+        return p;
+    }
+};
+
+// stages 2 and 3 of num_put: the narrow text in the stream's characters, widened by the ctype, the point and the
+// thousands separators of the numpunct put in (the integer digits grouped from the right by the sizes of the grouping
+// string, its last size repeated); returns the count. split is where the padding of an internal adjustment goes:
+// after a sign, or after the 0x of a hexadecimal number (0 when neither leads)
+template <class charT> struct __num_layout {
+    static size_t make(const char* s, size_t n, bool number, const ctype<charT>* ct, charT point, charT sep, const char* grouping, charT* out, size_t& split)
+    {
+        split = 0;
+        if (n > 0 && (s[0] == '-' || s[0] == '+')) split = 1;
+        if (n > split + 1 && s[split] == '0' && (s[split + 1] == 'x' || s[split + 1] == 'X')) split += 2;
+        size_t k = 0;
+        if (number && grouping[0] > 0 && grouping[0] < CHAR_MAX) {
+            size_t start = split;
+            while (start < n && (s[start] < '0' || s[start] > '9') && !(split > 1 && ((s[start] >= 'a' && s[start] <= 'f') || (s[start] >= 'A' && s[start] <= 'F')))) ++start;
+            size_t stop = start;
+            const bool hexDigits = split >= 2 && (s[split - 1] == 'x' || s[split - 1] == 'X');
+            while (stop < n && ((s[stop] >= '0' && s[stop] <= '9') || (hexDigits && ((s[stop] >= 'a' && s[stop] <= 'f') || (s[stop] >= 'A' && s[stop] <= 'F'))))) ++stop;
+            bool sep_[500];
+            for (size_t i = 0; i < n; ++i) sep_[i] = false;
+            size_t gi = 0, count = 0;
+            int size = grouping[0];
+            for (size_t i = stop; i > start; --i) {
+                if (count == static_cast<size_t>(size) && size > 0 && size < CHAR_MAX) {
+                    sep_[i] = true;
+                    count = 0;
+                    if (grouping[gi + 1] != 0) size = grouping[++gi];
+                }
+                ++count;
+            }
+            for (size_t i = 0; i < n; ++i) {
+                if (sep_[i]) out[k++] = sep;
+                out[k++] = s[i] == '.' ? point : (ct ? ct->widen(s[i]) : static_cast<charT>(static_cast<unsigned char>(s[i])));
+            }
+            return k;
+        }
+        for (size_t i = 0; i < n; ++i) out[k++] = number && s[i] == '.' ? point : (ct ? ct->widen(s[i]) : static_cast<charT>(static_cast<unsigned char>(s[i])));
+        return k;
+    }
+};
+
+// the facets' ids, in plain base classes: a stream finds the index of its locale's num_put without naming num_put itself,
+// whose instantiation would make every unit that makes a stream compile the facet's virtual functions (cppparse emits
+// them with the class); ctype<char> takes its id from a base the same way
+template <class charT, class OutputIterator> struct __num_put_id { static locale::id id; };
+template <class charT, class OutputIterator> locale::id __num_put_id<charT, OutputIterator>::id;
+template <class charT, class InputIterator> struct __num_get_id { static locale::id id; };
+template <class charT, class InputIterator> locale::id __num_get_id<charT, InputIterator>::id;
+
+// 22.2.2.2 num_put
+template <class charT, class OutputIterator = ostreambuf_iterator<charT> >
+class num_put : public locale::facet, public __num_put_id<charT, OutputIterator> {
+public:
+    typedef charT          char_type;
+    typedef OutputIterator iter_type;
+    explicit num_put(size_t refs = 0) : locale::facet(refs) {}
+    iter_type put(iter_type s, ios_base& f, char_type fill, bool v) const { return do_put(s, f, fill, v); }
+    iter_type put(iter_type s, ios_base& f, char_type fill, long v) const { return do_put(s, f, fill, v); }
+    iter_type put(iter_type s, ios_base& f, char_type fill, unsigned long v) const { return do_put(s, f, fill, v); }
+    iter_type put(iter_type s, ios_base& f, char_type fill, long long v) const { return do_put(s, f, fill, v); }
+    iter_type put(iter_type s, ios_base& f, char_type fill, unsigned long long v) const { return do_put(s, f, fill, v); }
+    iter_type put(iter_type s, ios_base& f, char_type fill, double v) const { return do_put(s, f, fill, v); }
+    iter_type put(iter_type s, ios_base& f, char_type fill, long double v) const { return do_put(s, f, fill, v); }
+    iter_type put(iter_type s, ios_base& f, char_type fill, const void* v) const { return do_put(s, f, fill, v); }
+    // static locale::id id: __num_put_id's
+protected:
+    virtual ~num_put() {}
+    virtual iter_type do_put(iter_type s, ios_base& f, char_type fill, bool v) const
+    {
+        if (!(f.flags() & ios_base::boolalpha)) return do_put(s, f, fill, static_cast<long>(v));
+        const locale loc = f.getloc();
+        const numpunct<charT>& np = use_facet<numpunct<charT> >(loc);
+        const basic_string<charT> t = v ? np.truename() : np.falsename();
+        return __pad(s, f, fill, t.data(), t.size(), 0);
+    }
+    virtual iter_type do_put(iter_type s, ios_base& f, char_type fill, long v) const { return __signed(s, f, fill, v); }
+    virtual iter_type do_put(iter_type s, ios_base& f, char_type fill, unsigned long v) const { return __unsigned(s, f, fill, v); }
+    virtual iter_type do_put(iter_type s, ios_base& f, char_type fill, long long v) const { return __signed(s, f, fill, v); }
+    virtual iter_type do_put(iter_type s, ios_base& f, char_type fill, unsigned long long v) const { return __unsigned(s, f, fill, v); }
+    virtual iter_type do_put(iter_type s, ios_base& f, char_type fill, double v) const
+    {
+        char buf[400];
+        const size_t n = __number_text::floating(v, f.flags(), f.precision(), buf);
+        return __text(s, f, fill, buf, n, true);
+    }
+    virtual iter_type do_put(iter_type s, ios_base& f, char_type fill, long double v) const { return do_put(s, f, fill, static_cast<double>(v)); }
+    virtual iter_type do_put(iter_type s, ios_base& f, char_type fill, const void* v) const
+    {
+        char buf[16];
+        const char* p = __number_text::pointer(v, buf + 16);
+        return __text(s, f, fill, p, 16, false);
+    }
+private:
+    // a signed value: in hexadecimal and octal its bits, as printf's %lx and %lo
+    iter_type __signed(iter_type s, ios_base& f, char_type fill, long long v) const
+    {
+        char buf[72];
+        const char* p;
+        size_t n = 0;
+        if (f.flags() & (ios_base::hex | ios_base::oct)) p = __number_text::integer(static_cast<unsigned long long>(v), false, false, f.flags(), buf + 72, n);
+        else if (v < 0) p = __number_text::integer(static_cast<unsigned long long>(-(v + 1)) + 1, true, true, f.flags(), buf + 72, n);
+        else p = __number_text::integer(static_cast<unsigned long long>(v), false, true, f.flags(), buf + 72, n);
+        return __text(s, f, fill, p, n, true);
+    }
+    iter_type __unsigned(iter_type s, ios_base& f, char_type fill, unsigned long long v) const
+    {
+        char buf[72];
+        size_t n = 0;
+        const char* p = __number_text::integer(v, false, false, f.flags(), buf + 72, n);
+        return __text(s, f, fill, p, n, true);
+    }
+    // stages 2 to 4: widened and punctuated by the stream's locale, then padded and written
+    iter_type __text(iter_type s, ios_base& f, char_type fill, const char* text, size_t n, bool number) const
+    {
+        const locale loc = f.getloc();
+        const ctype<charT>& ct = use_facet<ctype<charT> >(loc);
+        const numpunct<charT>& np = use_facet<numpunct<charT> >(loc);
+        const string grouping = np.grouping();
+        charT out[800];
+        size_t split = 0;
+        const size_t k = __num_layout<charT>::make(text, n, number, &ct, np.decimal_point(), np.thousands_sep(), grouping.c_str(), out, split);
+        return __pad(s, f, fill, out, k, split);
+    }
+    // stage 3's padding to the width (which is then reset), and stage 4's output
+    iter_type __pad(iter_type s, ios_base& f, char_type fill, const charT* text, size_t n, size_t split) const
+    {
+        const streamsize w = f.width();
+        f.width(0);
+        size_t pad = w > 0 && static_cast<size_t>(w) > n ? static_cast<size_t>(w) - n : 0;
+        const ios_base::fmtflags adjust = f.flags() & ios_base::adjustfield;
+        size_t i = 0;
+        if (adjust == ios_base::internal) { for (; i < split; ++i) *s++ = text[i]; for (; pad > 0; --pad) *s++ = fill; }
+        else if (adjust != ios_base::left) for (; pad > 0; --pad) *s++ = fill;
+        for (; i < n; ++i) *s++ = text[i];
+        for (; pad > 0; --pad) *s++ = fill;
+        return s;
+    }
+};
+
+// 22.2.2.1 num_get. Stage 2 takes the characters a number can have from the input, in the order its grammar allows
+// (sign, base prefix, digits with the locale's thousands separators, point, exponent), stage 3 converts them and
+// checks the grouping and the range: failbit when nothing could be taken or the value does not fit (the largest
+// value of the type stored then, as C++11 has it), eofbit when the input ended
+template <class charT, class InputIterator = istreambuf_iterator<charT> >
+class num_get : public locale::facet, public __num_get_id<charT, InputIterator> {
+public:
+    typedef charT         char_type;
+    typedef InputIterator iter_type;
+    explicit num_get(size_t refs = 0) : locale::facet(refs) {}
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, bool& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, long& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned short& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned int& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned long& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, long long& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned long long& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, float& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, double& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, long double& v) const { return do_get(in, end, f, err, v); }
+    iter_type get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, void*& v) const { return do_get(in, end, f, err, v); }
+    // static locale::id id: __num_get_id's
+protected:
+    virtual ~num_get() {}
+    // noboolalpha: an integer, 0 or 1 (another value stores true with failbit, as cl does); boolalpha: the longest
+    // of truename and falsename the input matches
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, bool& v) const
+    {
+        if (!(f.flags() & ios_base::boolalpha)) {
+            unsigned long long u = 0;
+            bool negative = false, badGrouping = false;
+            in = __integer(in, end, f, err, u, negative, badGrouping);
+            if (err & ios_base::failbit) return in;
+            if (u == 0) v = false;
+            else { v = true; if (u != 1 || negative) err |= ios_base::failbit; }
+            if (badGrouping) err |= ios_base::failbit;
+            return in;
+        }
+        const locale loc = f.getloc();
+        const numpunct<charT>& np = use_facet<numpunct<charT> >(loc);
+        const basic_string<charT> t = np.truename(), fl = np.falsename();
+        size_t k = 0;
+        bool canT = true, canF = true;
+        for (;; ++k) {
+            if ((canT && k == t.size()) || (canF && k == fl.size())) break;
+            if (in == end) { err |= ios_base::eofbit; break; }
+            const charT c = *in;
+            canT = canT && k < t.size() && char_traits<charT>::eq(t[k], c);
+            canF = canF && k < fl.size() && char_traits<charT>::eq(fl[k], c);
+            if (!canT && !canF) break;
+            ++in;
+        }
+        if (canT && k == t.size()) v = true;
+        else if (canF && k == fl.size()) v = false;
+        else err |= ios_base::failbit;
+        return in;
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, long& v) const
+    {
+        long long t = 0;
+        in = __signed(in, end, f, err, t, LONG_MIN, LONG_MAX);
+        v = static_cast<long>(t);
+        return in;
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned short& v) const
+    {
+        unsigned long long t = 0;
+        in = __unsigned(in, end, f, err, t, USHRT_MAX);
+        v = static_cast<unsigned short>(t);
+        return in;
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned int& v) const
+    {
+        unsigned long long t = 0;
+        in = __unsigned(in, end, f, err, t, UINT_MAX);
+        v = static_cast<unsigned int>(t);
+        return in;
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned long& v) const
+    {
+        unsigned long long t = 0;
+        in = __unsigned(in, end, f, err, t, ULONG_MAX);
+        v = static_cast<unsigned long>(t);
+        return in;
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, long long& v) const
+    {
+        return __signed(in, end, f, err, v, LLONG_MIN, LLONG_MAX);
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned long long& v) const
+    {
+        return __unsigned(in, end, f, err, v, ULLONG_MAX);
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, float& v) const
+    {
+        char buf[72];
+        in = __real(in, end, f, err, buf);
+        if (err & ios_base::failbit) { v = 0; return in; }
+        v = strtof(buf, 0);
+        if (v > FLT_MAX || v < -FLT_MAX) { err |= ios_base::failbit; v = v > 0 ? FLT_MAX : -FLT_MAX; }
+        return in;
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, double& v) const
+    {
+        char buf[72];
+        in = __real(in, end, f, err, buf);
+        if (err & ios_base::failbit) { v = 0; return in; }
+        v = strtod(buf, 0);
+        if (v > DBL_MAX || v < -DBL_MAX) { err |= ios_base::failbit; v = v > 0 ? DBL_MAX : -DBL_MAX; }
+        return in;
+    }
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, long double& v) const
+    {
+        double d = 0;
+        in = do_get(in, end, f, err, d);
+        v = d;
+        return in;
+    }
+    // hexadecimal, as %p reads it
+    virtual iter_type do_get(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, void*& v) const
+    {
+        const ios_base::fmtflags saved = f.flags();
+        f.setf(ios_base::hex, ios_base::basefield);
+        unsigned long long u = 0;
+        in = __unsigned(in, end, f, err, u, ULLONG_MAX);
+        f.flags(saved);
+        if (!(err & ios_base::failbit)) v = reinterpret_cast<void*>(u);
+        return in;
+    }
+
+private:
+    // the narrow form of c among the characters a number may have ("0123456789abcdefxABCDEFX+-"), 0 when it is none
+    static char __atom(const ctype<charT>& ct, charT c)
+    {
+        const char n = ct.narrow(c, 0);
+        if ((n >= '0' && n <= '9') || (n >= 'a' && n <= 'f') || (n >= 'A' && n <= 'F') || n == 'x' || n == 'X' || n == '+' || n == '-') return n;
+        return 0;
+    }
+    // stage 2 and the conversion of an integer: the magnitude in u (saturated, failbit when it overflowed 64 bits)
+    // and the sign; the base from basefield (none: from the prefix, as %i)
+    iter_type __integer(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, unsigned long long& u, bool& negative, bool& badGrouping) const
+    {
+        const locale loc = f.getloc();
+        const ctype<charT>& ct = use_facet<ctype<charT> >(loc);
+        const numpunct<charT>& np = use_facet<numpunct<charT> >(loc);
+        const string grouping = np.grouping();
+        const charT sep = np.thousands_sep();
+        const bool grouped = !grouping.empty() && grouping[0] > 0 && grouping[0] < CHAR_MAX;
+        const ios_base::fmtflags basefield = f.flags() & ios_base::basefield;
+        int base = basefield == ios_base::oct ? 8 : basefield == ios_base::hex ? 16 : basefield == 0 ? 0 : 10;
+        u = 0;
+        negative = false;
+        bool any = false, overflow = false;
+        char groups[64];
+        int groupCount = 0, inGroup = 0;
+        bool sepSeen = false, badGroup = false;
+        if (in != end) {
+            const char c = __atom(ct, *in);
+            if (c == '+' || c == '-') { negative = c == '-'; ++in; }
+        }
+        // a 0, then (base 16 or none) an x, or (no base) the octal digits that follow
+        if (in != end && __atom(ct, *in) == '0' && base != 10) {
+            ++in;
+            any = true;
+            if (in != end && (base == 16 || base == 0) && (__atom(ct, *in) == 'x' || __atom(ct, *in) == 'X')) { ++in; base = 16; any = false; }
+            else if (base == 0) base = 8;
+        }
+        if (base == 0) base = 10;
+        for (; in != end; ++in) {
+            const charT ch = *in;
+            if (grouped && char_traits<charT>::eq(ch, sep)) {
+                if (!any || inGroup == 0) { badGroup = true; }
+                if (groupCount < 64) groups[groupCount++] = static_cast<char>(inGroup);
+                inGroup = 0;
+                sepSeen = true;
+                continue;
+            }
+            const char c = __atom(ct, ch);
+            int d;
+            if (c >= '0' && c <= '9') d = c - '0';
+            else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+            else break;
+            if (d >= base) break;
+            if (u > (ULLONG_MAX - static_cast<unsigned long long>(d)) / static_cast<unsigned long long>(base)) overflow = true;
+            else u = u * static_cast<unsigned long long>(base) + static_cast<unsigned long long>(d);
+            any = true;
+            ++inGroup;
+        }
+        if (in == end) err |= ios_base::eofbit;
+        if (!any) { err |= ios_base::failbit; u = 0; return in; }
+        if (sepSeen) {
+            // 22.2.2.1.2/3: the groups, last first, against the grouping (its last size repeats); the first group may
+            // be shorter
+            if (groupCount < 64) groups[groupCount++] = static_cast<char>(inGroup);
+            size_t gi = 0;
+            for (int i = groupCount - 1; i >= 0 && !badGroup; --i) {
+                const int want = grouping[gi];
+                if (i == 0) { if (groups[i] > want || groups[i] == 0) badGroup = true; }
+                else if (groups[i] != want) badGroup = true;
+                if (gi + 1 < grouping.size()) ++gi;
+            }
+        }
+        if (overflow) { err |= ios_base::failbit; u = ULLONG_MAX; }
+        badGrouping = badGroup;   // the value stands, failbit is set after it is stored (22.2.2.1.2/3)
+        return in;
+    }
+    template <class T>
+    iter_type __signed(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, T& v, long long low, long long high) const
+    {
+        unsigned long long u = 0;
+        bool negative = false, badGrouping = false;
+        in = __integer(in, end, f, err, u, negative, badGrouping);
+        if (err & ios_base::failbit) { v = u == ULLONG_MAX ? static_cast<T>(negative ? low : high) : 0; return in; }
+        const unsigned long long limit = negative ? static_cast<unsigned long long>(-(low + 1)) + 1 : static_cast<unsigned long long>(high);
+        if (u > limit) { err |= ios_base::failbit; v = static_cast<T>(negative ? low : high); return in; }
+        v = negative ? static_cast<T>(-static_cast<long long>(u - 1) - 1) : static_cast<T>(u);
+        if (badGrouping) err |= ios_base::failbit;
+        return in;
+    }
+    // a minus sign negates the magnitude in the type, as strtoul does
+    template <class T>
+    iter_type __unsigned(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, T& v, unsigned long long high) const
+    {
+        unsigned long long u = 0;
+        bool negative = false, badGrouping = false;
+        in = __integer(in, end, f, err, u, negative, badGrouping);
+        if (err & ios_base::failbit) { v = u == ULLONG_MAX ? static_cast<T>(high) : 0; return in; }
+        if (u > high) { err |= ios_base::failbit; v = static_cast<T>(high); return in; }
+        v = negative ? static_cast<T>((high - u + 1) & high) : static_cast<T>(u);
+        if (badGrouping) err |= ios_base::failbit;
+        return in;
+    }
+    // stage 2 of a floating value: the characters of [sign] digits [point digits] [e [sign] digits], narrowed, in buf
+    // (zero-terminated); failbit when no digit was taken
+    iter_type __real(iter_type in, iter_type end, ios_base& f, ios_base::iostate& err, char* buf) const
+    {
+        const locale loc = f.getloc();
+        const ctype<charT>& ct = use_facet<ctype<charT> >(loc);
+        const numpunct<charT>& np = use_facet<numpunct<charT> >(loc);
+        const charT point = np.decimal_point(), sep = np.thousands_sep();
+        const bool grouped = !np.grouping().empty();
+        size_t n = 0;
+        bool digits = false;
+        if (in != end) {
+            const char c = __atom(ct, *in);
+            if (c == '+' || c == '-') { buf[n++] = c; ++in; }
+        }
+        for (; in != end; ++in) {
+            const charT ch = *in;
+            if (grouped && digits && char_traits<charT>::eq(ch, sep)) continue;
+            const char c = ct.narrow(ch, 0);
+            if (c < '0' || c > '9') break;
+            if (n < 64) buf[n++] = c;
+            digits = true;
+        }
+        if (in != end && char_traits<charT>::eq(*in, point)) {
+            if (n < 64) buf[n++] = '.';
+            for (++in; in != end; ++in) {
+                const char c = ct.narrow(*in, 0);
+                if (c < '0' || c > '9') break;
+                if (n < 64) buf[n++] = c;
+                digits = true;
+            }
+        }
+        if (digits && in != end) {
+            const char c = ct.narrow(*in, 0);
+            if (c == 'e' || c == 'E') {
+                if (n < 64) buf[n++] = c;
+                ++in;
+                if (in != end) {
+                    const char s = ct.narrow(*in, 0);
+                    if (s == '+' || s == '-') { if (n < 64) buf[n++] = s; ++in; }
+                }
+                for (; in != end; ++in) {
+                    const char d = ct.narrow(*in, 0);
+                    if (d < '0' || d > '9') break;
+                    if (n < 64) buf[n++] = d;
+                }
+            }
+        }
+        buf[n] = 0;
+        if (in == end) err |= ios_base::eofbit;
+        if (!digits) err |= ios_base::failbit;
+        return in;
+    }
+};
+
+// the library's num_put and num_get, for a locale that holds none of its own (made once, kept for good)
+template <class charT, class OutputIterator> struct __default_facet<num_put<charT, OutputIterator> > {
+    static const locale::facet* get() { static const locale::facet* const f = new num_put<charT, OutputIterator>(1); return f; }
+};
+template <class charT, class InputIterator> struct __default_facet<num_get<charT, InputIterator> > {
+    static const locale::facet* get() { static const locale::facet* const f = new num_get<charT, InputIterator>(1); return f; }
+};
+
+// the streams' calls of a num_put the program installed and of the locale's num_get (27.6.2.5.2, 27.6.1.2.2). For char
+// and wchar_t with char_traits, <ostream> and <istream> declare plain functions __num_put_out and __num_get_in that
+// libcpp/iostream.cpp defines with these, and the streams reach them through __num_out and __num_in, so that a unit that writes or reads a number does not compile the facets'
+// virtual functions: cppparse emits them wherever the facet class is named in a function it analyses, and it analyses
+// every member of a stream class. Other character types and traits reach these templates
+template <class charT, class traits, class V>
+bool __num_put_call(basic_ostream<charT, traits>& os, const locale::facet* f, charT fill, V v)
+{
+    return static_cast<const num_put<charT, ostreambuf_iterator<charT, traits> >*>(f)->put(ostreambuf_iterator<charT, traits>(os), os, fill, v).failed();
+}
+template <class charT, class traits, class V>
+void __num_get_call(basic_istream<charT, traits>& is, ios_base::iostate& err, V& v)
+{
+    use_facet<num_get<charT, istreambuf_iterator<charT, traits> > >(is.getloc()).get(istreambuf_iterator<charT, traits>(is), istreambuf_iterator<charT, traits>(), is, err, v);
+}
+// the dispatch the streams call: these for other streams, explicit specialisations for char and wchar_t with char_traits
+// in <ostream> and <istream> (a function template candidate would be instantiated, facets and all, by cppparse's
+// overload resolution)
+template <class charT, class traits> struct __num_out {
+    template <class V> static bool put(basic_ostream<charT, traits>& os, const locale::facet* f, charT fill, V v) { return __num_put_call(os, f, fill, v); }
+};
+template <class charT, class traits> struct __num_in {
+    template <class V> static void get(basic_istream<charT, traits>& is, ios_base::iostate& err, V& v) { __num_get_call(is, err, v); }
+};
+}
+
+#endif

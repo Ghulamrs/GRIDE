@@ -1,0 +1,139 @@
+// __ios_base - cppparse's C++98 library: ios_base (27.4.2), the formatting state, the locale and the extensible
+// arrays every stream has; the flag and state values are MSVC's. <ios> and <streambuf> include it.
+#ifndef CPPPARSE_IOS_BASE
+#define CPPPARSE_IOS_BASE
+
+#include <cstdlib>
+#include <exception>
+#include <string>
+#include <__char_traits>
+#include <__locale>
+
+namespace std {
+
+class ios_base {
+public:
+    class failure : public exception {
+    public:
+        explicit failure(const string& msg) : m_msg(msg) {}
+        virtual ~failure() {}
+        virtual const char* what() const { return m_msg.c_str(); }
+    private:
+        string m_msg;
+    };
+
+    typedef int fmtflags;
+    static const fmtflags skipws = 0x0001, unitbuf = 0x0002, uppercase = 0x0004, showbase = 0x0008, showpoint = 0x0010, showpos = 0x0020,
+                          left = 0x0040, right = 0x0080, internal = 0x0100, dec = 0x0200, oct = 0x0400, hex = 0x0800,
+                          scientific = 0x1000, fixed = 0x2000, boolalpha = 0x4000,
+                          adjustfield = 0x01c0, basefield = 0x0e00, floatfield = 0x3000;
+    typedef int iostate;
+    static const iostate goodbit = 0, eofbit = 1, failbit = 2, badbit = 4;
+    typedef int openmode;
+    static const openmode in = 0x01, out = 0x02, ate = 0x04, app = 0x08, trunc = 0x10, binary = 0x20;
+    typedef int seekdir;
+    static const seekdir beg = 0, cur = 1, end = 2;
+
+    class Init {
+    public:
+        Init() {}
+        ~Init() {}
+    };
+
+    fmtflags   flags() const { return m_flags; }
+    fmtflags   flags(fmtflags f) { fmtflags old = m_flags; m_flags = f; return old; }
+    fmtflags   setf(fmtflags f) { fmtflags old = m_flags; m_flags |= f; return old; }
+    fmtflags   setf(fmtflags f, fmtflags mask) { fmtflags old = m_flags; m_flags = (m_flags & ~mask) | (f & mask); return old; }
+    void       unsetf(fmtflags mask) { m_flags &= ~mask; }
+    streamsize precision() const { return m_precision; }
+    streamsize precision(streamsize p) { streamsize old = m_precision; m_precision = p; return old; }
+    streamsize width() const { return m_width; }
+    streamsize width(streamsize w) { streamsize old = m_width; m_width = w; return old; }
+
+    locale imbue(const locale& loc) { locale old = m_loc; m_loc = loc; __call(imbue_event); return old; }
+    locale getloc() const { return m_loc; }
+
+    static int xalloc() { static long volatile next = 0; return static_cast<int>(cppparse_interlocked_increment(&next) - 1); }   // (any thread)
+    long&  iword(int index) { __grow(index); return index < m_words ? m_iwords[index] : m_iwordError; }
+    void*& pword(int index) { __grow(index); return index < m_words ? m_pwords[index] : m_pwordError; }
+
+    enum event { erase_event, imbue_event, copyfmt_event };
+    typedef void (*event_callback)(event, ios_base&, int index);
+    void register_callback(event_callback fn, int index)
+    {
+        if (m_callbacks == m_callbackCap) {
+            int cap = m_callbackCap ? m_callbackCap * 2 : 4;
+            __callback* c = static_cast<__callback*>(malloc(cap * sizeof(__callback)));
+            for (int i = 0; i < m_callbacks; ++i) c[i] = m_callbackList[i];
+            free(m_callbackList);
+            m_callbackList = c;
+            m_callbackCap = cap;
+        }
+        m_callbackList[m_callbacks].fn = fn;
+        m_callbackList[m_callbacks].index = index;
+        ++m_callbacks;
+    }
+
+    static bool sync_with_stdio(bool = true) { return true; }   // the standard streams write through the C runtime's FILEs
+
+    // (most streams have no callbacks and no words: no call is made for them)
+    virtual ~ios_base()
+    {
+        if (m_callbacks) __call(erase_event);
+        if (m_iwords) free(m_iwords);
+        if (m_pwords) free(m_pwords);
+        if (m_callbackList) free(m_callbackList);
+    }
+
+protected:
+    ios_base() : m_flags(skipws | dec), m_precision(6), m_width(0), m_loc(), m_iwords(0), m_pwords(0), m_words(0),
+                 m_iwordError(0), m_pwordError(0), m_callbackList(0), m_callbacks(0), m_callbackCap(0) {}
+    // copyfmt's part: the formatting state, the locale and the arrays (the callbacks stay, 27.4.4.2/16)
+    void __copy_base(const ios_base& o)
+    {
+        __call(erase_event);
+        m_flags = o.m_flags;
+        m_precision = o.m_precision;
+        m_width = o.m_width;
+        m_loc = o.m_loc;
+        if (o.m_words > 0) __grow(o.m_words - 1);
+        for (int i = 0; i < m_words; ++i) { m_iwords[i] = i < o.m_words ? o.m_iwords[i] : 0; m_pwords[i] = i < o.m_words ? o.m_pwords[i] : 0; }
+    }
+    void __call(event ev) { for (int i = m_callbacks; i > 0; --i) m_callbackList[i - 1].fn(ev, *this, m_callbackList[i - 1].index); }
+
+    fmtflags   m_flags;
+    streamsize m_precision;
+    streamsize m_width;
+    locale     m_loc;
+
+private:
+    ios_base(const ios_base&);
+    ios_base& operator=(const ios_base&);
+    struct __callback { event_callback fn; int index; };
+    void __grow(int index)
+    {
+        if (index < m_words || index < 0) return;
+        int n = index + 1 < 8 ? 8 : index + 1;
+        long* iw = static_cast<long*>(malloc(n * sizeof(long)));
+        void** pw = static_cast<void**>(malloc(n * sizeof(void*)));
+        if (!iw || !pw) { free(iw); free(pw); return; }
+        for (int i = 0; i < n; ++i) { iw[i] = i < m_words ? m_iwords[i] : 0; pw[i] = i < m_words ? m_pwords[i] : 0; }
+        free(m_iwords);
+        free(m_pwords);
+        m_iwords = iw;
+        m_pwords = pw;
+        m_words = n;
+    }
+    long*       m_iwords;
+    void**      m_pwords;
+    int         m_words;
+    long        m_iwordError;
+    void*       m_pwordError;
+    __callback* m_callbackList;
+    int         m_callbacks;
+    int         m_callbackCap;
+};
+
+}
+
+#endif

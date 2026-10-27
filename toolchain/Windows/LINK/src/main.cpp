@@ -80,13 +80,49 @@ bool Link::run()
     return write_map();
 }
 
+/*  @file: the file's words in place of the argument, as link.exe reads a response file - split on
+ *  white space, a "quoted" word kept whole. What lets a library of a few hundred objects be
+ *  named on a command line Windows caps at 32,767 characters. */
+static bool expand(const char *a, std::vector<std::string> &out)
+{
+    if (a[0] != '@') { out.push_back(a); return true; }
+    FILE *f = fopen(a + 1, "rb");
+    if (!f) { fprintf(stderr, "link: cannot open the response file %s\n", a + 1); return false; }
+    std::string text;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) text.append(buf, n);
+    fclose(f);
+    size_t i = 0;
+    while (i < text.size()) {
+        while (i < text.size() && (text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n')) i++;
+        if (i >= text.size()) break;
+        std::string w;
+        bool quoted = false;
+        while (i < text.size() && (quoted || (text[i] != ' ' && text[i] != '\t' && text[i] != '\r' && text[i] != '\n'))) {
+            if (text[i] == '"') quoted = !quoted;
+            else w += text[i];
+            i++;
+        }
+        out.push_back(w);
+    }
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     Link lk;
     std::string v;
 
-    for (int i = 1; i < argc; i++) {
-        std::string a = argv[i];
+    std::vector<std::string> args;
+    for (int i = 1; i < argc; i++)
+        if (!expand(argv[i], args)) return 2;
+    /* /LIB first: the librarian (librarian.cpp), as link.exe /LIB is lib.exe */
+    if (!args.empty() && (args[0] == "/lib" || args[0] == "/LIB" || args[0] == "/Lib" || args[0] == "-lib" || args[0] == "-LIB"))
+        return librarian(std::vector<std::string>(args.begin() + 1, args.end()));
+
+    for (size_t i = 0; i < args.size(); i++) {
+        std::string a = args[i];
         if (!is_switch(a)) { lk.opt.inputs.push_back(a); continue; }
         if (eat(a, "out:", v))        { lk.opt.out = v; continue; }
         if (eat(a, "entry:", v))      { lk.opt.entry = v; continue; }
@@ -140,14 +176,15 @@ int main(int argc, char **argv)
             eat(a, "release", v) || eat(a, "manifest", v) || eat(a, "nxcompat", v) ||
             eat(a, "largeaddressaware", v) || eat(a, "errorreport:", v) || eat(a, "pdbaltpath:", v) ||
             eat(a, "tlbid:", v) || eat(a, "brepro", v)) continue;
-        fprintf(stderr, "link: unknown switch %s\n", argv[i]);
+        fprintf(stderr, "link: unknown switch %s\n", a.c_str());
         return 2;
     }
 
     if (lk.opt.inputs.empty()) {
         fprintf(stderr,
             "usage: link /out:image.exe [/entry:sym] [/nodefaultlib] [/fixed]\n"
-            "            [/subsystem:console|windows] [/timestamp:hex] object... library...\n");
+            "            [/subsystem:console|windows] [/timestamp:hex] object... library...\n"
+            "       link /LIB /OUT:library.lib object...   (a library: see link /LIB)\n");
         return 2;
     }
     if (lk.opt.out.empty()) {

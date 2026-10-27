@@ -1,0 +1,470 @@
+// __locale - cppparse's C++98 library: the part of <locale> the streams need (22.1): locale with its facets, facet
+// ids, use_facet and has_facet, and the facets ctype<char>, ctype<wchar_t>, numpunct and collate of the classic "C"
+// locale. <locale> adds the convenience functions (isspace(c, loc), toupper(c, loc), ...).
+// Every stream holds locales, and the global one is shared by all the streams of every thread: the reference counts
+// and the facet ids change by the runtime's interlocked operations, the classic and global locales are made once
+// (static locals, whose initialisation is thread-safe in cl's and cppparse's code), and an imp made global stays
+// referenced by the global holder for the rest of the program, so a thread that just read the global pointer never
+// sees it freed.
+#ifndef CPPPARSE_LOCALE_BASE
+#define CPPPARSE_LOCALE_BASE
+
+#include <cctype>
+#include <cstddef>
+#include <cstdlib>
+#include <cwctype>
+#include <string>
+#include <stdexcept>
+#include <typeinfo>
+
+// the runtime's atomic operations (runtime\cppparse_rt.cpp, which every program built with these headers links;
+// MSVC's are compiler intrinsics, which cppparse does not have)
+extern "C" {
+    long cppparse_interlocked_increment(long volatile* value);
+    long cppparse_interlocked_decrement(long volatile* value);
+    long cppparse_interlocked_compare_exchange(long volatile* value, long exchange, long comparand);
+}
+
+namespace std {
+
+template <class Facet> struct __default_facet;
+
+class locale {
+public:
+    // a facet is owned by the locales that hold it when it was made with refs 0 (deleted with the last of them),
+    // by the program otherwise (22.1.1.1.2)
+    class facet {
+    protected:
+        explicit facet(size_t refs = 0) : m_refs(refs), m_holders(0) {}
+        virtual ~facet() {}
+    private:
+        facet(const facet&);
+        void operator=(const facet&);
+        friend class locale;
+        size_t        m_refs;
+        long volatile m_holders;   // the locale imps holding it (interlocked)
+    };
+    // a facet class's identity: its index in a locale's table, given out on first use (static storage zero-initialises
+    // it). Two threads asking first may both draw a number; the first stored wins, the other number stays unused
+    class id {
+    public:
+        size_t __index()
+        {
+            long i = m_index;
+            if (i == 0) {
+                const long mine = cppparse_interlocked_increment(&__count());
+                i = cppparse_interlocked_compare_exchange(&m_index, mine, 0);
+                if (i == 0) i = mine;
+            }
+            return static_cast<size_t>(i);
+        }
+    private:
+        long volatile m_index;
+        static long volatile& __count() { static long volatile n = 0; return n; }
+    };
+
+    typedef int category;
+    static const category none = 0, collate = 1, ctype = 2, monetary = 4, numeric = 8, time = 16, messages = 32,
+                          all = collate | ctype | monetary | numeric | time | messages;
+
+    locale() throw() : m_imp(__global_imp()) { cppparse_interlocked_increment(&m_imp->refs); }
+    locale(const locale& o) throw() : m_imp(o.m_imp) { cppparse_interlocked_increment(&m_imp->refs); }
+    explicit locale(const char* name);
+    locale(const locale& other, const char* name, category cats);
+    locale(const locale& other, const locale& one, category cats);
+    template <class Facet> locale(const locale& other, Facet* f) : m_imp(__copy(other.m_imp))
+    {
+        if (f) __install(m_imp, f, Facet::id.__index());
+        m_imp->name = "*";
+    }
+    ~locale() throw() { __release(m_imp); }
+    const locale& operator=(const locale& o) throw()
+    {
+        cppparse_interlocked_increment(&o.m_imp->refs);
+        __release(m_imp);
+        m_imp = o.m_imp;
+        return *this;
+    }
+    template <class Facet> locale combine(const locale& other) const
+    {
+        const facet* f = other.__facet(Facet::id.__index());
+        if (!f) f = __default_facet<Facet>::get();
+        if (!f) throw runtime_error("locale::combine: the other locale lacks the facet");
+        locale r(__copy(m_imp));
+        __install(r.m_imp, const_cast<facet*>(f), Facet::id.__index());
+        r.m_imp->name = "*";
+        return r;
+    }
+    string name() const { return m_imp->name; }
+    bool operator==(const locale& o) const { return m_imp == o.m_imp || (m_imp->name != "*" && m_imp->name == o.m_imp->name); }
+    bool operator!=(const locale& o) const { return !(*this == o); }
+    template <class charT, class traits, class Allocator>
+    bool operator()(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b) const;
+    // string and wstring as plain members as well: cppparse passes no object to a member operator() template called
+    // on an object (loc(a, b))
+    bool operator()(const string& a, const string& b) const;
+    bool operator()(const wstring& a, const wstring& b) const;
+    static locale global(const locale& loc);
+    static const locale& classic();
+
+    // the facet at an id's index, 0 when the locale has none there (what use_facet and has_facet look up)
+    const facet* __facet(size_t index) const { return index < __slots ? m_imp->facets[index] : 0; }
+    // whether this is the classic locale itself (the streams then know its punctuation without asking the facets)
+    bool __classic() const { return m_imp == __classic_imp(); }
+
+private:
+    enum { __slots = 64 };
+    // an imp is shared by the locales that copy it (refs, interlocked); its facets and name do not change once another
+    // locale holds it
+    struct __imp {
+        long volatile refs;
+        facet*        facets[__slots];
+        string        name;
+    };
+    __imp* m_imp;
+
+    explicit locale(__imp* imp) : m_imp(imp) {}
+    static __imp* __new_imp(const char* name)
+    {
+        __imp* p = new __imp;
+        p->refs = 1;
+        for (int i = 0; i < __slots; ++i) p->facets[i] = 0;
+        p->name = name;
+        return p;
+    }
+    static __imp* __copy(const __imp* from)
+    {
+        __imp* p = __new_imp(from->name.c_str());
+        for (int i = 0; i < __slots; ++i) { p->facets[i] = from->facets[i]; if (p->facets[i]) cppparse_interlocked_increment(&p->facets[i]->m_holders); }
+        return p;
+    }
+    static void __install(__imp* p, facet* f, size_t index)
+    {
+        if (index >= __slots) throw runtime_error("locale: too many facet classes");
+        cppparse_interlocked_increment(&f->m_holders);
+        facet* old = p->facets[index];
+        p->facets[index] = f;
+        if (old) __drop(old);
+    }
+    static void __drop(facet* f) { if (cppparse_interlocked_decrement(&f->m_holders) == 0 && f->m_refs == 0) delete f; }
+    static void __release(__imp* p)
+    {
+        if (cppparse_interlocked_decrement(&p->refs) != 0) return;
+        for (int i = 0; i < __slots; ++i) if (p->facets[i]) __drop(p->facets[i]);
+        delete p;
+    }
+    static __imp* __classic_imp();
+    static __imp* __make_classic();
+    static __imp* __classic_ref() { __imp* c = __classic_imp(); cppparse_interlocked_increment(&c->refs); return c; }
+    // the global locale's imp: the classic one until locale::global is called (which only ever replaces the pointer)
+    static __imp*& __global_imp() { static __imp* g = __classic_ref(); return g; }
+    static __imp* __global() { return __global_imp(); }
+    static void __take(__imp* to, const __imp* from, category cats);
+};
+
+// the facet a locale holds for a facet class with no facet of its own there: none, but for num_put and num_get, whose
+// library facet every locale has (<__num_facets> specialises this)
+template <class Facet> struct __default_facet { static const locale::facet* get() { return 0; } };
+
+template <class Facet> const Facet& use_facet(const locale& loc)
+{
+    const locale::facet* f = loc.__facet(Facet::id.__index());
+    if (!f) f = __default_facet<Facet>::get();
+    if (!f) throw bad_cast();
+    return static_cast<const Facet&>(*f);
+}
+
+template <class Facet> bool has_facet(const locale& loc) throw() { return loc.__facet(Facet::id.__index()) != 0 || __default_facet<Facet>::get() != 0; }
+
+// 22.2.1: character classification, by the bits of the C runtime's <ctype.h> (upper 0x1, lower 0x2, digit 0x4, space 0x8,
+// punct 0x10, cntrl 0x20, xdigit 0x80); a struct, as MSVC declares it, for the names
+struct ctype_base {
+    typedef short mask;
+    static const mask upper = 0x1, lower = 0x2, digit = 0x4, space = 0x8, punct = 0x10, cntrl = 0x20, xdigit = 0x80,
+                      alpha = 0x100 | 0x1 | 0x2, alnum = alpha | digit, graph = alnum | punct, print = graph | 0x40;
+    // the mask of a character of the classic locale (from the C library's classification)
+    static mask __classify(int c)
+    {
+        mask m = 0;
+        if (isupper(c)) m |= upper;
+        if (islower(c)) m |= lower;
+        if (isdigit(c)) m |= digit;
+        if (isspace(c)) m |= space;
+        if (ispunct(c)) m |= punct;
+        if (iscntrl(c)) m |= cntrl;
+        if (isxdigit(c)) m |= xdigit;
+        if (isalpha(c)) m |= 0x100;
+        if (isprint(c)) m |= 0x40;
+        return m;
+    }
+    static mask __wclassify(wint_t c)
+    {
+        mask m = 0;
+        if (iswupper(c)) m |= upper;
+        if (iswlower(c)) m |= lower;
+        if (iswdigit(c)) m |= digit;
+        if (iswspace(c)) m |= space;
+        if (iswpunct(c)) m |= punct;
+        if (iswcntrl(c)) m |= cntrl;
+        if (iswxdigit(c)) m |= xdigit;
+        if (iswalpha(c)) m |= 0x100;
+        if (iswprint(c)) m |= 0x40;
+        return m;
+    }
+};
+
+// the static data member an explicitly specialised facet class takes its id from: a template's static member, so that
+// every unit defines it (a COMDAT) and no library unit is needed for it (the argument tells the facets apart; naming
+// the facet itself there would instantiate the primary template)
+template <int N> struct __facet_id { static locale::id id; };
+template <int N> locale::id __facet_id<N>::id;
+
+// 22.2.1.1: ctype<charT> (made for wchar_t), through the C library's wide classification; widen and narrow map the
+// characters 0-255 to themselves, as MSVC's classic locale does
+template <class charT>
+class ctype : public locale::facet, public ctype_base {
+public:
+    typedef charT char_type;
+    explicit ctype(size_t refs = 0) : locale::facet(refs) {}
+    bool         is(mask m, charT c) const { return do_is(m, c); }
+    const mask*  __table() const { return 0; }   // the library's: no table (ctype<char> has one, which its streams read)
+    const charT* is(const charT* low, const charT* high, mask* vec) const { return do_is(low, high, vec); }
+    const charT* scan_is(mask m, const charT* low, const charT* high) const { return do_scan_is(m, low, high); }
+    const charT* scan_not(mask m, const charT* low, const charT* high) const { return do_scan_not(m, low, high); }
+    charT        toupper(charT c) const { return do_toupper(c); }
+    const charT* toupper(charT* low, const charT* high) const { return do_toupper(low, high); }
+    charT        tolower(charT c) const { return do_tolower(c); }
+    const charT* tolower(charT* low, const charT* high) const { return do_tolower(low, high); }
+    charT        widen(char c) const { return do_widen(c); }
+    const char*  widen(const char* low, const char* high, charT* to) const { return do_widen(low, high, to); }
+    char         narrow(charT c, char dfault) const { return do_narrow(c, dfault); }
+    const charT* narrow(const charT* low, const charT* high, char dfault, char* to) const { return do_narrow(low, high, dfault, to); }
+    static locale::id id;
+protected:
+    virtual ~ctype() {}
+    virtual bool do_is(mask m, charT c) const { return (__wclassify(static_cast<wint_t>(c)) & m) != 0; }
+    virtual const charT* do_is(const charT* low, const charT* high, mask* vec) const
+    {
+        for (; low < high; ++low, ++vec) *vec = __wclassify(static_cast<wint_t>(*low));
+        return high;
+    }
+    virtual const charT* do_scan_is(mask m, const charT* low, const charT* high) const { while (low < high && !do_is(m, *low)) ++low; return low; }
+    virtual const charT* do_scan_not(mask m, const charT* low, const charT* high) const { while (low < high && do_is(m, *low)) ++low; return low; }
+    virtual charT do_toupper(charT c) const { return static_cast<charT>(towupper(static_cast<wint_t>(c))); }
+    virtual const charT* do_toupper(charT* low, const charT* high) const { for (; low < high; ++low) *low = do_toupper(*low); return high; }
+    virtual charT do_tolower(charT c) const { return static_cast<charT>(towlower(static_cast<wint_t>(c))); }
+    virtual const charT* do_tolower(charT* low, const charT* high) const { for (; low < high; ++low) *low = do_tolower(*low); return high; }
+    virtual charT do_widen(char c) const { return static_cast<charT>(static_cast<unsigned char>(c)); }
+    virtual const char* do_widen(const char* low, const char* high, charT* to) const { for (; low < high; ++low, ++to) *to = do_widen(*low); return high; }
+    virtual char do_narrow(charT c, char dfault) const { return static_cast<unsigned long>(c) < 256 ? static_cast<char>(c) : dfault; }
+    virtual const charT* do_narrow(const charT* low, const charT* high, char dfault, char* to) const { for (; low < high; ++low, ++to) *to = do_narrow(*low, dfault); return high; }
+};
+template <class charT> locale::id ctype<charT>::id;
+
+// 22.2.1.3: ctype<char>, over a table of masks (the classic one by default)
+template <>
+class ctype<char> : public locale::facet, public ctype_base, public __facet_id<0> {
+public:
+    typedef char char_type;
+    static const size_t table_size = 256;
+    explicit ctype(const mask* tab = 0, bool del = false, size_t refs = 0) : locale::facet(refs), m_table(tab ? tab : classic_table()), m_delete(tab && del) {}
+    bool        is(mask m, char c) const { return (m_table[static_cast<unsigned char>(c)] & m) != 0; }
+    const mask* __table() const { return m_table; }   // the library's: what is() reads, for the streams' scans
+    const char* is(const char* low, const char* high, mask* vec) const
+    {
+        for (; low < high; ++low, ++vec) *vec = m_table[static_cast<unsigned char>(*low)];
+        return high;
+    }
+    const char* scan_is(mask m, const char* low, const char* high) const { while (low < high && !is(m, *low)) ++low; return low; }
+    const char* scan_not(mask m, const char* low, const char* high) const { while (low < high && is(m, *low)) ++low; return low; }
+    char        toupper(char c) const { return do_toupper(c); }
+    const char* toupper(char* low, const char* high) const { return do_toupper(low, high); }
+    char        tolower(char c) const { return do_tolower(c); }
+    const char* tolower(char* low, const char* high) const { return do_tolower(low, high); }
+    char        widen(char c) const { return do_widen(c); }
+    const char* widen(const char* low, const char* high, char* to) const { return do_widen(low, high, to); }
+    char        narrow(char c, char dfault) const { return do_narrow(c, dfault); }
+    const char* narrow(const char* low, const char* high, char dfault, char* to) const { return do_narrow(low, high, dfault, to); }
+    // filled once, by the first thread to ask (a static local's initialisation is thread-safe)
+    static const mask* classic_table() throw()
+    {
+        static const mask* const table = __fill_classic();
+        return table;
+    }
+    static const mask* __fill_classic()
+    {
+        static mask table[256];
+        for (int c = 0; c < 256; ++c) table[c] = __classify(c);
+        return table;
+    }
+protected:
+    virtual ~ctype() { if (m_delete) delete[] m_table; }
+    const mask* table() const throw() { return m_table; }
+    virtual char do_toupper(char c) const { return static_cast<char>(::toupper(static_cast<unsigned char>(c))); }
+    virtual const char* do_toupper(char* low, const char* high) const { for (; low < high; ++low) *low = do_toupper(*low); return high; }
+    virtual char do_tolower(char c) const { return static_cast<char>(::tolower(static_cast<unsigned char>(c))); }
+    virtual const char* do_tolower(char* low, const char* high) const { for (; low < high; ++low) *low = do_tolower(*low); return high; }
+    virtual char do_widen(char c) const { return c; }
+    virtual const char* do_widen(const char* low, const char* high, char* to) const { for (; low < high; ++low, ++to) *to = *low; return high; }
+    virtual char do_narrow(char c, char) const { return c; }
+    virtual const char* do_narrow(const char* low, const char* high, char, char* to) const { for (; low < high; ++low, ++to) *to = *low; return high; }
+private:
+    const mask* m_table;
+    bool        m_delete;
+};
+
+// 22.2.3.1: the punctuation of numbers; the classic locale's ('.', no grouping, "true" and "false")
+template <class charT>
+class numpunct : public locale::facet {
+public:
+    typedef charT              char_type;
+    typedef basic_string<charT> string_type;
+    explicit numpunct(size_t refs = 0) : locale::facet(refs) {}
+    char_type   decimal_point() const { return do_decimal_point(); }
+    char_type   thousands_sep() const { return do_thousands_sep(); }
+    string      grouping() const { return do_grouping(); }
+    string_type truename() const { return do_truename(); }
+    string_type falsename() const { return do_falsename(); }
+    static locale::id id;
+protected:
+    virtual ~numpunct() {}
+    virtual char_type   do_decimal_point() const { return static_cast<charT>('.'); }
+    virtual char_type   do_thousands_sep() const { return static_cast<charT>(','); }
+    virtual string      do_grouping() const { return string(); }
+    virtual string_type do_truename() const { const char* s = "true"; return string_type(s, s + 4); }
+    virtual string_type do_falsename() const { const char* s = "false"; return string_type(s, s + 5); }
+};
+template <class charT> locale::id numpunct<charT>::id;
+
+// 22.2.4.1: string collation, by the characters' values in the classic locale
+template <class charT>
+class collate : public locale::facet {
+public:
+    typedef charT               char_type;
+    typedef basic_string<charT> string_type;
+    explicit collate(size_t refs = 0) : locale::facet(refs) {}
+    int         compare(const charT* low1, const charT* high1, const charT* low2, const charT* high2) const { return do_compare(low1, high1, low2, high2); }
+    string_type transform(const charT* low, const charT* high) const { return do_transform(low, high); }
+    long        hash(const charT* low, const charT* high) const { return do_hash(low, high); }
+    static locale::id id;
+protected:
+    virtual ~collate() {}
+    virtual int do_compare(const charT* low1, const charT* high1, const charT* low2, const charT* high2) const
+    {
+        for (; low1 < high1 && low2 < high2; ++low1, ++low2) {
+            if (char_traits<charT>::lt(*low1, *low2)) return -1;
+            if (char_traits<charT>::lt(*low2, *low1)) return 1;
+        }
+        return low2 < high2 ? -1 : low1 < high1 ? 1 : 0;
+    }
+    virtual string_type do_transform(const charT* low, const charT* high) const { return string_type(low, high); }
+    virtual long do_hash(const charT* low, const charT* high) const
+    {
+        unsigned long h = 0;
+        for (; low < high; ++low) h = (h << 5) + h + static_cast<unsigned long>(*low);
+        return static_cast<long>(h);
+    }
+};
+template <class charT> locale::id collate<charT>::id;
+
+// the classic locale: the facets above for char and wchar_t, owned by the library (refs 1: never deleted), in an imp
+// that keeps a reference of its own (never deleted either); made once, by the first thread to ask
+inline locale::__imp* locale::__make_classic()
+{
+    __imp* imp = __new_imp("C");
+    ++imp->refs;
+    __install(imp, new std::ctype<char>(0, false, 1), std::ctype<char>::id.__index());
+    __install(imp, new std::ctype<wchar_t>(1), std::ctype<wchar_t>::id.__index());
+    __install(imp, new numpunct<char>(1), numpunct<char>::id.__index());
+    __install(imp, new numpunct<wchar_t>(1), numpunct<wchar_t>::id.__index());
+    __install(imp, new std::collate<char>(1), std::collate<char>::id.__index());
+    __install(imp, new std::collate<wchar_t>(1), std::collate<wchar_t>::id.__index());
+    return imp;
+}
+inline locale::__imp* locale::__classic_imp()
+{
+    static __imp* const imp = __make_classic();
+    return imp;
+}
+
+inline const locale& locale::classic()
+{
+    static const locale* const c = new locale(__classic_ref());
+    return *c;
+}
+
+// the classic locale's ctype facet, looked up once (a stream made with the classic locale takes it from here)
+template <class charT> const ctype<charT>* __classic_ctype()
+{
+    static const ctype<charT>* const p = &use_facet<ctype<charT> >(locale::classic());
+    return p;
+}
+
+// the named locales: "C" and "" (the environment's, which is "C" here) are the classic locale; others are refused
+inline locale::locale(const char* name) : m_imp(0)
+{
+    if (!name) throw runtime_error("locale: null name");
+    if (strcmp(name, "C") != 0 && name[0] != 0) throw runtime_error("bad locale name");
+    m_imp = __classic_ref();
+}
+
+// the facets of the categories cats from one (or from the locale named), the rest from other
+inline void locale::__take(__imp* to, const __imp* from, category cats)
+{
+    if (cats & ctype) {
+        __install(to, from->facets[std::ctype<char>::id.__index()], std::ctype<char>::id.__index());
+        __install(to, from->facets[std::ctype<wchar_t>::id.__index()], std::ctype<wchar_t>::id.__index());
+    }
+    if (cats & numeric) {
+        __install(to, from->facets[numpunct<char>::id.__index()], numpunct<char>::id.__index());
+        __install(to, from->facets[numpunct<wchar_t>::id.__index()], numpunct<wchar_t>::id.__index());
+    }
+    if (cats & collate) {
+        __install(to, from->facets[std::collate<char>::id.__index()], std::collate<char>::id.__index());
+        __install(to, from->facets[std::collate<wchar_t>::id.__index()], std::collate<wchar_t>::id.__index());
+    }
+}
+
+inline locale::locale(const locale& other, const char* name, category cats) : m_imp(0)
+{
+    locale named(name);
+    m_imp = __copy(other.m_imp);
+    __take(m_imp, named.m_imp, cats);
+    m_imp->name = cats == none || other.m_imp->name == named.m_imp->name ? other.m_imp->name : string("*");
+}
+
+inline locale::locale(const locale& other, const locale& one, category cats) : m_imp(__copy(other.m_imp))
+{
+    __take(m_imp, one.m_imp, cats);
+    m_imp->name = cats == none || other.m_imp->name == one.m_imp->name ? other.m_imp->name : string("*");
+}
+
+// the new global imp gets the holder's reference, which is never given back (nor is the old one's): a thread making
+// a locale may have read the old pointer and not yet counted its reference
+inline locale locale::global(const locale& loc)
+{
+    __imp*& g = __global_imp();
+    locale old(g);
+    cppparse_interlocked_increment(&old.m_imp->refs);
+    cppparse_interlocked_increment(&loc.m_imp->refs);
+    g = loc.m_imp;
+    return old;
+}
+
+template <class charT, class traits, class Allocator>
+bool locale::operator()(const basic_string<charT, traits, Allocator>& a, const basic_string<charT, traits, Allocator>& b) const
+{
+    return use_facet<std::collate<charT> >(*this).compare(a.data(), a.data() + a.size(), b.data(), b.data() + b.size()) < 0;
+}
+inline bool locale::operator()(const string& a, const string& b) const
+{
+    return use_facet<std::collate<char> >(*this).compare(a.data(), a.data() + a.size(), b.data(), b.data() + b.size()) < 0;
+}
+inline bool locale::operator()(const wstring& a, const wstring& b) const
+{
+    return use_facet<std::collate<wchar_t> >(*this).compare(a.data(), a.data() + a.size(), b.data(), b.data() + b.size()) < 0;
+}
+
+}
+
+#endif

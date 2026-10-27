@@ -138,6 +138,7 @@ private:
     int  mpNull(const sema::Type* t, int line);
     int  mpAddressOf(sema::Symbol* m, const sema::Type* t, int line);
     int  mpConvert(int v, const sema::Type* from, const sema::Type* to, int line);
+    int  mpRemap(int v, const sema::Type* fu, const sema::Type* tu, sema::Symbol* fc, sema::Symbol* tc, int off, int line);   // into a class not sharing the vbptr
     int  mpCompare(int a, const sema::Type* ta, int b, const sema::Type* tb, bool ne, int line);
     int  mpToBool(int v, const sema::Type* t, int line);
     int  mpApply(cxx::Expr* e, int* code);
@@ -242,6 +243,18 @@ private:
     void storeVptr(sema::Symbol* cls, int objAddr, int line);
     int  vfptrThis(sema::Symbol* fn, int thisPtr, int line);
     static std::string vtableName(const sema::Symbol* cls, size_t t);
+    // cl's names of a class's vftables (MSVC 2012's scheme, as clang's MicrosoftVTableContext computes it): each vfptr's
+    // path from the class down to the class that introduced it, and the bases that tell it from another of the class's
+    struct VfPath {
+        std::vector<sema::Symbol*> chain;     // the subobjects from the class down to the one whose own vfptr it is
+        std::vector<bool>          virt;      // per step of chain: a virtual base
+        std::vector<sema::Symbol*> vbases;    // the virtual bases on the way
+        std::vector<sema::Symbol*> mangled;   // the bases that name the table apart (??_7D@@6BM@@@)
+        sema::Symbol*              next;      // the base added to mangled when the name would be another's
+        VfPath() : next(0) {}
+    };
+    void vfptrPaths(sema::Symbol* cls, std::vector<VfPath>& out, int depth) const;
+    int  vfPathOffset(const sema::Symbol* cls, const VfPath& p) const;   // the vfptr's offset in a complete cls
     // MSVC's vector deleting destructor of a virtual destructor (what its vtable slot holds): with bit 1 of its
     // flags clear it destroys the complete object, with bit 1 set the array whose count is in the cookie before
     // it, and frees it when bit 0 is set; made on first use, generated after the other functions
@@ -261,7 +274,7 @@ private:
     bool   terminated() const;
     void   br(int target, int line);
     void   condbr(int cond, int t, int f, int line);
-    int    constant(long v, const sema::Type* t, int line);
+    int    constant(long long v, const sema::Type* t, int line);   // a value outside the 32-bit immediates of a 64-bit type: bitConstant
     int    thisTemp(int line);
     int    addressOf(const LValue& lv, int line);
     int    load(const LValue& lv, const sema::Type* t, int line);
@@ -275,6 +288,7 @@ private:
     // expressions and statements
     int    value(cxx::Expr* e);
     LValue lvalue(cxx::Expr* e);
+    LValue builtinAssign(cxx::Expr* e, int& result);   // the right operand of = first, the left of op= first (cl)
     void   condition(cxx::Expr* e, int trueBlock, int falseBlock);
     int    conditional(cxx::Expr* e, bool byAddr);
     int    call(cxx::Expr* e, int sretAddr = -1);
@@ -284,6 +298,11 @@ private:
     int    conversionCall(cxx::Expr* e, int line);   // a cast through the conversion function e->semaSym, converted on to the cast's type
     int    incremented(int cur, const sema::Type* ot, bool up, int line);   // cur + 1 or cur - 1 in cur's type, as ++/-- compute it
     int    callFunction(sema::Symbol* fn, int thisPtr, int sretAddr, const std::vector<cxx::Expr*>& args, size_t firstArg, bool virtualCall, int line);
+    // cl's argument order: phase 1 those that call or have side effects, right to left; phase 2 the reads, last
+    void   callArguments(sema::Symbol* fn, const sema::Type* ft, const std::vector<cxx::Expr*>& args, size_t firstArg, int phase, int line, std::vector<IrOperand>& out);
+    bool   readsOnly(cxx::Expr* a, const sema::Type* pt) const;
+    bool   pureExpr(cxx::Expr* e, int depth) const;
+    int    emitCall(sema::Symbol* fn, int thisPtr, int sretAddr, const std::vector<IrOperand>& argOps, bool virtualCall, int vbFlag, int line);
     int    construct(sema::Symbol* ctor, int objAddr, const std::vector<cxx::Expr*>& args, size_t firstArg, int line);
     int    argument(cxx::Expr* a, const sema::Type* paramType, int line);
     void   stmt(cxx::Stmt* s);

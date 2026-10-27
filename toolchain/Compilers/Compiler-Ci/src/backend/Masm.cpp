@@ -288,7 +288,13 @@ void MasmSpelling::prologue(int frameSize) {
     o_ += "  mov rbp, rsp\n";
 
     o_ += "  .SETFRAME rbp, 0\n";
-    if (frameSize > 0) {
+    if (frameSize >= kStackProbeFrom) {
+        // a page or more: probed, as cl does (Spelling.h)
+        o_ += "  mov eax, "; appendNum(o_, frameSize); o_ += '\n';
+        o_ += "  call "; o_ += render(lbl("__chkstk")).text; o_ += '\n';
+        o_ += "  sub rsp, rax\n";
+        o_ += "  .ALLOCSTACK "; appendNum(o_, frameSize); o_ += '\n';
+    } else if (frameSize > 0) {
         o_ += "  sub rsp, "; appendNum(o_, frameSize); o_ += '\n';
         o_ += "  .ALLOCSTACK "; appendNum(o_, frameSize); o_ += '\n';
     }
@@ -484,7 +490,11 @@ void MasmSpelling::dataInt(int size, long long v) {
     items(dir, { std::to_string(v) });
 }
 
+// A symbol's address in data is a reference like one in code: an object or function this file only
+// declares, named in an initialiser and nowhere else (`static char *const t[] = { &foo };`), gets its
+// EXTERN, or masm finds it not defined.
 void MasmSpelling::dataSym(const std::string &sym, long long off) {
+    referenced_.insert(sym);
     std::string t = mangle(sym);
     if (off > 0) t += "+" + std::to_string(off);
     else if (off < 0) t += "-" + std::to_string(-off);

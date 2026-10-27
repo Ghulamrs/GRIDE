@@ -58,6 +58,7 @@ namespace Gride
         CheckBox^ chkJumpToFirstError;
         CheckBox^ chkAskNative;
         CheckBox^ chkRunInIde;
+        NumericUpDown^ numBuildJobs;
         TextBox^ txtRideRoot;
         // editor
         Label^ lblFont;
@@ -104,6 +105,8 @@ namespace Gride
         TextBox^ txtSharedLibraries;
         ComboBox^ cboDefaultCompiler;
         ComboBox^ cboC6747Debugger;
+        ComboBox^ cboWindowsDebugger;
+        ComboBox^ cboWindowsRuntime;
         CheckBox^ chkCcsEnabled;
         TextBox^ txtCcsRoot;
         // compiler options (the store a new project starts with)
@@ -127,14 +130,24 @@ namespace Gride
             chkJumpToFirstError = Ui::AddCheck(p, "After a failed build, put the caret on the first error (as White does)", 340, 16);
             chkAskNative = Ui::AddCheck(p, "Offer the vendor's assembler and linker when the project's own fail", 340, 44);
             chkRunInIde = Ui::AddCheck(p, "Run programs in the Output pane (off: a console window)", 340, 72);
-            Ui::AddLabel(p, "Toolchain installation (its root, or its bin):", 16, 84);
-            txtRideRoot = Ui::AddText(p, 16, 108, 560);
-            Button^ br = Ui::AddButton(p, "Browse...", 584, 106, 90);
+            Ui::AddLabel(p, "Files compiled at once:", 16, 102);
+            numBuildJobs = gcnew NumericUpDown();
+            numBuildJobs->Location = Point(160, 102);
+            numBuildJobs->Width = 60;
+            numBuildJobs->Minimum = Decimal(0);
+            numBuildJobs->Maximum = Decimal(64);
+            p->Controls->Add(numBuildJobs);
+            Label^ jobs = Ui::AddLabel(p, String::Format("0: one per processor ({0} here), 1: one file at a time;\nthe Output pane and the Error List keep the project's order",
+                                                         System::Environment::ProcessorCount), 230, 96);
+            jobs->ForeColor = Color::DimGray;
+            Ui::AddLabel(p, "Toolchain installation (its root, or its bin):", 16, 140);
+            txtRideRoot = Ui::AddText(p, 16, 164, 560);
+            Button^ br = Ui::AddButton(p, "Browse...", 584, 162, 90);
             br->Click += gcnew EventHandler(this, &OptionsDialog::OnBrowseRideRoot);
             Label^ h = Ui::AddLabel(p, "A tool named without a path is looked for in this order: its environment variable ($C90, $VM6747 ...), beside GRIDE.exe,\n"
-                                       "the toolchain's installation (this folder, else the default roots toolchain.json names - a RIDE installation among them - with one of its markers in their bin), then PATH.", 16, 140);
+                                       "the toolchain's installation (this folder, else the default roots toolchain.json names - a RIDE installation among them - with one of its markers in their bin), then PATH.", 16, 196);
             h->ForeColor = Color::DimGray;
-            Label^ l = Ui::AddLabel(p, String::Format("Settings file: {0}", IdeSettings::SettingsPath()), 16, 190);
+            Label^ l = Ui::AddLabel(p, String::Format("Settings file: {0}", IdeSettings::SettingsPath()), 16, 246);
             l->ForeColor = Color::DimGray;
         }
 
@@ -432,6 +445,26 @@ namespace Gride
             y += 30;
             Note(p, "auto: the simulator on this build's .out when it has a line table, else the emulator on the assembly (White's rule). "
                     "GRIDE_DEBUG_SIM6747=1 / GRIDE_DEBUG_VM6747=1 in the environment at start win.", y, 30); y += 38;
+            Ui::AddLabel(p, "Windows debugger:", 16, y);
+            cboWindowsDebugger = gcnew ComboBox();
+            cboWindowsDebugger->DropDownStyle = ComboBoxStyle::DropDownList;
+            cboWindowsDebugger->Location = Point(220, y);
+            cboWindowsDebugger->Width = 120;
+            cboWindowsDebugger->Items->AddRange(gcnew array<Object^>{ "auto", "gride-dbg", "cdb" });
+            p->Controls->Add(cboWindowsDebugger);
+            Ui::AddLabel(p, "Windows C runtime:", 388, y);
+            cboWindowsRuntime = gcnew ComboBox();
+            cboWindowsRuntime->DropDownStyle = ComboBoxStyle::DropDownList;
+            cboWindowsRuntime->Location = Point(512, y);
+            cboWindowsRuntime->Width = 220;
+            cboWindowsRuntime->Items->AddRange(gcnew array<Object^>{ "automatic", "GRIDE's runtime", "Microsoft's CRT" });   // settings.json's auto, grt, msvc
+            p->Controls->Add(cboWindowsRuntime);
+            y += 30;
+            Note(p, "Debugger - auto: gride-dbg, GRIDE's own debugger, when it is beside GRIDE, else cdb (Debugging Tools for Windows), else lldb; "
+                    "either named stands in for the other where that one is not there, and the Output pane says which.", y, 30); y += 38;
+            Note(p, "C runtime - GRIDE's: lib\\grtstart, grtcompat, grtcxx, grtc and grtwin.lib and GRIDE's own kernel32.lib, so a program needs no Visual Studio "
+                    "and no Windows SDK to link, and kernel32.dll alone to run. Microsoft's: Visual Studio's libcmt and the SDK's UCRT, found through LIB. "
+                    "Automatic: Microsoft's only where Visual Studio is found and the build has cl's objects. GRIDE_WINDOWS_RUNTIME=grt / msvc at start wins.", y, 44); y += 52;
 
             Section(p, "Code Composer Studio 7.4 / 5.5 projects (settings.json ccs)", y); y += 24;
             chkCcsEnabled = Ui::AddCheck(p, "Open CCS projects (File > Open Project, File > Import CCS Project)", 16, y); y += 28;
@@ -496,6 +529,7 @@ namespace Gride
             chkJumpToFirstError->Checked = work->JumpToFirstError;
             chkAskNative->Checked = work->AskNativeTools;
             chkRunInIde->Checked = work->RunInIde;
+            numBuildJobs->Value = Decimal(Math::Min(64, Math::Max(0, work->BuildJobs)));
             txtRideRoot->Text = work->RideRoot;
             fontName = work->EditorFontName;
             fontSize = work->EditorFontSize;
@@ -522,6 +556,9 @@ namespace Gride
             cboDefaultCompiler->SelectedItem = work->DefaultCompiler;
             if (cboDefaultCompiler->SelectedIndex < 0 && cboDefaultCompiler->Items->Count > 0) cboDefaultCompiler->SelectedIndex = 0;
             cboC6747Debugger->SelectedIndex = Math::Max(0, Array::IndexOf(DebuggerIds(), work->C6747Debugger));
+            cboWindowsDebugger->SelectedIndex = Math::Max(0, cboWindowsDebugger->Items->IndexOf(IdeSettings::Choice(work->WindowsDebugger, gcnew array<String^>{ "gride-dbg", "cdb" })));
+            String^ crt = IdeSettings::Choice(work->WindowsRuntime, gcnew array<String^>{ "grt", "msvc" });
+            cboWindowsRuntime->SelectedIndex = crt == "grt" ? 1 : crt == "msvc" ? 2 : 0;
             chkCcsEnabled->Checked = work->CcsEnabled;
             txtCcsRoot->Text = work->CcsRoot;
         }
@@ -582,6 +619,7 @@ namespace Gride
             work->JumpToFirstError = chkJumpToFirstError->Checked;
             work->AskNativeTools = chkAskNative->Checked;
             work->RunInIde = chkRunInIde->Checked;
+            work->BuildJobs = Decimal::ToInt32(numBuildJobs->Value);
             work->RideRoot = txtRideRoot->Text->Trim();
             work->EditorFontName = fontName;
             work->EditorFontSize = fontSize;
@@ -603,6 +641,8 @@ namespace Gride
             work->SharedLibraries = SplitLines(txtSharedLibraries->Text);
             work->DefaultCompiler = cboDefaultCompiler->SelectedItem == nullptr ? ToolWords::Auto : safe_cast<String^>(cboDefaultCompiler->SelectedItem);
             work->C6747Debugger = DebuggerIds()[Math::Max(0, cboC6747Debugger->SelectedIndex)];
+            work->WindowsDebugger = cboWindowsDebugger->SelectedItem == nullptr ? Str("auto") : safe_cast<String^>(cboWindowsDebugger->SelectedItem);
+            work->WindowsRuntime = cboWindowsRuntime->SelectedIndex == 1 ? "grt" : cboWindowsRuntime->SelectedIndex == 2 ? "msvc" : "auto";
             work->CcsEnabled = chkCcsEnabled->Checked;
             work->CcsRoot = txtCcsRoot->Text->Trim();
             optionsEditor->Commit();

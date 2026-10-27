@@ -41,8 +41,10 @@ void Calendar::breakDown(time_t t, tm *out)
     out->tm_min = (int)(seconds / 60 % 60);
     out->tm_sec = (int)(seconds % 60);
     out->tm_isdst = 0;
+#if !defined(_WIN32)   // Windows' struct tm (grt, toolchain\Windows\RT) has neither
     out->tm_gmtoff = 0;
     out->tm_zone = "UTC";
+#endif
 }
 
 time_t Calendar::compose(tm *fields)
@@ -57,10 +59,14 @@ time_t Calendar::compose(tm *fields)
     long year = 1900L + fields->tm_year + floorDiv(fields->tm_mon, 12);
     int month = (int)floorMod(fields->tm_mon, 12);
     long total = daysFromEpoch(year, month, 1) + days;
+#if !defined(_WIN32)   // Windows' time_t (grt) is 64 bits, and _mktime64 says which range it takes
     // 2^31 seconds is 24855 days and a part: the sum is formed in 64 bits and a 32-bit time_t must hold it.
     if (total < -24856 || total > 24855) return (time_t)-1;
+#endif
     long long t = (long long)total * 86400 + hours * 3600 + minutes * 60 + seconds;
+#if !defined(_WIN32)
     if (t < -2147483647LL - 1 || t > 2147483647LL) return (time_t)-1;
+#endif
     breakDown((time_t)t, fields);
     return (time_t)t;
 }

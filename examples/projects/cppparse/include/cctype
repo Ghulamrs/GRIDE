@@ -1,0 +1,26 @@
+// cctype - cppparse's C++98 library: declarations of the C runtime's character classification.
+#ifndef CPPPARSE_CCTYPE
+#define CPPPARSE_CCTYPE
+
+extern "C" {
+    int isalpha(int c);
+    int isdigit(int c);
+    int isalnum(int c);
+    int isspace(int c);
+    int isupper(int c);
+    int islower(int c);
+    int isxdigit(int c);
+    int ispunct(int c);
+    int isprint(int c);
+    int iscntrl(int c);
+    int isgraph(int c);
+    int toupper(int c);
+    int tolower(int c);
+}
+
+namespace std {
+    using ::isalpha; using ::isdigit; using ::isalnum; using ::isspace; using ::isupper; using ::islower;
+    using ::isxdigit; using ::ispunct; using ::isprint; using ::iscntrl; using ::isgraph; using ::toupper; using ::tolower;
+}
+
+#endif

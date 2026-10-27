@@ -1,0 +1,176 @@
+// ios - cppparse's C++98 library: basic_ios (27.4.4), a stream's state, its buffer, its tied stream and its fill
+// character, and the ios_base manipulators (27.4.5). ios and wios are typedefs of <ostream>, which this header
+// includes last: basic_ios<char> names basic_ostream<char>, which must be defined before the typedef instantiates it.
+#ifndef CPPPARSE_IOS
+#define CPPPARSE_IOS
+
+#include <__char_traits>
+#include <__ios_base>
+#include <streambuf>
+
+namespace std {
+
+template <class charT, class traits> class basic_ostream;
+template <class charT, class traits> class ostreambuf_iterator;
+template <class charT, class OutputIterator> struct __num_put_id;
+
+template <class charT, class traits = char_traits<charT> >
+class basic_ios : public ios_base {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+
+    operator void*() const { return fail() ? 0 : const_cast<basic_ios*>(this); }
+    bool operator!() const { return fail(); }
+    iostate rdstate() const { return m_state; }
+    void    clear(iostate state = goodbit)
+    {
+        m_state = state;
+        if (!m_sb) m_state |= badbit;
+        if (m_state & m_except) __throw_failure(m_state & m_except);
+    }
+    void    setstate(iostate state) { clear(m_state | state); }
+    bool    good() const { return m_state == 0; }
+    bool    eof() const { return (m_state & eofbit) != 0; }
+    bool    fail() const { return (m_state & (failbit | badbit)) != 0; }
+    bool    bad() const { return (m_state & badbit) != 0; }
+    iostate exceptions() const { return m_except; }
+    void    exceptions(iostate except) { m_except = except; clear(m_state); }
+
+    explicit basic_ios(basic_streambuf<charT, traits>* sb) : m_plain(true), m_classic(true), m_numput(0) { init(sb); }
+    virtual ~basic_ios() {}
+
+    basic_ostream<charT, traits>*   tie() const { return m_tie; }
+    basic_ostream<charT, traits>*   tie(basic_ostream<charT, traits>* o) { basic_ostream<charT, traits>* old = m_tie; m_tie = o; return old; }
+    basic_streambuf<charT, traits>* rdbuf() const { return m_sb; }
+    basic_streambuf<charT, traits>* rdbuf(basic_streambuf<charT, traits>* sb) { basic_streambuf<charT, traits>* old = m_sb; m_sb = sb; clear(); return old; }
+    basic_ios& copyfmt(const basic_ios& o)
+    {
+        if (this == &o) return *this;
+        __copy_base(o);
+        m_tie = o.m_tie;
+        m_fill = o.m_fill;
+        __cache();
+        __call(copyfmt_event);
+        exceptions(o.m_except);
+        return *this;
+    }
+    char_type fill() const { return m_fill; }
+    char_type fill(char_type c) { char_type old = m_fill; m_fill = c; return old; }
+    locale imbue(const locale& loc)
+    {
+        locale old = ios_base::imbue(loc);
+        __cache();
+        if (m_sb) m_sb->pubimbue(loc);
+        return old;
+    }
+    char      narrow(char_type c, char dfault) const { return m_ctype->narrow(c, dfault); }
+    char_type widen(char c) const { return m_ctype->widen(c); }
+
+    // the locale's numeric punctuation, read when the locale is set (what the formatting of numbers uses)
+    char_type     __decimal_point() const { return m_decimal; }
+    char_type     __thousands_sep() const { return m_thousands; }
+    const string& __grouping() const { return m_grouping; }
+    const ctype<charT>& __ctype() const { return *m_ctype; }
+
+protected:
+    basic_ios() : m_state(badbit), m_except(goodbit), m_fill(), m_tie(0), m_sb(0), m_ctype(0), m_decimal(), m_thousands(), m_plain(true), m_classic(true), m_numput(0) {}
+    void init(basic_streambuf<charT, traits>* sb)
+    {
+        m_sb = sb;
+        m_tie = 0;
+        m_state = goodbit;              // not sb ? goodbit : badbit, an lvalue of the static members (which have no definition)
+        if (!sb) m_state = badbit;
+        m_except = goodbit;
+        m_flags = skipws | dec;
+        m_width = 0;
+        m_precision = 6;
+        m_fill = __cache() ? static_cast<charT>(' ') : widen(' ');   // the classic ctype widens ' ' to itself
+    }
+
+private:
+    basic_ios(const basic_ios&);
+    basic_ios& operator=(const basic_ios&);
+    // the facets the stream uses, taken from its locale; true for the classic locale, whose are known without asking
+    bool __cache()
+    {
+        if (m_loc.__classic()) {
+            m_classic = true;
+            m_numput = 0;
+            m_ctype = __classic_ctype<charT>();
+            m_decimal = static_cast<charT>('.');
+            m_thousands = static_cast<charT>(',');
+            if (!m_plain) m_grouping.clear();
+            m_plain = true;
+            return true;
+        }
+        m_classic = false;
+        m_numput = m_loc.__facet(__num_put_id<charT, ostreambuf_iterator<charT, traits> >::id.__index());
+        m_ctype = &use_facet<ctype<charT> >(m_loc);
+        const numpunct<charT>& np = use_facet<numpunct<charT> >(m_loc);
+        if (&np == &use_facet<numpunct<charT> >(locale::classic())) {
+            m_decimal = static_cast<charT>('.');
+            m_thousands = static_cast<charT>(',');
+            m_grouping.clear();
+            m_plain = true;
+            return false;
+        }
+        m_decimal = np.decimal_point();
+        m_thousands = np.thousands_sep();
+        m_grouping = np.grouping();
+        m_plain = m_grouping.empty() && m_decimal == static_cast<charT>('.');
+        return false;
+    }
+    static void __throw_failure(iostate s)
+    {
+        throw failure(s & badbit ? "ios_base::badbit set" : s & failbit ? "ios_base::failbit set" : "ios_base::eofbit set");
+    }
+
+protected:
+    // the state is read by the streams' fast paths directly (basic_ostream and basic_istream derive from this class)
+    iostate                         m_state;
+    iostate                         m_except;
+    char_type                       m_fill;
+    basic_ostream<charT, traits>*   m_tie;
+    basic_streambuf<charT, traits>* m_sb;
+    const ctype<charT>*             m_ctype;
+    char_type                       m_decimal;
+    char_type                       m_thousands;
+    string                          m_grouping;
+    bool                            m_plain;       // no grouping and '.' as the point: numbers are written as formatted
+    bool                            m_classic;     // the classic locale (its ctype widens a char to itself)
+    const locale::facet*            m_numput;      // the locale's own num_put; 0: it has the library's, whose work the stream does
+};
+
+// 27.4.5 the ios_base manipulators
+inline ios_base& boolalpha(ios_base& b) { b.setf(ios_base::boolalpha); return b; }
+inline ios_base& noboolalpha(ios_base& b) { b.unsetf(ios_base::boolalpha); return b; }
+inline ios_base& showbase(ios_base& b) { b.setf(ios_base::showbase); return b; }
+inline ios_base& noshowbase(ios_base& b) { b.unsetf(ios_base::showbase); return b; }
+inline ios_base& showpoint(ios_base& b) { b.setf(ios_base::showpoint); return b; }
+inline ios_base& noshowpoint(ios_base& b) { b.unsetf(ios_base::showpoint); return b; }
+inline ios_base& showpos(ios_base& b) { b.setf(ios_base::showpos); return b; }
+inline ios_base& noshowpos(ios_base& b) { b.unsetf(ios_base::showpos); return b; }
+inline ios_base& skipws(ios_base& b) { b.setf(ios_base::skipws); return b; }
+inline ios_base& noskipws(ios_base& b) { b.unsetf(ios_base::skipws); return b; }
+inline ios_base& uppercase(ios_base& b) { b.setf(ios_base::uppercase); return b; }
+inline ios_base& nouppercase(ios_base& b) { b.unsetf(ios_base::uppercase); return b; }
+inline ios_base& unitbuf(ios_base& b) { b.setf(ios_base::unitbuf); return b; }
+inline ios_base& nounitbuf(ios_base& b) { b.unsetf(ios_base::unitbuf); return b; }
+inline ios_base& internal(ios_base& b) { b.setf(ios_base::internal, ios_base::adjustfield); return b; }
+inline ios_base& left(ios_base& b) { b.setf(ios_base::left, ios_base::adjustfield); return b; }
+inline ios_base& right(ios_base& b) { b.setf(ios_base::right, ios_base::adjustfield); return b; }
+inline ios_base& dec(ios_base& b) { b.setf(ios_base::dec, ios_base::basefield); return b; }
+inline ios_base& hex(ios_base& b) { b.setf(ios_base::hex, ios_base::basefield); return b; }
+inline ios_base& oct(ios_base& b) { b.setf(ios_base::oct, ios_base::basefield); return b; }
+inline ios_base& fixed(ios_base& b) { b.setf(ios_base::fixed, ios_base::floatfield); return b; }
+inline ios_base& scientific(ios_base& b) { b.setf(ios_base::scientific, ios_base::floatfield); return b; }
+
+}
+
+#include <ostream>   // basic_ostream, then the typedefs ios and wios
+
+#endif

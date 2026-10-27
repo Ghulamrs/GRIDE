@@ -126,7 +126,13 @@ unsigned long long FloatText::scale(const FloatFormat &format, bool negative, Bi
     }
     // Overflow, or a subnormal result: 7.20.1.3/10 lets ERANGE say underflow whether or not the value was exact.
     unsigned long long magnitude = bits & ~format.signBit();
+#if defined(_WIN32)
+    // GRIDE's runtime for Windows: the Microsoft runtime's choice - ERANGE when the value overflowed or came to
+    // zero, not for a subnormal result
+    if (magnitude == 0 || magnitude == format.infinity(false)) range = true;
+#else
     if (magnitude < (1ull << format.fractionBits()) || magnitude == format.infinity(false)) range = true;
+#endif
     return bits;
 }
 

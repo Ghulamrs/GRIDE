@@ -1,0 +1,114 @@
+// iterator - cppparse's C++98 library: the insert iterators and the stream iterators (24.4.2, 24.5); the
+// categories, traits, reverse_iterator, advance and distance are in <__iterator>, which the containers include.
+#ifndef CPPPARSE_ITERATOR
+#define CPPPARSE_ITERATOR
+
+#include <__iterator>
+#include <istream>
+#include <ostream>
+
+namespace std {
+
+template <class Container>
+class back_insert_iterator {
+public:
+    typedef output_iterator_tag iterator_category;
+    typedef void value_type; typedef void difference_type; typedef void pointer; typedef void reference;
+    typedef Container container_type;
+    explicit back_insert_iterator(Container& c) : m_c(&c) {}
+    back_insert_iterator& operator=(const typename Container::value_type& v) { m_c->push_back(v); return *this; }
+    back_insert_iterator& operator*() { return *this; }
+    back_insert_iterator& operator++() { return *this; }
+    back_insert_iterator  operator++(int) { return *this; }
+private:
+    Container* m_c;
+};
+template <class Container> back_insert_iterator<Container> back_inserter(Container& c) { return back_insert_iterator<Container>(c); }
+
+template <class Container>
+class front_insert_iterator {
+public:
+    typedef output_iterator_tag iterator_category;
+    typedef void value_type; typedef void difference_type; typedef void pointer; typedef void reference;
+    typedef Container container_type;
+    explicit front_insert_iterator(Container& c) : m_c(&c) {}
+    front_insert_iterator& operator=(const typename Container::value_type& v) { m_c->push_front(v); return *this; }
+    front_insert_iterator& operator*() { return *this; }
+    front_insert_iterator& operator++() { return *this; }
+    front_insert_iterator  operator++(int) { return *this; }
+private:
+    Container* m_c;
+};
+template <class Container> front_insert_iterator<Container> front_inserter(Container& c) { return front_insert_iterator<Container>(c); }
+
+template <class Container>
+class insert_iterator {
+public:
+    typedef output_iterator_tag iterator_category;
+    typedef void value_type; typedef void difference_type; typedef void pointer; typedef void reference;
+    typedef Container container_type;
+    insert_iterator(Container& c, typename Container::iterator pos) : m_c(&c), m_pos(pos) {}
+    insert_iterator& operator=(const typename Container::value_type& v) { m_pos = m_c->insert(m_pos, v); ++m_pos; return *this; }
+    insert_iterator& operator*() { return *this; }
+    insert_iterator& operator++() { return *this; }
+    insert_iterator  operator++(int) { return *this; }
+private:
+    Container* m_c;
+    typename Container::iterator m_pos;
+};
+template <class Container> insert_iterator<Container> inserter(Container& c, typename Container::iterator pos) { return insert_iterator<Container>(c, pos); }
+
+// 24.5.2 ostream_iterator: each value assigned is written with <<, the delimiter after it
+template <class T, class charT = char, class traits = char_traits<charT> >
+class ostream_iterator {
+public:
+    typedef output_iterator_tag iterator_category;
+    typedef void value_type; typedef void difference_type; typedef void pointer; typedef void reference;
+    typedef charT char_type;
+    typedef traits traits_type;
+    typedef basic_ostream<charT, traits> ostream_type;
+    ostream_iterator(ostream_type& out) : m_out(&out), m_delim(0) {}
+    ostream_iterator(ostream_type& out, const charT* delim) : m_out(&out), m_delim(delim) {}
+    ostream_iterator& operator=(const T& v) { *m_out << v; if (m_delim) *m_out << m_delim; return *this; }
+    ostream_iterator& operator*() { return *this; }
+    ostream_iterator& operator++() { return *this; }
+    ostream_iterator& operator++(int) { return *this; }
+private:
+    ostream_type* m_out;
+    const charT*  m_delim;
+};
+
+// 24.5.1 istream_iterator: the values read with >>; the end iterator is one whose stream failed
+template <class T, class charT = char, class traits = char_traits<charT>, class Distance = ptrdiff_t>
+class istream_iterator {
+public:
+    typedef input_iterator_tag iterator_category;
+    typedef T         value_type;
+    typedef Distance  difference_type;
+    typedef const T*  pointer;
+    typedef const T&  reference;
+    typedef charT char_type;
+    typedef traits traits_type;
+    typedef basic_istream<charT, traits> istream_type;
+    istream_iterator() : m_in(0), m_value() {}
+    istream_iterator(istream_type& in) : m_in(&in), m_value() { read(); }
+    const T& operator*() const { return m_value; }
+    const T* operator->() const { return &m_value; }
+    istream_iterator& operator++() { read(); return *this; }
+    istream_iterator  operator++(int) { istream_iterator t(*this); read(); return t; }
+    bool equal(const istream_iterator& o) const { return m_in == o.m_in; }
+private:
+    void read() { if (m_in && !(*m_in >> m_value)) m_in = 0; }
+    istream_type* m_in;
+    T             m_value;
+};
+template <class T, class charT, class traits, class Distance>
+bool operator==(const istream_iterator<T, charT, traits, Distance>& a, const istream_iterator<T, charT, traits, Distance>& b) { return a.equal(b); }
+template <class T, class charT, class traits, class Distance>
+bool operator!=(const istream_iterator<T, charT, traits, Distance>& a, const istream_iterator<T, charT, traits, Distance>& b) { return !a.equal(b); }
+
+// istreambuf_iterator and ostreambuf_iterator (24.5.3, 24.5.4) are in <__num_facets>, which the streams include
+
+}
+
+#endif

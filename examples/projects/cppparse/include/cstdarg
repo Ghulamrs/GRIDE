@@ -1,0 +1,20 @@
+// cstdarg - cppparse's C++98 library: variable argument lists, with the semantics of MSVC's vadefs.h on x64.
+// A variadic function keeps its parameters in their 8-byte home slots, the caller's shadow space continued by
+// its stack arguments (cppparse's prologue spills rcx, rdx, r8 and r9 there; a double argument travels in the
+// integer register as well), so the unnamed arguments follow the last named parameter at 8-byte steps.
+// An argument wider than 8 bytes, or of a size that is not a power of two, is passed by address.
+#ifndef CPPPARSE_CSTDARG
+#define CPPPARSE_CSTDARG
+
+typedef char* va_list;
+
+#define va_start(ap, v) ((void)((ap) = (va_list)&(v) + 8))
+#define va_arg(ap, t) \
+    ((sizeof(t) > 8 || (sizeof(t) & (sizeof(t) - 1)) != 0) ? **(t**)(((ap) += 8) - 8) : *(t*)(((ap) += 8) - 8))
+#define va_end(ap) ((void)((ap) = (va_list)0))
+
+namespace std {
+    typedef ::va_list va_list;
+}
+
+#endif

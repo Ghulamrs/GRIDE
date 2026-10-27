@@ -1,0 +1,331 @@
+// complex - cppparse's C++98 library: complex numbers (26.2): the template, and its specialisations for float, double
+// and long double (26.2.3), whose conversions widen implicitly and narrow only explicitly. The values and the
+// transcendentals are computed in the type's own precision (the C runtime's float functions for float; long double
+// is double on this target).
+// The stream operators are templates, and plain functions for the char and wchar_t streams as well, which take the
+// streams derived from them (cppparse deduces no template argument from a derived class).
+#ifndef CPPPARSE_COMPLEX
+#define CPPPARSE_COMPLEX
+
+#include <cmath>
+#include <istream>
+#include <ostream>
+#include <sstream>
+
+namespace std {
+
+// the real functions the complex ones are made of, in the precision of T: float by the C runtime's float functions,
+// double and long double (the same type here) by the double ones, any other type through double
+template <class T> struct __complex_math {
+    static T sqrt(T x) { return static_cast<T>(::sqrt(static_cast<double>(x))); }
+    static T exp(T x) { return static_cast<T>(::exp(static_cast<double>(x))); }
+    static T log(T x) { return static_cast<T>(::log(static_cast<double>(x))); }
+    static T sin(T x) { return static_cast<T>(::sin(static_cast<double>(x))); }
+    static T cos(T x) { return static_cast<T>(::cos(static_cast<double>(x))); }
+    static T sinh(T x) { return static_cast<T>(::sinh(static_cast<double>(x))); }
+    static T cosh(T x) { return static_cast<T>(::cosh(static_cast<double>(x))); }
+    static T atan2(T y, T x) { return static_cast<T>(::atan2(static_cast<double>(y), static_cast<double>(x))); }
+    static T ln10() { return static_cast<T>(2.302585092994045684); }
+};
+template <> struct __complex_math<float> {
+    static float sqrt(float x) { return ::sqrtf(x); }
+    static float exp(float x) { return ::expf(x); }
+    static float log(float x) { return ::logf(x); }
+    static float sin(float x) { return ::sinf(x); }
+    static float cos(float x) { return ::cosf(x); }
+    static float sinh(float x) { return ::sinhf(x); }
+    static float cosh(float x) { return ::coshf(x); }
+    static float atan2(float y, float x) { return ::atan2f(y, x); }
+    static float ln10() { return 2.302585093f; }
+};
+
+// the arithmetic every complex type shares: the product, and Smith's division (the larger of the divisor's parts
+// divides first, so the squares do not overflow)
+template <class T> struct __complex_ops {
+    static void mul(T& re, T& im, const T& r, const T& i)
+    {
+        const T x = re * r - im * i;
+        im = re * i + im * r;
+        re = x;
+    }
+    static void div(T& re, T& im, const T& r, const T& i)
+    {
+        T x, y;
+        if ((r < 0 ? -r : r) >= (i < 0 ? -i : i)) {
+            const T q = i / r, d = r + i * q;
+            x = (re + im * q) / d;
+            y = (im - re * q) / d;
+        } else {
+            const T q = r / i, d = r * q + i;
+            x = (re * q + im) / d;
+            y = (im * q - re) / d;
+        }
+        re = x;
+        im = y;
+    }
+};
+
+template <class T>
+class complex {
+public:
+    typedef T value_type;
+    // complex(const T& re = T(), const T& im = T()), as three constructors
+    complex() : m_re(), m_im() {}
+    complex(const T& re) : m_re(re), m_im() {}
+    complex(const T& re, const T& im) : m_re(re), m_im(im) {}
+    template <class X> complex(const complex<X>& o) : m_re(static_cast<T>(o.real())), m_im(static_cast<T>(o.imag())) {}
+
+    T real() const { return m_re; }
+    T imag() const { return m_im; }
+
+    complex& operator=(const T& v) { m_re = v; m_im = T(); return *this; }
+    complex& operator+=(const T& v) { m_re += v; return *this; }
+    complex& operator-=(const T& v) { m_re -= v; return *this; }
+    complex& operator*=(const T& v) { m_re *= v; m_im *= v; return *this; }
+    complex& operator/=(const T& v) { m_re /= v; m_im /= v; return *this; }
+    template <class X> complex& operator=(const complex<X>& o) { m_re = static_cast<T>(o.real()); m_im = static_cast<T>(o.imag()); return *this; }
+    template <class X> complex& operator+=(const complex<X>& o) { m_re += static_cast<T>(o.real()); m_im += static_cast<T>(o.imag()); return *this; }
+    template <class X> complex& operator-=(const complex<X>& o) { m_re -= static_cast<T>(o.real()); m_im -= static_cast<T>(o.imag()); return *this; }
+    template <class X> complex& operator*=(const complex<X>& o) { __complex_ops<T>::mul(m_re, m_im, static_cast<T>(o.real()), static_cast<T>(o.imag())); return *this; }
+    template <class X> complex& operator/=(const complex<X>& o) { __complex_ops<T>::div(m_re, m_im, static_cast<T>(o.real()), static_cast<T>(o.imag())); return *this; }
+
+    complex& operator=(const complex& o) { m_re = o.m_re; m_im = o.m_im; return *this; }
+    complex& operator+=(const complex& o) { m_re += o.m_re; m_im += o.m_im; return *this; }
+    complex& operator-=(const complex& o) { m_re -= o.m_re; m_im -= o.m_im; return *this; }
+    complex& operator*=(const complex& o) { __complex_ops<T>::mul(m_re, m_im, o.m_re, o.m_im); return *this; }
+    complex& operator/=(const complex& o) { __complex_ops<T>::div(m_re, m_im, o.m_re, o.m_im); return *this; }
+
+private:
+    T m_re;
+    T m_im;
+};
+
+// 26.2.3: the specialisations. A conversion to a wider type is implicit, to a narrower one explicit. Workarounds for
+// cppparse, which inside an explicit specialisation takes the class's own name, injected or with its argument, for
+// the primary template's instantiation (as naming ctype<char> in its own base clause did): the narrowing constructors
+// are templates (a constructor defined after the class does not match it either, S116); assignment is the implicit
+// copy (a value of the type converts through its constructor, as operator=(float) of 26.2.3 would assign); the
+// compound assignments are functions outside the class, through real() and imag()
+template <>
+class complex<float> {
+public:
+    typedef float value_type;
+    // complex(float re = 0.0f, float im = 0.0f), as three constructors
+    complex() : m_re(0.0f), m_im(0.0f) {}
+    complex(float re) : m_re(re), m_im(0.0f) {}
+    complex(float re, float im) : m_re(re), m_im(im) {}
+    template <class X> explicit complex(const complex<X>& o) : m_re(static_cast<float>(o.real())), m_im(static_cast<float>(o.imag())) {}
+    float real() const { return m_re; }
+    float imag() const { return m_im; }
+private:
+    float m_re;
+    float m_im;
+};
+
+template <>
+class complex<double> {
+public:
+    typedef double value_type;
+    // complex(double re = 0.0, double im = 0.0), as three constructors
+    complex() : m_re(0.0), m_im(0.0) {}
+    complex(double re) : m_re(re), m_im(0.0) {}
+    complex(double re, double im) : m_re(re), m_im(im) {}
+    complex(const complex<float>& o) : m_re(o.real()), m_im(o.imag()) {}
+    template <class X> explicit complex(const complex<X>& o) : m_re(static_cast<double>(o.real())), m_im(static_cast<double>(o.imag())) {}
+    double real() const { return m_re; }
+    double imag() const { return m_im; }
+private:
+    double m_re;
+    double m_im;
+};
+
+template <>
+class complex<long double> {
+public:
+    typedef long double value_type;
+    // complex(long double re = 0.0L, long double im = 0.0L), as three constructors
+    complex() : m_re(0.0L), m_im(0.0L) {}
+    complex(long double re) : m_re(re), m_im(0.0L) {}
+    complex(long double re, long double im) : m_re(re), m_im(im) {}
+    complex(const complex<float>& o) : m_re(o.real()), m_im(o.imag()) {}
+    complex(const complex<double>& o) : m_re(o.real()), m_im(o.imag()) {}
+    long double real() const { return m_re; }
+    long double imag() const { return m_im; }
+private:
+    long double m_re;
+    long double m_im;
+};
+
+// the specialisations' compound assignments (of 26.2.3), by a value of the type or by any complex
+template <class T> struct __complex_assign {
+    static complex<T>& add(complex<T>& a, T re, T im) { a = complex<T>(a.real() + re, a.imag() + im); return a; }
+    static complex<T>& sub(complex<T>& a, T re, T im) { a = complex<T>(a.real() - re, a.imag() - im); return a; }
+    static complex<T>& mul(complex<T>& a, T re, T im) { T x = a.real(), y = a.imag(); __complex_ops<T>::mul(x, y, re, im); a = complex<T>(x, y); return a; }
+    static complex<T>& div(complex<T>& a, T re, T im) { T x = a.real(), y = a.imag(); __complex_ops<T>::div(x, y, re, im); a = complex<T>(x, y); return a; }
+};
+inline complex<float>& operator+=(complex<float>& a, float v) { return __complex_assign<float>::add(a, v, 0.0f); }
+inline complex<float>& operator-=(complex<float>& a, float v) { return __complex_assign<float>::sub(a, v, 0.0f); }
+inline complex<float>& operator*=(complex<float>& a, float v) { a = complex<float>(a.real() * v, a.imag() * v); return a; }
+inline complex<float>& operator/=(complex<float>& a, float v) { a = complex<float>(a.real() / v, a.imag() / v); return a; }
+template <class X> complex<float>& operator+=(complex<float>& a, const complex<X>& b) { return __complex_assign<float>::add(a, static_cast<float>(b.real()), static_cast<float>(b.imag())); }
+template <class X> complex<float>& operator-=(complex<float>& a, const complex<X>& b) { return __complex_assign<float>::sub(a, static_cast<float>(b.real()), static_cast<float>(b.imag())); }
+template <class X> complex<float>& operator*=(complex<float>& a, const complex<X>& b) { return __complex_assign<float>::mul(a, static_cast<float>(b.real()), static_cast<float>(b.imag())); }
+template <class X> complex<float>& operator/=(complex<float>& a, const complex<X>& b) { return __complex_assign<float>::div(a, static_cast<float>(b.real()), static_cast<float>(b.imag())); }
+inline complex<double>& operator+=(complex<double>& a, double v) { return __complex_assign<double>::add(a, v, 0.0); }
+inline complex<double>& operator-=(complex<double>& a, double v) { return __complex_assign<double>::sub(a, v, 0.0); }
+inline complex<double>& operator*=(complex<double>& a, double v) { a = complex<double>(a.real() * v, a.imag() * v); return a; }
+inline complex<double>& operator/=(complex<double>& a, double v) { a = complex<double>(a.real() / v, a.imag() / v); return a; }
+template <class X> complex<double>& operator+=(complex<double>& a, const complex<X>& b) { return __complex_assign<double>::add(a, static_cast<double>(b.real()), static_cast<double>(b.imag())); }
+template <class X> complex<double>& operator-=(complex<double>& a, const complex<X>& b) { return __complex_assign<double>::sub(a, static_cast<double>(b.real()), static_cast<double>(b.imag())); }
+template <class X> complex<double>& operator*=(complex<double>& a, const complex<X>& b) { return __complex_assign<double>::mul(a, static_cast<double>(b.real()), static_cast<double>(b.imag())); }
+template <class X> complex<double>& operator/=(complex<double>& a, const complex<X>& b) { return __complex_assign<double>::div(a, static_cast<double>(b.real()), static_cast<double>(b.imag())); }
+inline complex<long double>& operator+=(complex<long double>& a, long double v) { return __complex_assign<long double>::add(a, v, 0.0L); }
+inline complex<long double>& operator-=(complex<long double>& a, long double v) { return __complex_assign<long double>::sub(a, v, 0.0L); }
+inline complex<long double>& operator*=(complex<long double>& a, long double v) { a = complex<long double>(a.real() * v, a.imag() * v); return a; }
+inline complex<long double>& operator/=(complex<long double>& a, long double v) { a = complex<long double>(a.real() / v, a.imag() / v); return a; }
+template <class X> complex<long double>& operator+=(complex<long double>& a, const complex<X>& b) { return __complex_assign<long double>::add(a, static_cast<long double>(b.real()), static_cast<long double>(b.imag())); }
+template <class X> complex<long double>& operator-=(complex<long double>& a, const complex<X>& b) { return __complex_assign<long double>::sub(a, static_cast<long double>(b.real()), static_cast<long double>(b.imag())); }
+template <class X> complex<long double>& operator*=(complex<long double>& a, const complex<X>& b) { return __complex_assign<long double>::mul(a, static_cast<long double>(b.real()), static_cast<long double>(b.imag())); }
+template <class X> complex<long double>& operator/=(complex<long double>& a, const complex<X>& b) { return __complex_assign<long double>::div(a, static_cast<long double>(b.real()), static_cast<long double>(b.imag())); }
+// 26.2.6 operators
+template <class T> complex<T> operator+(const complex<T>& a, const complex<T>& b) { complex<T> r(a); r += b; return r; }
+template <class T> complex<T> operator+(const complex<T>& a, const T& b) { complex<T> r(a); r += b; return r; }
+template <class T> complex<T> operator+(const T& a, const complex<T>& b) { complex<T> r(b); r += a; return r; }
+template <class T> complex<T> operator-(const complex<T>& a, const complex<T>& b) { complex<T> r(a); r -= b; return r; }
+template <class T> complex<T> operator-(const complex<T>& a, const T& b) { complex<T> r(a); r -= b; return r; }
+template <class T> complex<T> operator-(const T& a, const complex<T>& b) { complex<T> r(a); r -= b; return r; }
+template <class T> complex<T> operator*(const complex<T>& a, const complex<T>& b) { complex<T> r(a); r *= b; return r; }
+template <class T> complex<T> operator*(const complex<T>& a, const T& b) { complex<T> r(a); r *= b; return r; }
+template <class T> complex<T> operator*(const T& a, const complex<T>& b) { complex<T> r(b); r *= a; return r; }
+template <class T> complex<T> operator/(const complex<T>& a, const complex<T>& b) { complex<T> r(a); r /= b; return r; }
+template <class T> complex<T> operator/(const complex<T>& a, const T& b) { complex<T> r(a); r /= b; return r; }
+template <class T> complex<T> operator/(const T& a, const complex<T>& b) { complex<T> r(a); r /= b; return r; }
+template <class T> complex<T> operator+(const complex<T>& a) { return a; }
+template <class T> complex<T> operator-(const complex<T>& a) { return complex<T>(-a.real(), -a.imag()); }
+template <class T> bool operator==(const complex<T>& a, const complex<T>& b) { return a.real() == b.real() && a.imag() == b.imag(); }
+template <class T> bool operator==(const complex<T>& a, const T& b) { return a.real() == b && a.imag() == T(); }
+template <class T> bool operator==(const T& a, const complex<T>& b) { return a == b.real() && T() == b.imag(); }
+template <class T> bool operator!=(const complex<T>& a, const complex<T>& b) { return !(a == b); }
+template <class T> bool operator!=(const complex<T>& a, const T& b) { return !(a == b); }
+template <class T> bool operator!=(const T& a, const complex<T>& b) { return !(a == b); }
+
+// "re", "(re)" or "(re,im)" (26.2.6/12)
+template <class T, class charT, class traits>
+basic_istream<charT, traits>& __read_complex(basic_istream<charT, traits>& is, complex<T>& x)
+{
+    T re = T(), im = T();
+    charT c = charT();
+    is >> c;
+    if (is.fail()) return is;
+    if (traits::eq(c, is.widen('('))) {
+        is >> re >> c;
+        if (!is.fail() && traits::eq(c, is.widen(','))) is >> im >> c;
+        if (!is.fail() && !traits::eq(c, is.widen(')'))) is.setstate(ios_base::failbit);
+    } else {
+        is.putback(c);
+        is >> re;
+    }
+    if (!is.fail()) x = complex<T>(re, im);
+    return is;
+}
+// "(re,im)" with the stream's flags, precision and locale (26.2.6/15), the width applied to the whole
+template <class T, class charT, class traits>
+basic_ostream<charT, traits>& __write_complex(basic_ostream<charT, traits>& os, const complex<T>& x)
+{
+    basic_ostringstream<charT, traits> s;
+    s.flags(os.flags());
+    s.imbue(os.getloc());
+    s.precision(os.precision());
+    s << s.widen('(') << x.real() << s.widen(',') << x.imag() << s.widen(')');
+    return os << s.str();
+}
+template <class T, class charT, class traits>
+basic_istream<charT, traits>& operator>>(basic_istream<charT, traits>& is, complex<T>& x) { return __read_complex(is, x); }
+template <class T, class charT, class traits>
+basic_ostream<charT, traits>& operator<<(basic_ostream<charT, traits>& os, const complex<T>& x) { return __write_complex(os, x); }
+inline istream& operator>>(istream& is, complex<float>& x) { return __read_complex(is, x); }
+inline istream& operator>>(istream& is, complex<double>& x) { return __read_complex(is, x); }
+inline istream& operator>>(istream& is, complex<long double>& x) { return __read_complex(is, x); }
+inline wistream& operator>>(wistream& is, complex<float>& x) { return __read_complex(is, x); }
+inline wistream& operator>>(wistream& is, complex<double>& x) { return __read_complex(is, x); }
+inline wistream& operator>>(wistream& is, complex<long double>& x) { return __read_complex(is, x); }
+inline ostream& operator<<(ostream& os, const complex<float>& x) { return __write_complex(os, x); }
+inline ostream& operator<<(ostream& os, const complex<double>& x) { return __write_complex(os, x); }
+inline ostream& operator<<(ostream& os, const complex<long double>& x) { return __write_complex(os, x); }
+inline wostream& operator<<(wostream& os, const complex<float>& x) { return __write_complex(os, x); }
+inline wostream& operator<<(wostream& os, const complex<double>& x) { return __write_complex(os, x); }
+inline wostream& operator<<(wostream& os, const complex<long double>& x) { return __write_complex(os, x); }
+
+// 26.2.7 values, in T's precision
+template <class T> T real(const complex<T>& x) { return x.real(); }
+template <class T> T imag(const complex<T>& x) { return x.imag(); }
+template <class T> T abs(const complex<T>& x)
+{
+    // the larger part scales the other, so the square does not overflow
+    T a = x.real() < 0 ? -x.real() : x.real(), b = x.imag() < 0 ? -x.imag() : x.imag();
+    if (a < b) { T t = a; a = b; b = t; }
+    if (a == T()) return a;
+    const T q = b / a;
+    return a * __complex_math<T>::sqrt(static_cast<T>(1) + q * q);
+}
+template <class T> T arg(const complex<T>& x) { return __complex_math<T>::atan2(x.imag(), x.real()); }
+template <class T> T norm(const complex<T>& x) { return x.real() * x.real() + x.imag() * x.imag(); }
+template <class T> complex<T> conj(const complex<T>& x) { return complex<T>(x.real(), -x.imag()); }
+template <class T> complex<T> polar(const T& rho) { return complex<T>(rho, T()); }
+template <class T> complex<T> polar(const T& rho, const T& theta) { return complex<T>(rho * __complex_math<T>::cos(theta), rho * __complex_math<T>::sin(theta)); }
+
+// 26.2.8 transcendentals, in T's precision
+template <class T> complex<T> exp(const complex<T>& x)
+{
+    const T e = __complex_math<T>::exp(x.real());
+    return complex<T>(e * __complex_math<T>::cos(x.imag()), e * __complex_math<T>::sin(x.imag()));
+}
+template <class T> complex<T> log(const complex<T>& x) { return complex<T>(__complex_math<T>::log(abs(x)), arg(x)); }
+template <class T> complex<T> log10(const complex<T>& x) { return log(x) / __complex_math<T>::ln10(); }
+template <class T> complex<T> sqrt(const complex<T>& x)
+{
+    // the principal root, in the right half plane (26.2.8/9)
+    const T re = x.real(), im = x.imag();
+    if (re == T() && im == T()) return complex<T>();
+    const T m = abs(x);
+    const T a = __complex_math<T>::sqrt((m + (re < 0 ? -re : re)) / static_cast<T>(2));
+    if (re >= T()) return complex<T>(a, im / (static_cast<T>(2) * a));
+    return complex<T>((im < 0 ? -im : im) / (static_cast<T>(2) * a), im < 0 ? -a : a);
+}
+template <class T> complex<T> sin(const complex<T>& x)
+{
+    const T re = x.real(), im = x.imag();
+    return complex<T>(__complex_math<T>::sin(re) * __complex_math<T>::cosh(im), __complex_math<T>::cos(re) * __complex_math<T>::sinh(im));
+}
+template <class T> complex<T> cos(const complex<T>& x)
+{
+    const T re = x.real(), im = x.imag();
+    return complex<T>(__complex_math<T>::cos(re) * __complex_math<T>::cosh(im), -(__complex_math<T>::sin(re) * __complex_math<T>::sinh(im)));
+}
+template <class T> complex<T> tan(const complex<T>& x) { return sin(x) / cos(x); }
+template <class T> complex<T> sinh(const complex<T>& x)
+{
+    const T re = x.real(), im = x.imag();
+    return complex<T>(__complex_math<T>::sinh(re) * __complex_math<T>::cos(im), __complex_math<T>::cosh(re) * __complex_math<T>::sin(im));
+}
+template <class T> complex<T> cosh(const complex<T>& x)
+{
+    const T re = x.real(), im = x.imag();
+    return complex<T>(__complex_math<T>::cosh(re) * __complex_math<T>::cos(im), __complex_math<T>::sinh(re) * __complex_math<T>::sin(im));
+}
+template <class T> complex<T> tanh(const complex<T>& x) { return sinh(x) / cosh(x); }
+template <class T> complex<T> pow(const complex<T>& x, int y)
+{
+    // repeated squaring, as cl's pow(complex, int)
+    complex<T> r(static_cast<T>(1)), b(x);
+    unsigned n = static_cast<unsigned>(y < 0 ? -y : y);
+    for (; n; n >>= 1) { if (n & 1) r *= b; b *= b; }
+    return y < 0 ? complex<T>(static_cast<T>(1)) / r : r;
+}
+template <class T> complex<T> pow(const complex<T>& x, const complex<T>& y) { return x == T() ? complex<T>() : exp(y * log(x)); }
+template <class T> complex<T> pow(const complex<T>& x, const T& y) { return x == T() ? complex<T>() : exp(log(x) * y); }
+template <class T> complex<T> pow(const T& x, const complex<T>& y) { return x == T() ? complex<T>() : exp(y * __complex_math<T>::log(x)); }
+
+}
+
+#endif

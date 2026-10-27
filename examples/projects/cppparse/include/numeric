@@ -1,0 +1,79 @@
+// numeric - cppparse's C++98 library: the generalized numeric operations (26.4) over any iterator.
+#ifndef CPPPARSE_NUMERIC
+#define CPPPARSE_NUMERIC
+
+#include <iterator>
+
+namespace std {
+
+template <class It, class T>
+T accumulate(It first, It last, T init)
+{
+    for (; first != last; ++first) init = init + *first;
+    return init;
+}
+
+template <class It, class T, class Op>
+T accumulate(It first, It last, T init, Op op)
+{
+    for (; first != last; ++first) init = op(init, *first);
+    return init;
+}
+
+template <class It1, class It2, class T>
+T inner_product(It1 first1, It1 last1, It2 first2, T init)
+{
+    for (; first1 != last1; ++first1, ++first2) init = init + *first1 * *first2;
+    return init;
+}
+
+template <class It1, class It2, class T, class Op1, class Op2>
+T inner_product(It1 first1, It1 last1, It2 first2, T init, Op1 op1, Op2 op2)
+{
+    for (; first1 != last1; ++first1, ++first2) init = op1(init, op2(*first1, *first2));
+    return init;
+}
+
+template <class It, class Out>
+Out partial_sum(It first, It last, Out out)
+{
+    if (first == last) return out;
+    typename iterator_traits<It>::value_type sum = *first;
+    *out = sum;
+    for (++first, ++out; first != last; ++first, ++out) { sum = sum + *first; *out = sum; }
+    return out;
+}
+
+template <class It, class Out, class Op>
+Out partial_sum(It first, It last, Out out, Op op)
+{
+    if (first == last) return out;
+    typename iterator_traits<It>::value_type sum = *first;
+    *out = sum;
+    for (++first, ++out; first != last; ++first, ++out) { sum = op(sum, *first); *out = sum; }
+    return out;
+}
+
+template <class It, class Out>
+Out adjacent_difference(It first, It last, Out out)
+{
+    if (first == last) return out;
+    typename iterator_traits<It>::value_type prev = *first;
+    *out = prev;
+    for (++first, ++out; first != last; ++first, ++out) { typename iterator_traits<It>::value_type cur = *first; *out = cur - prev; prev = cur; }
+    return out;
+}
+
+template <class It, class Out, class Op>
+Out adjacent_difference(It first, It last, Out out, Op op)
+{
+    if (first == last) return out;
+    typename iterator_traits<It>::value_type prev = *first;
+    *out = prev;
+    for (++first, ++out; first != last; ++first, ++out) { typename iterator_traits<It>::value_type cur = *first; *out = op(cur, prev); prev = cur; }
+    return out;
+}
+
+}
+
+#endif

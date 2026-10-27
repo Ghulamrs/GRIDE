@@ -199,7 +199,7 @@ static bool binary_op(const Token &k, Op &op)
         if (c == '+' || c == '-') { op.prec = 5; op.c = c; return true; }
         return false;
     }
-    if (k.kind != T_NAME) return false;
+    if (k.kind != T_NAME || k.plain) return false;
     /* MASM's word operators, at its levels: MOD SHL SHR with * and /, then + -, then the
        comparisons (true is -1), then AND, then OR and XOR; NOT is a prefix below the comparisons */
     std::string w = upper(k.text);
@@ -223,7 +223,7 @@ static bool prefix_op(const Token &k, Op &op)
 {
     op.kind = OP_PREFIX;
     if (k.kind == T_PUNCT && (k.text[0] == '+' || k.text[0] == '-')) { op.prec = 7; op.c = k.text[0]; return true; }
-    if (k.kind != T_NAME) return false;
+    if (k.kind != T_NAME || k.plain) return false;
     std::string w = upper(k.text);
     if (w == "OFFSET") { op.prec = 9; op.c = 'O'; return true; }
     if (w == "IMAGEREL") { op.prec = 9; op.c = 'I'; return true; }

@@ -1,0 +1,47 @@
+// cmath - cppparse's C++98 library: declarations of the C runtime's double math functions (and of the float ones
+// <complex> uses).
+#ifndef CPPPARSE_CMATH
+#define CPPPARSE_CMATH
+
+extern "C" {
+    double sqrt(double x);
+    double fabs(double x);
+    double ceil(double x);
+    double floor(double x);
+    double pow(double x, double y);
+    double fmod(double x, double y);
+    double exp(double x);
+    double log(double x);
+    double log10(double x);
+    double sin(double x);
+    double cos(double x);
+    double tan(double x);
+    double atan(double x);
+    double asin(double x);
+    double acos(double x);
+    double sinh(double x);
+    double cosh(double x);
+    double tanh(double x);
+    double atan2(double y, double x);
+    double modf(double x, double* whole);
+    double ldexp(double x, int e);
+    double frexp(double x, int* e);
+    // the float functions (C99's names, which the C runtime has): <complex> computes complex<float> with them
+    float  sqrtf(float x);
+    float  expf(float x);
+    float  logf(float x);
+    float  sinf(float x);
+    float  cosf(float x);
+    float  sinhf(float x);
+    float  coshf(float x);
+    float  atan2f(float y, float x);
+}
+
+#define HUGE_VAL (1e300 * 1e300)
+
+namespace std {
+    using ::sqrt; using ::fabs; using ::ceil; using ::floor; using ::pow; using ::fmod; using ::exp; using ::log; using ::log10;
+    using ::sin; using ::cos; using ::tan; using ::atan; using ::asin; using ::acos; using ::sinh; using ::cosh; using ::tanh; using ::atan2; using ::modf; using ::ldexp; using ::frexp;
+}
+
+#endif

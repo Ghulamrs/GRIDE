@@ -35,6 +35,7 @@ namespace Gride { namespace Settings {
             JumpToFirstError = true;
             AskNativeTools = true;
             RunInIde = true;
+            BuildJobs = 0;
             DefaultProjectLocation = Path::Combine(Environment::GetFolderPath(Environment::SpecialFolder::MyDocuments), "GRIDE Projects");
             CcsToolRoot = "C:\\ti\\ccsv7\\tools\\compiler\\c6000_7.4.24";
             HelpDirectory = Path::Combine(PathUtil::AppDirectory(), "docs");
@@ -51,6 +52,7 @@ namespace Gride { namespace Settings {
             CcsRoot = String::Empty;
             C6747Debugger = "auto";
             WindowsDebugger = "auto";
+            WindowsRuntime = "auto";
             SyntaxColors = gcnew Dictionary<String^, String^>();
         }
         property String^ Theme;
@@ -65,6 +67,7 @@ namespace Gride { namespace Settings {
         property bool    JumpToFirstError;        // a failed build puts the caret on its first error (RIDE)
         property bool    AskNativeTools;          // RIDE's askNative: offer the vendor's assembler/linker when the project's own fail
         property bool    RunInIde;                // Start Without Debugging runs in the Output pane (RIDE); off: an external console window
+        property int     BuildJobs;               // how many of a project's files compile and assemble at once: 0 one per processor, 1 one at a time
         property String^ DefaultProjectLocation;
         property String^ CcsToolRoot;            // value of ${CG_TOOL_ROOT} for CCS imports
         property String^ HelpDirectory;
@@ -83,6 +86,10 @@ namespace Gride { namespace Settings {
         property String^ CcsRoot;                // "ccs.root": the CCS installation ${CG_TOOL_ROOT} is found under (C:\ti\ccsv7)
         property String^ C6747Debugger;          // auto (sim6747 on a .out with lines, else vm6747), sim6747, vm6747; GRIDE_DEBUG_* at start win
         property String^ WindowsDebugger;        // auto (gride-dbg beside GRIDE, else cdb, else lldb), gride-dbg, cdb: the other stands in where the one named is not there
+        // the C runtime a Windows program links: grt (GRIDE's own, lib\grtc.lib and its layers), msvc (Microsoft's, Visual Studio's
+        // libcmt and the SDK's UCRT), auto (Microsoft's only where Visual Studio is found and the build has cl's
+        // objects, GRIDE's otherwise); GRIDE_WINDOWS_RUNTIME in the environment at start wins
+        property String^ WindowsRuntime;
         property Dictionary<String^, String^>^ SyntaxColors;   // token -> "#RRGGBB" override
 
         // what ${CG_TOOL_ROOT} is resolved from, in RIDE's order: the CCS root when one is named (the
@@ -112,6 +119,15 @@ namespace Gride { namespace Settings {
             return String::IsNullOrWhiteSpace(WindowsDebugger) ? "auto" : WindowsDebugger->Trim()->ToLowerInvariant();
         }
 
+        // the Windows C runtime choice in force: auto, grt or msvc (GRIDE_WINDOWS_RUNTIME, then the setting)
+        String^ EffectiveWindowsRuntime()
+        {
+            String^ e = Environment::GetEnvironmentVariable("GRIDE_WINDOWS_RUNTIME");
+            String^ v = !String::IsNullOrWhiteSpace(e) ? e : WindowsRuntime;
+            v = String::IsNullOrWhiteSpace(v) ? "auto" : v->Trim()->ToLowerInvariant();
+            return v == "grt" || v == "msvc" ? v : "auto";
+        }
+
         JsonValue^ ToJson()
         {
             JsonValue^ o = JsonValue::MakeObject();
@@ -127,6 +143,7 @@ namespace Gride { namespace Settings {
             o->SetBool("jumpToFirstError", JumpToFirstError);
             o->SetBool("askNativeTools", AskNativeTools);
             o->SetBool("runInIde", RunInIde);
+            o->SetNumber("buildJobs", BuildJobs);
             o->SetString("defaultProjectLocation", DefaultProjectLocation);
             o->SetString("ccsToolRoot", CcsToolRoot);
             // only a folder the user named: this copy's own docs folder is no setting, and written down it
@@ -146,6 +163,7 @@ namespace Gride { namespace Settings {
             o->SetString("ccsRoot", CcsRoot);
             o->SetString("c6747Debugger", C6747Debugger);
             o->SetString("windowsDebugger", WindowsDebugger);
+            o->SetString("windowsRuntime", WindowsRuntime);
             JsonValue^ c = JsonValue::MakeObject();
             for each (KeyValuePair<String^, String^> kv in SyntaxColors) c->SetString(kv.Key, kv.Value);
             o->SetValue("syntaxColors", c);
@@ -166,6 +184,7 @@ namespace Gride { namespace Settings {
             JumpToFirstError = o->GetBool("jumpToFirstError", JumpToFirstError);
             AskNativeTools = o->GetBool("askNativeTools", AskNativeTools);
             RunInIde = o->GetBool("runInIde", RunInIde);
+            BuildJobs = Math::Max(0, o->GetInt("buildJobs", BuildJobs));
             DefaultProjectLocation = o->GetString("defaultProjectLocation", DefaultProjectLocation);
             CcsToolRoot = o->GetString("ccsToolRoot", CcsToolRoot);
             // a named folder that is gone (another copy's, written by an older GRIDE) leaves this copy's own
@@ -185,6 +204,7 @@ namespace Gride { namespace Settings {
             CcsRoot = o->GetString("ccsRoot", CcsRoot);
             C6747Debugger = o->GetString("c6747Debugger", C6747Debugger);
             WindowsDebugger = o->GetString("windowsDebugger", WindowsDebugger);
+            WindowsRuntime = o->GetString("windowsRuntime", WindowsRuntime);
             JsonValue^ c = o->GetObject("syntaxColors");
             if (c != nullptr)
                 for each (String^ k in c->KeyNames) SyntaxColors[k] = c->GetString(k, String::Empty);

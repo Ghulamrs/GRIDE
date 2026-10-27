@@ -333,8 +333,11 @@ struct GRIDEDebugger {
     std::string answer;
     std::string output;
     std::string refusal;
+    // the window's, for the program's lines as a move goes
+    GRIDELine onLine;
+    void* lineUser;
 
-    GRIDEDebugger() : looking(0) {}
+    GRIDEDebugger() : looking(0), onLine(0), lineUser(0) {}
 };
 
 extern "C" {
@@ -1034,6 +1037,35 @@ int gride_remember_tilinker(const char* file) {
     return editor::settings::rememberTilinker(file ? file : "") ? 1 : 0;
 }
 
+const char* gride_windows_runtime_setting(void) {
+    scratch() = editor::settings::windowsRuntimeSetting();
+    return scratch().c_str();
+}
+
+const char* gride_windows_runtime(void) {
+    scratch() = editor::settings::windowsRuntime();
+    return scratch().c_str();
+}
+
+int gride_remember_windows_runtime(const char* choice) {
+    return editor::settings::rememberWindowsRuntime(choice ? choice : "") ? 1 : 0;
+}
+
+const char* gride_windows_debugger(void) {
+    scratch() = editor::settings::windowsDebugger();
+    return scratch().c_str();
+}
+
+int gride_remember_windows_debugger(const char* choice) {
+    return editor::settings::rememberWindowsDebugger(choice ? choice : "") ? 1 : 0;
+}
+
+int gride_build_jobs(void) { return static_cast<int>(editor::settings::buildJobs()); }
+
+int gride_remember_build_jobs(int jobs) {
+    return editor::settings::rememberBuildJobs(jobs < 0 ? 0 : static_cast<size_t>(jobs)) ? 1 : 0;
+}
+
 const char* gride_ti(void) {
     scratch() = editor::settings::ti();
     return scratch().c_str();
@@ -1338,6 +1370,61 @@ void gride_debugger_run(GRIDEDebugger* debugger) {
     const bool itself = debugger->shm.running();
     afterMoving(debugger, itself ? debugger->shm.run() : debugger->debugger.run(), itself);
 }
+
+void gride_debugger_run_to_entry(GRIDEDebugger* debugger, const char* file, int line) {
+    if (!debugger) return;
+    // A Shalimar program's own session: a breakpoint on main's line, which the window's next setting of
+    // every breakpoint takes away again
+    if (debugger->shm.running()) {
+        if (file && *file && line > 0) debugger->shm.breakAt(file, static_cast<size_t>(line));
+        afterMoving(debugger, debugger->shm.run(), true);
+        return;
+    }
+    afterMoving(debugger, debugger->debugger.runToEntry(file ? file : "", line > 0 ? static_cast<size_t>(line) : 0), false);
+}
+
+const char* gride_debugger_note(GRIDEDebugger* debugger) {
+    if (!debugger || debugger->shm.running()) return "";
+    return debugger->debugger.note().c_str();
+}
+
+int gride_main_line_in(const char* file) {
+    return static_cast<int>(editor::dbg_mainLineIn(file ? file : ""));
+}
+
+const char* gride_debugger_backend(GRIDEDebugger* debugger) {
+    if (!debugger || !debugger->debugger.running()) return "";
+    return debugger->debugger.backend().c_str();
+}
+
+const char* gride_debugger_backend_why(GRIDEDebugger* debugger) {
+    if (!debugger || !debugger->debugger.running()) return "";
+    return debugger->debugger.backendWhy().c_str();
+}
+
+namespace {
+void debuggerLine(void* context, const std::string& line) {
+    GRIDEDebugger* debugger = static_cast<GRIDEDebugger*>(context);
+    if (debugger->onLine) debugger->onLine(debugger->lineUser, line.c_str());
+}
+}
+
+void gride_debugger_on_output(GRIDEDebugger* debugger, GRIDELine onLine, void* user) {
+    if (!debugger) return;
+    debugger->onLine = onLine;
+    debugger->lineUser = user;
+    debugger->debugger.tellProgram(onLine ? debuggerLine : 0, debugger);
+}
+
+const char* gride_debugger_continued_mark(void) { return editor::dbg_continuedMark(); }
+
+int gride_debugger_takes_input(GRIDEDebugger* debugger) {
+    return debugger && debugger->debugger.takesInput() ? 1 : 0;
+}
+
+int gride_debugger_send_input(GRIDEDebugger* debugger, const char* line) {
+    return debugger && debugger->debugger.sendInput(line ? line : "") ? 1 : 0;
+}
 void gride_debugger_resume(GRIDEDebugger* debugger) {
     if (!debugger) return;
     const bool itself = debugger->shm.running();
@@ -1380,7 +1467,9 @@ const char* gride_stop_output(GRIDEDebugger* debugger) {
         return debugger->output.c_str();
     }
 
-    debugger->output = editor::dbg_programOutput(debugger->debugger.kind(), debugger->stop.said);
+    // told already, line by line, as the move went
+    debugger->output = debugger->stop.told ? std::string()
+                                           : editor::dbg_programOutput(debugger->debugger.kind(), debugger->stop.said);
     return debugger->output.c_str();
 }
 

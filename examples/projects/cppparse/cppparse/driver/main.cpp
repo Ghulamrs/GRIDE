@@ -166,20 +166,21 @@ bool hasVirtualBase(const sema::Symbol* cls, int depth)
 const char* virtualBaseRefusal(const sema::Symbol* cls)
 {
     for (size_t t = 0; t < cls->vftables.size(); ++t)
-        if (cls->vftables[t].vtordispex) return "a virtual function overridden in another virtual base (cl's vtordispex thunk, which reads the vbtable)";
+        if (cls->vftables[t].vtordispex) return "a virtual function overridden in another virtual base that the class's vbtable does not index (cl's vtordispex thunk reads the entry)";
     return 0;
 }
 
 // a covariant override's slot (Sema::completeClass, VfTable::returnOf) that --compile6 cannot give cl's
-// return-adjusting thunk (S131): one whose return conversion goes through a virtual base (cl's thunk reads the
-// vbtable), one that also moves this (cl's $R thunks: a this and a return adjustment in one), or a variadic function
-// (the thunk cannot stage the unnamed arguments again); 0 when the slot is fine
+// return-adjusting thunk (S131): one in a vftable inside a virtual base whose overrider is held by another virtual
+// base (cl's vtordispex thunk would have to lead to the return thunk), or a variadic function (the thunk cannot stage
+// the unnamed arguments again); 0 when the slot is fine. A return conversion through a virtual base (the thunk reads
+// the vbtable), a slot that also moves this (an adjustor thunk to the return thunk) and a slot in a vftable inside a
+// virtual base (the return thunk, through cl's vtordisp thunk when the class has a vtordisp) are generated as cl's
+// (B11)
 const char* returnThunkRefusal(const sema::VfTable& t, size_t s)
 {
     if (s >= t.returnOf.size() || !t.returnOf[s]) return 0;
-    if (t.returnAdjust[s] < 0) return "its return conversion goes through a virtual base";
-    if (t.vbase) return "the overridden function's vftable lies in a virtual base";
-    if (t.thunks[s] != 0) return "the slot needs a this adjustment as well as the return adjustment";
+    if (t.vbase && s < t.vtordispexVbase.size() && t.vtordispexVbase[s]) return "the overrider is held by another virtual base of the class";
     const sema::Symbol* fn = t.fns[s];
     if (fn && fn->type && fn->type->kind == sema::Type::Function && fn->type->variadic) return "it is variadic";
     return 0;

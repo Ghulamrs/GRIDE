@@ -51,3 +51,13 @@ checked through `printf`.
 SampleExt is a copy of Sample's project files with its own sources, and
 its `.project` names it `SampleExt` rather than `Sample`, so the two can sit
 in one CCS workspace.
+
+## SampleExt for Windows
+
+A CCS project is the C6747's alone, so SampleExt is also a GRIDE project of
+its own outside this folder: `examples\projects\cpp-sampleext`, the same four
+sources, unchanged, with `cpp-sampleext.pro`. Built there with GRIDE's cpp11,
+masm and link for Windows (Debug or Release, on GRIDE's runtime or
+Microsoft's), it prints SampleExt's lines of the table above, 34 in all,
+the same as Microsoft's cl makes of the same sources. A change to the sources
+goes into both folders.

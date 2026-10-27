@@ -147,6 +147,10 @@ private:
     void loadTailToReg(const char *reg64, long long off, const char *base, int left);
 
     void canonicalise(const Type *t);
+    // Whether e calls a function that returns twice (setjmp and its kin); not asked again (false) while
+    // clean_ counts operands being generated that were found free of one.
+    bool returnsTwice(const Expr &e);
+    int clean_ = 0;
     void genFloatBinary(const Binary &n);
     void genConversion(const Type *from, const Type *to);
     void genTruth(const Expr &e) override;

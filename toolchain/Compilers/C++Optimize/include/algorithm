@@ -242,6 +242,23 @@ void reverse(It from, It to) {
     }
 }
 
+// **equal - [alg.equal]** (1.30, 2026-10-23): whether every element of [from, to) equals the element at
+// the same distance from `with`, whose range is the caller's to make long enough; compared with `==`, or by
+// the caller's predicate. cppparse's member lookup (B12) compares base paths with it.
+template <class In1, class In2>
+bool equal(In1 from, In1 to, In2 with) {
+    for (; from != to; ++from, ++with)
+        if (!(*from == *with)) return false;
+    return true;
+}
+
+template <class In1, class In2, class Same>
+bool equal(In1 from, In1 to, In2 with, Same same) {
+    for (; from != to; ++from, ++with)
+        if (!same(*from, *with)) return false;
+    return true;
+}
+
 // **max_element and min_element - [alg.min.max].** The first iterator whose
 // element no other beats, which is what makes them stable: `<` is asked in the
 // order the standard fixes, so an earlier equal element wins for max_element

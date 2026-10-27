@@ -2623,6 +2623,121 @@ StmtPtr Parser::statementBody() {
     return StmtPtr(new ExprStmt(std::move(e)));
 }
 
+// The scope a file-scope declaration starts in - no locals, one block, a frame of nothing - where a
+// function declarator's parameters are declared.
+void Parser::freshFileScope() {
+    locals_.clear();
+    fnVars_.clear();
+    scopeStarts_.clear();
+    blocks_.clear();
+    blockStack_.clear();
+    blocks_.push_back(0);
+    blockStack_.push_back(0);
+    enterScope();
+    frameSize_ = 0;
+}
+
+// A function declarator met in a file-scope declaration list - `int x, f(int), *g(void);`, or a name
+// whose type is a function typedef - declared, never defined, from its parameter types alone, as a
+// block's are (blockFunctionDeclaration). False, with nothing read, for an object's declarator.
+bool Parser::listedFunction(const Declared &d) {
+    if (d.type->isFunction() && d.paramsAt == 0 && !peek().is("(")) {
+        std::vector<const Type *> ps(d.type->params());
+        declareFunction(d.name, d.type->returns(), ps, d.type->isVariadicFn(), false, d.pos);
+        return true;
+    }
+    if (!peek().is("(") && d.paramsAt == 0) return false;
+    std::size_t resumeAt = 0;
+    if (d.paramsAt != 0) {
+        resumeAt = at_;
+        at_ = d.paramsAt;
+    }
+    std::vector<const Type *> params;
+    bool variadic = false;
+    parameterTypes(params, variadic);
+    if (resumeAt != 0) at_ = resumeAt;
+    declareFunction(d.name, d.type, params, variadic, false, d.pos);
+    return true;
+}
+
+// A file-scope declaration list from d to its ';': objects, and function declarators among them.
+void Parser::fileScopeList(Program &program, Declared d, const Type *base, StorageClass sc,
+                           const Qualifiers &quals, int baseEnum) {
+    for (;;) {
+        if (listedFunction(d)) {
+            if (peek().is("{"))
+                src_.fail(peek().pos, "'" + d.name + "' has a body inside a declaration list - a "
+                                      "function definition stands on its own");
+            if (!consume(",")) break;
+            d = declarator(base);
+            continue;
+        }
+        if (d.type->isVoid()) src_.fail(d.pos, "'" + d.name + "' cannot have type void");
+
+        std::vector<GlobalPiece> pieces;
+        bool hasInit = false;
+        if (consume("=")) {
+            Init in = parseInitialiser();
+            if (d.type->isArray() && d.type->length() < 0)
+                d.type = types_.arrayOf(d.type->pointee(),
+                                        inferredLength(in, d.type->pointee(), d.pos));
+            flattenInit(d.type, in, 0, pieces);
+            hasInit = true;
+        } else if (d.type->isArray() && d.type->length() < 0 &&
+                   sc != StorageExtern) {
+            src_.fail(d.pos, "'" + d.name + "' has no length and no initialiser "
+                             "to take one from");
+        }
+
+        if (GlobalSym *prev = findGlobalToUpdate(d.name)) {
+            const Type *both = composite(prev->type, d.type);
+            if (both == nullptr)
+                src_.fail(d.pos, "'" + d.name + "' was already declared as '" +
+                                 prev->type->describe() + "', not '" +
+                                 d.type->describe() + "'");
+
+            prev->type = both;
+            d.type = both;
+            if (hasInit && prev->hasInit)
+                src_.fail(d.pos, "'" + d.name + "' is given an initialiser twice");
+            if (hasInit) prev->hasInit = true;
+
+            if (sc != StorageExtern) {
+                if (!prev->emitted) {
+                    prev->emitted = true;
+                    program.globals.push_back(Global{ d.name, d.type, pieces,
+                                                      hasInit, sc == StorageStatic,
+                                                      prev->isConst });
+                    program.globals.back().enumType = enumOf(d.type, base, baseEnum);
+                } else {
+                    for (Global &g : program.globals)
+                        if (g.name == d.name) {
+                            g.type = both;
+                            if (hasInit) { g.init = pieces; g.hasInit = true; }
+                            break;
+                        }
+                }
+            }
+            if (!consume(",")) break;
+            d = declarator(base);
+            continue;
+        }
+
+        globalIndex_[d.name] = globals_.size();
+        bool objectIsConst = d.objectIsConst(quals.isConst);
+        globals_.push_back(GlobalSym{ d.name, d.type, objectIsConst,
+                                      sc != StorageExtern, hasInit });
+        if (sc != StorageExtern)
+            program.globals.push_back(Global{ d.name, d.type, std::move(pieces),
+                                              hasInit, sc == StorageStatic,
+                                              objectIsConst });
+        if (sc != StorageExtern) program.globals.back().enumType = enumOf(d.type, base, baseEnum);
+        if (!consume(",")) break;
+        d = declarator(base);
+    }
+    expect(";");
+}
+
 void Parser::topLevel(Program &program) {
     // File scope, so a typedef here is judged against the whole file. The stack is cleared HERE
     // rather than beside scopeStarts_.clear() below, because the typedef branch returns before
@@ -2654,15 +2769,7 @@ void Parser::topLevel(Program &program) {
         return;
     }
 
-    locals_.clear();
-    fnVars_.clear();
-    scopeStarts_.clear();
-    blocks_.clear();
-    blockStack_.clear();
-    blocks_.push_back(0);
-    blockStack_.push_back(0);
-    enterScope();
-    frameSize_ = 0;
+    freshFileScope();
     Declared d = declarator(base);
 
     if (d.type->isFunction() && d.paramsAt == 0 && !peek().is("(")) {
@@ -2673,76 +2780,16 @@ void Parser::topLevel(Program &program) {
             src_.fail(d.pos, "'" + d.name + "' cannot be *defined* through a "
                              "typedef - the body has no names for the "
                              "parameters; write the parameter list out");
+        if (consume(",")) {
+            fileScopeList(program, declarator(base), base, sc, quals, baseEnum);
+            return;
+        }
         expect(";");
         return;
     }
 
     if (!peek().is("(") && d.paramsAt == 0) {
-        for (;;) {
-            if (d.type->isVoid()) src_.fail(d.pos, "'" + d.name + "' cannot have type void");
-
-            std::vector<GlobalPiece> pieces;
-            bool hasInit = false;
-            if (consume("=")) {
-                Init in = parseInitialiser();
-                if (d.type->isArray() && d.type->length() < 0)
-                    d.type = types_.arrayOf(d.type->pointee(),
-                                            inferredLength(in, d.type->pointee(), d.pos));
-                flattenInit(d.type, in, 0, pieces);
-                hasInit = true;
-            } else if (d.type->isArray() && d.type->length() < 0 &&
-                       sc != StorageExtern) {
-                src_.fail(d.pos, "'" + d.name + "' has no length and no initialiser "
-                                 "to take one from");
-            }
-
-            if (GlobalSym *prev = findGlobalToUpdate(d.name)) {
-                const Type *both = composite(prev->type, d.type);
-                if (both == nullptr)
-                    src_.fail(d.pos, "'" + d.name + "' was already declared as '" +
-                                     prev->type->describe() + "', not '" +
-                                     d.type->describe() + "'");
-
-                prev->type = both;
-                d.type = both;
-                if (hasInit && prev->hasInit)
-                    src_.fail(d.pos, "'" + d.name + "' is given an initialiser twice");
-                if (hasInit) prev->hasInit = true;
-
-                if (sc != StorageExtern) {
-                    if (!prev->emitted) {
-                        prev->emitted = true;
-                        program.globals.push_back(Global{ d.name, d.type, pieces,
-                                                          hasInit, sc == StorageStatic,
-                                                          prev->isConst });
-                        program.globals.back().enumType = enumOf(d.type, base, baseEnum);
-                    } else {
-                        for (Global &g : program.globals)
-                            if (g.name == d.name) {
-                                g.type = both;
-                                if (hasInit) { g.init = pieces; g.hasInit = true; }
-                                break;
-                            }
-                    }
-                }
-                if (!consume(",")) break;
-                d = declarator(base);
-                continue;
-            }
-
-            globalIndex_[d.name] = globals_.size();
-            bool objectIsConst = d.objectIsConst(quals.isConst);
-            globals_.push_back(GlobalSym{ d.name, d.type, objectIsConst,
-                                          sc != StorageExtern, hasInit });
-            if (sc != StorageExtern)
-                program.globals.push_back(Global{ d.name, d.type, std::move(pieces),
-                                                  hasInit, sc == StorageStatic,
-                                                  objectIsConst });
-            if (sc != StorageExtern) program.globals.back().enumType = enumOf(d.type, base, baseEnum);
-            if (!consume(",")) break;
-            d = declarator(base);
-        }
-        expect(";");
+        fileScopeList(program, d, base, sc, quals, baseEnum);
         return;
     }
 
@@ -2811,6 +2858,15 @@ void Parser::topLevel(Program &program) {
 
     if (consume(";")) {
         declareFunction(d.name, d.type, params, variadic, false, d.pos);
+        return;
+    }
+    // **A prototype a declaration list goes on from**: `double cbrt(double), hypot(double, double);`.
+    // C90 6.5 lets one declaration carry any number of declarators, functions among them; only a
+    // definition stands alone. The names this one gave its parameters leave with its scope.
+    if (consume(",")) {
+        declareFunction(d.name, d.type, params, variadic, false, d.pos);
+        freshFileScope();
+        fileScopeList(program, declarator(base), base, sc, quals, baseEnum);
         return;
     }
     if (sawUnnamed)

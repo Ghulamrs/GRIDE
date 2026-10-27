@@ -10,10 +10,14 @@ double Logarithm::natural(double x)
     union { double d; unsigned w[2]; } v;
     v.d = x;
     double lo;
-    if (v.w[1] - 0x00100000u < 0x7FE00000u) return kernel(x, lo) + lo;
+    // The kernel's result is held before lo is read: in `kernel(x, lo) + lo` the order of evaluation is
+    // unspecified, and a compiler that reads lo first (cpp11 for x86-64 does) adds an unset lo.
+    double hi;
+    if (v.w[1] - 0x00100000u < 0x7FE00000u) { hi = kernel(x, lo); return hi + lo; }
     double result;
     if (special(x, result)) return result;
-    return kernel(x, lo) + lo;
+    hi = kernel(x, lo);
+    return hi + lo;
 }
 
 }  // namespace rts6x

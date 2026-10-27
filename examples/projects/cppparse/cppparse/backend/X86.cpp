@@ -1591,10 +1591,11 @@ void X86Module::addVcallThunk(const std::string& irName, int slotOffset)
     m_thunks.push_back(t);
 }
 
-void X86Module::addReturnThunk(const std::string& irName, const std::string& target, int thisAdjust, int returnAdjust, bool reference, int stackArgs)
+void X86Module::addReturnThunk(const std::string& irName, const std::string& target, int thisAdjust, int returnAdjust, bool reference, int stackArgs, int returnVbptr, int returnEntry)
 {
     if (!m_thunkNames.insert(irName).second) return;
     Thunk t; t.name = irName; t.target = target; t.adjust = thisAdjust; t.vcall = false; t.returning = true; t.returnAdjust = returnAdjust; t.reference = reference; t.stackArgs = stackArgs; t.vtordisp = false;
+    t.vbptrOffset = returnVbptr; t.entryOffset = returnEntry;
     m_thunks.push_back(t);
 }
 
@@ -1602,6 +1603,13 @@ void X86Module::addVtordispThunk(const std::string& irName, const std::string& t
 {
     if (!m_thunkNames.insert(irName).second) return;
     Thunk t; t.name = irName; t.target = target; t.adjust = adjust; t.vcall = false; t.returning = false; t.returnAdjust = 0; t.reference = false; t.stackArgs = 0; t.vtordisp = true;
+    m_thunks.push_back(t);
+}
+
+void X86Module::addVtordispexThunk(const std::string& irName, const std::string& target, int vbptrOffset, int entryOffset, int nonVirtual)
+{
+    if (!m_thunkNames.insert(irName).second) return;
+    Thunk t; t.name = irName; t.target = target; t.adjust = nonVirtual; t.vtordisp = true; t.vtordispex = true; t.vbptrOffset = vbptrOffset; t.entryOffset = entryOffset;
     m_thunks.push_back(t);
 }
 
@@ -1621,6 +1629,18 @@ void X86Module::emitVtables()
         }
         const std::string target = symbol(m_thunks[i].target);
         if (!m_defined.count(target)) m_externs.insert(target);
+        if (m_thunks[i].vtordispex) {
+            // this - vtordisp is the base where this class's layout has it; the vbptr lies vbptrOffset before it, and
+            // the overrider's base at its vbtable entry from the vbptr; then the overrider's own adjustor
+            const int vb = m_thunks[i].vbptrOffset;
+            const int rest = m_thunks[i].adjust - vb;
+            m_code += ";@comdat any\n" + sym + " PROC\n        ; " + m_thunks[i].name + "\n        movsxd rax, dword ptr [rcx-4]\n        sub rcx, rax\n" +
+                      "        mov rax, qword ptr [rcx" + (vb > 0 ? "-" + intToString(vb) : vb < 0 ? "+" + intToString(-vb) : std::string()) + "]\n" +
+                      "        movsxd rax, dword ptr [rax+" + intToString(m_thunks[i].entryOffset) + "]\n        add rcx, rax\n" +
+                      (rest > 0 ? "        add rcx, " + intToString(rest) + "\n" : rest < 0 ? "        sub rcx, " + intToString(-rest) + "\n" : std::string()) +
+                      "        jmp " + target + "\n" + sym + " ENDP\n\n";
+            continue;
+        }
         if (m_thunks[i].vtordisp) {
             m_code += ";@comdat any\n" + sym + " PROC\n        ; " + m_thunks[i].name + "\n        movsxd rax, dword ptr [rcx-4]\n        sub rcx, rax\n" +
                       (m_thunks[i].adjust ? "        sub rcx, " + intToString(m_thunks[i].adjust) + "\n" : std::string()) + "        jmp " + target + "\n" + sym + " ENDP\n\n";
@@ -1637,7 +1657,15 @@ void X86Module::emitVtables()
                 code += "        mov rax, qword ptr [rsp+" + intToString(frame + 40 + 8 * a) + "]\n        mov qword ptr [rsp+" + intToString(32 + 8 * a) + "], rax\n";
             if (t.adjust) code += "        sub rcx, " + intToString(t.adjust) + "\n";
             code += "        call " + target + "\n";
-            if (t.returnAdjust) {
+            if (t.vbptrOffset >= 0) {
+                // through a virtual base, as cl: the vbptr in the result, the base's entry of its vbtable, then the rest
+                const int vb = t.vbptrOffset;
+                if (!t.reference) code += "        test rax, rax\n        je " + sym + "_null\n";
+                code += "        mov rcx, qword ptr [rax" + (vb ? "+" + intToString(vb) : std::string()) + "]\n        movsxd rcx, dword ptr [rcx+" + intToString(t.entryOffset) + "]\n        add rax, rcx\n";
+                if (vb + t.returnAdjust) code += "        add rax, " + intToString(vb + t.returnAdjust) + "\n";
+                if (!t.reference) code += sym + "_null:\n";
+            }
+            else if (t.returnAdjust) {
                 if (!t.reference) code += "        test rax, rax\n        je " + sym + "_null\n";
                 code += "        add rax, " + intToString(t.returnAdjust) + "\n";
                 if (!t.reference) code += sym + "_null:\n";
@@ -1684,7 +1712,7 @@ void X86Module::emitGlobals()
                 const char* dir = it.size == 1 ? "DB" : it.size == 2 ? "DW" : it.size == 4 ? "DD" : "DQ";
                 def += "\n        ";
                 if (it.kind == IrDataItem::Zero) def += "DB " + intToString(it.size) + " DUP (0)";
-                else if (it.kind == IrDataItem::Int) def += std::string(dir) + " " + intToString(static_cast<int>(it.value));
+                else if (it.kind == IrDataItem::Int) def += std::string(dir) + " " + (it.size == 8 ? int64ToString(it.value) : intToString(static_cast<int>(it.value)));
                 else if (it.kind == IrDataItem::Float) def += std::string(it.size == 4 ? "REAL4 " : "REAL8 ") + it.text;
                 else if (it.kind == IrDataItem::String) def += "DQ OFFSET " + stringLabel(it.text);
                 else if (it.kind == IrDataItem::Bytes) {

@@ -1,8 +1,16 @@
 // Spec: ISO C 7.23.3.5/3-7 - a A b B c C d D e F g G h H I j m M n p r R S t T u U V w W x X y Y z
 // Z %, in the "C" locale: English names, %c as "%a %b %e %H:%M:%S %Y", %x as %m/%d/%y, %X as %T.
+// On Windows (grt, toolchain\Windows\RT) the Microsoft runtime's "C" locale: %c with the day as two
+// digits ("%a %b %d %H:%M:%S %Y"), and %z and %Z the time zone Windows is set to - struct tm has no
+// zone of its own there.
 
 #include "TimeFormatter.h"
 #include "Calendar.h"
+
+#if defined(_WIN32)
+extern "C" const char *__grt_zone_name(int isdst);
+extern "C" long __grt_zone_minutes(int isdst);
+#endif
 
 namespace rts6x {
 
@@ -73,7 +81,11 @@ void TimeFormatter::conversion(char c, const tm *fields)
     case 'A': put(weekdays[wday]); break;
     case 'b': case 'h': for (int i = 0; i < 3; i++) shortName[i] = months[mon][i]; put(shortName); break;
     case 'B': put(months[mon]); break;
+#if defined(_WIN32)
+    case 'c': run("%a %b %d %H:%M:%S %Y", fields); break;
+#else
     case 'c': run("%a %b %e %H:%M:%S %Y", fields); break;
+#endif
     case 'C': number(year / 100, 2, '0'); break;
     case 'd': number(fields->tm_mday, 2, '0'); break;
     case 'D': case 'x': run("%m/%d/%y", fields); break;
@@ -100,8 +112,19 @@ void TimeFormatter::conversion(char c, const tm *fields)
     case 'W': number((fields->tm_yday + 7 - (wday + 6) % 7) / 7, 2, '0'); break;
     case 'y': number(year % 100 < 0 ? year % 100 + 100 : year % 100, 2, '0'); break;
     case 'Y': number(year, 1, '0'); break;
+#if defined(_WIN32)
+    case 'z': {
+        long east = __grt_zone_minutes(fields->tm_isdst);
+        put(east < 0 ? '-' : '+');
+        if (east < 0) east = -east;
+        number(east / 60 * 100 + east % 60, 4, '0');
+        break;
+    }
+    case 'Z': put(__grt_zone_name(fields->tm_isdst)); break;
+#else
     case 'z': put('+'); number(0, 4, '0'); break;
     case 'Z': put(fields->tm_zone ? fields->tm_zone : ""); break;
+#endif
     case '%': put('%'); break;
     default: put('%'); put(c); break;
     }

@@ -1,0 +1,75 @@
+; kernel32.def - the import library grt's programs link against, written by GRIDE's own librarian
+; (link /LIB /DEF:kernel32.def /OUT:kernel32.lib); no SDK library is read. Two parts: the functions grt
+; calls (src\internal\win32.h declares them), and the ones the compilers' own <windows.h> declares, so a
+; program that includes it links with GRIDE's runtime as it does with Microsoft's. The grt build checks
+; that grt.lib with this library leaves nothing undefined.
+LIBRARY KERNEL32.dll
+EXPORTS
+    ; grt: files and handles
+    GetStdHandle
+    GetFileType
+    GetConsoleMode
+    WriteFile
+    ReadFile
+    CreateFileW
+    CloseHandle
+    SetFilePointerEx
+    DeleteFileW
+    MoveFileExW
+    GetLastError
+    SetLastError
+    ; grt: directories and a file's status (win\getcwd.c, win\findfile.c, win\stat.c)
+    GetFileAttributesW
+    GetFileInformationByHandle
+    PeekNamedPipe
+    GetDriveTypeW
+    FindFirstFileExW
+    FindNextFileW
+    FindClose
+    GetCurrentDirectoryW
+    GetFullPathNameW
+    ; grt: system (win\system.c)
+    CreateProcessW
+    WaitForSingleObject
+    GetExitCodeProcess
+    ; grt: the heap
+    GetProcessHeap
+    HeapAlloc
+    HeapReAlloc
+    HeapFree
+    ; grt: the command line, the environment, text in the ANSI code page
+    GetCommandLineW
+    GetEnvironmentStringsW
+    FreeEnvironmentStringsW
+    WideCharToMultiByte
+    MultiByteToWideChar
+    ; grt: time and the time zone
+    GetSystemTimeAsFileTime
+    QueryPerformanceCounter
+    QueryPerformanceFrequency
+    FileTimeToSystemTime
+    SystemTimeToFileTime
+    SystemTimeToTzSpecificLocalTime
+    TzSpecificLocalTimeToSystemTime
+    GetTimeZoneInformation
+    ; grt: locks (win\lock.c: function-local statics, the descriptors, the streams, the atexit list)
+    AcquireSRWLockExclusive
+    ReleaseSRWLockExclusive
+    SleepConditionVariableSRW
+    WakeAllConditionVariable
+    ; grt: CreateThread is grtwin's own (win\thread.c), over kernel32's: DATA, so that this library defines
+    ; __imp_CreateThread alone and no thunk of the plain name competes with grt's
+    CreateThread DATA
+    ; grt: the end
+    ExitProcess
+    ; the compilers' <windows.h> (cpp11's lib\windows.h): threads, waits, locks, the clock
+    WaitForMultipleObjects
+    GetSystemInfo
+    GetTickCount
+    GetTickCount64
+    GetCurrentThreadId
+    Sleep
+    InitializeCriticalSection
+    EnterCriticalSection
+    LeaveCriticalSection
+    DeleteCriticalSection

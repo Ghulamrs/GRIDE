@@ -189,6 +189,14 @@ Process* live[kLive];
 thread_local unsigned scopeEpoch = 0;
 thread_local int scopeDepth = 0;
 
+// **A part's command stops when a part before it failed** (runParts): nothing will read what it says.
+struct PartStop {
+    const std::atomic<size_t>* failedAt;
+    size_t part;
+    bool now() const { return failedAt != 0 && failedAt->load() < part; }
+};
+thread_local PartStop partStop = {0, 0};
+
 void lockLive() {
     while (liveLock.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
 }
@@ -283,7 +291,7 @@ int runOne(const std::string& command, const std::string& directory, std::string
     // keystrokes not yet read, and on Windows the editor's next read saw end of file and quit. The
     // child's input is the null device, as the " < NUL" once on the command made it.
     unsigned epoch = epochNow();
-    if (cancelEpoch.load() != epoch) return saidStopped(output, sink, context);
+    if (cancelEpoch.load() != epoch || partStop.now()) return saidStopped(output, sink, context);
 
     Process child;
     if (!child.startCaptured(command, directory)) {
@@ -305,6 +313,7 @@ int runOne(const std::string& command, const std::string& directory, std::string
         int said = child.readAny(chunk, 0, 200);
         if (said < 0) break;
         if (said > 0) lines.add(chunk);
+        if (partStop.now() && !child.killed()) child.kill();
     }
     lines.end();
 
@@ -447,7 +456,8 @@ void setAskNative(AskNative ask, void* context) {
 bool ownToolFailed(const std::string& output, bool emulated) {
     if (emulated ? output.find("lnk6x did not link it") == std::string::npos
                  : output.find("the assembler or linker failed") == std::string::npos &&
-                       output.find("the assembler failed") == std::string::npos)
+                       output.find("the assembler failed") == std::string::npos &&
+                       output.find("the link failed") == std::string::npos)
         return false;
     const char* program[] = {"unresolved external", "undefined symbol", "no symbol index",
                              "LNK2001", "LNK2019", "LNK1120", "LNK2005", "already defined",
@@ -599,8 +609,29 @@ namespace {
 
 void makeTiProgram(Built& result, const Toolchain& tool, const std::string& program, Configuration config,
                    LineSink sink, void* context);
+Built linkParts(const Toolchain& tool, const std::vector<Part>& parts, const std::string& arch, Configuration config,
+                const std::string& program, LineSink sink, void* context);
 
-// **A recipe's commands at once, on min(commands, cores) threads (P3).** Each one's output is captured
+// The sources one compiler builds, as the one part of a program.
+std::vector<Part> onePart(ToolchainKind kind, Language lang, const std::vector<std::string>& sources,
+                          const std::string& group) {
+    std::vector<Part> parts(1);
+    parts[0].group = group;
+    parts[0].toolchain = kind;
+    parts[0].lang = lang;
+    parts[0].sources = sources;
+    return parts;
+}
+
+// The commands a build runs at once: settings.json's buildJobs, 0 one per processor - and no more than the
+// kill table holds, so Stop reaches every one.
+unsigned jobs() {
+    const size_t named = settings::buildJobs();
+    const size_t n = named > 0 ? named : (std::max)(1u, std::thread::hardware_concurrency());
+    return static_cast<unsigned>((std::min<size_t>)(n, kLive));
+}
+
+// **A recipe's commands at once, on min(commands, jobs) threads (P3).** Each one's output is captured
 // whole and handed on in source order as it completes; the status is the first failure's, in that order.
 int runRecipe(const Recipe& recipe, std::string& output, LineSink sink, void* context) {
     const size_t n = recipe.commands.size();
@@ -622,9 +653,8 @@ int runRecipe(const Recipe& recipe, std::string& output, LineSink sink, void* co
             ended.notify_all();
         }
     };
-    const unsigned cores = (std::max)(1u, std::thread::hardware_concurrency());
     std::vector<std::thread> pool;
-    for (size_t t = 0; t < (std::min<size_t>)(n, cores); ++t) pool.emplace_back(work);
+    for (size_t t = 0; t < (std::min<size_t>)(n, jobs()); ++t) pool.emplace_back(work);
     int first = 0;
     for (size_t i = 0; i < n; ++i) {
         std::string out;
@@ -642,6 +672,113 @@ int runRecipe(const Recipe& recipe, std::string& output, LineSink sink, void* co
     return first;
 }
 
+long bytesOf(const std::string& file) {
+    std::FILE* f = std::fopen(file.c_str(), "rb");
+    if (!f) return 0;
+    long n = std::fseek(f, 0, SEEK_END) == 0 ? std::ftell(f) : 0;
+    std::fclose(f);
+    return n < 0 ? 0 : n;
+}
+
+// One command of a program's parts (runParts): a part's own, or one of a tms6747 group's per-source compiles.
+struct PartCommand {
+    size_t part;
+    const std::string* command;
+    long bytes;
+    bool alone;
+    std::string output;
+    int status;
+    bool done;
+};
+
+// **A program's parts at once (2026-10-26).** Their recipes are made first, in the project's order; their commands
+// - a part's one, or a tms6747 group's one per source - run jobs() at a time, the one with the most source first,
+// each one's output kept whole; then each part is read back in order, its "$ group (compiler)" line and its commands'
+// output as runRecipe hands them on, so what is said is what one part after another said. The first part to fail
+// stops those after it - their commands killed, or never started - as the build stopped there before; those before
+// it finish. A command marked alone (cl's Debug compile, whose PDB two cl's cannot share) never runs beside another.
+// The status is that part's first failure in source order, and `failed` the part.
+int runParts(const std::vector<Part>& parts, const std::vector<Recipe>& recipes, const std::vector<std::string>& headings,
+             const std::vector<char>& alone, std::string& output, LineSink sink, void* context, size_t& failed) {
+    std::vector<PartCommand> all;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        const bool each = recipes[i].commands.size() > 1;
+        for (size_t c = 0; c < (each ? recipes[i].commands.size() : 1); ++c) {
+            PartCommand one;
+            one.part = i;
+            one.command = each ? &recipes[i].commands[c] : &recipes[i].command;
+            one.bytes = 0;
+            for (size_t s = 0; s < parts[i].sources.size(); ++s)
+                if (!each || s == c) one.bytes += bytesOf(parts[i].sources[s]);
+            one.alone = alone[i] != 0;
+            one.status = 0;
+            one.done = false;
+            all.push_back(one);
+        }
+    }
+    std::vector<size_t> order(all.size());
+    for (size_t k = 0; k < order.size(); ++k) order[k] = k;
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return all[a].bytes > all[b].bytes; });
+
+    const unsigned epoch = epochNow();
+    std::atomic<size_t> failedAt(parts.size());
+    auto lower = [&](size_t part) {
+        for (size_t was = failedAt.load(); part < was && !failedAt.compare_exchange_weak(was, part);) {}
+    };
+    std::atomic<size_t> next(0);
+    std::mutex held, pdb;
+    std::condition_variable ended;
+    auto work = [&]() {
+        // the build's scope, so a Stop before a command starts it runs nothing
+        scopeEpoch = epoch;
+        ++scopeDepth;
+        for (size_t k; (k = next.fetch_add(1)) < order.size();) {
+            PartCommand& one = all[order[k]];
+            std::string out;
+            int rc = kStoppedStatus;
+            if (one.part <= failedAt.load() && cancelEpoch.load() == epoch) {
+                std::unique_lock<std::mutex> only(pdb, std::defer_lock);
+                if (one.alone) only.lock();
+                partStop.failedAt = &failedAt;
+                partStop.part = one.part;
+                rc = runCaptured(*one.command, out);
+                partStop.failedAt = 0;
+            }
+            if (rc == kStoppedStatus && out.empty()) out = "[stopped]\n";
+            if (rc != 0) lower(one.part);
+            std::lock_guard<std::mutex> lock(held);
+            one.output.swap(out);
+            one.status = rc;
+            one.done = true;
+            ended.notify_all();
+        }
+        --scopeDepth;
+    };
+    std::vector<std::thread> pool;
+    for (size_t t = 0; t < (std::min<size_t>)(all.size(), jobs()); ++t) pool.emplace_back(work);
+    int first = 0;
+    for (size_t i = 0, at = 0; i < parts.size() && first == 0; ++i) {
+        if (sink) sink(context, headings[i]);
+        for (; at < all.size() && all[at].part == i; ++at) {
+            std::string out;
+            int status;
+            {
+                std::unique_lock<std::mutex> lock(held);
+                ended.wait(lock, [&] { return all[at].done; });
+                out.swap(all[at].output);
+                status = all[at].status;
+            }
+            Lines lines(output, sink, context);
+            lines.add(out);
+            lines.end();
+            if (first == 0 && status != 0) first = status;
+        }
+        if (first != 0) failed = i;
+    }
+    for (size_t t = 0; t < pool.size(); ++t) pool[t].join();
+    return first;
+}
+
 Built buildProgramOnce(const Toolchain& tool, ToolchainKind kind, const std::string& sourcePath,
                        Language lang, const std::string& arch, Configuration config,
                        LineSink sink, void* context) {
@@ -654,17 +791,29 @@ Built buildProgramOnce(const Toolchain& tool, ToolchainKind kind, const std::str
     }
 
 
-    const std::string noLines = lineTableNote(kind, arch, config);
-    if (!noLines.empty()) {
-        result.output += noLines + "\n";
-        if (sink) sink(context, noLines);
-    }
-
     Recipe recipe = programRecipe(tool, kind, sourcePath, lang, arch, config);
     result.program = recipe.assemblyPath;
     result.leftovers = recipe.leftovers;
     result.shalimar = kind == ToolShc;
     if (refusedUnwritable(result.program, result, sink, context)) return result;
+
+    // The program where the recipe would have put it, linked here (linkedHere): its PDB beside it goes with it.
+    if (linkedHere(kind, arch)) {
+        Built made = linkParts(tool, onePart(kind, lang, std::vector<std::string>(1, sourcePath), path::filename(sourcePath)),
+                               arch, config, result.program, sink, context);
+        if (!made.ok && !made.diag.present) made.diag = parseDiagnostic(made.output, sourcePath);
+        const std::string stem = result.program.substr(0, result.program.size() - 4);
+        made.leftovers.push_back(stem + ".pdb");
+        made.leftovers.push_back(stem + ".ilk");
+        made.program = result.program;
+        return made;
+    }
+
+    const std::string noLines = lineTableNote(kind, arch, config);
+    if (!noLines.empty()) {
+        result.output += noLines + "\n";
+        if (sink) sink(context, noLines);
+    }
 
     int made = runCaptured(recipe.command, result.output, sink, context);
     if (made < 0) {
@@ -966,6 +1115,8 @@ Built buildTargetOnce(const Toolchain& tool, ToolchainKind kind,
         return result;
     }
     if (refusedUnwritable(program, result, sink, context)) return result;
+    if (linkedHere(kind, arch))
+        return linkParts(tool, onePart(kind, lang, sources, std::string()), arch, config, program, sink, context);
 
     if (!prepareFor(kind, config, arch)) {
         result.output = "no Visual Studio found - cl, ml64 and link cannot be run; name its vcvars64.bat under Tools\n";
@@ -1041,23 +1192,34 @@ Built buildPartsOnce(const Toolchain& tool, const std::vector<Part>& parts,
 
     // One part is its compiler's own link - unless the project names libraries, which cc1 and
     // cxx1 do not take: those go to the host's linker below, with the objects. The emulated
-    // target links nothing and a Shalimar program links its own runtime, so those two stay.
+    // target links nothing and a Shalimar program links its own runtime, so those two stay -
+    // but for a Windows program of the three, which is linked here with the runtime chosen for it.
     if (parts.size() == 1) {
         ToolchainKind only = toolchainOf(tool, parts[0]);
-        if (tool.libraries.empty() || isEmulated(arch) || only == ToolShc)
+        if ((tool.libraries.empty() || isEmulated(arch) || only == ToolShc) && !linkedHere(only, arch))
             return buildTargetOnce(tool, only, parts[0].sources, parts[0].lang, arch, config,
                                    program, sink, context);
     }
+    return linkParts(tool, parts, arch, config, program, sink, context);
+}
+
+// **Each part to objects by its compiler, and the objects linked here**: a program of several parts, or of
+// one whose compiler is not to link it. On Windows the link takes the C runtime chosen for it (windowsCrt) -
+// said once - and a Shalimar program the Shalimar runtime built for that runtime, before the project's libraries.
+Built linkParts(const Toolchain& tool, const std::vector<Part>& parts, const std::string& arch, Configuration config,
+                const std::string& program, LineSink sink, void* context) {
+    Built result;
+    auto say = [&](const std::string& line) { result.output += line + "\n"; if (sink) sink(context, line); };
 
     for (size_t i = 0; i < parts.size(); ++i) {
         const std::string noLines = lineTableNote(toolchainOf(tool, parts[i]), arch, config);
         if (noLines.empty()) continue;
-        result.output += noLines + "\n";
-        if (sink) sink(context, noLines);
+        say(noLines);
         break;
     }
 
-    bool withCpp = false;
+    // cl's objects name Microsoft's runtime themselves, and they and clang's CodeView are Microsoft's link.exe's in a Debug build
+    bool withCpp = false, clObjects = false, clangCodeView = false, shalimar = false;
     for (size_t i = 0; i < parts.size(); ++i) {
         ToolchainKind kind = toolchainOf(tool, parts[i]);
         if (!prepareFor(kind, config, arch)) {
@@ -1066,6 +1228,9 @@ Built buildPartsOnce(const Toolchain& tool, const std::vector<Part>& parts,
             return result;
         }
         if (parts[i].lang == LangCpp) withCpp = true;
+        if (kind == ToolMsvc) clObjects = true;
+        if (kind == ToolShc) shalimar = true;
+        if (debugsWithCodeView(kind, arch, config)) clangCodeView = true;
     }
 
     // For the emulated target the parts' assembly is the program: each part
@@ -1075,33 +1240,47 @@ Built buildPartsOnce(const Toolchain& tool, const std::vector<Part>& parts,
     if (emulated) path::removeTree(objects);
     path::makeDirectories(objects);
 
-    std::vector<std::string> made;
+    // every part's recipe made first, in the project's order; then one part after another, or all at once (runParts)
+    std::vector<Recipe> recipes(parts.size());
+    std::vector<std::vector<std::string> > theirs(parts.size());
+    std::vector<std::string> headings(parts.size());
+    std::vector<char> alone(parts.size());
     for (size_t i = 0; i < parts.size(); ++i) {
         ToolchainKind kind = toolchainOf(tool, parts[i]);
-
-        if (sink)
-            sink(context, "$ " + parts[i].group + " (" + toolchainShown(tool, kind) + ")");
-
-        std::vector<std::string> theirs;
-        Recipe recipe = objectRecipe(tool, kind, parts[i].sources, parts[i].lang,
-                                     arch, config, objects, theirs);
-
-        int rc = runRecipe(recipe, result.output, sink, context);
-        if (rc != 0) {
-
-            result.diag = parseDiagnostic(result.output, parts[i].sources[0]);
-            if (rc < 0 || (!result.diag.present && looksLikeMissingProgram(result.output))) {
-                std::string hint = std::string(programOf(tool, kind)) +
-                                   " could not be run - name it with --c90, --cpp11 or --cl, or put "
-                                   "it on PATH";
-                result.output += hint + "\n";
-                if (sink) sink(context, hint);
-            }
-            path::removeTree(objects);
-            return result;
-        }
-        for (size_t o = 0; o < theirs.size(); ++o) made.push_back(theirs[o]);
+        headings[i] = "$ " + (parts[i].group.empty() ? std::string() : parts[i].group + " ") +
+                      "(" + toolchainShown(tool, kind) + ")";
+        recipes[i] = objectRecipe(tool, kind, parts[i].sources, parts[i].lang,
+                                  arch, config, objects, theirs[i]);
+        // a Debug build's cl writes the one PDB objectRecipe names for every part
+        alone[i] = kind == ToolMsvc && config == ConfigDebug;
     }
+    size_t failed = parts.size();
+    int rc = 0;
+    if (parts.size() > 1 && jobs() > 1) {
+        rc = runParts(parts, recipes, headings, alone, result.output, sink, context, failed);
+    } else {
+        for (size_t i = 0; i < parts.size() && rc == 0; ++i) {
+            if (sink) sink(context, headings[i]);
+            rc = runRecipe(recipes[i], result.output, sink, context);
+            if (rc != 0) failed = i;
+        }
+    }
+    if (rc != 0) {
+
+        result.diag = parseDiagnostic(result.output, parts[failed].sources[0]);
+        if (rc < 0 || (!result.diag.present && looksLikeMissingProgram(result.output))) {
+            std::string hint = std::string(programOf(tool, toolchainOf(tool, parts[failed]))) +
+                               " could not be run - name it with --c90, --cpp11 or --cl, or put "
+                               "it on PATH";
+            result.output += hint + "\n";
+            if (sink) sink(context, hint);
+        }
+        path::removeTree(objects);
+        return result;
+    }
+    std::vector<std::string> made;
+    for (size_t i = 0; i < parts.size(); ++i)
+        for (size_t o = 0; o < theirs[i].size(); ++o) made.push_back(theirs[i][o]);
 
     if (emulated) {
         result.program = objects;
@@ -1112,9 +1291,41 @@ Built buildPartsOnce(const Toolchain& tool, const std::vector<Part>& parts,
         return result;
     }
 
-    if (sink) sink(context, "$ linking with " + linkerName(withCpp));
+    std::string crt;
+    if (arch == "x86_64-windows") {
+        const WindowsCrt chosen = windowsCrt(config, clObjects);
+        if (!chosen.error.empty()) {
+            say(chosen.error);
+            path::removeTree(objects);
+            return result;
+        }
+        for (size_t at = 0; at < chosen.said.size();) {
+            size_t end = chosen.said.find('\n', at);
+            if (end == std::string::npos) end = chosen.said.size();
+            say(chosen.said.substr(at, end - at));
+            at = end + 1;
+        }
+        if (!chosen.warning.empty()) say(chosen.warning);
+        crt = chosen.libraries;
+        // the Shalimar runtime built for that C runtime, the session's (-debug) where shalimar was given --debug
+        if (shalimar) {
+            const bool session = configFlags(ToolShc, config, arch).find("--debug") != std::string::npos;
+            const std::string shm = windowsShalimarRuntime(tool, chosen.crt, session);
+            if (path::exists(shm)) {
+                made.push_back(shm);
+                say("[" + path::filename(shm) + " linked first: the Shalimar runtime]");
+            } else {
+                say("[" + path::filename(shm) + " is not beside " + product::kName + " (" + path::parent(shm) +
+                    ") - the link may miss the Shalimar runtime]");
+            }
+        }
+    }
+    const bool microsoftDebug = clObjects || clangCodeView;
 
-    Recipe link = linkRecipe(tool, made, withCpp, arch, config, program);
+    if (sink) sink(context, "$ linking with " + (config == ConfigDebug && microsoftDebug ? std::string("link.exe")
+                                                                                       : linkerName(withCpp)));
+
+    Recipe link = linkRecipe(tool, made, withCpp, arch, config, program, crt, microsoftDebug);
     int linked = runCaptured(link.command, result.output, sink, context);
 
 #ifdef __APPLE__
@@ -1135,11 +1346,16 @@ Built buildPartsOnce(const Toolchain& tool, const std::vector<Part>& parts,
                                "Visual Studio's, found where its installation keeps it";
             result.output += hint + "\n";
             if (sink) sink(context, hint);
+        } else if (arch == "x86_64-windows" && linked != kStoppedStatus) {
+            // said as the compilers say a failed link of their own, so the question of the native tools is put
+            say("the link failed - the command was:");
+            say("  " + link.command);
         }
         return result;
     }
 
     result.program = program;
+    result.shalimar = shalimar;
     result.ok = true;
     return result;
 }

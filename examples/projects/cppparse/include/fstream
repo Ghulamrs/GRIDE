@@ -1,0 +1,298 @@
+// fstream - cppparse's C++98 library: basic_filebuf over the C runtime's FILE and the file streams (27.8): ifstream,
+// ofstream, fstream and their wide forms. A char buffer over a file it opened itself keeps a buffer of its own: a put
+// area when the file is opened for output only, a get area when it is opened for input only in binary mode (in text
+// mode the C runtime's line-end translation would make the file position of the get area unknown). Positioning
+// empties the buffer first. A buffer over a FILE the program shares (the standard streams), a wide buffer and a file
+// opened for input and output read and write the FILE directly (whose own buffer the C runtime keeps), so C and C++
+// output to one FILE stay in order. A wide buffer writes each character as one byte and fails on a character above
+// 255, as the "C" locale's conversion does in MSVC. Positions are 64-bit (_fseeki64, _ftelli64).
+#ifndef CPPPARSE_FSTREAM
+#define CPPPARSE_FSTREAM
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <istream>
+#include <ostream>
+#include <string>
+
+namespace std {
+
+template <class charT, class traits = char_traits<charT> >
+class basic_filebuf : public basic_streambuf<charT, traits> {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+
+    basic_filebuf() : m_file(0), m_own(false), m_mode(0), m_buf(0) {}
+    virtual ~basic_filebuf() { close(); }
+    bool is_open() const { return m_file != 0; }
+    basic_filebuf* open(const char* name, ios_base::openmode mode)
+    {
+        if (m_file) return 0;
+        const char* how = __fopen_mode(mode & ~ios_base::ate);
+        if (!how) return 0;
+        m_file = fopen(name, how);
+        if (!m_file) return 0;
+        m_own = true;
+        m_mode = mode;
+        if ((mode & ios_base::ate) && _fseeki64(m_file, 0, SEEK_END) != 0) { close(); return 0; }
+        // the buffer's own buffer: char files opened for output only, or for input only in binary mode
+        const bool outOnly = (mode & (ios_base::out | ios_base::app)) != 0 && !(mode & ios_base::in);
+        const bool binaryIn = (mode & ios_base::in) && !(mode & (ios_base::out | ios_base::app)) && (mode & ios_base::binary);
+        if (sizeof(charT) == 1 && (outOnly || binaryIn)) {
+            m_buf = static_cast<char_type*>(malloc(__bufSize * sizeof(char_type)));
+            if (m_buf && outOnly) this->setp(m_buf, m_buf + __bufSize);
+        }
+        return this;
+    }
+    basic_filebuf* close()
+    {
+        if (!m_file) return 0;
+        bool ok = __flush();
+        if (fflush(m_file) != 0) ok = false;
+        if (m_own && fclose(m_file) != 0) ok = false;
+        m_file = 0;
+        m_own = false;
+        free(m_buf);
+        m_buf = 0;
+        this->setp(0, 0);
+        this->setg(0, 0, 0);
+        return ok ? this : 0;
+    }
+    // the library's: a buffer over a FILE the program has open (the standard streams over stdin, stdout and stderr)
+    explicit basic_filebuf(FILE* f) : m_file(f), m_own(false), m_mode(ios_base::in | ios_base::out), m_buf(0) {}
+
+protected:
+    // the next character without taking it: from the buffer, refilled by fread, or from the FILE (fgetc, then ungetc)
+    virtual int_type underflow()
+    {
+        if (!m_file) return traits::eof();
+        if (this->__gnext < this->__gend) return traits::to_int_type(*this->__gnext);
+        if (m_buf && !this->__pbeg) {
+            const size_t n = fread(m_buf, sizeof(char_type), __bufSize, m_file);
+            if (n == 0) { this->setg(0, 0, 0); return traits::eof(); }
+            this->setg(m_buf, m_buf, m_buf + n);
+            return traits::to_int_type(*m_buf);
+        }
+        int c = fgetc(m_file);
+        if (c == EOF) return traits::eof();
+        ungetc(c, m_file);
+        return traits::to_int_type(static_cast<char_type>(static_cast<unsigned char>(c)));
+    }
+    virtual int_type uflow()
+    {
+        if (!m_file) return traits::eof();
+        if (m_buf && !this->__pbeg) {
+            if (traits::eq_int_type(underflow(), traits::eof())) return traits::eof();
+            return traits::to_int_type(*this->__gnext++);
+        }
+        int c = fgetc(m_file);
+        return c == EOF ? traits::eof() : traits::to_int_type(static_cast<char_type>(static_cast<unsigned char>(c)));
+    }
+    // what is buffered goes first; a long read of a buffered file goes straight to fread
+    virtual streamsize xsgetn(char_type* s, streamsize n)
+    {
+        if (!m_file || n <= 0) return 0;
+        streamsize done = 0;
+        if (this->__gnext < this->__gend) {
+            streamsize k = static_cast<streamsize>(this->__gend - this->__gnext);
+            if (k > n) k = n;
+            memcpy(s, this->__gnext, static_cast<size_t>(k) * sizeof(char_type));
+            this->__gnext += k;
+            done = k;
+        }
+        if (done < n && sizeof(charT) == 1 && (m_buf || !(m_mode & ios_base::out))) {
+            // char: the FILE's bytes are the characters
+            done += static_cast<streamsize>(fread(s + done, 1, static_cast<size_t>(n - done), m_file));
+            return done;
+        }
+        while (done < n) {
+            int_type c = uflow();
+            if (traits::eq_int_type(c, traits::eof())) break;
+            s[done++] = traits::to_char_type(c);
+        }
+        return done;
+    }
+    virtual int_type pbackfail(int_type c)
+    {
+        if (!m_file || traits::eq_int_type(c, traits::eof())) return traits::eof();
+        if (this->__gbeg < this->__gnext && traits::eq(traits::to_char_type(c), this->__gnext[-1])) { --this->__gnext; return c; }
+        if (m_buf) return traits::eof();
+        unsigned long v = static_cast<unsigned long>(traits::to_int_type(traits::to_char_type(c)));
+        return v < 256 && ungetc(static_cast<int>(v), m_file) != EOF ? c : traits::eof();
+    }
+    // the put area is full: it is written out, then c goes into it (or, unbuffered, to the FILE)
+    virtual int_type overflow(int_type c)
+    {
+        if (!m_file) return traits::eof();
+        if (this->__pbeg) {
+            if (!__flush()) return traits::eof();
+            if (traits::eq_int_type(c, traits::eof())) return traits::not_eof(c);
+            *this->__pnext++ = traits::to_char_type(c);
+            return c;
+        }
+        if (traits::eq_int_type(c, traits::eof())) return traits::not_eof(c);
+        unsigned long v = static_cast<unsigned long>(traits::to_int_type(traits::to_char_type(c)));
+        if (v > 255 || fputc(static_cast<int>(v), m_file) == EOF) return traits::eof();
+        return c;
+    }
+    virtual streamsize xsputn(const char_type* s, streamsize n)
+    {
+        if (!m_file || n <= 0) return 0;
+        if (this->__pbeg) {
+            if (reinterpret_cast<size_t>(this->__pend) - reinterpret_cast<size_t>(this->__pnext) >= static_cast<size_t>(n) * sizeof(char_type)) {
+                memcpy(this->__pnext, s, static_cast<size_t>(n) * sizeof(char_type));
+                this->__pnext += n;
+                return n;
+            }
+            if (!__flush()) return 0;
+            if (n < __bufSize) {
+                memcpy(this->__pnext, s, static_cast<size_t>(n) * sizeof(char_type));
+                this->__pnext += n;
+                return n;
+            }
+        }
+        // char: written as it is
+        if (sizeof(charT) == 1) return static_cast<streamsize>(fwrite(s, 1, static_cast<size_t>(n), m_file));
+        char buf[256];
+        streamsize done = 0;
+        while (done < n) {
+            size_t k = 0;
+            while (k < sizeof buf && done + static_cast<streamsize>(k) < n) {
+                unsigned long v = static_cast<unsigned long>(traits::to_int_type(s[done + k]));
+                if (v > 255) break;
+                buf[k++] = static_cast<char>(v);
+            }
+            size_t w = k ? fwrite(buf, 1, k, m_file) : 0;
+            done += static_cast<streamsize>(w);
+            if (w < k || k == 0) break;
+        }
+        return done;
+    }
+    virtual int sync() { return m_file && (!__flush() || fflush(m_file) != 0) ? -1 : 0; }
+    // the buffer is emptied first: what is to be written is written, what was read ahead is given back (the FILE
+    // is that many characters ahead of the reader, one byte per character in binary mode)
+    virtual pos_type seekoff(off_type off, ios_base::seekdir way, ios_base::openmode)
+    {
+        if (!m_file || !__flush()) return pos_type(off_type(-1));
+        const off_type ahead = static_cast<off_type>(this->__gend - this->__gnext);
+        if (way == ios_base::cur && off == 0) {
+            const long long at = _ftelli64(m_file);
+            return at < 0 ? pos_type(off_type(-1)) : pos_type(static_cast<off_type>(at) - ahead);
+        }
+        if (way == ios_base::cur) off -= ahead;
+        this->setg(0, 0, 0);
+        if (_fseeki64(m_file, off, way == ios_base::beg ? SEEK_SET : way == ios_base::end ? SEEK_END : SEEK_CUR) != 0) return pos_type(off_type(-1));
+        const long long at = _ftelli64(m_file);
+        return at < 0 ? pos_type(off_type(-1)) : pos_type(static_cast<off_type>(at));
+    }
+    virtual pos_type seekpos(pos_type sp, ios_base::openmode which) { return seekoff(off_type(sp), ios_base::beg, which); }
+
+private:
+    enum { __bufSize = 4096 };
+    FILE*              m_file;
+    bool               m_own;
+    ios_base::openmode m_mode;
+    char_type*         m_buf;    // the buffer's own buffer (0: the FILE is read and written directly)
+
+    basic_filebuf(const basic_filebuf&);
+    basic_filebuf& operator=(const basic_filebuf&);
+
+    // the put area to the FILE (false when not all of it could be written)
+    bool __flush()
+    {
+        if (!this->__pbeg || this->__pnext == this->__pbeg) return true;
+        const size_t n = static_cast<size_t>(this->__pnext - this->__pbeg);
+        const size_t w = fwrite(this->__pbeg, sizeof(char_type), n, m_file);
+        this->__pnext = this->__pbeg;
+        return w == n;
+    }
+    // C++98 table 92: the openmode combinations and the fopen modes they mean
+    static const char* __fopen_mode(ios_base::openmode m)
+    {
+        const bool b = (m & ios_base::binary) != 0;
+        switch (m & ~ios_base::binary) {
+        case ios_base::out: case ios_base::out | ios_base::trunc: return b ? "wb" : "w";
+        case ios_base::out | ios_base::app: case ios_base::app: return b ? "ab" : "a";
+        case ios_base::in: return b ? "rb" : "r";
+        case ios_base::in | ios_base::out: return b ? "r+b" : "r+";
+        case ios_base::in | ios_base::out | ios_base::trunc: return b ? "w+b" : "w+";
+        case ios_base::in | ios_base::out | ios_base::app: case ios_base::in | ios_base::app: return b ? "a+b" : "a+";
+        default: return 0;
+        }
+    }
+};
+
+template <class charT, class traits = char_traits<charT> >
+class basic_ifstream : public basic_istream<charT, traits> {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+    basic_ifstream() : basic_istream<charT, traits>(&m_sb) {}
+    explicit basic_ifstream(const char* name, ios_base::openmode mode = ios_base::in) : basic_istream<charT, traits>(&m_sb) { open(name, mode); }
+    virtual ~basic_ifstream() {}
+    basic_filebuf<charT, traits>* rdbuf() const { return const_cast<basic_filebuf<charT, traits>*>(&m_sb); }
+    bool is_open() const { return m_sb.is_open(); }
+    void open(const char* name, ios_base::openmode mode = ios_base::in) { if (!m_sb.open(name, mode | ios_base::in)) this->setstate(ios_base::failbit); }
+    void close() { if (!m_sb.close()) this->setstate(ios_base::failbit); }
+private:
+    basic_filebuf<charT, traits> m_sb;
+};
+
+template <class charT, class traits = char_traits<charT> >
+class basic_ofstream : public basic_ostream<charT, traits> {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+    basic_ofstream() : basic_ostream<charT, traits>(&m_sb) {}
+    explicit basic_ofstream(const char* name, ios_base::openmode mode = ios_base::out) : basic_ostream<charT, traits>(&m_sb) { open(name, mode); }
+    virtual ~basic_ofstream() {}
+    basic_filebuf<charT, traits>* rdbuf() const { return const_cast<basic_filebuf<charT, traits>*>(&m_sb); }
+    bool is_open() const { return m_sb.is_open(); }
+    void open(const char* name, ios_base::openmode mode = ios_base::out) { if (!m_sb.open(name, mode | ios_base::out)) this->setstate(ios_base::failbit); }
+    void close() { if (!m_sb.close()) this->setstate(ios_base::failbit); }
+private:
+    basic_filebuf<charT, traits> m_sb;
+};
+
+template <class charT, class traits = char_traits<charT> >
+class basic_fstream : public basic_iostream<charT, traits> {
+public:
+    typedef charT                      char_type;
+    typedef typename traits::int_type  int_type;
+    typedef typename traits::pos_type  pos_type;
+    typedef typename traits::off_type  off_type;
+    typedef traits                     traits_type;
+    basic_fstream() : basic_iostream<charT, traits>(&m_sb) {}
+    explicit basic_fstream(const char* name, ios_base::openmode mode = ios_base::in | ios_base::out) : basic_iostream<charT, traits>(&m_sb) { open(name, mode); }
+    virtual ~basic_fstream() {}
+    basic_filebuf<charT, traits>* rdbuf() const { return const_cast<basic_filebuf<charT, traits>*>(&m_sb); }
+    bool is_open() const { return m_sb.is_open(); }
+    void open(const char* name, ios_base::openmode mode = ios_base::in | ios_base::out) { if (!m_sb.open(name, mode)) this->setstate(ios_base::failbit); }
+    void close() { if (!m_sb.close()) this->setstate(ios_base::failbit); }
+private:
+    basic_filebuf<charT, traits> m_sb;
+};
+
+typedef basic_filebuf<char, char_traits<char> >        filebuf;
+typedef basic_filebuf<wchar_t, char_traits<wchar_t> >  wfilebuf;
+typedef basic_ifstream<char, char_traits<char> >       ifstream;
+typedef basic_ifstream<wchar_t, char_traits<wchar_t> > wifstream;
+typedef basic_ofstream<char, char_traits<char> >       ofstream;
+typedef basic_ofstream<wchar_t, char_traits<wchar_t> > wofstream;
+typedef basic_fstream<char, char_traits<char> >        fstream;
+typedef basic_fstream<wchar_t, char_traits<wchar_t> >  wfstream;
+
+}
+
+#endif

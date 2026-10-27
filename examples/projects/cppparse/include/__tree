@@ -1,0 +1,232 @@
+// __tree - cppparse's C++98 library: the AVL tree behind map and set. Nodes keep parent links
+// for bidirectional iteration; erase unlinks nodes, so other iterators stay valid.
+#ifndef CPPPARSE_TREE
+#define CPPPARSE_TREE
+
+#include <cstddef>
+#include <cstdlib>
+#include <new>
+#include <utility>
+
+namespace std {
+
+template <class Key, class Value, class KeyOf, class Cmp>
+class __tree {
+public:
+    struct node {
+        Value value;
+        node* left;
+        node* right;
+        node* parent;
+        int   height;
+        node(const Value& v) : value(v), left(0), right(0), parent(0), height(1) {}
+    };
+
+    class iterator {
+    public:
+        iterator() : n(0), owner(0) {}
+        iterator(node* at, const __tree* t) : n(at), owner(t) {}
+        Value& operator*() const { return n->value; }
+        Value* operator->() const { return &n->value; }
+        bool operator==(const iterator& o) const { return n == o.n; }
+        bool operator!=(const iterator& o) const { return n != o.n; }
+        iterator& operator++() { n = __tree::next(n); return *this; }
+        iterator  operator++(int) { iterator t(*this); n = __tree::next(n); return t; }
+        iterator& operator--() { n = n ? __tree::prev(n) : __tree::rightmost(owner->m_root); return *this; }
+        iterator  operator--(int) { iterator t(*this); --*this; return t; }
+        node* n;
+        const __tree* owner;
+    };
+    typedef iterator const_iterator;
+
+    __tree() : m_root(0), m_size(0) {}
+    __tree(const __tree& o) : m_root(0), m_size(0) { copyFrom(o); }
+    ~__tree() { clear(); }
+    __tree& operator=(const __tree& o) { if (this != &o) { clear(); copyFrom(o); } return *this; }
+
+    size_t size() const { return m_size; }
+    bool   empty() const { return m_size == 0; }
+    void   clear() { destroy(m_root); m_root = 0; m_size = 0; }
+    iterator begin() const { return iterator(leftmost(m_root), this); }
+    iterator end() const { return iterator(0, this); }
+    void swap(__tree& o) { node* r = m_root; m_root = o.m_root; o.m_root = r; size_t s = m_size; m_size = o.m_size; o.m_size = s; }
+
+    iterator find(const Key& k) const
+    {
+        node* n = lowerNode(k);
+        if (n && !m_cmp(k, m_keyOf(n->value))) return iterator(n, this);
+        return end();
+    }
+    size_t count(const Key& k) const { return find(k) == end() ? 0 : 1; }
+    iterator lower_bound(const Key& k) const { return iterator(lowerNode(k), this); }
+    iterator upper_bound(const Key& k) const
+    {
+        node* best = 0;
+        for (node* n = m_root; n;) {
+            if (m_cmp(k, m_keyOf(n->value))) { best = n; n = n->left; } else n = n->right;
+        }
+        return iterator(best, this);
+    }
+
+    pair<iterator, bool> insert(const Value& v)
+    {
+        const Key& k = m_keyOf(v);
+        node* parent = 0;
+        node** link = &m_root;
+        while (*link) {
+            parent = *link;
+            if (m_cmp(k, m_keyOf(parent->value))) link = &parent->left;
+            else if (m_cmp(m_keyOf(parent->value), k)) link = &parent->right;
+            else return pair<iterator, bool>(iterator(parent, this), false);
+        }
+        node* n = static_cast<node*>(malloc(sizeof(node)));
+        new (n) node(v);
+        n->parent = parent;
+        *link = n;
+        ++m_size;
+        rebalance(parent);
+        return pair<iterator, bool>(iterator(n, this), true);
+    }
+
+    void erase(iterator at)
+    {
+        node* z = at.n;
+        if (!z) return;
+        unlink(z);
+        z->~node();
+        free(z);
+        --m_size;
+    }
+    size_t erase(const Key& k)
+    {
+        iterator it = find(k);
+        if (it == end()) return 0;
+        erase(it);
+        return 1;
+    }
+    void erase(iterator first, iterator last)
+    {
+        while (first != last) { iterator n = first; ++n; erase(first); first = n; }
+    }
+
+    static node* leftmost(node* n) { if (n) while (n->left) n = n->left; return n; }
+    static node* rightmost(node* n) { if (n) while (n->right) n = n->right; return n; }
+    static node* next(node* n)
+    {
+        if (n->right) return leftmost(n->right);
+        while (n->parent && n->parent->right == n) n = n->parent;
+        return n->parent;
+    }
+    static node* prev(node* n)
+    {
+        if (n->left) return rightmost(n->left);
+        while (n->parent && n->parent->left == n) n = n->parent;
+        return n->parent;
+    }
+
+private:
+    node*  m_root;
+    size_t m_size;
+    Cmp    m_cmp;
+    KeyOf  m_keyOf;
+
+    node* lowerNode(const Key& k) const
+    {
+        node* best = 0;
+        for (node* n = m_root; n;) {
+            if (m_cmp(m_keyOf(n->value), k)) n = n->right;
+            else { best = n; n = n->left; }
+        }
+        return best;
+    }
+    void copyFrom(const __tree& o)
+    {
+        for (node* n = leftmost(o.m_root); n; n = next(n)) insert(n->value);
+    }
+    void destroy(node* n)
+    {
+        if (!n) return;
+        destroy(n->left);
+        destroy(n->right);
+        n->~node();
+        free(n);
+    }
+    static int heightOf(node* n) { return n ? n->height : 0; }
+    static int balance(node* n) { return heightOf(n->left) - heightOf(n->right); }
+    static void update(node* n)
+    {
+        int l = heightOf(n->left), r = heightOf(n->right);
+        n->height = (l > r ? l : r) + 1;
+    }
+    void replaceChild(node* parent, node* old, node* with)
+    {
+        if (!parent) m_root = with;
+        else if (parent->left == old) parent->left = with;
+        else parent->right = with;
+    }
+    node* rotateLeft(node* x)
+    {
+        node* y = x->right;
+        x->right = y->left;
+        if (y->left) y->left->parent = x;
+        y->parent = x->parent;
+        replaceChild(x->parent, x, y);
+        y->left = x;
+        x->parent = y;
+        update(x);
+        update(y);
+        return y;
+    }
+    node* rotateRight(node* x)
+    {
+        node* y = x->left;
+        x->left = y->right;
+        if (y->right) y->right->parent = x;
+        y->parent = x->parent;
+        replaceChild(x->parent, x, y);
+        y->right = x;
+        x->parent = y;
+        update(x);
+        update(y);
+        return y;
+    }
+    void rebalance(node* n)
+    {
+        while (n) {
+            update(n);
+            node* up = n->parent;
+            int b = balance(n);
+            if (b > 1) { if (balance(n->left) < 0) rotateLeft(n->left); rotateRight(n); }
+            else if (b < -1) { if (balance(n->right) > 0) rotateRight(n->right); rotateLeft(n); }
+            n = up;
+        }
+    }
+    void unlink(node* z)
+    {
+        node* fixFrom;
+        if (!z->left || !z->right) {
+            node* c = z->left ? z->left : z->right;
+            replaceChild(z->parent, z, c);
+            if (c) c->parent = z->parent;
+            fixFrom = z->parent;
+        } else {
+            node* s = leftmost(z->right);
+            if (s->parent != z) {
+                fixFrom = s->parent;
+                replaceChild(s->parent, s, s->right);
+                if (s->right) s->right->parent = s->parent;
+                s->right = z->right;
+                s->right->parent = s;
+            } else fixFrom = s;
+            replaceChild(z->parent, z, s);
+            s->parent = z->parent;
+            s->left = z->left;
+            s->left->parent = s;
+        }
+        rebalance(fixFrom);
+    }
+};
+
+}
+
+#endif

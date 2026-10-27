@@ -1,0 +1,23 @@
+// cerrno - cppparse's C++98 library: errno (MSVC's per-thread _errno()) and the error numbers of its C runtime.
+#ifndef CPPPARSE_CERRNO
+#define CPPPARSE_CERRNO
+
+extern "C" int* _errno(void);
+#define errno (*_errno())
+
+#define EPERM    1
+#define ENOENT   2
+#define EINTR    4
+#define EIO      5
+#define EBADF    9
+#define EAGAIN   11
+#define ENOMEM   12
+#define EACCES   13
+#define EEXIST   17
+#define EINVAL   22
+#define EPIPE    32
+#define EDOM     33
+#define ERANGE   34
+#define EILSEQ   42
+
+#endif

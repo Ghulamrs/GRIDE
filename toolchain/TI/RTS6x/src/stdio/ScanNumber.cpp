@@ -76,11 +76,20 @@ bool Scanner::floating(bool assign, int width, Length length, bool &input)
     bool single = length == Default;
     unsigned long long bits = 0;
     if (n > 0) bits = FloatText::read(single ? FloatFormat::binary32() : FloatFormat::binary64(), text, &end, range);
+#if defined(_WIN32)
+    // grt: as the Microsoft runtime - a field that is not a whole number ("1.5e", "nan(") fails the conversion,
+    // and at the end of the input that is an input failure (EOF before any conversion)
+    if (n == 0 || end != text + n) {
+        input = in_.endReached();
+        return false;
+    }
+#else
     // A field whose end is not part of a number - "1.5e" - converts as far as it is one.
     if (n == 0 || end == text) {
         input = n == 0 && in_.endReached();
         return false;
     }
+#endif
     if (!assign) return true;
     if (single) *va_arg(*args_, float *) = FloatBits::toFloat(bits);
     else *va_arg(*args_, double *) = FloatBits::toDouble(bits);

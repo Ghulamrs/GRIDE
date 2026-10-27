@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -61,6 +62,7 @@ struct Process::Held {
     std::string vtParams;
     int row;
     int column;
+    std::mutex saying;     // say's lines, one at a time
 
     Held() : toChild(NULL), fromChild(NULL), child(NULL), console(NULL), errFromChild(NULL),
              job(NULL), grouped(false), outOpen(false), errOpen(false), reaped(false), status(0),
@@ -83,6 +85,7 @@ struct Process::Held {
     bool terminal;
     char endOfInput;
     bool midLine;
+    std::mutex saying;     // say's lines, one at a time
 
     Held() : toChild(-1), fromChild(-1), child(-1), errFromChild(-1), grouped(false),
              outOpen(false), errOpen(false), reaped(false), status(0), terminal(false),
@@ -284,6 +287,8 @@ bool Process::startOnConsole(const std::string& command) {
 bool Process::say(const std::string& line) {
     if (!running_) return false;
 
+    std::lock_guard<std::mutex> one(held_->saying);
+    if (!held_->toChild) return false;
     std::string out = line + (held_->console ? "\r\n" : "\n");
     DWORD written = 0;
     if (!WriteFile(held_->toChild, out.data(), static_cast<DWORD>(out.size()), &written, NULL))
@@ -295,7 +300,10 @@ void Process::stop() {
     if (!running_) return;
     running_ = false;
 
-    if (held_->toChild) { CloseHandle(held_->toChild); held_->toChild = NULL; }
+    {
+        std::lock_guard<std::mutex> one(held_->saying);
+        if (held_->toChild) { CloseHandle(held_->toChild); held_->toChild = NULL; }
+    }
 
     if (WaitForSingleObject(held_->child, 2000) == WAIT_TIMEOUT)
         TerminateProcess(held_->child, 1);
@@ -827,6 +835,8 @@ bool Process::start(const std::string& command) {
 bool Process::say(const std::string& line) {
     if (!running_) return false;
 
+    std::lock_guard<std::mutex> one(held_->saying);
+    if (held_->toChild < 0) return false;
     std::string out = line + "\n";
     size_t written = 0;
     while (written < out.size()) {
@@ -844,7 +854,10 @@ void Process::stop() {
     if (!running_) return;
     running_ = false;
 
-    if (held_->toChild >= 0) { close(held_->toChild); held_->toChild = -1; }
+    {
+        std::lock_guard<std::mutex> one(held_->saying);
+        if (held_->toChild >= 0) { close(held_->toChild); held_->toChild = -1; }
+    }
 
     for (int waited = 0; waited < 200; ++waited) {
         int status = 0;
@@ -1143,6 +1156,30 @@ std::string Process::readUntil(const std::string& marker, bool* found, int timeo
     std::string rest = pending_;
     pending_.clear();
     return rest;
+}
+
+std::string Process::readLines(const std::string& marker, bool* found, int timeoutMs) {
+    if (found) *found = false;
+    if (marker.empty()) return std::string();
+    if (pending_.find(marker) == std::string::npos && running_) {
+        char chunk[1024];
+        size_t got = 0;
+        const int said = readSome(held_->fromChild, chunk, sizeof chunk, got, timeoutMs);
+        if (said < 0) running_ = false;
+        if (said > 0) pending_.append(chunk, got);
+    }
+    const size_t at = pending_.find(marker);
+    if (at != std::string::npos) {
+        std::string answer = pending_.substr(0, at);
+        pending_.erase(0, at + marker.size());
+        if (found) *found = true;
+        return answer;
+    }
+    // Once the child is gone there is no rest to wait for.
+    const size_t ended = running_ ? pending_.rfind('\n') + 1 : pending_.size();
+    std::string lines = pending_.substr(0, ended);
+    pending_.erase(0, ended);
+    return lines;
 }
 
 }

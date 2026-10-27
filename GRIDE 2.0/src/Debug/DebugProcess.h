@@ -30,6 +30,7 @@ namespace Gride
             process = IntPtr::Zero; console = IntPtr::Zero; input = IntPtr::Zero; output = IntPtr::Zero;
             reader = nullptr; waiter = nullptr;
             pending = gcnew StringBuilder();
+            sayGate = gcnew Object();
             heard = gcnew Queue<String^>();
             gotData = gcnew AutoResetEvent(false);
             encoding = gcnew UTF8Encoding(false);
@@ -101,10 +102,12 @@ namespace Gride
             return true;
         }
 
-        // a line to the child, with its line end: a newline on a pipe, Enter ("\r") on a console
+        // a line to the child, with its line end: a newline on a pipe, Enter ("\r") on a console; one line at
+        // a time, since the program's input may be said while a move waits on another thread
         bool Say(String^ line)
         {
             if (!running) return false;
+            Monitor::Enter(sayGate);
             try
             {
                 if (onConsole)
@@ -120,16 +123,22 @@ namespace Gride
                     s->Write(bytes, 0, bytes->Length);
                     s->Flush();
                 }
-                Transcript->Append("> " + line + "\n");
+                Monitor::Enter(pending);
+                try { Transcript->Append("> " + line + "\n"); } finally { Monitor::Exit(pending); }
                 return true;
             }
             catch (Exception^) { return false; }
+            finally { Monitor::Exit(sayGate); }
         }
 
         // what the child printed up to the marker (the marker and its line end taken out); found
         // says whether the marker came. When the time runs out, or the child ends, what is pending
         // is answered and found is false.
-        String^ ReadUntil(String^ marker, int timeoutMs, bool% found)
+        String^ ReadUntil(String^ marker, int timeoutMs, bool% found) { return ReadUntil(marker, timeoutMs, found, false); }
+
+        // the same; wholeLines: a wait that runs out answers only the lines that have ended (the rest, a
+        // marker on its way among it, is kept for the next read), so a move can be read a little at a time
+        String^ ReadUntil(String^ marker, int timeoutMs, bool% found, bool wholeLines)
         {
             found = false;
             if (String::IsNullOrEmpty(marker)) return String::Empty;
@@ -160,7 +169,13 @@ namespace Gride
                 gotData->WaitOne(Math::Min(left, 250));
             }
             Monitor::Enter(pending);
-            try { String^ rest = pending->ToString(); pending->Length = 0; return rest; }
+            try
+            {
+                String^ rest = pending->ToString();
+                int ended = wholeLines ? rest->LastIndexOf(L'\n') + 1 : rest->Length;
+                pending->Remove(0, ended);
+                return rest->Substring(0, ended);
+            }
             finally { Monitor::Exit(pending); }
         }
 
@@ -236,6 +251,7 @@ namespace Gride
         Thread^ reader;
         Thread^ waiter;
         StringBuilder^ pending;
+        Object^ sayGate;
         Queue<String^>^ heard;
         AutoResetEvent^ gotData;
         UTF8Encoding^ encoding;

@@ -1,0 +1,21 @@
+// csetjmp - cppparse's C++98 library: setjmp and longjmp of MSVC's C runtime (x64: a 16-byte aligned 256-byte
+// buffer; setjmp is _setjmp with a null frame pointer, so longjmp restores the registers without unwinding, which
+// is what C code expects; cppparse's own exception runtime does the same).
+#ifndef CPPPARSE_CSETJMP
+#define CPPPARSE_CSETJMP
+
+struct __declspec(align(16)) __cppparse_jmp_buf { unsigned long long data[32]; };
+typedef __cppparse_jmp_buf jmp_buf[1];
+
+extern "C" {
+    int  _setjmp(jmp_buf env, void* frame);
+    void longjmp(jmp_buf env, int value);
+}
+
+#define setjmp(env) _setjmp((env), 0)
+
+namespace std {
+    using ::jmp_buf; using ::longjmp;
+}
+
+#endif

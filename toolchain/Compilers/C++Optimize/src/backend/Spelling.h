@@ -148,6 +148,9 @@ public:
     }
 
     virtual void predefine(const std::vector<std::string> &) {}
+    // Every chunk of the file's text, written and in order, before the preamble: what only the whole
+    // file decides is spelled here (1.30: MASM's `div` instruction where `div` is a name).
+    virtual void finishText(std::vector<std::string> &) {}
     virtual void preamble(std::ostream &) {}
     virtual void postamble(std::ostream &) {}
 
@@ -188,6 +191,12 @@ public:
     // Identity everywhere but COFF, where a temporary cannot carry a
     // relocation - see CoffSpelling::sym.
     virtual std::string labelText(const std::string &l) const { return l; }
+    // A label the spelling itself writes round a function's code - `$LNprolog$`, `$LNend$` - as a
+    // table names it: the prefix and the symbol as one label here, the prefix before the symbol as
+    // the spelling writes that in MASM (1.30, 2026-10-23: `_GLOBAL__sub_I_f.cpp` is `$_GLOBAL__...`).
+    virtual std::string codeLabelText(const std::string &prefix, const std::string &symbol) {
+        return labelText(prefix + symbol);
+    }
     virtual void dataBytes(const std::string &bytes) = 0;
 };
 

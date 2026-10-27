@@ -83,6 +83,14 @@ public:
     int  sizeOf(const Type* t) const;
     int  alignOf(const Type* t) const;
     static void memberPointerModel(const Symbol* cls, bool& multiple, bool& virt, int depth);
+    // cl's value of &C::m, m a non-static member of C, as a pointer to member of C (measured on cl's objects): a data
+    // member's offset (in the virtual model counted from the subobject that holds C's vbptr, where its vbtable's
+    // entry 0 leads); a function's this adjustment (from that subobject too in the virtual model: X : A0, B1 with
+    // B1's vbptr shared gives -16); for a virtual function whose slot is in a vftable of a virtual base, the byte offset
+    // of that base's entry in C's vbtable (vbindex, else 0), the adjustment then counting from the base, and in the
+    // unspecified model the vbptr's offset with it (vbptr, else 0)
+    static void memberPointerValue(const Symbol* m, int& offset, int& adjust, int& vbptr, int& vbindex);
+    static int  vbptrOrigin(const Symbol* cls);   // where C's vbptr's subobject starts (0 without virtual bases)
     // t is, or holds in an element, base or member (not through a reference), a pointer to member
     static bool holdsMemberPointer(const Type* t, int depth = 0);
     int  rank(const Type* t) const;        // integer conversion rank
@@ -129,8 +137,18 @@ struct VfTable {
     // (vtordisp: cl's $4 thunks; the field holds how far the base moved from where this class's layout has it)
     Symbol*              vbase;
     bool                 vtordisp;
-    Symbol*              vtordispex;      // an overrider from inside another virtual base (its distance varies: cl's
-                                          // vtordispex thunk reads the vbtable); 0 when the table has none
+    // per slot of such a table with a vtordisp: the virtual base of the class that is the overrider's own class, when
+    // that is not the table's base (its distance from the base varies: cl's vtordispex thunk reads its vbtable entry,
+    // $R4); 0 for the other slots (an overrider in a non-virtual base of another virtual base gets the $4 thunk of
+    // the static layout, as cl gives it)
+    std::vector<Symbol*> vtordispexVbase;
+    Symbol*              vtordispex;      // such an overrider whose thunk --compile6 cannot build (no vbtable entry for
+                                          // its base); 0 when the table has none
+    // per slot of a table inside a virtual base: the class that appended the slot (cl puts a covariant override's slot
+    // of its own at the end of the virtual base's table that holds the overridden function: CV : virtual VB { Y* get(); }
+    // over VB::get returning X*), 0 for the base's own slots. The appending class's function in it is reached without
+    // the vtordisp (cl: ?get@CV@@UEAAPEAUY@@XZ itself, or a plain adjustor in a bigger class), any other through it
+    std::vector<Symbol*> slotClass;
     VfTable() : offset(0), introducedBy(0), vbase(0), vtordisp(false), vtordispex(0) {}
 };
 
@@ -206,7 +224,7 @@ struct Symbol {
     cxx::Expr*    init;
     Symbol*       initCtor;               // variable of class type: the constructor chosen for its initialisation
     bool          hasConstValue;
-    long          constValue;
+    long long     constValue;             // the value in its type: the low 32 bits sign-extended for a type of 4 bytes or less, all 64 bits of a 64-bit type
     int           declAlign;              // __declspec(align(N)) on a variable or field (0: none)
     int           bitWidth, bitOffset;    // bit-field: its width (-1: not a bit-field) and first bit in the unit at offset
     // a member of an anonymous union or struct, seen as a member of the enclosing class: the unnamed member
@@ -219,7 +237,9 @@ struct Symbol {
     std::map<std::string, Symbol*> instantiations;   // argument text -> instantiated class / function
     Symbol*       instantiatedFrom;
     std::vector<const Type*> templateArgs;           // for an instantiation: the type arguments (0 for non-type)
-    std::vector<long>        templateIntArgs;
+    std::vector<long long>   templateIntArgs;
+    std::vector<Symbol*>     templateSymArgs;        // for an instantiation: the member a pointer-to-member argument names (0 for the others; templateIntArgs holds a data member's offset)
+    Symbol*       memberArg;              // a non-type template parameter bound in an instantiation to the pointer to member &C::m: m
     bool          isDependentContext;     // declared inside a template: not analysed until instantiated
     bool          isImplicitInstantiation; // class: made from a template by instantiateClassTemplate (not an explicit specialisation)
     bool          isLazyInstantiation;    // function analysed tentatively (Sema::isLazyMember): generated only when used
@@ -272,6 +292,13 @@ struct Scope {
 // the value of an integer literal's digits modulo 2^64 (SemaExpr.cpp); *overflow when it needs more bits
 unsigned long long integerLiteralValue(const std::string& text, bool* overflow);
 
+// folded integer constants (Expr::semaValue, Symbol::constValue, Symbol::templateIntArgs) hold their value in their
+// type, modulo 2^N: all 64 bits of a type of 8 bytes, the low 32 bits sign-extended for one of 4 bytes or less (an
+// unsigned int 0xFFFFFFFF is -1, as when semaValue was a 32-bit long), the value of a char or short.
+// foldedConstant: v as a value of type t; convertedConstant: a value of type from converted to type to (4.7)
+long long foldedConstant(const TypeTable& types, long long v, const Type* t);
+long long convertedConstant(const TypeTable& types, long long v, const Type* from, const Type* to);
+
 struct Diag {
     enum Severity { Error, Warning, Note };
     Severity    severity;
@@ -307,7 +334,8 @@ struct Conversion {
     bool        derivedToBase;   // a pointer/reference conversion to a base class (better than the other standard conversions, 13.3.3.2/4)
     bool        qualification;   // only cv-qualification added
     Rank        second;          // UserDefined: the rank of the standard conversion after the user conversion (13.3.3.2/3)
-    Conversion() : rank(None), userFunction(0), target(0), derivedToBase(false), qualification(false), second(Exact) {}
+    Symbol*     function;        // the name of an overloaded function or a function template: the one of the target's type (13.4)
+    Conversion() : rank(None), userFunction(0), target(0), derivedToBase(false), qualification(false), second(Exact), function(0) {}
 };
 
 class Sema {
@@ -388,6 +416,8 @@ private:
     Symbol*  lookupUnqualified(const std::string& name, Scope* from, bool typesOnly, std::vector<Symbol*>* all);
     bool     lookupInScope(Scope* s, const std::string& name, bool typesOnly, std::vector<Symbol*>& out, std::set<Scope*>& seen);
     bool     lookupMember(Symbol* cls, const std::string& name, std::vector<Symbol*>& out, int depth = 0);
+    bool     memberLookupAmbiguous(Symbol* cls, const std::string& name);   // 10.2/2 (cl C2385)
+    bool     ambiguousMemberName(const cxx::QualifiedName& n, Symbol* s, Scope* in, const cxx::Loc& loc);   // reports S144
     Symbol*  resolveName(const cxx::QualifiedName& n, Scope* from, bool typesOnly, std::vector<Symbol*>* overloads);
     // argument-dependent lookup (3.4.2): the namespaces associated with a type, and the functions named name
     // declared in the namespaces associated with the arguments' types (in-class friend definitions among them)
@@ -397,7 +427,12 @@ private:
     // types
     const Type* namedType(const cxx::QualifiedName& n, Scope* in, const std::string& elaborated, const cxx::Loc& loc);
     const Type* instantiateClassTemplate(Symbol* tmpl, const std::vector<cxx::TemplateArg>& args, Scope* from, const cxx::Loc& loc);
-    bool   templateArgText(const std::vector<cxx::TemplateArg>& args, Scope* from, std::vector<const Type*>& types, std::vector<long>& ints, std::string& text);
+    // params: the template's parameters, whose types the value arguments are converted to (0: as written)
+    // syms: the members pointer-to-member arguments name (&C::m; 0 for the other arguments)
+    bool   templateArgText(const std::vector<cxx::TemplateArg>& args, Scope* from, std::vector<const Type*>& types, std::vector<long long>& ints, std::string& text, const std::vector<Symbol*>* params = 0, std::vector<Symbol*>* syms = 0);
+    Symbol* memberPointerArg(cxx::Expr* x, const Symbol* param);   // &C::m as a template argument (14.3.2/1), 0 when it is not one
+    void   bindMemberArg(Symbol* b, Symbol* m);
+    static bool anyMemberArg(const std::vector<Symbol*>& syms);
     bool   derivesFrom(Symbol* derived, Symbol* base, int* offset, int depth = 0);
     int    baseSubobjects(Symbol* derived, Symbol* base);   // subobjects of base in derived (C2594 / C2385 when > 1)
 
@@ -428,19 +463,25 @@ private:
     void        braceDeclInit(Symbol* var, cxx::Initializer& init, Scope* in);
     const Type* completedArray(const Type* t, const cxx::Initializer& init);
     bool   completeForSizeof(const Type* t, Scope* in, const cxx::Loc& loc);   // false, with S113, for an incomplete type
-    bool   constantValue(cxx::Expr* e, long& out);
+    bool   constantValue(cxx::Expr* e, long long& out);
+    long long fitConstant(long long v, const Type* t) const { return foldedConstant(m_types, v, t); }
+    long long constantIn(long long v, const Type* from, const Type* to) const { return convertedConstant(m_types, v, from, to); }
+    long long exprConstantIn(const cxx::Expr* e, const Type* to) const { return convertedConstant(m_types, e->semaValue, e->semaType, to); }
+    void      foldBinary(cxx::Expr* e, const std::string& op, const Type* l, const Type* r, const Type* rt);
+    // the type a non-type template parameter is bound with in an instantiation: its declared integral type, else int
+    const Type* valueParamType(const Symbol* param) const { return param && param->type && param->type->isIntegral() ? m_types.unqualified(param->type) : m_types.basic(Type::Int); }
     Symbol* classOperator(const std::string& op, cxx::Expr* e, const std::vector<cxx::Expr*>& operands, Scope* in, const Type*& result);
     // explicitArgs: the template arguments written on the call (f<int>(x)), bound before deduction
     Symbol* resolveOverload(const std::vector<Symbol*>& cands, const std::vector<cxx::Expr*>& args, size_t firstArg, cxx::Expr* thisExpr, Scope* in, const cxx::Loc& loc, const std::string& what, bool report, const std::vector<cxx::TemplateArg>* explicitArgs = 0);
     Conversion convert(cxx::Expr* from, const Type* to, Scope* in);
     Conversion convertType(const Type* from, bool lvalue, bool nullConstant, const Type* to, Scope* in, bool allowUser);
     Symbol* instantiateFunctionTemplate(Symbol* tmpl, const std::vector<cxx::Expr*>& args, size_t firstArg, Scope* in, const cxx::Loc& loc, const std::vector<cxx::TemplateArg>* explicitArgs = 0);
-    Symbol* instantiateBoundFunctionTemplate(Symbol* tmpl, std::map<std::string, const Type*>& bind, std::map<std::string, long>& ints);
-    bool   matchFunctionTemplate(Symbol* tmpl, cxx::Declarator* dcl, const Type* ft, Scope* in, std::map<std::string, const Type*>& bind, std::map<std::string, long>& ints);
+    Symbol* instantiateBoundFunctionTemplate(Symbol* tmpl, std::map<std::string, const Type*>& bind, std::map<std::string, long long>& ints);
+    bool   matchFunctionTemplate(Symbol* tmpl, cxx::Declarator* dcl, const Type* ft, Scope* in, std::map<std::string, const Type*>& bind, std::map<std::string, long long>& ints);
     bool   atLeastAsSpecialized(Symbol* a, Symbol* b);   // 14.5.5.2: b's parameters deduce from a's with a's parameters unique types
     static bool typeHasError(const Type* t);
     void   declareFunctionSpecialization(cxx::Decl* d, cxx::Decl* inner, cxx::Declarator* dcl, Scope* in, cxx::Access access);
-    bool   deduce(const cxx::Param* p, const Type* argType, Scope* tscope, std::map<std::string, const Type*>& bindings, std::map<std::string, long>& ints);
+    bool   deduce(const cxx::Param* p, const Type* argType, Scope* tscope, std::map<std::string, const Type*>& bindings, std::map<std::string, long long>& ints);
     const Type* resultOfCall(Symbol* fn);
 
     // diagnostics
@@ -465,6 +506,7 @@ private:
     int                        m_definingDepth;   // class definitions open
     std::set<std::string>      m_reportedUnknown;
     std::set<std::string>      m_fixedTemplateParams;   // the template parameters given explicitly on the call being deduced (not deduced, converted)
+    std::map<std::string, Symbol*> m_boundMembers;      // the pointer-to-member arguments given explicitly to the function template being instantiated, by parameter
     bool                       m_strictDeduce;          // partial ordering: a const in the parameter needs a const in the argument
     int                        m_instantiationDepth;    // class template instantiations nested (cl stops at 1000: C2999)
     bool                       m_instantiationOverflow; // the limit was reported once

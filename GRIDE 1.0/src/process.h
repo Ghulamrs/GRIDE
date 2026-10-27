@@ -18,10 +18,14 @@ public:
 
     bool running() const { return running_; }
 
+    // One line at a time, whichever thread says it: a debugged program's input may be said while a move waits.
     bool say(const std::string& line);
 
     std::string readUntil(const std::string& marker, bool* found = 0,
                           int timeoutMs = 30000);
+    // What comes within timeoutMs, up to the marker when it comes (found); else only the lines that have ended,
+    // the rest kept for the next read - so an answer can be read a little at a time.
+    std::string readLines(const std::string& marker, bool* found, int timeoutMs);
 
     void stop();
 

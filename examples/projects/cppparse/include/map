@@ -1,0 +1,68 @@
+// map - cppparse's C++98 library: an ordered map on the AVL tree of __tree. The value type is
+// pair<const K, V> (23.3.1); the tree copy-constructs its nodes and never assigns them.
+#ifndef CPPPARSE_MAP
+#define CPPPARSE_MAP
+
+#include <__tree>
+#include <algorithm>
+#include <utility>
+
+namespace std {
+
+template <class K, class V>
+struct __first_of {
+    const K& operator()(const pair<const K, V>& v) const { return v.first; }
+};
+
+template <class K, class V, class C = less<K> >
+class map {
+public:
+    typedef K                          key_type;
+    typedef V                          mapped_type;
+    typedef pair<const K, V>           value_type;
+    typedef size_t                     size_type;
+    typedef C                          key_compare;
+    typedef __tree<K, pair<const K, V>, __first_of<K, V>, C> tree_type;
+    typedef typename tree_type::iterator iterator;
+    typedef typename tree_type::iterator const_iterator;
+
+    map() {}
+    map(const map& o) : m_tree(o.m_tree) {}
+    map& operator=(const map& o) { m_tree = o.m_tree; return *this; }
+
+    size_t   size() const { return m_tree.size(); }
+    bool     empty() const { return m_tree.empty(); }
+    void     clear() { m_tree.clear(); }
+    iterator begin() const { return m_tree.begin(); }
+    iterator end() const { return m_tree.end(); }
+    void     swap(map& o) { m_tree.swap(o.m_tree); }
+
+    iterator find(const K& k) const { return m_tree.find(k); }
+    size_t   count(const K& k) const { return m_tree.count(k); }
+    iterator lower_bound(const K& k) const { return m_tree.lower_bound(k); }
+    iterator upper_bound(const K& k) const { return m_tree.upper_bound(k); }
+    pair<iterator, iterator> equal_range(const K& k) const { return pair<iterator, iterator>(lower_bound(k), upper_bound(k)); }
+
+    pair<iterator, bool> insert(const value_type& v) { return m_tree.insert(v); }
+    iterator insert(iterator, const value_type& v) { return m_tree.insert(v).first; }
+    void     erase(iterator at) { m_tree.erase(at); }
+    size_t   erase(const K& k) { return m_tree.erase(k); }
+    void     erase(iterator first, iterator last) { m_tree.erase(first, last); }
+
+    V& operator[](const K& k)
+    {
+        iterator it = m_tree.find(k);
+        if (it == end()) it = m_tree.insert(value_type(k, V())).first;
+        return it->second;
+    }
+
+private:
+    tree_type m_tree;
+};
+
+template <class K, class V, class C>
+void swap(map<K, V, C>& a, map<K, V, C>& b) { a.swap(b); }
+
+}
+
+#endif

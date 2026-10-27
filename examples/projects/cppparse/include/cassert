@@ -1,0 +1,9 @@
+// cassert - cppparse's C++98 <cassert>: the assert macro over the C runtime's _assert. No include guard, as
+// the standard requires: the macro follows the current NDEBUG each time the header is included.
+#undef assert
+#ifdef NDEBUG
+#define assert(expression) ((void)0)
+#else
+extern "C" void _assert(const char* message, const char* file, unsigned line);
+#define assert(expression) ((void)((expression) || (_assert(#expression, __FILE__, __LINE__), 0)))
+#endif

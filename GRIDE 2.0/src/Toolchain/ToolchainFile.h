@@ -214,13 +214,16 @@ namespace Gride
             Directory = String::Empty; DirectoryEnv = String::Empty; Marker = String::Empty;
             Files = gcnew Dictionary<String^, String^>(); Aliases = gcnew List<String^>();
             AssemblyDirectories = gcnew Dictionary<String^, String^>(); AssemblyDirectoryEnv = gcnew Dictionary<String^, String^>();
-            When = "always";
+            When = "always"; Crt = String::Empty;
         }
         property String^ Id;
         property String^ Name;
         property String^ Description;
         property String^ Kind;
         property String^ Target;
+        // the host C runtime the library belongs to: "grt" (GRIDE's), "msvc" (Microsoft's), "" either - which of
+        // two hostCrt entries, and which Shalimar runtime, a Windows link takes (Tools > Options, Windows C runtime)
+        property String^ Crt;
         property String^ Directory;
         property String^ DirectoryEnv;
         property String^ Marker;
@@ -667,6 +670,18 @@ namespace Gride
                 if (l->Kind == kind && (String::IsNullOrEmpty(arch) || String::Compare(l->Target, arch, true) == 0)) return l;
             return nullptr;
         }
+        // the one of that kind for a host C runtime ("grt" / "msvc"): an entry naming it, else one naming none
+        LibraryEntry^ LibraryByKind(String^ arch, String^ kind, String^ crt)
+        {
+            LibraryEntry^ either = nullptr;
+            for each (LibraryEntry^ l in Libraries)
+            {
+                if (l->Kind != kind || (!String::IsNullOrEmpty(arch) && String::Compare(l->Target, arch, true) != 0)) continue;
+                if (String::Compare(l->Crt, crt, true) == 0) return l;
+                if (String::IsNullOrEmpty(l->Crt) && either == nullptr) either = l;
+            }
+            return either;
+        }
         LinkerCommandFileEntry^ LinkerCommandFile(String^ id)
         {
             if (String::IsNullOrEmpty(id)) return nullptr;
@@ -759,7 +774,7 @@ namespace Gride
         static array<String^>^ Roles()
         {
             return gcnew array<String^>{ "cCompiler", "cppCompiler", "shalimarCompiler", "hostCompiler", "hostCxx", "assembler", "linker",
-                                         "debugAssembler", "debugLinker", "nativeAssembler", "nativeLinker", "simulator", "emulator", "debugger", "fallbackDebugger", "converter" };
+                                         "debugAssembler", "debugLinker", "nativeAssembler", "nativeLinker", "simulator", "emulator", "ownDebugger", "debugger", "fallbackDebugger", "converter" };
         }
 
         static JsonValue^ Clone(JsonValue^ v) { return v == nullptr ? nullptr : JsonParser::Parse(JsonWriter::Write(v)); }
@@ -1328,6 +1343,7 @@ namespace Gride
                     d->Description = l->GetString("description", String::Empty);
                     d->Kind = l->GetString("kind", String::Empty);
                     d->Target = l->GetString("target", String::Empty);
+                    d->Crt = l->GetString("crt", String::Empty);
                     d->Directory = l->GetString("directory", String::Empty);
                     d->DirectoryEnv = l->GetString("directoryEnv", String::Empty);
                     d->Marker = l->GetString("marker", String::Empty);

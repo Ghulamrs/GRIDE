@@ -12,6 +12,8 @@ class NumberText {
 public:
     // strtol (isSigned 1), strtoul (0): sign applied, ERANGE and the nearest limit past the range.
     static unsigned long convert(const unsigned char *s, char **end, int base, unsigned isSigned);
+    // strtoll (isSigned 1), strtoull (0): the same subject sequence read into 64 bits (C99 7.20.1.4).
+    static unsigned long long convertLong(const unsigned char *s, char **end, int base, unsigned isSigned);
 
 private:
     // Each character's digit value, 0-35 for 0-9, a-z and A-Z; 99 for every other character.

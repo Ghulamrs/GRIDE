@@ -77,6 +77,13 @@ std::string intToString(int v)
     return oss.str();
 }
 
+std::string int64ToString(long long v)
+{
+    std::ostringstream oss;
+    oss << v;
+    return oss.str();
+}
+
 std::string replaceAll(const std::string& s, const std::string& from, const std::string& to)
 {
     if (from.empty()) return s;

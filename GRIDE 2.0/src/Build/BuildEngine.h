@@ -8,8 +8,10 @@
 //  Incremental: a file is rebuilt only when it, a project header, or the
 //  build settings changed since its object file was made.
 //  RIDE's rules: a part per compiler with its "$ group (compiler)" line, a
-//  Shalimar program compiled as one, a Windows Debug build through clang and
-//  Microsoft's link.exe /DEBUG, the C6747 program through asm6x and lnk6x
+//  Shalimar program compiled as one, a Windows Debug build's CodeView written
+//  by the compilers for GRIDE's masm and link /DEBUG (clang and Microsoft's
+//  link.exe /DEBUG for one that cannot), GRIDE's C runtime or Microsoft's on
+//  the Windows link, the C6747 program through asm6x and lnk6x
 //  against RTS6x, the environment the compilers read, Visual Studio's folders
 //  found without cmd.exe, the native question, and RIDE's refusals.
 // ============================================================================
@@ -27,17 +29,6 @@ namespace Gride
         property String^ Code;
         property String^ Text;
         property String^ Tool;
-        // a tool's line about itself: held back until the tool exits - an error when it fails, else a message
-        property bool AboutItself;
-
-        // the last part of a name read from a tool's output; never throws, as Path::GetFileName does
-        // on a character no path may hold ('"', '<', '|' ...), which a tool's line may well carry
-        static String^ Leaf(String^ name)
-        {
-            if (String::IsNullOrEmpty(name)) return String::Empty;
-            int slash = name->LastIndexOfAny(gcnew array<wchar_t>{ L'\\', L'/' });
-            return slash < 0 ? name : name->Substring(slash + 1);
-        }
     };
 
     // The shapes a tool's lines take, read as RIDE's parseDiagnostic reads a build's output
@@ -137,7 +128,7 @@ namespace Gride
             if (String::IsNullOrEmpty(toolName) || String::IsNullOrEmpty(line)) return nullptr;
             int at = line->IndexOf(": ");
             if (at <= 0) return nullptr;
-            String^ who = BuildMessage::Leaf(line->Substring(0, at)->Trim())->ToLowerInvariant();
+            String^ who = Path::GetFileName(line->Substring(0, at)->Trim())->ToLowerInvariant();
             String^ name = toolName->ToLowerInvariant();
             if (who != name && who != String::Concat(name, ".exe")) return nullptr;
             String^ text = line->Substring(at + 2)->Trim();
@@ -148,7 +139,6 @@ namespace Gride
             b->Line = 0; b->Column = 0;
             b->Code = String::Empty;
             b->Text = text;
-            b->AboutItself = true;
             return b;
         }
 
@@ -330,6 +320,9 @@ namespace Gride
             optionStore = project->OptionStore();
             clSettingsSaid = false; rideHeadersSaid = false; noCrtList = false;
             clangChecked = false; clangMissing = false;
+            ownPdb = false; crtLibs = nullptr; crtChosen = String::Empty;
+            planning = nullptr;
+            stepDone = gcnew System::Threading::AutoResetEvent(false);
         }
 
         static String^ OutputFileOf(GrideProject^ p)
@@ -526,7 +519,6 @@ namespace Gride
         // tool currently running (read by the output callback)
         String^ currentTool;
         String^ currentToolName;    // the program's own name, for its lines about itself
-        List<BuildMessage^>^ itself = gcnew List<BuildMessage^>();   // those lines, until the tool exits
         Regex^ currentRegex;        // pre-compiled custom error pattern of the running tool
         String^ currentDir;
         String^ currentSource;      // the file being compiled (shalimar's diagnostic names none)
@@ -549,9 +541,21 @@ namespace Gride
         bool clSettingsSaid;        // a Visual Studio project's own settings for cl were named (once a build)
         bool rideHeadersSaid;       // an installation header directory kept from cl was named (once)
         bool noCrtList;             // every object cl's: they name their own C runtime, no CRT list is added
+        bool ownPdb;                // every compiled file wrote its own CodeView: GRIDE's link /DEBUG writes the PDB
+        String^ crtLibs;            // the link's $(CrtLibs) once the Windows C runtime is chosen (ChooseCrt); nullptr before
+        String^ crtChosen;          // "grt" / "msvc" once chosen, "" where the target has no choice (the Shalimar runtime follows it)
+
+        // Microsoft's runtime libraries, each refused to a link with GRIDE's runtime (docs\Runtime_Design.md 13.4)
+        literal String^ MicrosoftRuntimeRefused =
+            " /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd"
+            " /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd"
+            " /NODEFAULTLIB:libvcruntime /NODEFAULTLIB:libvcruntimed /NODEFAULTLIB:vcruntime /NODEFAULTLIB:vcruntimed"
+            " /NODEFAULTLIB:libcpmt /NODEFAULTLIB:libcpmtd /NODEFAULTLIB:msvcprt /NODEFAULTLIB:msvcprtd"
+            " /NODEFAULTLIB:oldnames /NODEFAULTLIB:legacy_stdio_definitions";
 
         void Out(String^ s)
         {
+            if (planning != nullptr) { planning->Items->Add(s); return; }
             if (output != nullptr) output->Invoke(s);
             System::Threading::Monitor::Enter(lines);
             try { lines->Add(s); }
@@ -571,8 +575,14 @@ namespace Gride
             BuildMessage^ m = gcnew BuildMessage();
             m->Severity = sev; m->Text = text; m->FilePath = file == nullptr ? String::Empty : file;
             m->Line = line; m->Code = String::Empty; m->Tool = "GRIDE";
+            if (planning != nullptr) planning->Items->Add(m);
+            else Tell(m);
+        }
+
+        void Tell(BuildMessage^ m)
+        {
             Count(m);
-            Out(String::Format("{0}: {1}", sev, text));
+            Out(String::Format("{0}: {1}", m->Severity, m->Text));
             if (message != nullptr) message->Invoke(m);
         }
 
@@ -596,10 +606,24 @@ namespace Gride
             else if (String::Equals(m->Severity, "warning")) System::Threading::Interlocked::Increment(warnings);
         }
 
+        // a tool's line as the Output pane shows it: a file of the project named by its full path ("C:\...\proj\src\a.c:7:5:
+        // error: ...") from the project's folder ("src\a.c:7:5: error: ..."), so the message stays in view; the Error
+        // List keeps the full path, which double-click navigation uses
+        String^ Shown(String^ line)
+        {
+            if (String::IsNullOrEmpty(line) || String::IsNullOrEmpty(projectDir)) return line;
+            String^ dir = projectDir->TrimEnd(gcnew array<wchar_t>{ L'\\', L'/' });
+            String^ t = line->TrimStart();
+            String^ lead = line->Substring(0, line->Length - t->Length);
+            for each (String^ d in gcnew array<String^>{ dir + "\\", dir->Replace(L'\\', L'/') + "/" })
+                if (t->StartsWith(d, StringComparison::OrdinalIgnoreCase) && t->Length > d->Length) return lead + t->Substring(d->Length);
+            return line;
+        }
+
         // the two streams of a tool come on two threads: one line at a time through here
         void OnToolLine(String^ line)
         {
-            Out(line);
+            Out(Shown(line));
             BuildMessage^ m;
             System::Threading::Monitor::Enter(parser);
             try
@@ -610,13 +634,6 @@ namespace Gride
             finally { System::Threading::Monitor::Exit(parser); }
             if (m == nullptr) return;
             m->Tool = currentTool;
-            if (m->AboutItself)
-            {
-                System::Threading::Monitor::Enter(itself);
-                try { itself->Add(m); }
-                finally { System::Threading::Monitor::Exit(itself); }
-                return;
-            }
             Count(m);
             if (message != nullptr) message->Invoke(m);
         }
@@ -843,6 +860,7 @@ namespace Gride
             if (clangChecked) return clangMissing;
             clangChecked = true;
             if (native || !IsDebugConfig(config->Name) || !target->CodeView || target->DebugAssemblerId == nullptr) return false;
+            if (!NeedsClang()) return false;
             ToolDefinition^ d = settings->GetTool(target->DebugAssemblerId);
             if (d != nullptr && d->IsConfigured() && d->ResolvedPath() != nullptr) return false;
             clangMissing = true;
@@ -851,6 +869,32 @@ namespace Gride
                                                  d != nullptr ? ToolName(d) : "clang", ToolName(settings->GetTool(target->AssemblerId)),
                                                  ToolName(settings->GetTool(target->LinkerId)), d != nullptr ? LookedInPart(d) : String::Empty), nullptr, 0);
             return true;
+        }
+
+        // a Debug build of a compiler that writes its CodeView in the MASM spelling itself (toolchain.json's
+        // asmSyntaxFlags.ownCodeView: c90, shalimar, cpp11 from 1.29): GRIDE's masm carries it and GRIDE's
+        // link /DEBUG writes the PDB - no clang, no Microsoft link.exe
+        bool OwnCodeView(ToolDefinition^ compiler)
+        {
+            if (native || compiler == nullptr || !IsDebugConfig(config->Name) || !target->CodeView) return false;
+            ToolEntry^ e = ToolchainFile::Current->Tool(compiler->Definition);
+            return e != nullptr && !String::IsNullOrEmpty(e->AsmSyntaxFlag("ownCodeView"));
+        }
+
+        // whether a Debug build has a file whose compiler cannot write its own CodeView, which clang must then carry
+        bool NeedsClang()
+        {
+            for each (String^ rel in project->SourceFiles)
+            {
+                String^ src = project->ResolvePath(rel);
+                if (!project->IsBuilt(rel) || config->Excludes(src)) continue;
+                String^ why;
+                String^ id = TargetInfo::CompilerFor(Path::GetExtension(src), settings, project->ToolchainFor(src), why);
+                ToolDefinition^ c = id == nullptr ? nullptr : settings->GetTool(id);
+                if (c == nullptr || WritesObject(c)) continue;
+                if (!OwnCodeView(c)) return true;
+            }
+            return false;
         }
 
         static String^ WithoutDashG(String^ flags)
@@ -871,37 +915,108 @@ namespace Gride
             String^ own;
             if (config->ConfigFlagsByRole != nullptr && config->ConfigFlagsByRole->TryGetValue(e->Role, own)) return own;
             bool debug = IsDebugConfig(config->Name);
-            bool codeViewCompiler = e->Role == "cCompiler" || e->Role == "cppCompiler" || e->Role == "shalimarCompiler";
+            // a compiler writing its own CodeView keeps -g with no clang to carry it
+            bool clangCompiler = (e->Role == "cCompiler" || e->Role == "cppCompiler" || e->Role == "shalimarCompiler") && !OwnCodeView(tool);
             // RIDE's Compiler Options: a compiler listing options takes the project's (the defaults where it set none)
             if (CompilerOptionRules::Governs(e))
             {
                 String^ chosen = CompilerOptionRules::Flags(optionStore, e, debug ? "Debug" : "Release", target->Entry);
-                return debug && codeViewCompiler && NoClang() ? WithoutDashG(chosen) : chosen;
+                return debug && clangCompiler && NoClang() ? WithoutDashG(chosen) : chosen;
             }
             String^ flags = e->ConfigFlagsFor(debug ? "Debug" : "Release", target->Arch);
             if (!debug) return flags;
-            if (!target->EmitsDebugInfo || (codeViewCompiler && NoClang())) return WithoutDashG(flags);
+            if (!target->EmitsDebugInfo || (clangCompiler && NoClang())) return WithoutDashG(flags);
             return flags;
         }
 
-        // the compiler's assembler spelling (RIDE's assemblerFlag, the compiler's asmSyntaxFlags):
-        // codeview's for a Debug build carrying CodeView, assemblerNamed's for the host target when an
-        // assembler is named, else none
+        // the compiler's assembler spelling (RIDE's assemblerFlag, the compiler's asmSyntaxFlags): ownCodeView's
+        // for a Debug build of a compiler writing its own CodeView, codeview's for one carrying CodeView through
+        // clang, assemblerNamed's for the host target when an assembler is named, else none
         String^ AsmSyntaxFlag(ToolDefinition^ compiler, bool codeView)
         {
             ToolEntry^ e = ToolchainFile::Current->Tool(compiler->Definition);
             if (e == nullptr) return String::Empty;
+            if (OwnCodeView(compiler)) return e->AsmSyntaxFlag("ownCodeView");
             if (codeView) return e->AsmSyntaxFlag("codeview");
             ToolDefinition^ as = settings->GetTool(target->AssemblerId);
             return target->Host && as != nullptr && as->IsConfigured() ? e->AsmSyntaxFlag("assemblerNamed") : String::Empty;
         }
 
-        // the C runtime the host link names for the configuration (the target's hostCrt library)
+        // the C runtime the host link names for the configuration (the target's hostCrt library); the one
+        // ChooseCrt took once the link is near
         String^ CrtLibraries()
         {
+            if (crtLibs != nullptr) return crtLibs;
             LibraryEntry^ l = target->RuntimeLibrary;
             if (l == nullptr || !String::Equals(l->Kind, "hostCrt")) return String::Empty;
             return l->FileFor(IsDebugConfig(config->Name));
+        }
+
+        // The Windows C runtime a link takes: "grt" (GRIDE's) or "msvc" (Microsoft's). Tools > Options says which;
+        // automatic is Microsoft's only where Visual Studio is found and cl's objects are among the inputs - they
+        // name its libraries themselves - and GRIDE's otherwise, always where there is no Visual Studio.
+        String^ WindowsRuntime(bool clObjects)
+        {
+            String^ choice = settings->EffectiveWindowsRuntime();
+            if (choice != "auto") return choice;
+            return clObjects && VisualStudio::Find() != nullptr ? Str("msvc") : Str("grt");
+        }
+
+        // a host C runtime's libraries as the link takes them: where the entry names a directory (GRIDE's, lib
+        // beside GRIDE) each file by its full path, so no LIB is read for them; else the names, found through LIB
+        // (Microsoft's). Null where the entry's directory or one of its files is not there.
+        String^ CrtFiles(String^ crt, bool debug)
+        {
+            LibraryEntry^ lib = ToolchainFile::Current->LibraryByKind(target->Arch, "hostCrt", crt);
+            if (lib == nullptr) return String::Empty;
+            if (String::IsNullOrEmpty(lib->Directory)) return lib->FileFor(debug);
+            String^ dir = IdeSettingsPaths::FindLibraryDir(lib);
+            if (dir == nullptr) return nullptr;
+            List<String^>^ paths = gcnew List<String^>();
+            for each (String^ f in lib->FileFor(debug)->Split(gcnew array<wchar_t>{ L' ' }, StringSplitOptions::RemoveEmptyEntries))
+            {
+                String^ full = Path::Combine(dir, f);
+                if (!File::Exists(full)) return nullptr;
+                paths->Add(PathUtil::Quote(full));
+            }
+            return String::Join(" ", paths);
+        }
+
+        // the Windows C runtime of the link, where the target has GRIDE's beside Microsoft's: its libraries into
+        // $(CrtLibs), said once; false, with the error, where GRIDE's is chosen and not there
+        bool ChooseCrt(bool clObjects)
+        {
+            LibraryEntry^ grt = ToolchainFile::Current->LibraryByKind(target->Arch, "hostCrt", "grt");
+            if (grt == nullptr || !String::Equals(grt->Crt, "grt", StringComparison::OrdinalIgnoreCase)) return true;
+            bool debug = IsDebugConfig(config->Name);
+            bool said = crtLibs != nullptr;
+            String^ dir = IdeSettingsPaths::FindLibraryDir(grt);
+            String^ where = dir == nullptr ? grt->Directory : dir;
+            crtChosen = WindowsRuntime(clObjects);
+            String^ libs = CrtFiles(crtChosen, debug);
+            if (libs == nullptr && settings->EffectiveWindowsRuntime() == "auto" && VisualStudio::Find() != nullptr)
+            {
+                if (!said) Out(String::Format("[GRIDE's C runtime is not in {0} - Microsoft's (Visual Studio's) is linked instead]", where));
+                crtChosen = "msvc";
+                libs = CrtFiles(crtChosen, debug);
+            }
+            if (libs == nullptr)
+            {
+                AddMessage("error", String::Format("GRIDE's C runtime is not there: grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib and kernel32.lib are looked for in {0} "
+                                                   "beside GRIDE (Setup installs them; Build Solution writes them into x64\\<Configuration>\\lib)", where), nullptr, 0);
+                failedStep = "link";
+                return false;
+            }
+            // a library cl built names Microsoft's runtime by /DEFAULTLIB (libcmt, oldnames ...): with GRIDE's
+            // runtime those names are refused, and what cl's code calls beyond the C library is grtcompat's
+            if (crtChosen == "grt") libs += MicrosoftRuntimeRefused;
+            crtLibs = libs;
+            if (said) return true;
+            if (crtChosen == "grt" && clObjects)
+                AddMessage("warning", "cl's objects name Microsoft's C runtime, and GRIDE's runtime is chosen (Tools > Options > GRIDE Paths, Windows C runtime): they may not link", nullptr, 0);
+            Out(crtChosen == "grt" ? String::Format("[GRIDE's C runtime: grtstart, grtcompat, grtcxx, grtc, grtwin and kernel32.lib from {0} - no Visual Studio or Windows SDK library]", where)
+                                   : String::Format("[Microsoft's C runtime: {0}, found through LIB]", libs));
+            return true;
         }
 
         // the runtime library of the configuration: the library's Debug file (rts6xd.lib) beside the found one for a Debug build
@@ -955,31 +1070,67 @@ namespace Gride
             return env;
         }
 
+        // one tool run: a compile step's is decided before any tool runs, and run here when the build runs one step
+        // at a time, else on a worker with its lines kept, which are read back in the project's order
+        ref class ToolPass
+        {
+        public:
+            ToolPass() { Removed = gcnew array<String^>(0); Lines = gcnew List<String^>(); Code = 0; Made = false; }
+            ToolDefinition^ Tool;
+            String^ Exe;
+            String^ Args;
+            List<String^>^ Env;
+            Regex^ Pattern;
+            String^ Source;             // {in}: shalimar's diagnostic and "did not produce" are filed under it
+            array<String^>^ Removed;    // removed before it runs, so an old one is not taken for its work
+            String^ Writes;             // removed when it fails: half an object would look up to date
+            String^ Step;               // compile / assemble: the failedStep when it fails
+            String^ Refused;            // said after it fails, or nullptr
+            List<String^>^ Lines;
+            int Code;
+            bool Made;                  // it succeeded and Writes is there
+        };
+
         int RunTool(ToolDefinition^ tool, Dictionary<String^, String^>^ vars, List<String^>^ env)
         {
-            String^ exe = tool->ResolvedPath();
-            String^ args = ToolRunner::Expand(tool->Arguments, vars);
-            Out(String::Format("> {0} {1}", PathUtil::Quote(exe), args));
-            currentTool = tool->DisplayName;
-            currentToolName = Path::GetFileNameWithoutExtension(exe);
-            currentRegex = parser->Compile(tool->ErrorPattern);      // compiled before output threads start
-            currentDir = projectDir;
+            ToolPass^ p = Pass(tool, vars, env);
+            int before = BeginPass(p);
+            p->Code = ToolRunner::Run(p->Exe, p->Args, projectDir, gcnew Action<String^>(this, &BuildEngine::OnToolLine), token, tool, env);
+            EndPass(p, before);
+            return p->Code;
+        }
+
+        // a tool's run as its command line, environment and reader, decided before it runs
+        ToolPass^ Pass(ToolDefinition^ tool, Dictionary<String^, String^>^ vars, List<String^>^ env)
+        {
+            ToolPass^ p = gcnew ToolPass();
+            p->Tool = tool;
+            p->Exe = tool->ResolvedPath();
+            p->Args = ToolRunner::Expand(tool->Arguments, vars);
+            p->Env = env;
+            p->Pattern = parser->Compile(tool->ErrorPattern);      // compiled before output threads start
             String^ in;
-            currentSource = vars->TryGetValue("in", in) ? in : nullptr;
+            p->Source = vars->TryGetValue("in", in) ? in : nullptr;
+            return p;
+        }
+
+        // the "> program arguments" line and the reader set for the run's lines; the errors counted before them
+        int BeginPass(ToolPass^ p)
+        {
+            Out(String::Format("> {0} {1}", PathUtil::Quote(p->Exe), p->Args));
+            currentTool = p->Tool->DisplayName;
+            currentToolName = Path::GetFileNameWithoutExtension(p->Exe);
+            currentRegex = p->Pattern;
+            currentDir = projectDir;
+            currentSource = p->Source;
             previousLine = nullptr;
-            int before = errors;
-            itself->Clear();
-            int rc = ToolRunner::Run(exe, args, projectDir, gcnew Action<String^>(this, &BuildEngine::OnToolLine), token, tool, env);
-            for each (BuildMessage^ m in itself)
-            {
-                m->Severity = rc != 0 && rc != ToolRunner::ExitCancelled ? "error" : "info";
-                Count(m);
-                if (message != nullptr) message->Invoke(m);
-            }
-            itself->Clear();
-            if (rc != 0 && rc != ToolRunner::ExitCancelled && errors == before)
-                AddMessage("error", String::Format("{0} exited with code {1}.", tool->DisplayName, rc), nullptr, 0);
-            return rc;
+            return errors;
+        }
+
+        void EndPass(ToolPass^ p, int errorsBefore)
+        {
+            if (p->Code != 0 && p->Code != ToolRunner::ExitCancelled && errors == errorsBefore)
+                AddMessage("error", String::Format("{0} exited with code {1}.", p->Tool->DisplayName, p->Code), nullptr, 0);
         }
 
         // Fingerprint of everything that should force a full rebuild when changed.
@@ -989,7 +1140,8 @@ namespace Gride
             sb->AppendLine(project->Target)->AppendLine(config->Name)->AppendLine(config->Flags)
               ->AppendLine(config->AsmFlags)
               ->AppendLine(PathUtil::JoinList(config->Defines))->AppendLine(PathUtil::JoinList(project->IncludePaths))
-              ->AppendLine(native ? "the vendor's assembler" : "the project's assembler");
+              ->AppendLine(native ? "the vendor's assembler" : "the project's assembler")
+              ->AppendLine(IsDebugConfig(config->Name) && target->CodeView && !NeedsClang() ? "the compilers' own CodeView" : String::Empty);
             array<String^>^ ids = gcnew array<String^>{ ToolIds::CompilerC90, ToolIds::CompilerCpp11, ToolIds::CompilerShalimar,
                                                         target->AssemblerId, target->DebugAssemblerId, target->NativeAssemblerId };
             for each (String^ id in ids)
@@ -1009,7 +1161,8 @@ namespace Gride
               ->AppendLine(linker->ExecutablePath)->AppendLine(linker->Arguments)->AppendLine(linker->LibrarySwitch)
               ->AppendLine(linker->Environment)->AppendLine(linker->SetupScript)
               ->AppendLine(String::Join("|", libs->ToArray()))->AppendLine(String::Join("|", cmdFiles->ToArray()))
-              ->AppendLine(String::Join("|", config->LibraryDirs->ToArray()));
+              ->AppendLine(String::Join("|", config->LibraryDirs->ToArray()))
+              ->AppendLine(crtLibs == nullptr ? String::Empty : crtLibs)->AppendLine(ownPdb ? "/DEBUG" : String::Empty);
             return sb->ToString();
         }
 
@@ -1061,6 +1214,24 @@ namespace Gride
             String^ ObjFile;
             bool WritesObject;          // the compiler writes the object itself (cl): nothing is assembled after it
         };
+
+        // a compile step as it is said and run: in order, the lines said (String^), the messages added
+        // (BuildMessage^) and the tool runs (ToolPass^)
+        ref class CompileStep
+        {
+        public:
+            CompileStep() { Items = gcnew List<Object^>(); Planned = StepResult::Built; Result = StepResult::Skipped; Size = 0; SharedPdb = false; Started = false; Done = false; }
+            List<Object^>^ Items;
+            StepResult Planned;         // what it comes to when every tool run succeeds
+            StepResult Result;
+            Int64 Size;                 // its sources' bytes: the largest start first, so the longest does not start last
+            bool SharedPdb;             // cl writing the build's one PDB: two at once cannot share it (C1041), so never beside another
+            bool Started;
+            volatile bool Done;
+        };
+
+        CompileStep^ planning;          // the step being planned: what Out and AddMessage say goes into it
+        System::Threading::AutoResetEvent^ stepDone;
 
         // Object file names for every source entry, in project order (stable across builds).
         Dictionary<String^, String^>^ StemMap()
@@ -1164,9 +1335,23 @@ namespace Gride
             return r;
         }
 
-        // compile (if needed) and assemble one step; stopAtAssembly: another machine's target, or the
+        // one step decided as it was compiled and assembled one after another, before any tool runs - what it says
+        // goes into it (Out and AddMessage while it is planned); stopAtAssembly: another machine's target, or the
         // C6747 with emulateOnly - the assembly is what the build makes
-        StepResult CompileUnit(Unit^ u, bool force, DateTime newestHeader, bool stopAtAssembly)
+        CompileStep^ PlanUnit(Unit^ u, bool force, DateTime newestHeader, bool stopAtAssembly)
+        {
+            CompileStep^ step = gcnew CompileStep();
+            planning = step;
+            try { step->Planned = Plan(step, u, force, newestHeader, stopAtAssembly); }
+            finally { planning = nullptr; }
+            for each (String^ s in u->Sources) if (File::Exists(s)) step->Size += (gcnew FileInfo(s))->Length;
+            bool runs = false;
+            for each (Object^ item in step->Items) if (dynamic_cast<ToolPass^>(item) != nullptr) runs = true;
+            if (!runs) { step->Started = true; step->Done = true; }
+            return step;
+        }
+
+        StepResult Plan(CompileStep^ step, Unit^ u, bool force, DateTime newestHeader, bool stopAtAssembly)
         {
             bool isAsm = u->CompilerId == nullptr;
             if (isAsm && stopAtAssembly) return StepResult::Skipped;      // assembly already: nothing here assembles it
@@ -1187,8 +1372,9 @@ namespace Gride
 
             List<String^>^ names = gcnew List<String^>();
             for each (String^ s in u->Sources) names->Add(Path::GetFileName(s));
-            // a Debug build of compiled code on a target carrying CodeView (RIDE's debugsWithCodeView)
-            bool codeView = !isAsm && IsDebugConfig(config->Name) && target->CodeView && !NoClang();
+            // a Debug build of compiled code on a target carrying CodeView (RIDE's debugsWithCodeView) through clang -
+            // not for a compiler writing its own CodeView, which GRIDE's masm carries
+            bool codeView = !isAsm && IsDebugConfig(config->Name) && target->CodeView && !OwnCodeView(settings->GetTool(u->CompilerId)) && !NoClang();
             if (!isAsm)
             {
                 ToolDefinition^ compiler = RequireTool(u->CompilerId);
@@ -1199,8 +1385,6 @@ namespace Gride
                 if (u->WritesObject) part = String::Format("{0} ({1})", project->Name, FileToolName(compiler));     // the compiler's own name (cl)
                 if (!String::Equals(part, lastPart)) { Out(String::Concat("$ ", part)); lastPart = part; }
                 Out(String::Join(" ", names));
-                TryDelete(u->AsmFile);
-                if (u->WritesObject) TryDelete(u->ObjFile);
                 String^ first = u->Sources[0];
                 StringBuilder^ quoted = gcnew StringBuilder();
                 for each (String^ s in u->Sources) quoted->Append(PathUtil::Quote(s))->Append(L' ');
@@ -1218,50 +1402,208 @@ namespace Gride
                     String^ flags = String::Concat(config->Flags, " ", own)->Trim();
                     v["CompileFlags"] = flags; v["flags"] = flags;
                 }
-                int rc = RunTool(compiler, v, CompileEnvironment(compiler, codeView));
-                if (rc == ToolRunner::ExitCancelled) return StepResult::Cancelled;
-                if (rc != 0) { failedStep = "compile"; return StepResult::Failed; }
-                if (u->WritesObject)
-                {
-                    // the compiler wrote the object: nothing is assembled after it
-                    if (File::Exists(u->ObjFile)) return StepResult::Built;
-                    AddMessage("error", String::Format("{0} did not produce '{1}'.", compiler->DisplayName, u->ObjFile), first, 0);
-                    failedStep = "compile";
-                    return StepResult::Failed;
-                }
-                if (!File::Exists(u->AsmFile))
-                {
-                    AddMessage("error", String::Format("{0} did not produce '{1}'.", compiler->DisplayName, u->AsmFile), first, 0);
-                    failedStep = "compile";
-                    return StepResult::Failed;
-                }
-                if (stopAtAssembly) return StepResult::Built;
+                ToolPass^ compile = Pass(compiler, v, CompileEnvironment(compiler, codeView));
+                compile->Removed = u->WritesObject ? gcnew array<String^>{ u->AsmFile, u->ObjFile } : gcnew array<String^>{ u->AsmFile };
+                compile->Writes = u->WritesObject ? u->ObjFile : u->AsmFile;
+                compile->Step = "compile";
+                step->Items->Add(compile);
+                step->SharedPdb = u->WritesObject && WritesSharedPdb(compile->Args);
+                // the compiler writes the object itself: nothing is assembled after it
+                if (u->WritesObject || stopAtAssembly) return StepResult::Built;
             }
             else Out(String::Join(" ", names));
 
             // hand-written assembly is the target assembler's own spelling: the CodeView path is the compilers'
             ToolDefinition^ assembler = AssemblerFor(codeView);
             if (assembler == nullptr) return StepResult::Failed;
-            TryDelete(u->ObjFile);
             Dictionary<String^, String^>^ va = Vars(assembler);
             va["in"] = u->AsmFile;
             va["out"] = u->ObjFile;
             va["AsmFile"] = u->AsmFile; va["ObjFile"] = u->ObjFile; va["Name"] = u->Stem;
-            int arc = RunTool(assembler, va, ToolEnvironment(assembler));
-            if (arc == ToolRunner::ExitCancelled) return StepResult::Cancelled;
-            if (arc != 0)
-            {
-                failedStep = "assemble";
-                if (target->Emulated) Out(String::Format("{0} refused the assembly - the emulator would run it, but it is not a TI program", ToolName(assembler)));
-                return StepResult::Failed;
-            }
-            if (!File::Exists(u->ObjFile))
-            {
-                AddMessage("error", String::Format("{0} did not produce '{1}'.", assembler->DisplayName, u->ObjFile), u->AsmFile, 0);
-                failedStep = "assemble";
-                return StepResult::Failed;
-            }
+            ToolPass^ assemble = Pass(assembler, va, ToolEnvironment(assembler));
+            assemble->Removed = gcnew array<String^>{ u->ObjFile };
+            assemble->Writes = u->ObjFile;
+            assemble->Step = "assemble";
+            if (target->Emulated) assemble->Refused = String::Format("{0} refused the assembly - the emulator would run it, but it is not a TI program", ToolName(assembler));
+            step->Items->Add(assemble);
             return StepResult::Built;
+        }
+
+        // cl puts a /Zi build's debug information into one PDB for every file (toolchain.json's /Fd), which two cl's
+        // at once cannot write unless /FS says so
+        static bool WritesSharedPdb(String^ args)
+        {
+            return Regex::IsMatch(args, R"RX((^|\s)[/-]Z[iI](\s|$))RX") && !Regex::IsMatch(args, R"RX((^|\s)[/-]FS(\s|$))RX");
+        }
+
+        // a step said and run as one tool after another said and ran it: its lines and messages in their place, each
+        // tool run here (live) or its kept lines read back as they came, and what the tool made checked
+        StepResult Walk(CompileStep^ step, bool live)
+        {
+            for each (Object^ item in step->Items)
+            {
+                ToolPass^ p = dynamic_cast<ToolPass^>(item);
+                if (p == nullptr)
+                {
+                    BuildMessage^ m = dynamic_cast<BuildMessage^>(item);
+                    if (m != nullptr) Tell(m);
+                    else Out(safe_cast<String^>(item));
+                    continue;
+                }
+                int before = BeginPass(p);
+                if (live) RunPass(p, gcnew Action<String^>(this, &BuildEngine::OnToolLine));
+                else for each (String^ line in LineKeeper::Kept(p->Lines)) OnToolLine(line);
+                EndPass(p, before);
+                if (p->Code == ToolRunner::ExitCancelled) return StepResult::Cancelled;
+                if (p->Code != 0)
+                {
+                    failedStep = p->Step;
+                    if (p->Refused != nullptr) Out(p->Refused);
+                    return StepResult::Failed;
+                }
+                if (!p->Made)
+                {
+                    AddMessage("error", String::Format("{0} did not produce '{1}'.", p->Tool->DisplayName, p->Writes), p->Source, 0);
+                    failedStep = p->Step;
+                    return StepResult::Failed;
+                }
+            }
+            return step->Planned;
+        }
+
+        void RunPass(ToolPass^ p, Action<String^>^ onLine)
+        {
+            for each (String^ f in p->Removed) TryDelete(f);
+            p->Code = ToolRunner::Run(p->Exe, p->Args, projectDir, onLine, token, p->Tool, p->Env);
+            if (p->Code != 0) TryDelete(p->Writes);
+            else p->Made = File::Exists(p->Writes);
+        }
+
+        // a tool's lines as it writes them, kept for the step's reading back
+        ref class LineKeeper
+        {
+        public:
+            LineKeeper(List<String^>^ lines) { this->lines = lines; }
+            void Keep(String^ line)
+            {
+                System::Threading::Monitor::Enter(lines);
+                try { lines->Add(line); }
+                finally { System::Threading::Monitor::Exit(lines); }
+            }
+            static array<String^>^ Kept(List<String^>^ lines)
+            {
+                System::Threading::Monitor::Enter(lines);
+                try { return lines->ToArray(); }
+                finally { System::Threading::Monitor::Exit(lines); }
+            }
+        private:
+            List<String^>^ lines;
+        };
+
+        ref class StepWorker
+        {
+        public:
+            StepWorker(BuildEngine^ engine, CompileStep^ step) { this->engine = engine; this->step = step; }
+
+            void Run()
+            {
+                ToolPass^ running = nullptr;
+                try
+                {
+                    for each (Object^ item in step->Items)
+                    {
+                        running = dynamic_cast<ToolPass^>(item);
+                        if (running == nullptr) continue;
+                        engine->RunPass(running, gcnew Action<String^>(gcnew LineKeeper(running->Lines), &LineKeeper::Keep));
+                        if (!running->Made) break;
+                    }
+                }
+                catch (Exception^ ex)
+                {
+                    if (running != nullptr)
+                    {
+                        running->Lines->Add(String::Concat("error: ", ex->Message));
+                        running->Code = ToolRunner::ExitStartFailed;
+                    }
+                }
+                finally
+                {
+                    step->Done = true;
+                    engine->stepDone->Set();
+                }
+            }
+
+        private:
+            BuildEngine^ engine;
+            CompileStep^ step;
+        };
+
+        // how many compile steps run at once (Tools > Options > General): 0 is one per processor
+        int Jobs()
+        {
+            int n = settings->BuildJobs;
+            return n > 0 ? n : Math::Max(1, System::Environment::ProcessorCount);
+        }
+
+        static int LargerFirst(CompileStep^ a, CompileStep^ b) { return b->Size.CompareTo(a->Size); }
+
+        // The steps Jobs() at a time: one at a time on this thread, each tool's lines as it writes them; else on
+        // workers, the largest first, each read back in the project's order once it and those before it are done -
+        // so the Output pane, the Error List and the first error are what one step after another gave. A step that
+        // fails stops none of the others, as it stopped none before; Cancel stops every tool running (the token is
+        // theirs too) and starts no more, and the build ends at the first step it stopped. False then.
+        bool RunSteps(List<CompileStep^>^ steps)
+        {
+            int jobs = Jobs();
+            if (jobs == 1)
+            {
+                for each (CompileStep^ s in steps)
+                {
+                    if (token.IsCancellationRequested) return false;
+                    s->Result = Walk(s, true);
+                    if (s->Result == StepResult::Cancelled) return false;
+                }
+                return true;
+            }
+            List<CompileStep^>^ order = gcnew List<CompileStep^>(steps);
+            order->Sort(gcnew Comparison<CompileStep^>(&BuildEngine::LargerFirst));
+            int read = 0;
+            bool cancelled = false;
+            for (;;)
+            {
+                int running = 0;
+                bool pdbTaken = false;
+                for each (CompileStep^ s in steps)
+                    if (s->Started && !s->Done) { running++; if (s->SharedPdb) pdbTaken = true; }
+                while (!cancelled && read < steps->Count && steps[read]->Done)
+                {
+                    CompileStep^ s = steps[read++];
+                    s->Result = Walk(s, false);
+                    if (s->Result == StepResult::Cancelled) cancelled = true;
+                }
+                if (cancelled || token.IsCancellationRequested)
+                {
+                    if (running == 0) return false;
+                }
+                else
+                {
+                    if (read == steps->Count) return true;
+                    for each (CompileStep^ s in order)
+                    {
+                        if (running >= jobs) break;
+                        if (s->Started || (s->SharedPdb && pdbTaken)) continue;
+                        s->Started = true;
+                        if (s->SharedPdb) pdbTaken = true;
+                        System::Threading::Thread^ t = gcnew System::Threading::Thread(
+                            gcnew System::Threading::ThreadStart(gcnew StepWorker(this, s), &StepWorker::Run));
+                        t->IsBackground = true;
+                        t->Name = "GRIDE compile";
+                        t->Start();
+                        running++;
+                    }
+                }
+                stepDone->WaitOne(100);
+            }
         }
 
         // Ctrl+F7: compile + assemble just one file (no link).
@@ -1287,7 +1629,7 @@ namespace Gride
             if (units == nullptr) { AddMessage("error", refusal, refused, 0); return false; }
             if (units->Count == 0) return false;
             bool stopAtAssembly = target->CrossOnly || (target->Emulated && project->EmulateOnly);
-            StepResult r = CompileUnit(units[0], true, DateTime::MinValue, stopAtAssembly);
+            StepResult r = Walk(PlanUnit(units[0], true, DateTime::MinValue, stopAtAssembly), true);
             if (r == StepResult::Skipped) Out(String::Format("{0} is assembly already - nothing here assembles it", Path::GetFileName(full)));
             return r == StepResult::Built || r == StepResult::Skipped;
         }
@@ -1331,14 +1673,19 @@ namespace Gride
             bool shalimarProgram = false;
             int compiledCount = 0;
             lastPart = nullptr;
+            // every step decided here, in the project's order, before any tool runs; RunSteps runs them Jobs() at a time
+            List<CompileStep^>^ steps = gcnew List<CompileStep^>();
             for each (Unit^ u in InParts(units))
             {
                 if (token.IsCancellationRequested) return false;
                 if (String::Equals(u->CompilerId, ToolIds::CompilerShalimar)) shalimarProgram = true;
-                StepResult r = CompileUnit(u, forceAll, newestHeader, stopAtAssembly);
-                if (r == StepResult::Cancelled) return false;
-                if (r == StepResult::Failed) anyFailed = true;
-                if (r == StepResult::Built) { anyBuilt = true; compiledCount++; }
+                steps->Add(PlanUnit(u, forceAll, newestHeader, stopAtAssembly));
+            }
+            if (!RunSteps(steps)) return false;
+            for each (CompileStep^ s in steps)
+            {
+                if (s->Result == StepResult::Failed) anyFailed = true;
+                if (s->Result == StepResult::Built) { anyBuilt = true; compiledCount++; }
             }
 
             if (anyFailed || errors > 0)
@@ -1363,14 +1710,23 @@ namespace Gride
             }
 
             List<String^>^ objs = gcnew List<String^>();
-            bool clObjects = false, otherObjects = false;
-            for each (Unit^ u in units) { objs->Add(u->ObjFile); if (u->WritesObject) clObjects = true; else otherObjects = true; }
-            // a Debug build on a target carrying CodeView links with Microsoft's link.exe /DEBUG (the PDB); so do cl's
-            // objects in either configuration (they are Microsoft's, with its CRT)
-            ToolDefinition^ linker = clObjects && target->Host ? ClLinker() : LinkerFor(IsDebugConfig(config->Name) && target->CodeView && !NoClang());
+            bool clObjects = false, otherObjects = false, ownObjects = false;
+            for each (Unit^ u in units)
+            {
+                objs->Add(u->ObjFile);
+                if (u->WritesObject) clObjects = true; else otherObjects = true;
+                if (u->CompilerId != nullptr && OwnCodeView(settings->GetTool(u->CompilerId))) ownObjects = true;
+            }
+            // a Debug build whose CodeView clang carried links with Microsoft's link.exe /DEBUG (the PDB); so do cl's
+            // objects in either configuration (they are Microsoft's, with its CRT). One whose compilers all wrote
+            // their own CodeView links with the target's linker, GRIDE's link, given /DEBUG for the PDB
+            bool clangCodeView = IsDebugConfig(config->Name) && target->CodeView && NeedsClang() && !NoClang();
+            ToolDefinition^ linker = clObjects && target->Host ? ClLinker() : LinkerFor(clangCodeView);
             if (linker == nullptr) return false;
+            ownPdb = ownObjects && !clangCodeView && linker == settings->GetTool(target->LinkerId);
             noCrtList = clObjects && !otherObjects && target->Host && linker != settings->GetTool(target->LinkerId);
             if (noCrtList) Out(String::Format("[cl's objects name their own C runtime - {0} takes it from them, no CRT list is added]", FileToolName(linker)));
+            else if (target->Host && !ChooseCrt(clObjects)) return false;
             return target->Emulated ? TiLink(linker, objs, cmdFiles, shalimarProgram, forceAll || anyBuilt)
                                     : HostLink(linker, objs, shalimarProgram, forceAll || anyBuilt);
         }
@@ -1551,6 +1907,13 @@ namespace Gride
                 String^ more = (config->LinkFlags + " --rom_model")->Trim();
                 vl["LinkFlags"] = more; vl["linkflags"] = more;
             }
+            // the PDB of GRIDE's own link: /DEBUG, which it writes beside the program
+            String^ flags = vl["LinkFlags"] == nullptr ? String::Empty : vl["LinkFlags"];
+            if (ownPdb && flags->IndexOf("/DEBUG", StringComparison::OrdinalIgnoreCase) < 0)
+            {
+                String^ more = (flags + " /DEBUG")->Trim();
+                vl["LinkFlags"] = more; vl["linkflags"] = more;
+            }
             int lrc = RunTool(linker, vl, ToolEnvironment(linker));
             if (lrc == ToolRunner::ExitCancelled) return false;
             if (lrc != 0) { failedStep = "link"; return false; }
@@ -1589,7 +1952,9 @@ namespace Gride
             if (shalimarProgram)
             {
                 bool debug = IsDebugConfig(config->Name);
-                LibraryEntry^ shm = ToolchainFile::Current->LibraryByKind(target->Arch, "shalimarRuntime");
+                // the Shalimar runtime built for the C runtime in force (shmrt-x86_64-windows-grt.lib over GRIDE's)
+                LibraryEntry^ shm = String::IsNullOrEmpty(crtChosen) ? ToolchainFile::Current->LibraryByKind(target->Arch, "shalimarRuntime")
+                                                                     : ToolchainFile::Current->LibraryByKind(target->Arch, "shalimarRuntime", crtChosen);
                 String^ found = IdeSettingsPaths::FindLibraryFile(shm, debug);
                 if (found != nullptr)
                 {

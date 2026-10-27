@@ -1,0 +1,119 @@
+// bitset - cppparse's C++98 library: a fixed-size sequence of bits (23.3.5) in 64-bit words.
+#ifndef CPPPARSE_BITSET
+#define CPPPARSE_BITSET
+
+#include <cstddef>
+#include <string>
+#include <stdexcept>
+
+namespace std {
+
+template <size_t N>
+class bitset {
+public:
+    class reference {
+    public:
+        reference(bitset& b, size_t pos) : m_b(&b), m_pos(pos) {}
+        reference& operator=(bool v) { m_b->set(m_pos, v); return *this; }
+        reference& operator=(const reference& r) { m_b->set(m_pos, bool(r)); return *this; }
+        operator bool() const { return m_b->test(m_pos); }
+        bool operator~() const { return !m_b->test(m_pos); }
+        reference& flip() { m_b->flip(m_pos); return *this; }
+    private:
+        bitset* m_b;
+        size_t  m_pos;
+    };
+
+    bitset() { for (size_t w = 0; w < WORDS; ++w) m_w[w] = 0; }
+    bitset(unsigned long v) { for (size_t w = 0; w < WORDS; ++w) m_w[w] = 0; m_w[0] = v; trim(); }
+    explicit bitset(const string& s, size_t pos = 0, size_t n = string::npos)
+    {
+        for (size_t w = 0; w < WORDS; ++w) m_w[w] = 0;
+        if (pos > s.size()) throw out_of_range("bitset: position past the end of the string");
+        size_t len = s.size() - pos;
+        if (n < len) len = n;
+        if (len > N) len = N;
+        for (size_t i = 0; i < len; ++i) {
+            char c = s[pos + len - 1 - i];
+            if (c == '1') set(i);
+            else if (c != '0') throw invalid_argument("bitset: a character other than 0 and 1");
+        }
+    }
+
+    bitset& operator&=(const bitset& o) { for (size_t w = 0; w < WORDS; ++w) m_w[w] &= o.m_w[w]; return *this; }
+    bitset& operator|=(const bitset& o) { for (size_t w = 0; w < WORDS; ++w) m_w[w] |= o.m_w[w]; return *this; }
+    bitset& operator^=(const bitset& o) { for (size_t w = 0; w < WORDS; ++w) m_w[w] ^= o.m_w[w]; return *this; }
+    bitset& operator<<=(size_t n)
+    {
+        if (n >= N) return reset();
+        for (size_t i = N; i-- > n;) set(i, test(i - n));
+        for (size_t i = 0; i < n; ++i) reset(i);
+        return *this;
+    }
+    bitset& operator>>=(size_t n)
+    {
+        if (n >= N) return reset();
+        for (size_t i = 0; i + n < N; ++i) set(i, test(i + n));
+        for (size_t i = N - n; i < N; ++i) reset(i);
+        return *this;
+    }
+    bitset operator<<(size_t n) const { bitset r(*this); r <<= n; return r; }
+    bitset operator>>(size_t n) const { bitset r(*this); r >>= n; return r; }
+    bitset operator~() const { bitset r(*this); r.flip(); return r; }
+
+    bitset& set() { for (size_t w = 0; w < WORDS; ++w) m_w[w] = ~0ULL; trim(); return *this; }
+    bitset& set(size_t pos, bool v = true)
+    {
+        if (pos >= N) throw out_of_range("bitset: position past the end");
+        if (v) m_w[pos / 64] |= 1ULL << (pos % 64); else m_w[pos / 64] &= ~(1ULL << (pos % 64));
+        return *this;
+    }
+    bitset& reset() { for (size_t w = 0; w < WORDS; ++w) m_w[w] = 0; return *this; }
+    bitset& reset(size_t pos) { return set(pos, false); }
+    bitset& flip() { for (size_t w = 0; w < WORDS; ++w) m_w[w] = ~m_w[w]; trim(); return *this; }
+    bitset& flip(size_t pos) { return set(pos, !test(pos)); }
+
+    bool test(size_t pos) const
+    {
+        if (pos >= N) throw out_of_range("bitset: position past the end");
+        return (m_w[pos / 64] >> (pos % 64)) & 1;
+    }
+    bool      operator[](size_t pos) const { return (m_w[pos / 64] >> (pos % 64)) & 1; }
+    reference operator[](size_t pos) { return reference(*this, pos); }
+    size_t count() const
+    {
+        size_t n = 0;
+        for (size_t w = 0; w < WORDS; ++w) { unsigned long long v = m_w[w]; while (v) { v &= v - 1; ++n; } }
+        return n;
+    }
+    size_t size() const { return N; }
+    bool any() const { for (size_t w = 0; w < WORDS; ++w) if (m_w[w]) return true; return false; }
+    bool none() const { return !any(); }
+    unsigned long to_ulong() const
+    {
+        for (size_t w = 1; w < WORDS; ++w) if (m_w[w]) throw overflow_error("bitset: to_ulong overflow");
+        if (WORDS && (m_w[0] >> 32)) throw overflow_error("bitset: to_ulong overflow");
+        return WORDS ? static_cast<unsigned long>(m_w[0]) : 0;
+    }
+    string to_string() const
+    {
+        string s(N, '0');
+        for (size_t i = 0; i < N; ++i) if (test(i)) s[N - 1 - i] = '1';
+        return s;
+    }
+    bool operator==(const bitset& o) const { for (size_t w = 0; w < WORDS; ++w) if (m_w[w] != o.m_w[w]) return false; return true; }
+    bool operator!=(const bitset& o) const { return !(*this == o); }
+
+private:
+    enum { WORDS = (N + 63) / 64 };
+    void trim() { if (N % 64 && WORDS) m_w[WORDS - 1] &= (1ULL << (N % 64)) - 1; }
+    unsigned long long m_w[(N + 127) / 64];   // WORDS, or one word for N = 0
+};
+
+template <size_t N> bitset<N> operator&(const bitset<N>& a, const bitset<N>& b) { bitset<N> r(a); r &= b; return r; }
+template <size_t N> bitset<N> operator|(const bitset<N>& a, const bitset<N>& b) { bitset<N> r(a); r |= b; return r; }
+template <size_t N> bitset<N> operator^(const bitset<N>& a, const bitset<N>& b) { bitset<N> r(a); r ^= b; return r; }
+
+}
+
+#endif

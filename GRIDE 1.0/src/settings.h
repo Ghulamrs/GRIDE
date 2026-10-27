@@ -84,6 +84,21 @@ bool rememberCompilerOptions(const Json& options);
 // the project's own were named, so every recipe reaches for the vendor's.
 void forceNative(bool on);
 bool nativeForced();
+// **The C runtime a Windows program links** (GRIDEx3): "windowsRuntime" - "grt" GRIDE's own (lib\grtstart, grtcompat,
+// grtcxx, grtc and grtwin.lib and GRIDE's kernel32.lib beside the editor), "msvc" Microsoft's (libcmt and the UCRT,
+// through LIB), "auto" Microsoft's only where Visual Studio is found and cl's objects are in the link. The Tools
+// menu writes it; GRIDE_WINDOWS_RUNTIME=grt or msvc in the environment wins over it. Answered as auto, grt or msvc.
+std::string windowsRuntime();
+std::string windowsRuntimeSetting();   // what settings.json says, the environment aside
+bool rememberWindowsRuntime(const std::string& choice);
+// **The debugger of a Windows program**: "windowsDebugger" - "auto" gride-dbg beside the editor, else cdb;
+// "gride-dbg"; "cdb" - the one named stands in for the other where that one is not there.
+std::string windowsDebugger();
+bool rememberWindowsDebugger(const std::string& choice);
+// **How many of a program's parts compile at once**: "buildJobs" - 0, the default, one per processor; 1 one
+// part after another, as before 2026-10-26. The Tools menu writes it.
+size_t buildJobs();
+bool rememberBuildJobs(size_t jobs);
 // The compiler chosen at start when nothing says otherwise: auto, cc1, cxx1, shc, msvc or c++ - "compiler" in the installation's settings.json, which the menu writes.
 std::string defaultCompiler();
 // Header directories every compile searches after a project's own, and

@@ -11,7 +11,11 @@ public:
     IntegerDigits(unsigned hi, unsigned lo, unsigned base, bool upper);
 
     unsigned length() const { return length_; }
+#if defined(_WIN32)   // grt: the offset in size_t first - cpp11 1.29 negates `p - unsigned` in 32 bits on x86_64
+    const char *text() const { return text_ + (sizeof text_ - length_); }
+#else
     const char *text() const { return text_ + sizeof text_ - length_; }
+#endif
 
 private:
     // 2^64 has 22 octal digits, the most of the three bases. pairs_: "00" to "99".

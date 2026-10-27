@@ -1,0 +1,241 @@
+// list - cppparse's C++98 library: a doubly linked list (23.2.2) with a sentinel node and bidirectional
+// iterators; splice, remove, unique, merge, reverse and sort (a merge sort) as the standard's.
+#ifndef CPPPARSE_LIST
+#define CPPPARSE_LIST
+
+#include <cstddef>
+#include <cstdlib>
+#include <__iterator>
+#include <new>
+#include <__traits>
+
+namespace std {
+
+struct __list_node_base { __list_node_base* prev; __list_node_base* next; };
+
+template <class T>
+struct __list_node : public __list_node_base { T value; __list_node(const T& v) : value(v) {} };
+
+template <class T>
+class __list_iterator {
+public:
+    typedef bidirectional_iterator_tag iterator_category;
+    typedef T         value_type;
+    typedef ptrdiff_t difference_type;
+    typedef T*        pointer;
+    typedef T&        reference;
+    __list_iterator() : m_n(0) {}
+    explicit __list_iterator(__list_node_base* n) : m_n(n) {}
+    T& operator*() const { return static_cast<__list_node<T>*>(m_n)->value; }
+    T* operator->() const { return &static_cast<__list_node<T>*>(m_n)->value; }
+    __list_iterator& operator++() { m_n = m_n->next; return *this; }
+    __list_iterator  operator++(int) { __list_iterator t(*this); m_n = m_n->next; return t; }
+    __list_iterator& operator--() { m_n = m_n->prev; return *this; }
+    __list_iterator  operator--(int) { __list_iterator t(*this); m_n = m_n->prev; return t; }
+    bool operator==(const __list_iterator& o) const { return m_n == o.m_n; }
+    bool operator!=(const __list_iterator& o) const { return m_n != o.m_n; }
+    __list_node_base* node() const { return m_n; }
+private:
+    __list_node_base* m_n;
+};
+
+template <class T>
+class __list_const_iterator {
+public:
+    typedef bidirectional_iterator_tag iterator_category;
+    typedef T         value_type;
+    typedef ptrdiff_t difference_type;
+    typedef const T*  pointer;
+    typedef const T&  reference;
+    __list_const_iterator() : m_n(0) {}
+    explicit __list_const_iterator(const __list_node_base* n) : m_n(n) {}
+    __list_const_iterator(const __list_iterator<T>& o) : m_n(o.node()) {}
+    const T& operator*() const { return static_cast<const __list_node<T>*>(m_n)->value; }
+    const T* operator->() const { return &static_cast<const __list_node<T>*>(m_n)->value; }
+    __list_const_iterator& operator++() { m_n = m_n->next; return *this; }
+    __list_const_iterator  operator++(int) { __list_const_iterator t(*this); m_n = m_n->next; return t; }
+    __list_const_iterator& operator--() { m_n = m_n->prev; return *this; }
+    __list_const_iterator  operator--(int) { __list_const_iterator t(*this); m_n = m_n->prev; return t; }
+    bool operator==(const __list_const_iterator& o) const { return m_n == o.m_n; }
+    bool operator!=(const __list_const_iterator& o) const { return m_n != o.m_n; }
+    const __list_node_base* node() const { return m_n; }
+private:
+    const __list_node_base* m_n;
+};
+
+template <class T>
+class list {
+public:
+    typedef T         value_type;
+    typedef size_t    size_type;
+    typedef ptrdiff_t difference_type;
+    typedef T&        reference;
+    typedef const T&  const_reference;
+    typedef __list_iterator<T>       iterator;
+    typedef __list_const_iterator<T> const_iterator;
+    typedef __list_node<T>           node_type;
+    typedef std::reverse_iterator<iterator>       reverse_iterator;
+    typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+
+    list() : m_size(0) { m_end.prev = m_end.next = &m_end; }
+    explicit list(size_t n) : m_size(0) { m_end.prev = m_end.next = &m_end; resize(n); }
+    list(size_t n, const T& v) : m_size(0) { m_end.prev = m_end.next = &m_end; assign(n, v); }
+    template <class It> list(It first, It last) : m_size(0) { m_end.prev = m_end.next = &m_end; initRange(first, last, typename __is_integer<It>::type()); }
+    list(const list& o) : m_size(0) { m_end.prev = m_end.next = &m_end; assign(o.begin(), o.end()); }
+    ~list() { clear(); }
+    list& operator=(const list& o) { if (this != &o) assign(o.begin(), o.end()); return *this; }
+
+    iterator begin() { return iterator(m_end.next); }
+    iterator end() { return iterator(&m_end); }
+    const_iterator begin() const { return const_iterator(m_end.next); }
+    const_iterator end() const { return const_iterator(&m_end); }
+    reverse_iterator rbegin() { return reverse_iterator(end()); }
+    reverse_iterator rend() { return reverse_iterator(begin()); }
+    const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
+    const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
+
+    size_t size() const { return m_size; }
+    size_t max_size() const { return ~static_cast<size_t>(0) / sizeof(__list_node<T>); }
+    bool   empty() const { return m_size == 0; }
+    T&       front() { return *begin(); }
+    const T& front() const { return *begin(); }
+    T&       back() { return *--end(); }
+    const T& back() const { return *--end(); }
+
+    void push_back(const T& v) { insert(end(), v); }
+    void push_front(const T& v) { insert(begin(), v); }
+    void pop_back() { erase(--end()); }
+    void pop_front() { erase(begin()); }
+    iterator insert(iterator pos, const T& v)
+    {
+        __list_node<T>* n = static_cast<__list_node<T>*>(malloc(sizeof(__list_node<T>)));
+        new (n) __list_node<T>(v);
+        __list_node_base* at = pos.node();
+        n->next = at; n->prev = at->prev;
+        at->prev->next = n; at->prev = n;
+        ++m_size;
+        return iterator(n);
+    }
+    void insert(iterator pos, size_t n, const T& v) { for (size_t i = 0; i < n; ++i) insert(pos, v); }
+    template <class It> void insert(iterator pos, It first, It last) { for (; first != last; ++first) insert(pos, *first); }
+    iterator erase(iterator pos)
+    {
+        __list_node_base* n = pos.node();
+        __list_node_base* next = n->next;
+        n->prev->next = n->next; n->next->prev = n->prev;
+        static_cast<node_type*>(n)->~node_type();
+        free(n);
+        --m_size;
+        return iterator(next);
+    }
+    iterator erase(iterator first, iterator last) { while (first != last) first = erase(first); return last; }
+    void clear() { while (!empty()) pop_back(); }
+    void resize(size_t n) { while (m_size > n) pop_back(); while (m_size < n) push_back(T()); }
+    void resize(size_t n, const T& v) { while (m_size > n) pop_back(); while (m_size < n) push_back(v); }
+    void assign(size_t n, const T& v) { clear(); insert(end(), n, v); }
+    template <class It> void assign(It first, It last) { clear(); insert(end(), first, last); }
+    void swap(list& o)
+    {
+        list t; t.splice(t.end(), *this);
+        splice(end(), o);
+        o.splice(o.end(), t);
+    }
+
+    // the nodes of o (all, one, or [first, last)) move before pos
+    void splice(iterator pos, list& o)
+    {
+        if (o.empty()) return;
+        transfer(pos.node(), o.m_end.next, &o.m_end);
+        m_size += o.m_size; o.m_size = 0;
+    }
+    void splice(iterator pos, list& o, iterator i)
+    {
+        iterator j = i; ++j;
+        if (pos == i || pos == j) return;
+        transfer(pos.node(), i.node(), j.node());
+        ++m_size; --o.m_size;
+    }
+    void splice(iterator pos, list& o, iterator first, iterator last)
+    {
+        if (first == last) return;
+        size_t n = 0;
+        for (iterator k = first; k != last; ++k) ++n;
+        transfer(pos.node(), first.node(), last.node());
+        m_size += n; o.m_size -= n;
+    }
+    void remove(const T& v) { for (iterator i = begin(); i != end();) { if (*i == v) i = erase(i); else ++i; } }
+    template <class P> void remove_if(P p) { for (iterator i = begin(); i != end();) { if (p(*i)) i = erase(i); else ++i; } }
+    void unique() { if (empty()) return; iterator i = begin(); iterator j = i; for (++j; j != end();) { if (*i == *j) j = erase(j); else { i = j; ++j; } } }
+    template <class P> void unique(P p) { if (empty()) return; iterator i = begin(); iterator j = i; for (++j; j != end();) { if (p(*i, *j)) j = erase(j); else { i = j; ++j; } } }
+    void merge(list& o) { merge(o, __less()); }
+    template <class C> void merge(list& o, C cmp)
+    {
+        if (this == &o) return;
+        iterator a = begin(), b = o.begin();
+        while (a != end() && b != o.end()) {
+            if (cmp(*b, *a)) { iterator next = b; ++next; transfer(a.node(), b.node(), next.node()); b = next; }
+            else ++a;
+        }
+        if (b != o.end()) transfer(end().node(), b.node(), o.end().node());
+        m_size += o.m_size; o.m_size = 0;
+    }
+    void reverse()
+    {
+        __list_node_base* n = &m_end;
+        do { __list_node_base* t = n->next; n->next = n->prev; n->prev = t; n = t; } while (n != &m_end);
+    }
+    void sort() { sort(__less()); }
+    template <class C> void sort(C cmp)
+    {
+        // a merge sort: carry holds one element, counter[k] a sorted run of 2^k, merged as the runs collide
+        if (m_size < 2) return;
+        list carry;
+        list counter[64];
+        int fill = 0;
+        while (!empty()) {
+            carry.splice(carry.begin(), *this, begin());
+            int i = 0;
+            while (i < fill && !counter[i].empty()) { counter[i].merge(carry, cmp); carry.swap(counter[i]); ++i; }
+            carry.swap(counter[i]);
+            if (i == fill) ++fill;
+        }
+        for (int i = 1; i < fill; ++i) counter[i].merge(counter[i - 1], cmp);
+        swap(counter[fill - 1]);
+    }
+
+private:
+    struct __less { bool operator()(const T& a, const T& b) const { return a < b; } };
+    template <class It> void initRange(It first, It last, __false_type) { insert(end(), first, last); }
+    template <class N> void initRange(N n, N v, __true_type) { assign(static_cast<size_t>(n), static_cast<T>(v)); }
+    // the nodes [first, last) move before pos (no sizes touched)
+    static void transfer(__list_node_base* pos, __list_node_base* first, __list_node_base* last)
+    {
+        if (pos == last) return;
+        __list_node_base* lastNode = last->prev;
+        first->prev->next = last; last->prev = first->prev;
+        first->prev = pos->prev; lastNode->next = pos;
+        pos->prev->next = first; pos->prev = lastNode;
+    }
+    __list_node_base m_end;
+    size_t           m_size;
+};
+
+template <class T> bool operator==(const list<T>& a, const list<T>& b)
+{
+    if (a.size() != b.size()) return false;
+    typename list<T>::const_iterator i = a.begin(), j = b.begin();
+    for (; i != a.end(); ++i, ++j) if (!(*i == *j)) return false;
+    return true;
+}
+template <class T> bool operator!=(const list<T>& a, const list<T>& b) { return !(a == b); }
+template <class T> bool operator<(const list<T>& a, const list<T>& b)
+{
+    typename list<T>::const_iterator i = a.begin(), j = b.begin();
+    for (; i != a.end() && j != b.end(); ++i, ++j) { if (*i < *j) return true; if (*j < *i) return false; }
+    return i == a.end() && j != b.end();
+}
+template <class T> void swap(list<T>& a, list<T>& b) { a.swap(b); }
+
+}
+
+#endif

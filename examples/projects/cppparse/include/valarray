@@ -1,0 +1,331 @@
+// valarray - cppparse's C++98 library: numeric arrays (26.3): valarray, slice and gslice, and the views slice_array,
+// gslice_array, mask_array and indirect_array; the element-wise operators and the math functions. The elements live
+// in malloc storage built with placement new; every operation makes its result at once (no expression templates).
+#ifndef CPPPARSE_VALARRAY
+#define CPPPARSE_VALARRAY
+
+#include <cmath>
+#include <cstddef>
+#include <cstdlib>
+#include <new>
+
+namespace std {
+
+class slice;
+class gslice;
+template <class T> class slice_array;
+template <class T> class gslice_array;
+template <class T> class mask_array;
+template <class T> class indirect_array;
+
+template <class T>
+class valarray {
+public:
+    typedef T value_type;
+
+    // 26.3.2.1 construction
+    valarray() : m_data(0), m_size(0) {}
+    explicit valarray(size_t n) : m_data(0), m_size(0) { make(n); for (size_t i = 0; i < n; ++i) new (m_data + i) T(); }
+    valarray(const T& v, size_t n) : m_data(0), m_size(0) { make(n); for (size_t i = 0; i < n; ++i) new (m_data + i) T(v); }
+    valarray(const T* p, size_t n) : m_data(0), m_size(0) { make(n); for (size_t i = 0; i < n; ++i) new (m_data + i) T(p[i]); }
+    valarray(const valarray& o) : m_data(0), m_size(0) { make(o.m_size); for (size_t i = 0; i < m_size; ++i) new (m_data + i) T(o.m_data[i]); }
+    valarray(const slice_array<T>& a);
+    valarray(const gslice_array<T>& a);
+    valarray(const mask_array<T>& a);
+    valarray(const indirect_array<T>& a);
+    ~valarray() { destroy(); }
+
+    // 26.3.2.2 assignment
+    valarray& operator=(const valarray& o)
+    {
+        if (this == &o) return *this;
+        if (m_size != o.m_size) { valarray t(o); swap(t); return *this; }
+        for (size_t i = 0; i < m_size; ++i) m_data[i] = o.m_data[i];
+        return *this;
+    }
+    valarray& operator=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] = v; return *this; }
+    valarray& operator=(const slice_array<T>& a) { valarray t(a); swap(t); return *this; }
+    valarray& operator=(const gslice_array<T>& a) { valarray t(a); swap(t); return *this; }
+    valarray& operator=(const mask_array<T>& a) { valarray t(a); swap(t); return *this; }
+    valarray& operator=(const indirect_array<T>& a) { valarray t(a); swap(t); return *this; }
+
+    // 26.3.2.3 element access and subsets
+    const T& operator[](size_t i) const { return m_data[i]; }
+    T&       operator[](size_t i) { return m_data[i]; }
+    valarray          operator[](slice s) const;
+    slice_array<T>    operator[](slice s);
+    valarray          operator[](const gslice& s) const;
+    gslice_array<T>   operator[](const gslice& s);
+    valarray          operator[](const valarray<bool>& m) const;
+    mask_array<T>     operator[](const valarray<bool>& m);
+    valarray          operator[](const valarray<size_t>& idx) const;
+    indirect_array<T> operator[](const valarray<size_t>& idx);
+
+    // 26.3.2.5 unary operators
+    valarray operator+() const { return *this; }
+    valarray operator-() const { valarray r(*this); for (size_t i = 0; i < m_size; ++i) r.m_data[i] = -m_data[i]; return r; }
+    valarray operator~() const { valarray r(*this); for (size_t i = 0; i < m_size; ++i) r.m_data[i] = ~m_data[i]; return r; }
+    valarray<bool> operator!() const { valarray<bool> r(m_size); for (size_t i = 0; i < m_size; ++i) r[i] = !m_data[i]; return r; }
+
+    // 26.3.2.6 computed assignment
+    valarray& operator*=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] *= v; return *this; }
+    valarray& operator/=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] /= v; return *this; }
+    valarray& operator%=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] %= v; return *this; }
+    valarray& operator+=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] += v; return *this; }
+    valarray& operator-=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] -= v; return *this; }
+    valarray& operator^=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] ^= v; return *this; }
+    valarray& operator&=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] &= v; return *this; }
+    valarray& operator|=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] |= v; return *this; }
+    valarray& operator<<=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] <<= v; return *this; }
+    valarray& operator>>=(const T& v) { for (size_t i = 0; i < m_size; ++i) m_data[i] >>= v; return *this; }
+    valarray& operator*=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] *= o.m_data[i]; return *this; }
+    valarray& operator/=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] /= o.m_data[i]; return *this; }
+    valarray& operator%=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] %= o.m_data[i]; return *this; }
+    valarray& operator+=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] += o.m_data[i]; return *this; }
+    valarray& operator-=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] -= o.m_data[i]; return *this; }
+    valarray& operator^=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] ^= o.m_data[i]; return *this; }
+    valarray& operator&=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] &= o.m_data[i]; return *this; }
+    valarray& operator|=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] |= o.m_data[i]; return *this; }
+    valarray& operator<<=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] <<= o.m_data[i]; return *this; }
+    valarray& operator>>=(const valarray& o) { for (size_t i = 0; i < m_size; ++i) m_data[i] >>= o.m_data[i]; return *this; }
+
+    // 26.3.2.7 member functions
+    size_t size() const { return m_size; }
+    T sum() const { T r = m_size ? m_data[0] : T(); for (size_t i = 1; i < m_size; ++i) r += m_data[i]; return r; }
+    T min() const { T r = m_size ? m_data[0] : T(); for (size_t i = 1; i < m_size; ++i) if (m_data[i] < r) r = m_data[i]; return r; }
+    T max() const { T r = m_size ? m_data[0] : T(); for (size_t i = 1; i < m_size; ++i) if (r < m_data[i]) r = m_data[i]; return r; }
+    // element i of the result is element i + n (T() past the ends)
+    valarray shift(int n) const
+    {
+        valarray r(m_size);
+        for (size_t i = 0; i < m_size; ++i) {
+            long long j = static_cast<long long>(i) + n;
+            if (j >= 0 && j < static_cast<long long>(m_size)) r.m_data[i] = m_data[j];
+        }
+        return r;
+    }
+    // element i of the result is element (i + n) modulo the size
+    valarray cshift(int n) const
+    {
+        valarray r(m_size);
+        if (m_size == 0) return r;
+        long long k = n % static_cast<long long>(m_size);
+        if (k < 0) k += static_cast<long long>(m_size);
+        for (size_t i = 0; i < m_size; ++i) r.m_data[i] = m_data[(i + static_cast<size_t>(k)) % m_size];
+        return r;
+    }
+    valarray apply(T func(T)) const { valarray r(*this); for (size_t i = 0; i < m_size; ++i) r.m_data[i] = func(m_data[i]); return r; }
+    valarray apply(T func(const T&)) const { valarray r(*this); for (size_t i = 0; i < m_size; ++i) r.m_data[i] = func(m_data[i]); return r; }
+    // resize(n, c = T()), as two functions
+    void resize(size_t n) { resize(n, T()); }
+    void resize(size_t n, T c) { destroy(); make(n); for (size_t i = 0; i < n; ++i) new (m_data + i) T(c); }
+
+    void swap(valarray& o) { T* d = m_data; m_data = o.m_data; o.m_data = d; size_t s = m_size; m_size = o.m_size; o.m_size = s; }
+
+private:
+    T*     m_data;
+    size_t m_size;
+    void make(size_t n) { m_data = n ? static_cast<T*>(malloc(n * sizeof(T))) : 0; m_size = n; }
+    void destroy() { for (size_t i = 0; i < m_size; ++i) m_data[i].~T(); free(m_data); m_data = 0; m_size = 0; }
+};
+
+// 26.3.4 slice: start, size and stride
+class slice {
+public:
+    slice() : m_start(0), m_size(0), m_stride(0) {}
+    slice(size_t start, size_t size, size_t stride) : m_start(start), m_size(size), m_stride(stride) {}
+    size_t start() const { return m_start; }
+    size_t size() const { return m_size; }
+    size_t stride() const { return m_stride; }
+private:
+    size_t m_start, m_size, m_stride;
+};
+
+// 26.3.6 gslice: a start and pairs of sizes and strides; indexes() lists the elements it selects, the last size
+// varying fastest
+class gslice {
+public:
+    gslice() : m_start(0) {}
+    gslice(size_t start, const valarray<size_t>& sizes, const valarray<size_t>& strides) : m_start(start), m_sizes(sizes), m_strides(strides) {}
+    size_t           start() const { return m_start; }
+    valarray<size_t> size() const { return m_sizes; }
+    valarray<size_t> stride() const { return m_strides; }
+    valarray<size_t> __indexes() const
+    {
+        const size_t dims = m_sizes.size();
+        size_t total = dims ? 1 : 0;
+        for (size_t d = 0; d < dims; ++d) total *= m_sizes[d];
+        valarray<size_t> r(total);
+        valarray<size_t> at(dims);
+        for (size_t k = 0; k < total; ++k) {
+            size_t idx = m_start;
+            for (size_t d = 0; d < dims; ++d) idx += at[d] * m_strides[d];
+            r[k] = idx;
+            for (size_t d = dims; d > 0; --d) { if (++at[d - 1] < m_sizes[d - 1]) break; at[d - 1] = 0; }
+        }
+        return r;
+    }
+private:
+    size_t           m_start;
+    valarray<size_t> m_sizes;
+    valarray<size_t> m_strides;
+};
+
+// the views (26.3.5, 26.3.7-26.3.9): the elements of a valarray they select, by index; assigning to a view assigns
+// to those elements
+template <class T>
+class __index_view {
+public:
+    size_t __count() const { return m_idx.size(); }
+    T&     __at(size_t k) const { return (*m_array)[m_idx[k]]; }
+    void operator=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) = v[k]; }
+    void operator=(const T& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) = v; }
+    void operator*=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) *= v[k]; }
+    void operator/=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) /= v[k]; }
+    void operator%=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) %= v[k]; }
+    void operator+=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) += v[k]; }
+    void operator-=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) -= v[k]; }
+    void operator^=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) ^= v[k]; }
+    void operator&=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) &= v[k]; }
+    void operator|=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) |= v[k]; }
+    void operator<<=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) <<= v[k]; }
+    void operator>>=(const valarray<T>& v) const { for (size_t k = 0; k < m_idx.size(); ++k) __at(k) >>= v[k]; }
+protected:
+    __index_view(valarray<T>* a, const valarray<size_t>& idx) : m_array(a), m_idx(idx) {}
+    valarray<T>*     m_array;
+    valarray<size_t> m_idx;
+};
+
+template <class T>
+class slice_array : public __index_view<T> {
+public:
+    typedef T value_type;
+    slice_array(const slice_array& o) : __index_view<T>(o.m_array, o.m_idx) {}
+    void operator=(const valarray<T>& v) const { __index_view<T>::operator=(v); }
+    void operator=(const T& v) const { __index_view<T>::operator=(v); }
+    const slice_array& operator=(const slice_array& o) const { for (size_t k = 0; k < this->m_idx.size(); ++k) this->__at(k) = o.__at(k); return *this; }
+private:
+    friend class valarray<T>;
+    slice_array(valarray<T>* a, const valarray<size_t>& idx) : __index_view<T>(a, idx) {}
+};
+template <class T>
+class gslice_array : public __index_view<T> {
+public:
+    typedef T value_type;
+    gslice_array(const gslice_array& o) : __index_view<T>(o.m_array, o.m_idx) {}
+    void operator=(const valarray<T>& v) const { __index_view<T>::operator=(v); }
+    void operator=(const T& v) const { __index_view<T>::operator=(v); }
+    const gslice_array& operator=(const gslice_array& o) const { for (size_t k = 0; k < this->m_idx.size(); ++k) this->__at(k) = o.__at(k); return *this; }
+private:
+    friend class valarray<T>;
+    gslice_array(valarray<T>* a, const valarray<size_t>& idx) : __index_view<T>(a, idx) {}
+};
+template <class T>
+class mask_array : public __index_view<T> {
+public:
+    typedef T value_type;
+    mask_array(const mask_array& o) : __index_view<T>(o.m_array, o.m_idx) {}
+    void operator=(const valarray<T>& v) const { __index_view<T>::operator=(v); }
+    void operator=(const T& v) const { __index_view<T>::operator=(v); }
+    const mask_array& operator=(const mask_array& o) const { for (size_t k = 0; k < this->m_idx.size(); ++k) this->__at(k) = o.__at(k); return *this; }
+private:
+    friend class valarray<T>;
+    mask_array(valarray<T>* a, const valarray<size_t>& idx) : __index_view<T>(a, idx) {}
+};
+template <class T>
+class indirect_array : public __index_view<T> {
+public:
+    typedef T value_type;
+    indirect_array(const indirect_array& o) : __index_view<T>(o.m_array, o.m_idx) {}
+    void operator=(const valarray<T>& v) const { __index_view<T>::operator=(v); }
+    void operator=(const T& v) const { __index_view<T>::operator=(v); }
+    const indirect_array& operator=(const indirect_array& o) const { for (size_t k = 0; k < this->m_idx.size(); ++k) this->__at(k) = o.__at(k); return *this; }
+private:
+    friend class valarray<T>;
+    indirect_array(valarray<T>* a, const valarray<size_t>& idx) : __index_view<T>(a, idx) {}
+};
+
+// the indexes a slice, a mask and an index array select
+inline valarray<size_t> __slice_indexes(const slice& s)
+{
+    valarray<size_t> r(s.size());
+    for (size_t k = 0; k < s.size(); ++k) r[k] = s.start() + k * s.stride();
+    return r;
+}
+inline valarray<size_t> __mask_indexes(const valarray<bool>& m)
+{
+    size_t n = 0;
+    for (size_t i = 0; i < m.size(); ++i) if (m[i]) ++n;
+    valarray<size_t> r(n);
+    for (size_t i = 0, k = 0; i < m.size(); ++i) if (m[i]) r[k++] = i;
+    return r;
+}
+
+template <class T> valarray<T>::valarray(const slice_array<T>& a) : m_data(0), m_size(0) { make(a.__count()); for (size_t k = 0; k < m_size; ++k) new (m_data + k) T(a.__at(k)); }
+template <class T> valarray<T>::valarray(const gslice_array<T>& a) : m_data(0), m_size(0) { make(a.__count()); for (size_t k = 0; k < m_size; ++k) new (m_data + k) T(a.__at(k)); }
+template <class T> valarray<T>::valarray(const mask_array<T>& a) : m_data(0), m_size(0) { make(a.__count()); for (size_t k = 0; k < m_size; ++k) new (m_data + k) T(a.__at(k)); }
+template <class T> valarray<T>::valarray(const indirect_array<T>& a) : m_data(0), m_size(0) { make(a.__count()); for (size_t k = 0; k < m_size; ++k) new (m_data + k) T(a.__at(k)); }
+
+template <class T> valarray<T> valarray<T>::operator[](slice s) const { valarray<size_t> idx = __slice_indexes(s); valarray r(idx.size()); for (size_t k = 0; k < idx.size(); ++k) r[k] = m_data[idx[k]]; return r; }
+template <class T> slice_array<T> valarray<T>::operator[](slice s) { return slice_array<T>(this, __slice_indexes(s)); }
+template <class T> valarray<T> valarray<T>::operator[](const gslice& s) const { valarray<size_t> idx = s.__indexes(); valarray r(idx.size()); for (size_t k = 0; k < idx.size(); ++k) r[k] = m_data[idx[k]]; return r; }
+template <class T> gslice_array<T> valarray<T>::operator[](const gslice& s) { return gslice_array<T>(this, s.__indexes()); }
+template <class T> valarray<T> valarray<T>::operator[](const valarray<bool>& m) const { valarray<size_t> idx = __mask_indexes(m); valarray r(idx.size()); for (size_t k = 0; k < idx.size(); ++k) r[k] = m_data[idx[k]]; return r; }
+template <class T> mask_array<T> valarray<T>::operator[](const valarray<bool>& m) { return mask_array<T>(this, __mask_indexes(m)); }
+template <class T> valarray<T> valarray<T>::operator[](const valarray<size_t>& idx) const { valarray r(idx.size()); for (size_t k = 0; k < idx.size(); ++k) r[k] = m_data[idx[k]]; return r; }
+template <class T> indirect_array<T> valarray<T>::operator[](const valarray<size_t>& idx) { return indirect_array<T>(this, idx); }
+
+// 26.3.3 the element-wise operators: valarray with valarray, with a value on either side
+#define CPPPARSE_VALARRAY_OPERATOR(OP, R) \
+template <class T> valarray<R> operator OP(const valarray<T>& a, const valarray<T>& b) { valarray<R> r(a.size()); for (size_t i = 0; i < a.size(); ++i) r[i] = a[i] OP b[i]; return r; } \
+template <class T> valarray<R> operator OP(const valarray<T>& a, const T& b) { valarray<R> r(a.size()); for (size_t i = 0; i < a.size(); ++i) r[i] = a[i] OP b; return r; } \
+template <class T> valarray<R> operator OP(const T& a, const valarray<T>& b) { valarray<R> r(b.size()); for (size_t i = 0; i < b.size(); ++i) r[i] = a OP b[i]; return r; }
+CPPPARSE_VALARRAY_OPERATOR(*, T)
+CPPPARSE_VALARRAY_OPERATOR(/, T)
+CPPPARSE_VALARRAY_OPERATOR(%, T)
+CPPPARSE_VALARRAY_OPERATOR(+, T)
+CPPPARSE_VALARRAY_OPERATOR(-, T)
+CPPPARSE_VALARRAY_OPERATOR(^, T)
+CPPPARSE_VALARRAY_OPERATOR(&, T)
+CPPPARSE_VALARRAY_OPERATOR(|, T)
+CPPPARSE_VALARRAY_OPERATOR(<<, T)
+CPPPARSE_VALARRAY_OPERATOR(>>, T)
+CPPPARSE_VALARRAY_OPERATOR(&&, bool)
+CPPPARSE_VALARRAY_OPERATOR(||, bool)
+CPPPARSE_VALARRAY_OPERATOR(==, bool)
+CPPPARSE_VALARRAY_OPERATOR(!=, bool)
+CPPPARSE_VALARRAY_OPERATOR(<, bool)
+CPPPARSE_VALARRAY_OPERATOR(>, bool)
+CPPPARSE_VALARRAY_OPERATOR(<=, bool)
+CPPPARSE_VALARRAY_OPERATOR(>=, bool)
+#undef CPPPARSE_VALARRAY_OPERATOR
+
+// 26.3.3.3 the transcendentals, element by element (computed in double); abs by the sign
+template <class T> valarray<T> abs(const valarray<T>& a) { valarray<T> r(a.size()); for (size_t i = 0; i < a.size(); ++i) r[i] = a[i] < T() ? -a[i] : a[i]; return r; }
+#define CPPPARSE_VALARRAY_FUNCTION(F) \
+template <class T> valarray<T> F(const valarray<T>& a) { valarray<T> r(a.size()); for (size_t i = 0; i < a.size(); ++i) r[i] = static_cast<T>(::F(static_cast<double>(a[i]))); return r; }
+CPPPARSE_VALARRAY_FUNCTION(acos)
+CPPPARSE_VALARRAY_FUNCTION(asin)
+CPPPARSE_VALARRAY_FUNCTION(atan)
+CPPPARSE_VALARRAY_FUNCTION(cos)
+CPPPARSE_VALARRAY_FUNCTION(cosh)
+CPPPARSE_VALARRAY_FUNCTION(exp)
+CPPPARSE_VALARRAY_FUNCTION(log)
+CPPPARSE_VALARRAY_FUNCTION(log10)
+CPPPARSE_VALARRAY_FUNCTION(sin)
+CPPPARSE_VALARRAY_FUNCTION(sinh)
+CPPPARSE_VALARRAY_FUNCTION(sqrt)
+CPPPARSE_VALARRAY_FUNCTION(tan)
+CPPPARSE_VALARRAY_FUNCTION(tanh)
+#undef CPPPARSE_VALARRAY_FUNCTION
+#define CPPPARSE_VALARRAY_FUNCTION2(F) \
+template <class T> valarray<T> F(const valarray<T>& a, const valarray<T>& b) { valarray<T> r(a.size()); for (size_t i = 0; i < a.size(); ++i) r[i] = static_cast<T>(::F(static_cast<double>(a[i]), static_cast<double>(b[i]))); return r; } \
+template <class T> valarray<T> F(const valarray<T>& a, const T& b) { valarray<T> r(a.size()); for (size_t i = 0; i < a.size(); ++i) r[i] = static_cast<T>(::F(static_cast<double>(a[i]), static_cast<double>(b))); return r; } \
+template <class T> valarray<T> F(const T& a, const valarray<T>& b) { valarray<T> r(b.size()); for (size_t i = 0; i < b.size(); ++i) r[i] = static_cast<T>(::F(static_cast<double>(a), static_cast<double>(b[i]))); return r; }
+CPPPARSE_VALARRAY_FUNCTION2(atan2)
+CPPPARSE_VALARRAY_FUNCTION2(pow)
+#undef CPPPARSE_VALARRAY_FUNCTION2
+
+}
+
+#endif
