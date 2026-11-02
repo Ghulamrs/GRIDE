@@ -333,9 +333,10 @@ struct Conversion {
     const Type* target;
     bool        derivedToBase;   // a pointer/reference conversion to a base class (better than the other standard conversions, 13.3.3.2/4)
     bool        qualification;   // only cv-qualification added
+    bool        pointerToVoid;   // an object pointer converted to a (cv) void* (4.10/2), not a null pointer constant
     Rank        second;          // UserDefined: the rank of the standard conversion after the user conversion (13.3.3.2/3)
     Symbol*     function;        // the name of an overloaded function or a function template: the one of the target's type (13.4)
-    Conversion() : rank(None), userFunction(0), target(0), derivedToBase(false), qualification(false), second(Exact), function(0) {}
+    Conversion() : rank(None), userFunction(0), target(0), derivedToBase(false), qualification(false), pointerToVoid(false), second(Exact), function(0) {}
 };
 
 class Sema {
@@ -376,6 +377,7 @@ private:
     Symbol* findClassSymbolForQualifier(const cxx::QualifiedName& n, Scope* from);
     Scope* scopeForQualifier(const cxx::QualifiedName& n, Scope* from);
     Symbol* injectedTemplate(Symbol* s, const cxx::NameComponent& c) const;   // the template an injected name with arguments names
+    Symbol* explicitSpecialization(Symbol* primary, const std::string& key, const std::vector<const Type*>& types, const std::vector<long long>& ints, Scope* in);
 
     // bodies
     // order: where the body stands among the class definitions of the unit (Symbol::defOrder), for cl's

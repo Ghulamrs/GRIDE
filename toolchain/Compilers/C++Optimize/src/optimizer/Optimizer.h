@@ -108,6 +108,7 @@ private:
     // waiting to be written after the function.
     opt::Function fn_;
     std::unique_ptr<opt::Function> funclet_;
+    std::vector<std::unique_ptr<opt::Function> > outerFunclets_;
     std::vector<opt::Stream> funclets_;
     int frameSize_ = 0;
     // The pipeline, built once per spelling, and the manager that runs it.

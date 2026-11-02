@@ -38,6 +38,31 @@ void countUses(const IrFunction& f, std::map<int, int>& uses)
                 if (f.blocks[b].insts[i].args[a].kind == IrOperand::Temp) uses[f.blocks[b].insts[i].args[a].id]++;
 }
 
+// removes the blocks whose keep entry is false and renumbers the rest (a stale block operand becomes block 0)
+int eraseBlocks(IrFunction& f, const std::vector<bool>& keep)
+{
+    std::vector<int> remap(f.blocks.size(), -1);
+    std::vector<IrBlock> kept;
+    int removed = 0;
+    for (size_t b = 0; b < f.blocks.size(); ++b) {
+        if (!keep[b]) { ++removed; continue; }
+        remap[b] = static_cast<int>(kept.size());
+        kept.push_back(f.blocks[b]);
+    }
+    if (removed == 0) return 0;
+    for (size_t b = 0; b < kept.size(); ++b) {
+        kept[b].id = static_cast<int>(b);
+        for (size_t i = 0; i < kept[b].insts.size(); ++i)
+            for (size_t x = 0; x < kept[b].insts[i].args.size(); ++x)
+                if (kept[b].insts[i].args[x].kind == IrOperand::Block) {
+                    int old = kept[b].insts[i].args[x].id;
+                    kept[b].insts[i].args[x].id = (old >= 0 && static_cast<size_t>(old) < remap.size() && remap[static_cast<size_t>(old)] >= 0) ? remap[static_cast<size_t>(old)] : 0;
+                }
+    }
+    f.blocks.swap(kept);
+    return removed;
+}
+
 bool isPow2(long v) { return v > 0 && (v & (v - 1)) == 0; }
 
 // a floating value converted to the integer type t as cl's code converts it at run time (X86.cpp): signed and
@@ -677,27 +702,170 @@ int Optimizer::simplifyCfg(IrFunction& f)
         --a;
     }
     // remove unreachable blocks and renumber
-    std::vector<int> remap(f.blocks.size(), -1);
-    std::vector<IrBlock> kept;
-    for (size_t b = 0; b < f.blocks.size(); ++b) {
-        if (!reach[b]) { ++changes; continue; }
-        remap[b] = static_cast<int>(kept.size());
-        kept.push_back(f.blocks[b]);
-    }
-    if (kept.size() != f.blocks.size()) {
-        for (size_t b = 0; b < kept.size(); ++b) {
-            kept[b].id = static_cast<int>(b);
-            for (size_t i = 0; i < kept[b].insts.size(); ++i)
-                for (size_t x = 0; x < kept[b].insts[i].args.size(); ++x)
-                    if (kept[b].insts[i].args[x].kind == IrOperand::Block) {
-                        int old = kept[b].insts[i].args[x].id;
-                        kept[b].insts[i].args[x].id = (old >= 0 && static_cast<size_t>(old) < remap.size() && remap[static_cast<size_t>(old)] >= 0) ? remap[static_cast<size_t>(old)] : 0;
-                    }
-        }
-        f.blocks.swap(kept);
-    }
+    changes += eraseBlocks(f, reach);
     f.computeCfg();
     return changes;
+}
+
+int Optimizer::removeDeadRegions(IrFunction& f)
+{
+    const size_t n = f.blocks.size();
+    // the regions: their handlers, and the function's unwind region (IrGen's trybegin "unwind")
+    std::map<long, std::vector<int> > handlersOf;
+    long unwindId = -1;
+    for (size_t b = 0; b < n; ++b)
+        for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
+            const IrInst& in = f.blocks[b].insts[i];
+            if (in.op != IrInst::TryBegin) continue;
+            if (in.sub == "unwind") unwindId = in.extra;
+            for (size_t a = 0; a < in.args.size(); ++a) if (in.args[a].kind == IrOperand::Block) handlersOf[in.extra].push_back(in.args[a].id);
+        }
+    if (handlersOf.empty()) return 0;
+    // the flags the unwind handler tests; IrGen writes them by stores of constants only (they are pinned in memory
+    // for the setjmp handlers, but nothing takes their address)
+    std::vector<int> flagIndex(f.locals.size(), -1);
+    int nFlags = 0;
+    for (size_t l = 0; l < f.locals.size(); ++l)
+        if (f.locals[l].ehFlag) flagIndex[l] = nFlags++;
+    std::map<int, long> constOf;
+    std::map<int, int> defs;
+    countDefs(f, defs);
+    for (size_t b = 0; b < n; ++b)
+        for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
+            const IrInst& in = f.blocks[b].insts[i];
+            if (in.op == IrInst::Const && in.dst >= 0 && !in.args.empty() && in.args[0].kind == IrOperand::Imm && defs[in.dst] == 1) constOf[in.dst] = in.args[0].ival;
+            if (in.op == IrInst::AddrLocal && !in.args.empty() && in.args[0].kind == IrOperand::Local && in.args[0].id >= 0 &&
+                static_cast<size_t>(in.args[0].id) < flagIndex.size() && flagIndex[static_cast<size_t>(in.args[0].id)] >= 0) return 0;
+        }
+    // a forward walk from the entry: the regions open at each block (the same on every path, as the back end's
+    // range tables need them) and the flags that may be set; an instruction that may throw hands its state to the
+    // handlers of the regions around it, which run in the regions outside their own. The entry block clears every
+    // flag itself, so the walk starts with all of them possibly set
+    std::vector<std::vector<bool> > maySet(n);
+    std::vector<std::vector<long> > regionIn(n);
+    std::vector<bool> reached(n, false), queued(n, false);
+    std::vector<int> work;
+    maySet[0].assign(static_cast<size_t>(nFlags), true);
+    reached[0] = true; queued[0] = true;
+    work.push_back(0);
+    bool ok = true, unwindNeeded = false;
+    while (!work.empty() && ok) {
+        const int b = work.back(); work.pop_back();
+        queued[static_cast<size_t>(b)] = false;
+        std::vector<bool> state = maySet[static_cast<size_t>(b)];
+        std::vector<long> regions = regionIn[static_cast<size_t>(b)];
+        const IrBlock& blk = f.blocks[static_cast<size_t>(b)];
+        for (size_t i = 0; i < blk.insts.size() && ok; ++i) {
+            const IrInst& in = blk.insts[i];
+            if (in.op == IrInst::TryBegin) { regions.push_back(in.extra); continue; }
+            if (in.op == IrInst::TryEnd) { if (regions.empty() || regions.back() != in.extra) ok = false; else regions.pop_back(); continue; }
+            if (in.op == IrInst::StoreLocal && in.args.size() == 2 && in.args[0].kind == IrOperand::Local &&
+                in.args[0].id >= 0 && static_cast<size_t>(in.args[0].id) < flagIndex.size() && flagIndex[static_cast<size_t>(in.args[0].id)] >= 0) {
+                bool set = true;
+                if (in.args[1].kind == IrOperand::Imm) set = in.args[1].ival != 0;
+                else if (in.args[1].kind == IrOperand::Temp) { std::map<int, long>::const_iterator c = constOf.find(in.args[1].id); if (c != constOf.end()) set = c->second != 0; }
+                state[static_cast<size_t>(flagIndex[static_cast<size_t>(in.args[0].id)])] = set;
+                continue;
+            }
+            std::vector<int> targets;
+            std::vector<std::vector<long> > targetRegions;
+            if (in.mayThrow()) {
+                bool any = false;
+                for (size_t k = 0; k < state.size(); ++k) if (state[k]) { any = true; break; }
+                if (any && unwindId >= 0 && std::find(regions.begin(), regions.end(), unwindId) != regions.end()) unwindNeeded = true;
+                for (size_t r = 0; r < regions.size(); ++r) {
+                    const std::vector<int>& hs = handlersOf[regions[r]];
+                    const std::vector<long> around(regions.begin(), regions.begin() + static_cast<std::vector<long>::difference_type>(r));
+                    for (size_t h = 0; h < hs.size(); ++h) { targets.push_back(hs[h]); targetRegions.push_back(around); }
+                }
+            }
+            if (in.op == IrInst::Br || in.op == IrInst::CondBr)
+                for (size_t a = 0; a < in.args.size(); ++a) if (in.args[a].kind == IrOperand::Block) { targets.push_back(in.args[a].id); targetRegions.push_back(regions); }
+            for (size_t t = 0; t < targets.size() && ok; ++t) {
+                const int h = targets[t];
+                if (h < 0 || static_cast<size_t>(h) >= n) { ok = false; break; }
+                const size_t hs = static_cast<size_t>(h);
+                if (!reached[hs]) { reached[hs] = true; maySet[hs] = state; regionIn[hs] = targetRegions[t]; }
+                else {
+                    if (regionIn[hs] != targetRegions[t]) { ok = false; break; }
+                    bool grew = false;
+                    for (size_t k = 0; k < state.size(); ++k) if (state[k] && !maySet[hs][k]) { maySet[hs][k] = true; grew = true; }
+                    if (!grew) continue;
+                }
+                if (!queued[hs]) { queued[hs] = true; work.push_back(h); }
+            }
+        }
+    }
+    if (!ok) return 0;
+    // a region is dead when no instruction that may throw reaches one of its handlers: a cleanup region (the table
+    // model's object regions, A4) or a try block around code that cannot throw; the unwind region also when every
+    // throwing instruction inside it runs with every flag clear, where its handler would only rethrow
+    std::set<long> dead;
+    for (std::map<long, std::vector<int> >::const_iterator r = handlersOf.begin(); r != handlersOf.end(); ++r) {
+        bool anyReached = false;
+        for (size_t h = 0; h < r->second.size(); ++h)
+            if (r->second[h] >= 0 && static_cast<size_t>(r->second[h]) < n && reached[static_cast<size_t>(r->second[h])]) anyReached = true;
+        if (!anyReached || (r->first == unwindId && !unwindNeeded)) dead.insert(r->first);
+    }
+    if (dead.empty()) return 0;
+    for (size_t b = 0; b < n; ++b)
+        for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
+            IrInst& in = f.blocks[b].insts[i];
+            if ((in.op == IrInst::TryBegin || in.op == IrInst::TryEnd) && dead.count(in.extra)) { in.op = IrInst::Nop; in.args.clear(); in.sub.clear(); }
+        }
+    // the handlers of the dead regions, with what only they reach, are unreachable now
+    std::vector<bool> keep(n, false);
+    std::vector<int> stack;
+    stack.push_back(0);
+    keep[0] = true;
+    while (!stack.empty()) {
+        const int b = stack.back(); stack.pop_back();
+        const IrBlock& blk = f.blocks[static_cast<size_t>(b)];
+        for (size_t i = 0; i < blk.insts.size(); ++i) {
+            const IrInst& in = blk.insts[i];
+            if (in.op != IrInst::Br && in.op != IrInst::CondBr && in.op != IrInst::TryBegin) continue;
+            for (size_t a = 0; a < in.args.size(); ++a) {
+                const IrOperand& o = in.args[a];
+                if (o.kind == IrOperand::Block && o.id >= 0 && static_cast<size_t>(o.id) < n && !keep[static_cast<size_t>(o.id)]) { keep[static_cast<size_t>(o.id)] = true; stack.push_back(o.id); }
+            }
+        }
+    }
+    eraseBlocks(f, keep);
+    const int removed = static_cast<int>(dead.size());
+    if (unwindId >= 0 && dead.count(unwindId)) {
+    // the unwind handler is gone: the stores of flags nothing reads any more, and the constants only they used
+    std::vector<int> reads(f.locals.size(), 0);
+    for (size_t b = 0; b < f.blocks.size(); ++b)
+        for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
+            const IrInst& in = f.blocks[b].insts[i];
+            if ((in.op == IrInst::LoadLocal || in.op == IrInst::AddrLocal) && !in.args.empty() && in.args[0].kind == IrOperand::Local &&
+                in.args[0].id >= 0 && static_cast<size_t>(in.args[0].id) < reads.size()) ++reads[static_cast<size_t>(in.args[0].id)];
+        }
+    std::set<int> freed;
+    for (size_t b = 0; b < f.blocks.size(); ++b)
+        for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
+            IrInst& in = f.blocks[b].insts[i];
+            if (in.op != IrInst::StoreLocal || in.args.size() != 2 || in.args[0].kind != IrOperand::Local) continue;
+            const int l = in.args[0].id;
+            if (l < 0 || static_cast<size_t>(l) >= flagIndex.size() || flagIndex[static_cast<size_t>(l)] < 0 || reads[static_cast<size_t>(l)] != 0) continue;
+            if (in.args[1].kind == IrOperand::Temp) freed.insert(in.args[1].id);
+            in.op = IrInst::Nop; in.args.clear();
+        }
+    if (!freed.empty()) {
+        std::map<int, int> uses;
+        countUses(f, uses);
+        for (size_t b = 0; b < f.blocks.size(); ++b)
+            for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
+                IrInst& in = f.blocks[b].insts[i];
+                if (in.op == IrInst::Const && in.dst >= 0 && freed.count(in.dst) && uses[in.dst] == 0) { in.op = IrInst::Nop; in.args.clear(); in.dst = -1; }
+            }
+    }
+    }
+    f.hasTry = false;
+    for (size_t b = 0; b < f.blocks.size() && !f.hasTry; ++b)
+        for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) if (f.blocks[b].insts[i].op == IrInst::TryBegin) { f.hasTry = true; break; }
+    f.computeCfg();
+    return removed;
 }
 
 namespace {
@@ -814,6 +982,32 @@ int Optimizer::licm(IrFunction& f)
     return changes;
 }
 
+namespace {
+
+// what a callee will cost once the SSA passes and the lowering have had it, not the count of its IR before them: the
+// loads and stores of the locals SSA promotes become copies or nothing, phis and nops are no code, an unconditional
+// branch mostly a fall-through, a field address is folded into the load or store that uses it (the matrix sample's
+// sameSize: 26 IR instructions, 15 lowered); a call costs the moves of its arguments as well
+int loweredSize(const IrFunction& g)
+{
+    int n = 0;
+    for (size_t b = 0; b < g.blocks.size(); ++b)
+        for (size_t i = 0; i < g.blocks[b].insts.size(); ++i) {
+            const IrInst& in = g.blocks[b].insts[i];
+            switch (in.op) {
+            case IrInst::Nop: case IrInst::Phi: case IrInst::Br: case IrInst::AddrField: break;
+            case IrInst::LoadLocal: case IrInst::StoreLocal:
+                if (in.args.empty() || in.args[0].kind != IrOperand::Local || !promotableLocal(g, in.args[0].id)) ++n;
+                break;
+            case IrInst::Call: case IrInst::VCall: n += 1 + static_cast<int>(in.args.size()); break;
+            default: ++n; break;
+            }
+        }
+    return n;
+}
+
+} // namespace
+
 int Optimizer::inlineCalls(IrFunction& f, int maxInsts, int maxInstsInLoop)
 {
     // a budget per caller, as cl, clang and gcc limit inlining by the caller's growth (a count per module
@@ -827,8 +1021,28 @@ int Optimizer::inlineCalls(IrFunction& f, int maxInsts, int maxInstsInLoop)
     std::vector<bool> inLoop(f.blocks.size(), false);
     for (size_t L = 0; L < loops.size(); ++L)
         for (size_t k = 0; k < loops[L].blocks.size(); ++k) inLoop[static_cast<size_t>(loops[L].blocks[k])] = true;
+    // no inlining into the landing pads and the code only they reach (the unwind and dtor blocks, the catch bodies):
+    // cold code, which cl keeps in its dtor$ and catch$ funclets with the calls as they are
+    std::vector<bool> onPath(f.blocks.size(), false);
+    {
+        std::vector<int> work;
+        if (!f.blocks.empty()) { onPath[0] = true; work.push_back(0); }
+        while (!work.empty()) {
+            const IrBlock& pb = f.blocks[static_cast<size_t>(work.back())];
+            work.pop_back();
+            for (size_t i = 0; i < pb.insts.size(); ++i) {
+                const IrInst& in = pb.insts[i];
+                if (in.op != IrInst::Br && in.op != IrInst::CondBr) continue;
+                for (size_t a = 0; a < in.args.size(); ++a) {
+                    const IrOperand& o = in.args[a];
+                    if (o.kind == IrOperand::Block && o.id >= 0 && static_cast<size_t>(o.id) < onPath.size() && !onPath[static_cast<size_t>(o.id)]) { onPath[static_cast<size_t>(o.id)] = true; work.push_back(o.id); }
+                }
+            }
+        }
+    }
     int changes = 0;
     for (size_t b = 0; b < f.blocks.size(); ++b) {
+        if (b < onPath.size() && !onPath[b]) continue;
         for (size_t i = 0; i < f.blocks[b].insts.size(); ++i) {
             IrInst call = f.blocks[b].insts[i];
             if (call.op != IrInst::Call) continue;
@@ -836,7 +1050,7 @@ int Optimizer::inlineCalls(IrFunction& f, int maxInsts, int maxInstsInLoop)
             if (it == m_functions.end()) continue;
             const IrFunction& g = *it->second;
             const bool hot = b < inLoop.size() && inLoop[b];
-            if (&g == &f || g.name == f.name || g.hasTry || g.instCount() > (hot ? maxInstsInLoop : maxInsts)) continue;
+            if (&g == &f || g.name == f.name || g.hasTry || loweredSize(g) > (hot ? maxInstsInLoop : maxInsts)) continue;
             if (changes >= maxPerCaller || f.instCount() + g.instCount() > growthLimit) continue;
             if (g.blocks.empty()) continue;
             bool hasUnreachable = false;
@@ -1088,15 +1302,19 @@ void Optimizer::runLocal(IrFunction& f, std::vector<std::string>& log)
 void Optimizer::runInterprocedural(IrFunction& f, std::vector<std::string>& log)
 {
     if (m_level < 2) return;
-    // accessors of a line or two (rows(), cols(): 4 instructions) everywhere; in a loop also operators of a few
-    // lines (operator()(r, c) calling index(r, c) is about 15). 24 everywhere made the matrix sample 31% faster
-    // and 66% larger; 8 everywhere slower than no change
-    int n = inlineCalls(f, 8, 24); if (n) log.push_back("    inlining (small functions): " + intToString(n));
+    // by the callee's lowered size: accessors of a line or two (rows(), cols(): 1 or 2) everywhere; in a loop also
+    // operators of a few lines (operator()(r, c) with index(r, c) inlined into it: about 10, sameSize: 11). The
+    // limits were 8 and 24 on the count of the IR before the SSA passes (24 everywhere made the matrix sample 31 %
+    // faster and 66 % larger, 8 everywhere slower than no change); on the lowered size 8 and 24 inline more (the
+    // sample units 1.2 % larger, the matrix sample's code 17 %), 6 and 16 less (0.3 % and 1.4 % smaller, 2026-10-29)
+    int n = inlineCalls(f, 6, 16); if (n) log.push_back("    inlining (small functions): " + intToString(n));
     level1(f, log);
+    // the calls inlined away may have been the only ones that could throw inside a region
+    if (n) { const int d = removeDeadRegions(f); if (d) log.push_back("    try regions nothing can throw into removed: " + intToString(d)); }
     // the code inlined into a loop brings loop-invariant work with it (b.cols(), i * cols, data pointers)
     if (n) { int h = licm(f); if (h) { log.push_back("    loop-invariant code motion after inlining: " + intToString(h)); level1(f, log); } }
     if (m_level >= 3) {
-        n = inlineCalls(f, 40, 40); if (n) log.push_back("    inlining (larger functions): " + intToString(n));
+        n = inlineCalls(f, 24, 24); if (n) log.push_back("    inlining (larger functions): " + intToString(n));
         n = unrollLoops(f, 8, 40); if (n) log.push_back("    loop unrolling: " + intToString(n));
         level1(f, log);
         n = licm(f); if (n) log.push_back("    loop-invariant code motion: " + intToString(n));

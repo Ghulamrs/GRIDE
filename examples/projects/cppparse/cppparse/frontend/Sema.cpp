@@ -626,6 +626,22 @@ Symbol* Sema::injectedTemplate(Symbol* s, const cxx::NameComponent& c) const
     return tmpl && tmpl->kind == Symbol::ClassTemplate && tmpl->name == s->name ? tmpl : 0;
 }
 
+// the class of primary's explicit specialisation for the arguments key (14.7.3): the one an earlier declaration or
+// definition of it made (a second definition is then S110, cl C2766), else an ordinary class registered under its argument text before its members are declared, whose own name
+// inside it, injected or with its arguments, is the specialisation itself (14.6.1/1), as an instantiation's is
+Symbol* Sema::explicitSpecialization(Symbol* primary, const std::string& key, const std::vector<const Type*>& types, const std::vector<long long>& ints, Scope* in)
+{
+    std::map<std::string, Symbol*>::iterator prev = primary->instantiations.find(key);
+    if (prev != primary->instantiations.end() && !prev->second->isImplicitInstantiation) return prev->second;
+    Scope* iscope = m_prog.newScope(Scope::Instantiation, in, primary);
+    Symbol* cls = m_prog.newSymbol(Symbol::Class, primary->name + key, iscope);
+    cls->type = m_types.classType(cls); cls->instantiatedFrom = primary; cls->templateArgs = types; cls->templateIntArgs = ints;
+    Symbol* inj = m_prog.newSymbol(Symbol::Typedef, primary->name, iscope);
+    inj->type = cls->type;
+    primary->instantiations[key] = cls;
+    return cls;
+}
+
 Scope* Sema::scopeForQualifier(const cxx::QualifiedName& n, Scope* from)
 {
     // the scope denoted by all components but the last
@@ -1611,6 +1627,25 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
         d->semaSym = ct; inner->semaSym = ct;
         return;
     }
+    if (!classAst && d->explicitSpecialization && inner->kind == cxx::Decl::Simple && inner->spec.kind == cxx::DeclSpec::Named && inner->declarators.empty()
+        && (inner->spec.elaborated == "class" || inner->spec.elaborated == "struct" || inner->spec.elaborated == "union")
+        && !inner->spec.name.parts.empty() && inner->spec.name.parts.back().hasTemplateArgs) {
+        // "template <> class complex<double>;" declares the explicit specialisation: named before its definition (by
+        // another specialisation's members), it is that class, incomplete until then, not an instantiation
+        const cxx::QualifiedName& qn = inner->spec.name;
+        Scope* target = in;
+        if (qn.parts.size() > 1) { Scope* q = scopeForQualifier(qn, in); if (q) target = q; }
+        Symbol* primary = 0;
+        const std::vector<Symbol*>* v = target->find(qn.parts.back().ident);
+        if (v) for (size_t i = 0; i < v->size() && !primary; ++i) if ((*v)[i]->kind == Symbol::ClassTemplate && !(*v)[i]->patternArgs.size()) primary = (*v)[i];
+        if (!primary) { error(d->loc, "S111", "specialisation of unknown template '" + qn.parts.back().ident + "'"); return; }
+        std::vector<const Type*> types; std::vector<long long> ints; std::string key;
+        if (!templateArgText(qn.parts.back().templateArgs, in, types, ints, key, &primary->templateParams)) { error(d->loc, "S111", "bad specialisation arguments"); return; }
+        Symbol* cls = explicitSpecialization(primary, key, types, ints, in);
+        if (!cls->isDefinition) { cls->isStruct = inner->spec.elaborated != "class"; cls->isUnion = inner->spec.elaborated == "union"; }
+        d->semaSym = cls; inner->semaSym = cls;
+        return;
+    }
     if (classAst) {
         std::string name = classAst->name.parts.empty() ? std::string("") : classAst->name.parts.back().ident;
         bool specialization = !classAst->name.parts.empty() && classAst->name.parts.back().hasTemplateArgs;
@@ -1647,18 +1682,11 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
             }
             if (!primary) { error(d->loc, "S111", "specialisation of unknown template '" + name + "'"); return; }
             if (d->explicitSpecialization) {
-                // a full specialisation is an ordinary class registered under its argument text
                 std::vector<const Type*> types; std::vector<long long> ints; std::string key;
                 if (!templateArgText(classAst->name.parts.back().templateArgs, in, types, ints, key, &primary->templateParams)) { error(d->loc, "S111", "bad specialisation arguments"); return; }
-                cxx::ClassDecl copy = *classAst;
-                copy.name.parts.back().hasTemplateArgs = false;
-                copy.name.parts.back().ident = name + key;
-                Scope* iscope = m_prog.newScope(Scope::Instantiation, in, primary);
-                Symbol* cls = m_prog.newSymbol(Symbol::Class, name + key, iscope);
-                cls->type = m_types.classType(cls); cls->instantiatedFrom = primary; cls->templateArgs = types; cls->templateIntArgs = ints;
+                Symbol* cls = explicitSpecialization(primary, key, types, ints, in);
                 classAst->name.parts.back().ident = name + key; classAst->name.parts.back().hasTemplateArgs = false;   // so that out-of-line members match
-                declareClass(classAst, iscope, access, cls);
-                primary->instantiations[key] = cls;
+                declareClass(classAst, cls->scope, access, cls);
                 d->semaSym = cls;
                 return;
             }

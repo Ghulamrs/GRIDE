@@ -29,7 +29,11 @@ public:
 
 private:
     static bool in(char c, const char *set) { for (; *set; set++) if (*set == c) return true; return false; }
+#if defined(_WIN32)   // grt: strtok's place kept for each thread, as the Microsoft runtime keeps it
+    static thread_local char *next_;
+#else
     static char *next_;
+#endif
 };
 
 }  // namespace rts6x

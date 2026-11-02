@@ -86,13 +86,16 @@ int put(FILE *f, const char *s, unsigned count)
     else f->flags &= ~(unsigned)TextOut;
     const char *end = s + count;
     if (!text) {
-        // A run as large as the buffer, the buffer empty, goes straight to Windows, as the Microsoft runtime's.
-        if (f->pos == f->buf && count >= (unsigned)BufferSize) {
-            if (__grt_write_raw(f->fd, s, count) < 0) {
+        // Runs of whole buffers, the buffer empty, go straight to Windows and the rest is kept, as the Microsoft
+        // runtime's fwrite does.
+        size_t size = (size_t)(f->buff_stop - f->buf);
+        if (f->pos == f->buf && count >= size) {
+            size_t whole = count - count % size;
+            if (__grt_write_raw(f->fd, s, (unsigned)whole) < 0) {
                 f->flags |= Stream::Failed;
                 return -1;
             }
-            return (int)count;
+            s += whole;
         }
         while (s < end) {
             if (f->pos == f->buff_stop && flush(f) != 0) return -1;
@@ -309,32 +312,12 @@ int Stream::writeDescriptor()
 
 int Stream::seek(long offset, int whence)
 {
-    FILE *f = f_;
-    grt::valid(f);
-    if (whence < SEEK_SET || whence > SEEK_END) {
-        errno = EINVAL;
-        return -1;
-    }
-    long long target = offset;
-    if (f->flags & grt::Pending) {
-        if (grt::flush(f) != 0) return -1;
-    } else if (whence == SEEK_CUR) {
-        target -= (long long)(f->bufend - f->pos);
-    }
-    if (__grt_seek64(f->fd, target, whence) < 0) return -1;
-    f->pos = f->bufend = f->buf;
-    f->flags &= ~(unsigned)(AtEnd | grt::Pending | grt::TextOut);
-    return 0;
+    return grt::seek(f_, offset, whence);
 }
 
 long Stream::tell()
 {
-    FILE *f = f_;
-    grt::valid(f);
-    long long here = __grt_seek64(f->fd, 0, SEEK_CUR);
-    if (here < 0) return -1L;
-    if (f->flags & grt::Pending) here += (long long)(f->pos - f->buf);
-    else here -= (long long)(f->bufend - f->pos);
+    long long here = grt::tell(f_);
     if (here > 0x7FFFFFFFLL) {
         errno = EINVAL;
         return -1L;
@@ -343,3 +326,35 @@ long Stream::tell()
 }
 
 }  // namespace rts6x
+
+namespace grt {
+
+int seek(FILE *f, long long offset, int whence)
+{
+    valid(f);
+    if (whence < SEEK_SET || whence > SEEK_END) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (f->flags & Pending) {
+        if (flush(f) != 0) return -1;
+    } else if (whence == SEEK_CUR) {
+        offset -= (long long)(f->bufend - f->pos);
+    }
+    if (__grt_seek64(f->fd, offset, whence) < 0) return -1;
+    f->pos = f->bufend = f->buf;
+    f->flags &= ~(unsigned)(Stream::AtEnd | Pending | TextOut);
+    return 0;
+}
+
+long long tell(FILE *f)
+{
+    valid(f);
+    long long here = __grt_seek64(f->fd, 0, SEEK_CUR);
+    if (here < 0) return -1;
+    if (f->flags & Pending) here += (long long)(f->pos - f->buf);
+    else here -= (long long)(f->bufend - f->pos);
+    return here;
+}
+
+}  // namespace grt

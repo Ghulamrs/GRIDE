@@ -7,7 +7,8 @@
 //  Optional split view (Window > Split Editor) shows a read-only mirror above.
 //
 //  Responsibilities: colouring, undo, find/replace, comment/uncomment,
-//  indent, format, case change, bookmarks, breakpoints, execution marker.
+//  indent, format, case change, bookmarks, breakpoints, execution marker,
+//  folding of { } blocks (their lines hidden, the gutter's boxes fold them).
 //
 //  The text is set once as plain text; only the visible lines are coloured
 //  (again after scrolling or editing). Undo records one EditDelta per typing
@@ -74,6 +75,7 @@ namespace Gride { namespace UI {
             mirrorVersion = -1;
             lastFirstVisible = -1;
             lastMirrorFirst = -1;
+            foldSyncPending = false;
 
             split = gcnew SplitContainer();
             split->Dock = DockStyle::Fill;
@@ -116,6 +118,9 @@ namespace Gride { namespace UI {
             mirror->SelectionChanged += gcnew EventHandler(this, &CodeEditor::OnMirrorScroll);
             mirror->Resize += gcnew EventHandler(this, &CodeEditor::OnMirrorScroll);
             gutter->LineClicked += gcnew LineHandler(this, &CodeEditor::OnGutterClicked);
+            gutter->FoldClicked += gcnew LineHandler(this, &CodeEditor::ToggleFold);
+            box->FoldMarkClicked += gcnew IndexHandler(this, &CodeEditor::OnFoldOpened);
+            box->FoldEditing += gcnew IndexHandler(this, &CodeEditor::OnFoldOpened);
         }
 
         // ---- events ---------------------------------------------------------------
@@ -131,9 +136,9 @@ namespace Gride { namespace UI {
             bool get() { return modified; }
             void set(bool v) { if (v != modified) { modified = v; ModifiedChanged(this, EventArgs::Empty); } }
         }
-        property int CurrentLine { int get() { return box->GetLineFromCharIndex(box->SelectionStart) + 1; } }
-        property int CurrentColumn { int get() { return box->SelectionStart - box->GetFirstCharIndexOfCurrentLine() + 1; } }
-        property int LineCount { int get() { return box->GetLineFromCharIndex(box->TextLength) + 1; } }
+        property int CurrentLine { int get() { return box->CurrentLineIndex() + 1; } }
+        property int CurrentColumn { int get() { return box->SelectionStart - box->SourceLineStart(box->CurrentLineIndex()) + 1; } }
+        property int LineCount { int get() { return box->SourceLineCount(); } }
         property SortedSet<int>^ Breakpoints { SortedSet<int>^ get() { return gutter->Breakpoints; } }
         property SortedSet<int>^ Bookmarks { SortedSet<int>^ get() { return gutter->Bookmarks; } }
         property bool CanUndo { bool get() { return inBurst || undo->CanUndo; } }
@@ -159,6 +164,11 @@ namespace Gride { namespace UI {
             commentLine = settings != nullptr ? settings->LineComment : String::Empty;
             commentStart = settings != nullptr ? settings->BlockCommentStart : String::Empty;
             commentEnd = settings != nullptr ? settings->BlockCommentEnd : String::Empty;
+            box->LineComment = commentLine;
+            box->BlockCommentStart = commentStart;
+            box->BlockCommentEnd = commentEnd;
+            ShowAllFolds();
+            box->ForgetFolds();
             FullRecolor();
         }
 
@@ -201,6 +211,7 @@ namespace Gride { namespace UI {
         {
             burstTimer->Stop();
             inBurst = false;
+            ShowAllFolds();
             suppress = true;
             try { box->Text = text->Replace("\r\n", "\n"); }
             finally { suppress = false; }
@@ -226,6 +237,7 @@ namespace Gride { namespace UI {
         void ReplaceAllText(String^ text)
         {
             int caret = box->SelectionStart;
+            ShowAllFolds();
             SD::Point pos; int first;
             SaveView(box, pos, first);
             BeginEdit();
@@ -244,8 +256,9 @@ namespace Gride { namespace UI {
         void GoToLine(int line)
         {
             if (line < 1) line = 1;
-            int idx = box->GetFirstCharIndexFromLine(line - 1);
+            int idx = box->SourceLineStart(line - 1);
             if (idx < 0) idx = box->TextLength;
+            ShowFoldsAt(idx, idx);
             box->Select(idx, 0);
             box->ScrollToCaret();
             box->Focus();
@@ -256,10 +269,11 @@ namespace Gride { namespace UI {
         void GoTo(int line, int column)
         {
             if (line < 1) line = 1;
-            int idx = box->GetFirstCharIndexFromLine(line - 1);
+            int idx = box->SourceLineStart(line - 1);
             if (idx < 0) { GoToLine(line); return; }
-            int length = box->Lines->Length > line - 1 ? box->Lines[line - 1]->Length : 0;
+            int length = box->LineText(line - 1)->Length;
             int offset = Math::Max(0, Math::Min(column - 1, length));
+            ShowFoldsAt(idx + offset, idx + offset);
             box->Select(idx + offset, 0);
             box->ScrollToCaret();
             box->Focus();
@@ -267,6 +281,7 @@ namespace Gride { namespace UI {
 
         void SelectRange(int start, int length)
         {
+            ShowFoldsAt(start, start + length);
             box->Select(start, length);
             box->ScrollToCaret();
         }
@@ -289,13 +304,13 @@ namespace Gride { namespace UI {
         void Cut()
         {
             if (box->SelectionLength == 0) return;
-            box->Copy();
+            box->CopyWhole();
             if (box->ReadOnly) return;
             BeginEdit();
             box->SelectedText = String::Empty;
             EndEdit();
         }
-        void Copy()      { if (box->SelectionLength > 0) box->Copy(); }
+        void Copy()      { box->CopyWhole(); }
         void Paste()     { box->PastePlain(); }
         void DeleteSel()
         {
@@ -431,6 +446,7 @@ namespace Gride { namespace UI {
         {
             if (box->SelectionLength == 0 || box->ReadOnly) return;
             int s = box->SelectionStart, l = box->SelectionLength;
+            ShowFoldsAt(s, s + l);                  // SelectedText leaves a folded block's lines out
             BeginEdit();
             box->SelectedText = upper ? box->SelectedText->ToUpperInvariant() : box->SelectedText->ToLowerInvariant();
             box->Select(s, l);
@@ -539,8 +555,36 @@ namespace Gride { namespace UI {
             if (execLine > 0) PaintExecLine(execLine, false);
             execLine = line;
             gutter->ExecLine = line;
-            if (line > 0) { PaintExecLine(line, true); GoToLine(line); }
+            if (line > 0) { GoToLine(line); PaintExecLine(line, true); }    // GoToLine unfolds the line first
             gutter->Invalidate();
+        }
+
+        // ---- folding ---------------------------------------------------------------------
+        // folds or unfolds the { } block whose '{' is on this line (1-based)
+        void ToggleFold(int line)
+        {
+            if (closed || !box->IsHandleCreated) return;
+            SyncFolds();
+            box->UpdateFolds(box->CachedText);
+            int fold = box->FoldAtLine(line - 1);
+            if (fold < 0) return;
+            int open, start, end, closeLine;
+            box->GetFold(fold, open, start, end, closeLine);
+            if (box->IsFolded(open)) { ShowFolds(SpansOf(open)); return; }
+
+            int selStart = box->SelectionStart, selLength = box->SelectionLength;
+            int selEnd = selStart + selLength;
+            // a caret or a selection's end inside the block moves to the end of its '{' line
+            if ((selStart > start && selStart <= end) || (selEnd > start && selEnd <= end)) { selStart = start; selLength = 0; }
+            SD::Point pos; int first;
+            BeginFoldEdit(pos, first);
+            try
+            {
+                box->Select(start, end - start);
+                NativeMethods::SetSelectionHidden(box->Handle, true);
+                box->AddHidden(open, start, end);
+            }
+            finally { EndFoldEdit(selStart, selLength, pos, first); }
         }
 
         // ---- split view ------------------------------------------------------------------
@@ -608,6 +652,108 @@ namespace Gride { namespace UI {
         bool burstAtomic;
         int burstSelStart, burstSelLength, burstFirstLine;
         int atomicSelStart, atomicSelLength, atomicFirstLine;
+        bool foldSyncPending;   // SyncFolds is posted to run after the edit that changed the text
+
+        // ---- folding machinery --------------------------------------------------------------
+        // CFE_HIDDEN is a format, so a fold is changed the way colours are: the editor's own
+        // selection moves, painting off, the view and the selection put back
+        void BeginFoldEdit(SD::Point% pos, int% first)
+        {
+            SaveView(box, pos, first);
+            coloring = true;
+            box->Recolouring = true;
+            NativeMethods::SetRedraw(box->Handle, false);
+        }
+
+        void EndFoldEdit(int selStart, int selLength, SD::Point pos, int first)
+        {
+            int len = box->TextLength;
+            selStart = Math::Max(0, Math::Min(selStart, len));
+            box->Select(selStart, Math::Max(0, Math::Min(selLength, len - selStart)));
+            RestoreView(box, pos, first);
+            NativeMethods::SetRedraw(box->Handle, true);
+            box->Recolouring = false;
+            coloring = false;
+            box->Invalidate();
+            gutter->UpdateWidth();
+            lastFirstVisible = -1;
+            ScheduleRecolor();
+        }
+
+        List<FoldSpan>^ SpansOf(int open)
+        {
+            List<FoldSpan>^ r = gcnew List<FoldSpan>();
+            for each (FoldSpan s in box->Hidden) if (s.Open == open) r->Add(s);
+            return r;
+        }
+
+        // Shows these folded runs again. A block folded inside one of them stays folded, so
+        // the folds left are hidden once more; the shown text gets its background back
+        // (an execution marker painted while it was hidden did not reach it).
+        void ShowFolds(List<FoldSpan>^ spans)
+        {
+            if (spans->Count == 0 || !box->IsHandleCreated) return;
+            int selStart = box->SelectionStart, selLength = box->SelectionLength;
+            SD::Point pos; int first;
+            BeginFoldEdit(pos, first);
+            try
+            {
+                // shown before they are forgotten: while a fold is known the text is read whole
+                int len = box->TextLength;
+                for each (FoldSpan s in spans)
+                {
+                    // a visible character on each side: a selection of hidden text alone collapses
+                    int a = Math::Max(0, Math::Min(s.Start - 1, len)), b = Math::Max(a, Math::Min(s.End + 1, len));
+                    if (b == a) continue;
+                    box->Select(a, b - a);
+                    NativeMethods::SetSelectionHidden(box->Handle, false);
+                    box->SelectionBackColor = ThemeManager::Current->Window;
+                }
+                for each (FoldSpan s in spans) box->RemoveHidden(s.Open);
+                for each (FoldSpan s in box->Hidden)
+                {
+                    box->Select(s.Start, s.End - s.Start);
+                    NativeMethods::SetSelectionHidden(box->Handle, true);
+                }
+                if (execLine > 0) PaintExecLine(execLine, true);
+            }
+            finally { EndFoldEdit(selStart, selLength, pos, first); }
+        }
+
+        void ShowAllFolds()
+        {
+            if (box->HasHidden) ShowFolds(gcnew List<FoldSpan>(box->Hidden));
+        }
+
+        // the folds that hide any of [start, end]: a place found, gone to or edited is shown
+        void ShowFoldsAt(int start, int end)
+        {
+            if (!box->HasHidden) return;
+            List<FoldSpan>^ hit = gcnew List<FoldSpan>();
+            for each (FoldSpan s in box->Hidden)
+                if (start < s.End && end > s.Start) hit->Add(s);
+            ShowFolds(hit);
+        }
+
+        // the text changed: a fold the edit reached is shown again, the others moved with it
+        void SyncFolds()
+        {
+            foldSyncPending = false;
+            if (closed || !box->HasHidden) return;
+            ShowFolds(box->TakeStaleFolds());
+        }
+
+        // a key edits at a folded block's edge, or its "..." was clicked: the block is shown,
+        // and a caret at the end of its '{' line stays there
+        void OnFoldOpened(int open)
+        {
+            List<FoldSpan>^ spans = SpansOf(open);
+            if (spans->Count == 0) return;
+            FoldSpan s = spans[0];
+            bool atLineEnd = box->SelectionLength == 0 && box->SelectionStart >= s.Start && box->SelectionStart <= s.End;
+            ShowFolds(spans);
+            if (atLineEnd) box->Select(s.Start, 0);
+        }
 
         // ---- undo machinery ---------------------------------------------------------------
         void CloseBurst()
@@ -679,6 +825,7 @@ namespace Gride { namespace UI {
         // restores the selection and (if still showing the caret) the view
         void ApplyDelta(int start, int length, String^ text, int selStart, int selLength, int firstLine)
         {
+            ShowFoldsAt(start, start + length);     // a hidden range cannot be selected to replace it
             SD::Point pos; int viewLine;
             SaveView(box, pos, viewLine);
             suppress = true;
@@ -701,6 +848,7 @@ namespace Gride { namespace UI {
                 coloring = false;
                 NativeMethods::SetRedraw(box->Handle, true);
             }
+            SyncFolds();
             if (!CaretVisible()) box->ScrollToCaret();
             Modified = !undo->AtSavePoint;
             gutter->UpdateWidth();
@@ -794,9 +942,9 @@ namespace Gride { namespace UI {
 
         void PaintExecLine(int line, bool on)
         {
-            int start = box->GetFirstCharIndexFromLine(line - 1);
+            int start = box->SourceLineStart(line - 1);
             if (start < 0) return;
-            int next = box->GetFirstCharIndexFromLine(line);
+            int next = box->SourceLineStart(line);
             int end = next < 0 ? box->TextLength : next;
             bool old = coloring;
             coloring = true;
@@ -820,6 +968,7 @@ namespace Gride { namespace UI {
         {
             if (closed || !box->IsHandleCreated) return;
             String^ text = box->CachedText;
+            box->UpdateFolds(text);
             coloring = true;
             box->Recolouring = true;
             try { ColorVisible(box, text); }
@@ -927,9 +1076,9 @@ namespace Gride { namespace UI {
         void SelectedLineRange(int% first, int% last)
         {
             int s = box->SelectionStart, e = s + box->SelectionLength;
-            first = box->GetLineFromCharIndex(s);
-            last = box->GetLineFromCharIndex(e);
-            if (last > first && box->SelectionLength > 0 && e == box->GetFirstCharIndexFromLine(last)) last--;
+            first = box->SourceLineFromChar(s);
+            last = box->SourceLineFromChar(e);
+            if (last > first && box->SelectionLength > 0 && e == box->SourceLineStart(last)) last--;
         }
 
         List<String^>^ GetLines(int first, int last)
@@ -942,9 +1091,10 @@ namespace Gride { namespace UI {
         void ReplaceLines(int first, int last, List<String^>^ lines)
         {
             if (box->ReadOnly) return;
-            int start = box->GetFirstCharIndexFromLine(first);
-            int endNext = box->GetFirstCharIndexFromLine(last + 1);
+            int start = box->SourceLineStart(first);
+            int endNext = box->SourceLineStart(last + 1);
             int end = endNext < 0 ? box->TextLength : endNext - 1;
+            ShowFoldsAt(start, end);
             String^ block = String::Join("\n", lines);
             BeginEdit();
             box->Select(start, end - start);
@@ -975,6 +1125,12 @@ namespace Gride { namespace UI {
             textVersion++;
             Modified = true;
             if (!inAtomic) { burstTimer->Stop(); burstTimer->Start(); }
+            // the folds are checked once RichEdit has finished the edit, not inside its notification
+            if (box->HasHidden && !foldSyncPending && IsHandleCreated)
+            {
+                foldSyncPending = true;
+                BeginInvoke(gcnew MethodInvoker(this, &CodeEditor::SyncFolds));
+            }
             ScheduleRecolor();
             gutter->UpdateWidth();
         }

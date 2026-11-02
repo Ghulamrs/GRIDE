@@ -22,18 +22,24 @@ namespace Gride { namespace UI {
 
     // the workspace a build or a run takes: the open one; with none open, the C, C++ or Shalimar file
     // in the editor as a one-file program of its own - built beside it (obj\<Config>\Win, out\<Config>\Win),
-    // never written as a .pro
+    // never written as a .pro, with the installation's Compiler Options (Tools > Options) as they are now,
+    // as RIDE builds a file with no project
     Workspace^ MainForm::BuildSpace()
     {
         if (workspace != nullptr) return workspace;
         EditorDocument^ d = docs->Active;
         if (d == nullptr || d->IsUntitled || !LanguageInfo::IsCompiled(d->Lang)) return nullptr;
-        if (lone != nullptr && lone->StartupProject != nullptr && lone->StartupProject->ContainsFile(d->FilePath)) return lone;
+        if (lone != nullptr && lone->StartupProject != nullptr && lone->StartupProject->ContainsFile(d->FilePath))
+        {
+            lone->StartupProject->Options->CopyFrom(settings->CompilerOptions);
+            return lone;
+        }
         GrideProject^ p = gcnew GrideProject();
         p->Name = Path::GetFileNameWithoutExtension(d->FilePath);
         p->FilePath = Path::Combine(Path::GetDirectoryName(d->FilePath), p->Name + ".pro");
         p->Lang = d->Lang;
         p->AddFile(d->FilePath, "src");
+        p->Options->CopyFrom(settings->CompilerOptions);
         p->IsReadOnly = true;       // nothing of it is saved
         lone = Workspace::ForSingleProject(p);
         return lone;

@@ -56,7 +56,7 @@
 <h3 id="tc-compilerOptions">compilerOptions - the Compiler Options table</h3>
 <table>
   <tr><th>Entry</th><th>What it is</th></tr>
-  <tr><td><code>compilerOptions</code></td><td>The Compiler Options (White&#x27;s options.cpp): the table Tools &gt; Options &gt; Projects &gt; Compiler Options and Project &gt; Properties draw, one entry per option in the order each tab shows them, keyed by id (&lt;tool word&gt;.&lt;option&gt;; general.* serve several compilers). tab, label and hint are the dialog&#x27;s. control is check (the value is 1 or 0), choice (one of choices; the first is the compiler&#x27;s own default and is never written) or text (&#x27;;&#x27; between the entries). default is one value, or one per configuration as { Debug, Release }. What an option becomes: flagOn / flagOff for a check (written when the value is 1 / 0), flag for a choice ($(Value) filled in; silent names the choice that writes nothing - the first when absent), flagEach for a text list ($(Item) filled in once per entry, an entry holding a space quoted), environment names a variable the compiler is given instead of a flag (its value 1, or empty). needs says when the option means something: lineTable (the compiler writes a line table for the target), emulated (the emulated target only), notEmulated - with unavailable the sentence said otherwise ($(Arch) filled in); an option that does not apply writes nothing. Each compiler&#x27;s options field lists the ids it takes, in the order the flags are written; a compiler without one takes its configFlags.</td></tr>
+  <tr><td><code>compilerOptions</code></td><td>The Compiler Options (White&#x27;s options.cpp): the table Tools &gt; Options &gt; Projects &gt; Compiler Options and Project &gt; Properties draw, one entry per option in the order each tab shows them, keyed by id (&lt;tool word&gt;.&lt;option&gt;; general.* serve several compilers). tab, label and hint are the dialog&#x27;s. control is check (the value is 1 or 0), choice (one of choices; the first is the compiler&#x27;s own default and is never written) or text (&#x27;;&#x27; between the entries in the files). A text with flagEach is a list - the defines (-D) and undefines (-U) - and the dialog shows it in a box with a scroll bar, one entry per line: Enter starts the next line (it does not press OK), and each non-empty line is one entry. default is one value, or one per configuration as { Debug, Release }. What an option becomes: flagOn / flagOff for a check (written when the value is 1 / 0), flag for a choice ($(Value) filled in; silent names the choice that writes nothing - the first when absent), flagEach for a text list ($(Item) filled in once per entry, each entry one argument: <code>__ABC__</code> and <code>LEVEL=2</code> on two lines become <code>-D__ABC__ -DLEVEL=2</code>; an entry holding a space, a tab or a quote is quoted, a quote inside as \&quot; - <code>MSG=&quot;hi there&quot;</code> becomes <code>-D&quot;MSG=\&quot;hi there\&quot;&quot;</code>; NAME=value needs no quotes), environment names a variable the compiler is given instead of a flag (its value 1, or empty). needs says when the option means something: lineTable (the compiler writes a line table for the target), emulated (the emulated target only), notEmulated - with unavailable the sentence said otherwise ($(Arch) filled in); an option that does not apply writes nothing. Each compiler&#x27;s options field lists the ids it takes, in the order the flags are written; a compiler without one takes its configFlags.</td></tr>
 </table>
 <h3 id="tc-visualStudio">visualStudio - Microsoft&#x27;s tools and libraries</h3>
 <table>
@@ -220,7 +220,7 @@
   <tr><td><code>libraries</code></td><td>libraries the link takes - for a third-party library, its prebuilt binary for this platform</td></tr>
   <tr><td><code>build</code></td><td>what the build makes: <code>target</code> is the program (<code>mathx-demo</code>, or <code>mathx-demo.exe</code> on Windows), <code>groups</code> the groups compiled into it, <code>args</code> the program's arguments when it runs. Every Shalimar file has a <code>main()</code>, so for Shalimar the target says which is the program</td></tr>
   <tr><td><code>emulateOnly</code></td><td>a TMS320C6747 build that only runs on the emulator (vm6747), not linked for the simulator</td></tr>
-  <tr><td><code>options</code></td><td>the Compiler Options this project sets, by option id</td></tr>
+  <tr><td><code>options</code></td><td>the Compiler Options this project sets, by option id - the form of <code>settings.json</code>&#x27;s <code>compilerOptions</code> (<a href="#sample-settings">section 4</a>)</td></tr>
   <tr><td><code>open</code></td><td>the file the editor shows when the project opens. Without it, all three open the first source that defines <code>main</code> (Shalimar's <code>fun &lt;&gt; = main()</code>), else the project's first file</td></tr>
   <tr><td><code>indent, tabs</code></td><td>the project's own indentation, over the editor's</td></tr>
   <tr><td><code>configurations, excludeFromBuild, dependsOn, language, template, targets</code></td><td>Black's own: its build configurations, files left out of the build, projects built first, the language, the template it was made from, and several targets</td></tr>
@@ -254,6 +254,7 @@
   solve3-cpp11.pro
   src\main.cpp  src\check.cpp  src\check.h  src\CMatrix.h  src\CVector.h
   obj\Release\Win\main.s  main.obj  check.s  check.obj      the compilers' assembly and masm's objects
+  obj\Release\Win\solve3-cpp11.build.log                 every command the build ran, with what each wrote (below)
   out\Release\Win\solve3-cpp11.exe                         link's program</code></pre>
 <p>Build (<kbd>F7</kbd>) runs each source through cpp11 (<code>"toolchain": "auto"</code>: C++ goes to cpp11), masm and link, and stops; Start Without Debugging (<kbd>Ctrl+F5</kbd>) builds what is out of date and runs the program in the Output pane:</p>
 <pre><code>------ Build started: Project solve3-cpp11, Configuration Release | Windows ------
@@ -268,6 +269,7 @@ $ linking with link
 [LINK] out/Release/Win/solve3-cpp11.exe
 ========== Build: 1 succeeded, 0 failed, 0 up-to-date, 0 skipped ==========</code></pre>
 <p>The assembly is a step on the way: it is written to <code>obj</code> and not opened. A failed build puts the caret on the first error in one of the project's own files, never in a generated <code>.s</code>; a tool that fails on every line shows its first 40 and counts the rest.</p>
+<p id="build-log"><strong>The command lines.</strong> Each step&#x27;s line in the Output pane names the program and the file it writes; the whole command, every switch and <code>-o &quot;...\obj\Release\Win\main.s&quot;</code> with it, is in the build&#x27;s log, <code>obj\&lt;Config&gt;\&lt;Target&gt;\&lt;project&gt;.build.log</code> beside the objects (here <code>obj\Release\Win\solve3-cpp11.build.log</code>). GRIDE writes it in the background whenever a build runs a tool, whatever the Output pane shows: the build&#x27;s lines, each command as GRIDE ran it (<code>&gt; ...</code>), the folder it ran in, the setup script it ran after (a vcvars named for the target), the variables GRIDE set for it, all the tool wrote (the Output pane shows a tool&#x27;s first 40 lines) and its exit code and time. A build with nothing to do leaves the last log as it is; Clean and Rebuild empty the obj folder, the log with it. Tools &gt; Options &gt; Environment &gt; General &gt; <em>Show each tool&#x27;s command line in the Output pane</em> (settings.json <code>showCommandLines</code>) puts the same <code>&gt;</code> lines in the Output pane, under each step&#x27;s line. A command runs as it is, not through <code>cmd.exe</code>: its <code>$(...)</code> placeholders are filled in by GRIDE, a <code>%VAR%</code> in it is not.</p>
 
 <h3 id="sample-settings">settings.json: GRIDE's memory, not the project's</h3>
 <p>What GRIDE keeps there - the editor, the build, the paths, the recent projects, the window. GRIDE 2.0 and GRIDE 1.0 keep their own keys beside GRIDE's in the same file. GRIDE's part of a fresh file:</p>
@@ -275,7 +277,7 @@ $ linking with link
   "environment": {
     "theme": "Dark", "font": "Consolas", "fontSize": 10, "tabSize": 4, "insertSpaces": false,
     "lineNumbers": true, "reopenLastWorkspace": true, "saveBeforeBuild": true,
-    "jumpToFirstError": true, "askNativeTools": true, "runInIde": true,
+    "jumpToFirstError": true, "showCommandLines": false, "askNativeTools": true, "runInIde": true,
     "defaultProjectLocation": "C:\\Users\\you\\Documents\\GRIDE Projects",
     "grideRoot": "", "vcvars": "", "defaultCompiler": "auto", "c6747Debugger": "auto",
     "windowsDebugger": "auto", "windowsRuntime": "auto"
@@ -285,6 +287,10 @@ $ linking with link
   "compilerOptions": {}
 }</code></pre>
 <p>Nothing in it says where this copy of GRIDE is: the programs and <code>toolchain.json</code> are found beside the running <code>GRIDE.exe</code> (before a RIDE installation, then PATH), so one <code>settings.json</code> serves a GRIDE started from Visual Studio and an installed one alike. A help folder is written only when one is named under Tools &gt; Options, and a named folder that no longer exists is passed over. A recent project that is gone is skipped.</p>
+<p><code>compilerOptions</code> is Tools &gt; Options &gt; Projects &gt; Compiler Options: the options that differ from <code>toolchain.json</code>&#x27;s defaults, per configuration - what a new project starts with, and what a file built with no project open takes (a project&#x27;s own are its <code>.pro</code>&#x27;s <code>options</code>, in the same form). The Defines (-D) box takes one definition per line, <code>NAME</code> or <code>NAME=value</code>, and each line reaches the compiler as a <code>-D</code> of its own, so <code>#if defined(__ABC__)</code> in a source sees <code>__ABC__</code>; Undefines (-U) is the same. The file keeps <code>;</code> between the definitions, as all three outlooks have always written them, so a <code>settings.json</code> from before the box had lines reads unchanged, each definition on a line of its own (a <code>;</code> typed in a line still separates two):</p>
+<pre><code>&quot;compilerOptions&quot;: {
+  &quot;debug&quot;: { &quot;cpp11.defines&quot;: &quot;_DEBUG=1;__ABC__;LEVEL=2&quot; }
+}</code></pre>
 
 <h3 id="sample-toolchain">toolchain.json: the part a C++ build on Windows uses</h3>
 <p>The Windows target names the program for each role; cpp11's entry says how it is called. Shortened - the whole file is described entry by entry in <a href="#toolchain">section 2</a>:</p>

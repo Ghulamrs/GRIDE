@@ -42,6 +42,11 @@ private:
     size_type count_;
 };
 
+// [support.initlist.range]: the free pair, which `std::begin(il)` and a generic
+// begin()..end() walk reach for.
+template <class E> inline const E *begin(initializer_list<E> il) { return il.begin(); }
+template <class E> inline const E *end(initializer_list<E> il) { return il.end(); }
+
 }  // namespace std
 
 #endif

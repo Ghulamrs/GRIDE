@@ -13,7 +13,7 @@ namespace {
 
 const long long latest = 32535215999LL;   // 3000-12-31 23:59:59 UTC
 
-struct tm result;
+thread_local struct tm result;     // gmtime's and localtime's, one for each thread as the Microsoft runtime's
 
 void fill(const int fields[9], struct tm *out)
 {

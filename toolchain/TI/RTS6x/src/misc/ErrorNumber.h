@@ -3,15 +3,26 @@
 #ifndef RTS6X_ERROR_NUMBER_H
 #define RTS6X_ERROR_NUMBER_H
 
+#if defined(_WIN32)
+// GRIDE's runtime for Windows (toolchain\Windows\RT): one errno for each thread, *_errno() as the Microsoft
+// runtime's, kept in thread-local storage by its Windows layer (win\errno.cpp).
+extern "C" int *_errno(void);
+#endif
+
 namespace rts6x {
 
 class ErrorNumber {
 public:
+#if defined(_WIN32)
+    static int *address() { return _errno(); }
+    static void set(int code) { *_errno() = code; }
+#else
     static int *address() { return &value_; }
     static void set(int code) { value_ = code; }
 
 private:
     static int value_;
+#endif
 };
 
 }  // namespace rts6x

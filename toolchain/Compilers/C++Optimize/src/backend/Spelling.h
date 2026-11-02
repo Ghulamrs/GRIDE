@@ -171,6 +171,10 @@ public:
     // **Where __tls_init is registered on COFF** - .CRT$XDU, which the CRT runs in every new thread - and the
     // directive that pulls `__dyn_tls_init` into the link; nothing on ELF, where the `_ZTH` aliases reach it.
     virtual void tlsInitialiserEntry(const std::string &fn) { (void)fn; }
+    // Whether `[base + SECTIONREL x]` can be spelled; the project's masm writes SECTIONREL in a DD only, so a
+    // thread_local's offset is read from a word holding it instead, `$tlsoff$x`, which this records (Phase 6).
+    virtual bool tlsOperandsSpelled() const { return true; }
+    virtual void tlsOffsetWord(const std::string &symbol) { (void)symbol; }
     virtual void objectType(const std::string &name) = 0;
     virtual void objectSize(const std::string &name, int size) = 0;
     virtual void align(int n) = 0;

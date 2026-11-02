@@ -20,21 +20,21 @@
 
 #define MAX_PATH 260
 
-static unsigned length(const char *s)
+static unsigned grt_length(const char *s)
 {
     unsigned n = 0;
     while (s[n]) n++;
     return n;
 }
 
-static const char *last(const char *s, char c)
+static const char *grt_last(const char *s, char c)
 {
     const char *at = 0;
     for (; *s; s++) if (*s == c) at = s;
     return at;
 }
 
-static char *append_text(char *to, const char *from)
+static char *grt_append_text(char *to, const char *from)
 {
     while (*from) *to++ = *from++;
     *to = 0;
@@ -42,21 +42,22 @@ static char *append_text(char *to, const char *from)
 }
 
 /* 0 when path names something (the runtime's _access_s(path, 0)); else -1, errno and *error set */
-static int exists(const char *path, DWORD *error)
+static int grt_exists(const char *path, DWORD *error)
 {
     WCHAR *wide = __grt_widen(path);
-    DWORD attributes;
+    GRT_FILE_ATTRIBUTE_DATA data;
+    int ok;
     if (!wide) return -1;
-    attributes = GetFileAttributesW(wide);
-    if (attributes == GRT_INVALID_FILE_ATTRIBUTES) *error = GetLastError();
+    ok = GetFileAttributesExW(wide, 0, &data);
+    if (!ok) *error = GetLastError();
     HeapFree(GetProcessHeap(), 0, wide);
-    if (attributes != GRT_INVALID_FILE_ATTRIBUTES) return 0;
+    if (ok) return 0;
     __grt_set_errno_from(*error);
     return -1;
 }
 
 /* program started with the command line line, waited for: its exit code, or -1 */
-static int run(const char *program, const char *line, DWORD *error)
+static int grt_run(const char *program, const char *line, DWORD *error)
 {
     WCHAR *wideProgram = __grt_widen(program), *wideLine;
     GRT_STARTUPINFO startup;
@@ -85,41 +86,41 @@ static int run(const char *program, const char *line, DWORD *error)
 
 /* _spawnve: file as it is when its name has an extension, else with each executable one in turn; a bare name in
    the working directory */
-static int spawn(const char *file, const char *line, DWORD *error)
+static int grt_spawn(const char *file, const char *line, DWORD *error)
 {
     static const char kinds[4][5] = { ".com", ".exe", ".bat", ".cmd" };
-    const char *back = last(file, '\\'), *fore = last(file, '/'), *end = back, *path = file;
+    const char *back = grt_last(file, '\\'), *fore = grt_last(file, '/'), *end = back, *path = file;
     char *made = 0, *tried;
     unsigned n;
     int k, saved, result = -1;
     if (!fore) {
         if (!back) {
-            end = last(file, ':');
+            end = grt_last(file, ':');
             if (!end) {
-                made = (char *)malloc(length(file) + 3);
+                made = (char *)malloc(grt_length(file) + 3);
                 if (!made) return -1;
                 made[0] = '.';
                 made[1] = '\\';
-                append_text(made + 2, file);
+                grt_append_text(made + 2, file);
                 path = made;
                 end = made + 2;
             }
         }
     } else if (!back || fore > back)
         end = fore;
-    if (last(end, '.')) {
-        if (exists(path, error) == 0) result = run(path, line, error);
+    if (grt_last(end, '.')) {
+        if (grt_exists(path, error) == 0) result = grt_run(path, line, error);
     } else {
-        n = length(path);
+        n = grt_length(path);
         tried = (char *)malloc(n + 5);
         if (tried) {
-            append_text(tried, path);
+            grt_append_text(tried, path);
             saved = errno;
             for (k = 0; k < 4; k++) {
-                append_text(tried + n, kinds[k]);
-                if (exists(tried, error) == 0) {
+                grt_append_text(tried + n, kinds[k]);
+                if (grt_exists(tried, error) == 0) {
                     errno = saved;
-                    result = run(tried, line, error);
+                    result = grt_run(tried, line, error);
                     break;
                 }
             }
@@ -132,7 +133,7 @@ static int spawn(const char *file, const char *line, DWORD *error)
 
 /* _getpath: the next folder of a PATH list into folder, its quotes dropped and the semicolons around it skipped,
    at most capacity - 2 characters; what is left of the list, or 0 when nothing was left or the folder too long */
-static const char *next_folder(const char *list, char *folder, unsigned capacity)
+static const char *grt_next_folder(const char *list, char *folder, unsigned capacity)
 {
     const char *at = list, *first;
     char *out = folder, *end = folder + capacity - 1;
@@ -154,7 +155,7 @@ static const char *next_folder(const char *list, char *folder, unsigned capacity
 }
 
 /* _spawnvpe: spawn, then, for a bare name not found, each folder of PATH; errno as it was when nothing set it */
-static int spawn_searching(const char *file, const char *line)
+static int grt_spawn_searching(const char *file, const char *line)
 {
     DWORD error = 0;
     int saved = errno, result;
@@ -162,16 +163,16 @@ static int spawn_searching(const char *file, const char *line)
     char *folder;
     unsigned n;
     errno = 0;
-    result = spawn(file, line, &error);
-    if (result == -1 && errno == ENOENT && !last(file, '\\') && !last(file, '/') && file[1] != ':' &&
+    result = grt_spawn(file, line, &error);
+    if (result == -1 && errno == ENOENT && !grt_last(file, '\\') && !grt_last(file, '/') && file[1] != ':' &&
         (list = getenv("PATH")) != 0 && (folder = (char *)malloc(MAX_PATH)) != 0) {
-        while ((list = next_folder(list, folder, MAX_PATH - 1)) != 0 && folder[0]) {
-            n = length(folder);
+        while ((list = grt_next_folder(list, folder, MAX_PATH - 1)) != 0 && folder[0]) {
+            n = grt_length(folder);
             if (folder[n - 1] != '\\' && folder[n - 1] != '/') { folder[n++] = '\\'; folder[n] = 0; }
-            if (n + length(file) >= MAX_PATH) break;
-            append_text(folder + n, file);
+            if (n + grt_length(file) >= MAX_PATH) break;
+            grt_append_text(folder + n, file);
             errno = 0;
-            result = spawn(folder, line, &error);
+            result = grt_spawn(folder, line, &error);
             if (result != -1) break;
             if (errno == ENOENT || error == GRT_ERROR_NOT_READY) continue;
             if ((folder[0] == '/' && folder[1] == '/') || (folder[0] == '\\' && folder[1] == '\\')) continue;
@@ -184,10 +185,10 @@ static int spawn_searching(const char *file, const char *line)
 }
 
 /* "<program> /c <command>", from malloc */
-static char *command_line(const char *program, const char *command)
+static char *grt_command_line(const char *program, const char *command)
 {
-    char *line = (char *)malloc(length(program) + length(command) + 5);
-    if (line) append_text(append_text(append_text(line, program), " /c "), command);
+    char *line = (char *)malloc(grt_length(program) + grt_length(command) + 5);
+    if (line) grt_append_text(grt_append_text(grt_append_text(line, program), " /c "), command);
     return line;
 }
 
@@ -197,22 +198,22 @@ int system(const char *command)
     char *line;
     DWORD error = 0;
     int saved, result;
-    if (!command) return comspec != 0 && exists(comspec, &error) == 0;
+    if (!command) return comspec != 0 && grt_exists(comspec, &error) == 0;
     if (comspec) {
         if (!comspec[0]) __grt_fail_fast();
-        line = command_line(comspec, command);
+        line = grt_command_line(comspec, command);
         if (!line) return -1;
         saved = errno;
         errno = 0;
-        result = spawn(comspec, line, &error);
+        result = grt_spawn(comspec, line, &error);
         free(line);
         if (result != -1) { errno = saved; return result; }
         if (errno != ENOENT && errno != EACCES) return result;
         errno = saved;
     }
-    line = command_line("cmd.exe", command);
+    line = grt_command_line("cmd.exe", command);
     if (!line) return -1;
-    result = spawn_searching("cmd.exe", line);
+    result = grt_spawn_searching("cmd.exe", line);
     free(line);
     return result;
 }

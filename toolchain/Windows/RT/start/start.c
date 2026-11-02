@@ -16,10 +16,28 @@ typedef void (*Initialiser)(void);
 extern CInitialiser __xi_a[], __xi_z[];
 extern Initialiser __xc_a[], __xc_z[];
 
-int main(int argc, char **argv, char **envp);
+/* main(argc, argv, envp) under __grt_main_handler (start\mainguard.asm) */
+int __grt_call_main(int argc, char **argv, char **envp);
+
+/* main's language handler, the Microsoft runtime's start-up filter: in the search for a handler (no unwinding flag,
+   0x66, in the record's flags), a structured exception that is a signal goes to the program's handler for it, and
+   the program goes on where it stopped (ExceptionContinueExecution, 0); anything else is searched on (1) */
+int __grt_main_handler(void *record, void *frame, void *context, void *dispatcher)
+{
+    unsigned long *r = (unsigned long *)record;
+    (void)frame;
+    (void)context;
+    (void)dispatcher;
+    if ((r[1] & 0x66) == 0 && __grt_signal_exception(r[0])) return 0;
+    return 1;
+}
 
 /* the word cl's objects ask for when they use floating point; nothing here reads it */
 int _fltused = 0x9875;
+
+/* links the TLS directory (win\tls.asm) into every program, so its thread-attach callback sees each thread */
+extern char _tls_used[];
+char *__grt_tls_directory = _tls_used;
 
 void mainCRTStartup(void)
 {
@@ -39,5 +57,5 @@ void mainCRTStartup(void)
     for (i = __xc_a; i < __xc_z; i++)
         if (*i) (*i)();
     __grt_arguments(&argc, &argv);
-    exit(main(argc, argv, __grt_environment()));
+    exit(__grt_call_main(argc, argv, __grt_environment()));
 }

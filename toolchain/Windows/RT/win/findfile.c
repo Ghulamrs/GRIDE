@@ -19,7 +19,7 @@ struct _finddata64i32_t {
     char name[260];
 };
 
-static void failed(DWORD code)
+static void grt_failed(DWORD code)
 {
     if (code == GRT_ERROR_NO_MORE_FILES || code == GRT_ERROR_FILE_NOT_FOUND || code == GRT_ERROR_PATH_NOT_FOUND)
         errno = ENOENT;
@@ -27,17 +27,17 @@ static void failed(DWORD code)
     else errno = EINVAL;
 }
 
-static long long found_time(const GRT_FILETIME *t)
+static long long grt_found_time(const GRT_FILETIME *t)
 {
     if (t->low == 0 && t->high == 0) return -1;
     return __grt_file_time(t->low, t->high);
 }
 
 /* what Windows found, into found; 0 with errno set when its name has no form in the ANSI code page */
-static int entry(const GRT_FIND_DATA *w, struct _finddata64i32_t *found)
+static int grt_entry(const GRT_FIND_DATA *w, struct _finddata64i32_t *found)
 {
-    long long created = found_time(&w->ftCreationTime), accessed = found_time(&w->ftLastAccessTime);
-    long long written = found_time(&w->ftLastWriteTime);
+    long long created = grt_found_time(&w->ftCreationTime), accessed = grt_found_time(&w->ftLastAccessTime);
+    long long written = grt_found_time(&w->ftLastWriteTime);
     int n = WideCharToMultiByte(GRT_CP_ACP, 0, w->cFileName, -1, 0, 0, 0, 0);
     if (n <= 0) { __grt_set_errno_from(GetLastError()); return 0; }
     if (n > (int)sizeof found->name) __grt_fail_fast();
@@ -59,10 +59,10 @@ long long _findfirst64i32(const char *pattern, struct _finddata64i32_t *found)
     wide = __grt_widen(pattern);
     if (!wide) return -1;
     h = FindFirstFileExW(wide, GRT_FIND_EX_INFO_STANDARD, &w, GRT_FIND_EX_SEARCH_NAME_MATCH, 0, 0);
-    if (h == GRT_INVALID_HANDLE) failed(GetLastError());
+    if (h == GRT_INVALID_HANDLE) grt_failed(GetLastError());
     HeapFree(GetProcessHeap(), 0, wide);
     if (h == GRT_INVALID_HANDLE) return -1;
-    if (!entry(&w, found)) { FindClose(h); return -1; }
+    if (!grt_entry(&w, found)) { FindClose(h); return -1; }
     return (long long)h;
 }
 
@@ -70,8 +70,8 @@ int _findnext64i32(long long handle, struct _finddata64i32_t *found)
 {
     GRT_FIND_DATA w;
     if (handle == 0 || handle == -1 || !found) __grt_fail_fast();
-    if (!FindNextFileW((HANDLE)handle, &w)) { failed(GetLastError()); return -1; }
-    return entry(&w, found) ? 0 : -1;
+    if (!FindNextFileW((HANDLE)handle, &w)) { grt_failed(GetLastError()); return -1; }
+    return grt_entry(&w, found) ? 0 : -1;
 }
 
 int _findclose(long long handle)

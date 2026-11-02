@@ -7,7 +7,11 @@
 
 namespace rts6x {
 
+#if defined(_WIN32)
+thread_local char *CString::next_;
+#else
 char *CString::next_;
+#endif
 
 char *CString::copy(char *to, const char *from)
 {

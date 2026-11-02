@@ -11,6 +11,7 @@
 #include "../Settings/ToolchainDefinitions.h"
 #include "../Settings/CompilerOptions.h"
 #include "VisualStudio.h"
+#include "MacroExpander.h"
 
 namespace Gride { namespace Services {
 
@@ -325,8 +326,8 @@ namespace Gride { namespace Services {
 
         // the flags a compiler is given for a configuration and target, from a store, in the order
         // the tool's options list them: a check's flagOn / flagOff, a choice's flag unless it is the
-        // silent one, a text list's flagEach per entry (quoted when it holds a space), an option that
-        // does not apply to the target writing nothing
+        // silent one, a text list's flagEach per entry (quoted when it holds a space or a quote), an option
+        // that does not apply to the target writing nothing
         static String^ OptionFlags(CompilerOptionStore^ store, ToolDefinition^ tool, String^ config, Target target)
         {
             StringBuilder^ sb = gcnew StringBuilder();
@@ -350,7 +351,7 @@ namespace Gride { namespace Services {
                 else if (o->FlagEach->Length > 0 && OptionAvailable(id, target, why))
                 {
                     for each (String^ item in CompilerOptionStore::Entries(value))
-                        Append(sb, o->FlagEach->Replace("$(Item)", item->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) < 0 ? item : "\"" + item + "\""));
+                        Append(sb, o->FlagEach->Replace("$(Item)", MacroExpander::QuoteEntry(item)));
                 }
             }
             return sb->ToString();

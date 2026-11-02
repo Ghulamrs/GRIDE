@@ -35,6 +35,7 @@ int  simplifyPhis(IrFunction& f);          // phi(x, x, ...) -> copy x; phi(x, s
 int  gvn(IrFunction& f);                   // global value numbering (dominator-tree scoped)
 void fromSsa(IrFunction& f, SsaStats& stats);
 bool isSsa(const IrFunction& f);           // true when the function holds phi instructions
+bool promotableLocal(const IrFunction& f, int local);   // a local toSsa turns into values: a scalar whose address is not taken
 // an operand as a value-numbering key: a floating constant by its exact bits (str() prints six digits)
 std::string operandKey(const IrOperand& o);
 

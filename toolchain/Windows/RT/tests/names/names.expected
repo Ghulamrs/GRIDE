@@ -1,0 +1,37 @@
+llabs 5 9223372036854775807 0
+ldiv -3 -1 lldiv -2333333333333 -1
+atoll "42" 42 errno 0
+atoll "  -17x" -17 errno 0
+atoll "+9223372036854775807" 9223372036854775807 errno 0
+atoll "9223372036854775808" 9223372036854775807 errno 34
+atoll "-9223372036854775809" -9223372036854775808 errno 34
+atoll "" 0 errno 0
+atoll "abc" 0 errno 0
+atoll " 0x10" 0 errno 0
+mblen null 0, "a" 1, "" 0, n0 0, \xe9 1
+mbtowc b 1 62
+mbtowc e9 1 e9
+mbtowc empty 0 0
+mbtowc n0 0 1234, null 0, no pwc 1
+wctomb z 1 z, null 0
+wctomb e9 1 e9 errno 0
+wctomb 100 -1 errno 42
+mbstowcs 3 68 69 e9 0
+mbstowcs count 4, short 3
+wcstombs 3 6f 6b e9
+wcstombs bad -1 errno 42, count 3
+isblank 2 first 9 value 64 tab 64
+strncat abcd abcdgh
+strcoll 1 1 0
+strxfrm 4 text, count 11
+setvbuf 16: 0, on disk 16 then 20
+setvbuf line 7: 0, on disk 6 then 12
+setbuf null: on disk 7
+setvbuf none: 0, on disk 1
+fgetpos 0 10 getc 3 fsetpos 0 tell 10 getc 4
+_fseeki64 0 _ftelli64 6 getc 6 end-2 0 8 before start -1 errno 22
+vfscanf 3 12 apples 3.5
+vsscanf 2 7 8, empty -1
+tmpnam: own buffer 1, same static 1, differ 1 1, in temp 1 1, exists -1
+tmpfile 1 scratch
+exit 0

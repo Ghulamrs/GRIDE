@@ -495,8 +495,8 @@ namespace Gride
             n->Dock = DockStyle::Top;
             n->Height = 34;
             n->ForeColor = Color::DimGray;
-            n->Text = "The Compiler Options a new project starts with (White's settings.json options). A project's own are under Project > Compiler Options; "
-                      "a CCS project's come from its configurations.";
+            n->Text = "The Compiler Options a new project starts with, and a file built with no project open takes (White's settings.json options). "
+                      "A project's own are under Project > Compiler Options; a CCS project's come from its configurations.";
             p->Controls->Add(optionsEditor);
             p->Controls->Add(n);
             optionsEditor->BringToFront();

@@ -414,6 +414,8 @@ namespace Gride { namespace Settings {
         bool IsCheck() { return String::Compare(Control, "check", true) == 0; }
         bool IsChoice() { return String::Compare(Control, "choice", true) == 0; }
         bool IsText() { return String::Compare(Control, "text", true) == 0; }
+        // a text list (one with flagEach): the dialog shows its entries one per line, the files keep ';' between them
+        bool IsList() { return IsText() && FlagEach->Length > 0; }
 
         // the default of a configuration: the one named for it, else the one for all, else the
         // control's own (the first choice, 0 for a check, nothing for a text)

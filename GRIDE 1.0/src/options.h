@@ -33,7 +33,8 @@ const Def* find(const std::string& id);
 size_t tabCount();
 const char* tabName(size_t tab);
 
-// One configuration's values, id to value; "1"/"0" for a Check, ';' between a Text list's entries.
+// One configuration's values, id to value; "1"/"0" for a Check, ';' between a Text list's entries
+// (the dialog shows them one per line).
 typedef std::map<std::string, std::string> Values;
 
 class Store {

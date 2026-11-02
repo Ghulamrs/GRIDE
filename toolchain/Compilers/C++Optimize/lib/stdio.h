@@ -87,6 +87,57 @@ extern FILE *stderr;
 #define SEEK_CUR 1
 #define SEEK_END 2
 
+// **The buffer sizes, the buffering modes and the position type, as each C
+// library has them**: these are numbers its own functions read back, so they are
+// the platform's and nothing else's. fpos_t is a 64-bit offset on the UCRT and
+// Darwin, a long on the C6000, and on glibc a structure of an offset and a
+// multibyte state - laid out here only so its size is right, since a program
+// reaches it through fgetpos and fsetpos and nothing else.
+#if defined(_WIN32)
+#define BUFSIZ       512
+#define _IOFBF       0x0000
+#define _IOLBF       0x0040
+#define _IONBF       0x0004
+#define FILENAME_MAX 260
+#define FOPEN_MAX    20
+#define L_tmpnam     260
+#define TMP_MAX      2147483647
+typedef long long fpos_t;
+#elif defined(__APPLE__)
+#define BUFSIZ       1024
+#define _IOFBF       0
+#define _IOLBF       1
+#define _IONBF       2
+#define FILENAME_MAX 1024
+#define FOPEN_MAX    20
+#define L_tmpnam     1024
+#define TMP_MAX      308915776
+typedef long long fpos_t;
+#elif defined(__TMS320C6X__)
+#define BUFSIZ       256
+#define _IOFBF       0x0001
+#define _IOLBF       0x0002
+#define _IONBF       0x0004
+#define FILENAME_MAX 256
+#define FOPEN_MAX    20
+#define TMP_MAX      65535
+typedef long fpos_t;
+#else
+#define BUFSIZ       8192
+#define _IOFBF       0
+#define _IOLBF       1
+#define _IONBF       2
+#define FILENAME_MAX 4096
+#define FOPEN_MAX    16
+#define L_tmpnam     20
+#define TMP_MAX      238328
+typedef struct {
+    long __pos;
+    int __count;
+    unsigned int __value;
+} fpos_t;
+#endif
+
 // Opening and closing.
 FILE *fopen(const char *, const char *);
 FILE *freopen(const char *, const char *, FILE *);
@@ -138,6 +189,12 @@ size_t fwrite(const void *, size_t, size_t, FILE *);
 int fseek(FILE *, long, int);
 long ftell(FILE *);
 void rewind(FILE *);
+int fgetpos(FILE *, fpos_t *);
+int fsetpos(FILE *, const fpos_t *);
+
+// Buffering, set before the first read or write.
+void setbuf(FILE *, char *);
+int setvbuf(FILE *, char *, int, size_t);
 
 // State.
 int feof(FILE *);
@@ -148,21 +205,13 @@ void perror(const char *);
 // The files themselves.
 int remove(const char *);
 int rename(const char *, const char *);
+char *tmpnam(char *);
 
-// vprintf, vfprintf and vsprintf take a va_list, which needs <stdarg.h> - so
-// they are declared there rather than here, and only a translation unit that
-// asked for stdarg.h can see them. Declaring them unconditionally would put
-// the name va_list into every file that includes stdio.h.
-//
-// Two absences remain, each for a reason rather than an oversight.
-//
-// fgetpos and fsetpos take an fpos_t *, and the caller has to declare the
-// fpos_t. glibc's is a struct, so declaring one needs its definition, and its
-// definition is the kind of thing this header exists to avoid. fseek and ftell
-// do the same work with a long.
-//
-// setbuf and setvbuf are omitted only because nothing here has needed them; add
-// them the day something does.
+// The functions that take a va_list - the vprintf and vscanf families - need
+// <stdarg.h>, so they are declared there rather than here, and only a
+// translation unit that asked for stdarg.h can see them. Declaring them
+// unconditionally would put the name va_list into every file that includes
+// stdio.h.
 
 // The descriptor behind a stream. Spelled with a leading underscore because
 // that is what the Microsoft CRT calls it and this is what <io.h>'s _setmode

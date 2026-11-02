@@ -147,6 +147,7 @@ namespace Gride
         IdeSettings^ settings;
         String^ settingsWarning;
         GrideProject^ project;
+        GrideProject^ lone;                 // a source built with no project open: its own one-file program (BuildProject)
         DateTime projectDiskTime;           // last write time of the .pro we know about
         array<String^>^ startupArgs;
         int untitledCounter;
@@ -724,7 +725,7 @@ namespace Gride
             CodeEditor^ ed = ActiveEditor();
             bool hasProject = project != nullptr;
             bool writable = hasProject && !project->IsReadOnly;
-            bool canBuild = hasProject && (writable || project->IsImported) && !busy;     // a CCS or Visual Studio project builds, read-only
+            bool canBuild = (hasProject ? writable || project->IsImported : LoneSource(ed)) && !busy;     // a CCS or Visual Studio project builds, read-only
 
             miCloseFile->Enabled = ed != nullptr;
             miCloseProject->Enabled = hasProject && !busy;
@@ -742,7 +743,7 @@ namespace Gride
             miBuild->Enabled = canBuild;
             miCompileFile->Enabled = canBuild && ed != nullptr && ed->FilePath != nullptr &&
                                      TargetInfo::IsSource(Path::GetExtension(ed->FilePath), settings) &&
-                                     project->ContainsFile(ed->FilePath);
+                                     (!hasProject || project->ContainsFile(ed->FilePath));
             miRebuild->Enabled = canBuild;
             miClean->Enabled = canBuild;
             // one program at a time; Stop ends a build or the running program (RIDE's Stop)
@@ -933,6 +934,7 @@ namespace Gride
                 return;
             }
             project = p;
+            lone = nullptr;
             RememberProjectTime();
             settings->AddRecentProject(p->IsVs && p->Vs->StateFile->Length == 0 ? p->FilePath : full);     // a Visual Studio project by its project file (its solution is found again); one a .pro stands for by the .pro
             SaveSettings();
@@ -2128,11 +2130,12 @@ namespace Gride
         {
             if (debugger != nullptr && debugger->IsActive) return;
             if (busy || ProgramBusy()) return;
-            if (project == nullptr) { Ui::Info(this, "Open or create a project first."); return; }
-            if (!BuildEngine::IsDebugConfig(project->ActiveConfig()->Name))
+            GrideProject^ p = BuildProject();
+            if (p == nullptr) { Ui::Info(this, NothingToBuild); return; }
+            if (!BuildEngine::IsDebugConfig(p->ActiveConfig()->Name))
             {
                 // RIDE's refusal before anything is built
-                DebugLaunch^ l = DebuggerChoice::For(project, settings);
+                DebugLaunch^ l = DebuggerChoice::For(p, settings);
                 ShowBottom(pageOutput);
                 EnqueueOutput(l->WhyNot);
                 SetStatus(l->WhyNot);
@@ -2148,7 +2151,9 @@ namespace Gride
         // the engine that debugs the build (DebuggerChoice: RIDE's), its events marshalled to the window
         void StartDebugging()
         {
-            DebugLaunch^ l = DebuggerChoice::For(project, settings);
+            GrideProject^ p = RunProject();
+            if (p == nullptr) return;
+            DebugLaunch^ l = DebuggerChoice::For(p, settings);
             ShowBottom(pageOutput);
             if (!l->Possible)
             {
@@ -2164,7 +2169,7 @@ namespace Gride
             d->ProgramOutput += gcnew TextLineHandler(this, &MainForm::OnDebugProgramLine);
             d->SetBreakpoints(breakpoints);
             List<String^>^ files = gcnew List<String^>();
-            for each (String^ f in project->SourceFiles) files->Add(project->ResolvePath(f));
+            for each (String^ f in p->SourceFiles) files->Add(p->ResolvePath(f));
             d->SetSourceFiles(files);
             debugger = d;
             programLineLast = false;
@@ -2176,10 +2181,10 @@ namespace Gride
             if (d->TakesInput && !ProgramBusy()) txtInput->Enabled = true;
             String^ entryFile = nullptr;
             int entryLine = 0;
-            d->StopAtEntry = debugAtEntry && DebuggerChoice::EntryOf(project, entryFile, entryLine);
+            d->StopAtEntry = debugAtEntry && DebuggerChoice::EntryOf(p, entryFile, entryLine);
             if (debugAtEntry && !d->StopAtEntry) EnqueueOutput("[debug] no main() in the project's sources - running to a breakpoint or the end");
             debugAtEntry = false;
-            if (!d->Start(l->Program, project->TargetValue, entryFile, entryLine))
+            if (!d->Start(l->Program, p->TargetValue, entryFile, entryLine))
             {
                 SetStatus("the debugger did not start - see the Output pane");
                 debugger = nullptr;
@@ -2356,11 +2361,45 @@ namespace Gride
         }
 
         // ============================================================ Build / Run / Convert
+        literal String^ NothingToBuild = "Open or create a project, or open a C, C++ or Shalimar file, first.";
+
+        // a saved C, C++ or Shalimar file in the editor, which builds and runs with no project open
+        bool LoneSource(CodeEditor^ ed)
+        {
+            return ed != nullptr && ed->FilePath != nullptr && TargetInfo::CompilerFor(Path::GetExtension(ed->FilePath), settings) != nullptr;
+        }
+
+        // the project a build, a run or the debugger takes: the open one; with none open, the source in the
+        // editor as a one-file program of its own, built beside it (build\<Target>\<Config>) and never saved
+        GrideProject^ BuildProject()
+        {
+            if (project != nullptr) return project;
+            CodeEditor^ ed = ActiveEditor();
+            if (!LoneSource(ed)) return nullptr;
+            if (lone != nullptr && lone->ContainsFile(ed->FilePath))
+            {
+                lone->SetOptionStore(settings->OptionStore());   // Tools > Options' Compiler Options as they are now
+                return lone;
+            }
+            String^ compiler = TargetInfo::CompilerFor(Path::GetExtension(ed->FilePath), settings);
+            LanguageKind lang = String::Equals(compiler, ToolIds::CompilerCpp11) ? LanguageKind::Cpp11
+                              : String::Equals(compiler, ToolIds::CompilerShalimar) ? LanguageKind::Shalimar : LanguageKind::C90;
+            GrideProject^ p = GrideProject::Create(Path::GetFileNameWithoutExtension(ed->FilePath), Path::GetDirectoryName(ed->FilePath),
+                                                   lang, TargetKind::Windows, settings);
+            p->AddFile(ed->FilePath);
+            lone = p;
+            return lone;
+        }
+
+        // the project whose program a finished build runs or debugs: the open one, else the lone file's last built
+        GrideProject^ RunProject() { return project != nullptr ? project : lone; }
+
         bool PrepareBuild()
         {
             if (busy) return false;
-            if (project == nullptr) { Ui::Info(this, "Open or create a project first."); return false; }
-            if (project->IsReadOnly && !project->IsImported)
+            GrideProject^ p = BuildProject();
+            if (p == nullptr) { Ui::Info(this, NothingToBuild); return false; }
+            if (p->IsReadOnly && !p->IsImported)
             {
                 Ui::Info(this, "This project is read-only in GRIDE.");
                 return false;
@@ -2398,22 +2437,23 @@ namespace Gride
         {
             BuildJob^ job = gcnew BuildJob();
             job->Kind = kind;
+            GrideProject^ p = RunProject();           // the one PrepareBuild chose
             // Work on copies so the UI can never change them under the worker thread. A CCS or Visual Studio
             // project is read afresh for every build, as RIDE reads it (its configurations carry what a .pro cannot hold).
-            if (project->IsImported)
+            if (p->IsImported)
             {
-                job->Project = project->IsVs ? VsImporter::Read(project->FilePath, project->Vs->SolutionPath) : CcsImporter::Import(project->FilePath);
-                job->Project->ActiveConfiguration = project->ActiveConfiguration;
-                job->Project->Toolchain = project->Toolchain;
-                if (project->IsVs) job->Project->Vs->StateFile = project->Vs->StateFile;
-                job->Project->ProgramArgs = project->ProgramArgs == nullptr ? nullptr : gcnew List<String^>(project->ProgramArgs);
-                job->Project->EmulateOnly = project->EmulateOnly;
+                job->Project = p->IsVs ? VsImporter::Read(p->FilePath, p->Vs->SolutionPath) : CcsImporter::Import(p->FilePath);
+                job->Project->ActiveConfiguration = p->ActiveConfiguration;
+                job->Project->Toolchain = p->Toolchain;
+                if (p->IsVs) job->Project->Vs->StateFile = p->Vs->StateFile;
+                job->Project->ProgramArgs = p->ProgramArgs == nullptr ? nullptr : gcnew List<String^>(p->ProgramArgs);
+                job->Project->EmulateOnly = p->EmulateOnly;
                 job->Project->Normalize();
             }
             else
             {
-                job->Project = JsonClone<GrideProject>(project);
-                job->Project->FilePath = project->FilePath;
+                job->Project = JsonClone<GrideProject>(p);
+                job->Project->FilePath = p->FilePath;
                 job->Project->Normalize();
             }
             job->Settings = JsonClone<IdeSettings>(settings);
@@ -2437,9 +2477,10 @@ namespace Gride
         void OnCompileFile(Object^ sender, EventArgs^ e)
         {
             CodeEditor^ ed = ActiveEditor();
-            if (ed == nullptr || ed->FilePath == nullptr || project == nullptr || !project->ContainsFile(ed->FilePath))
+            GrideProject^ p = BuildProject();
+            if (ed == nullptr || ed->FilePath == nullptr || p == nullptr || !p->ContainsFile(ed->FilePath))
             {
-                Ui::Info(this, "Open a source file of the project first.");
+                Ui::Info(this, project != nullptr ? "Open a source file of the project first." : NothingToBuild);
                 return;
             }
             if (!PrepareBuild()) return;
@@ -2484,8 +2525,9 @@ namespace Gride
         void StartRun(RunHow how, bool build)
         {
             if (busy || ProgramBusy()) return;
-            if (project == nullptr) { Ui::Info(this, "Open or create a project first."); return; }
-            String^ refused = ProgramLauncher::Refusal(project, how);
+            GrideProject^ p = BuildProject();
+            if (p == nullptr) { Ui::Info(this, NothingToBuild); return; }
+            String^ refused = ProgramLauncher::Refusal(p, how);
             if (refused != nullptr)
             {
                 ClearBuildOutput();
@@ -2512,17 +2554,18 @@ namespace Gride
         // assembly when the project says emulateOnly), Emulate the emulator, Verify both, compared
         void RunChosen(RunHow how)
         {
-            if (project == nullptr || ProgramBusy()) return;
+            GrideProject^ p = RunProject();
+            if (p == nullptr || ProgramBusy()) return;
             ShowBottom(pageOutput);
-            TargetInfo^ t = TargetInfo::Get(project->TargetValue);
+            TargetInfo^ t = TargetInfo::Get(p->TargetValue);
             // the way before the port, kept as an option: the program in a console window of its own
             if (!settings->RunInIde && how == RunHow::Run && t->RunsNatively)
             {
-                int rc = BuildEngine::RunOutput(project, settings, gcnew Action<String^>(this, &MainForm::EnqueueOutput), System::Threading::CancellationToken::None);
+                int rc = BuildEngine::RunOutput(p, settings, gcnew Action<String^>(this, &MainForm::EnqueueOutput), System::Threading::CancellationToken::None);
                 SetStatus(rc == 0 ? Str("Started in a console window") : Str("The program could not be started"));
                 return;
             }
-            RunPlan^ plan = ProgramLauncher::Plan(project, settings, how);
+            RunPlan^ plan = ProgramLauncher::Plan(p, settings, how);
             if (plan->Error != nullptr) { EnqueueOutput(plan->Error); SetStatus(plan->Error); return; }
             for each (String^ note in plan->Notes) EnqueueOutput(note);
             if (plan->How == RunHow::Verify)
@@ -2742,10 +2785,10 @@ namespace Gride
             }
             else if (job->Kind == JobKind::Run) SetStatus(job->ExitCode == 0 ? gcnew String("Run finished") : String::Format("Run ended with code {0}", job->ExitCode));
             // a successful build of Build and Run, Emulate or Verify: the program now runs in the Output pane
-            if (job->Kind == JobKind::BuildAndRun && job->Result != nullptr && job->Result->Success && !job->Result->Cancelled && project != nullptr)
+            if (job->Kind == JobKind::BuildAndRun && job->Result != nullptr && job->Result->Success && !job->Result->Cancelled && RunProject() != nullptr)
                 RunChosen(job->How);
             // a successful build for F8: the debugger now (R10)
-            if (job->Kind == JobKind::BuildAndDebug && job->Result != nullptr && job->Result->Success && !job->Result->Cancelled && project != nullptr)
+            if (job->Kind == JobKind::BuildAndDebug && job->Result != nullptr && job->Result->Success && !job->Result->Cancelled && RunProject() != nullptr)
                 StartDebugging();
 
             if (job->Kind == JobKind::Convert)

@@ -1,0 +1,10 @@
+strlen      19712 checks, 0 wrong, hash c1ae9840
+strchr      61120 checks, 0 wrong, hash 07c34aac
+strrchr     61120 checks, 0 wrong, hash 8b3b83fb
+memchr     260935 checks, 0 wrong, hash 6201591b
+memcmp     173995 checks, 0 wrong, hash c2b5c55b
+strcmp     145814 checks, 0 wrong, hash d265bf46
+strncmp    145814 checks, 0 wrong, hash 9118da87
+copies     161756 checks, 0 wrong, hash e6af1741
+guard       43328 checks, 0 wrong, hash 50870d08
+exit 0

@@ -15,7 +15,7 @@ long long _mktime64(struct tm *fields);
 char *_ctime64(const long long *t);
 
 /* a 64-bit time a 32-bit time_t cannot hold: -1, errno EOVERFLOW (132) as the runtime's _time32 says */
-static long narrowed(long long t)
+static long grt_narrowed(long long t)
 {
     if (t > 2147483647LL || t < -2147483647LL - 1) { errno = 132; return -1L; }
     return (long)t;
@@ -23,7 +23,7 @@ static long narrowed(long long t)
 
 time_t time(time_t *t)
 {
-    long v = narrowed(_time64(0));
+    long v = grt_narrowed(_time64(0));
     if (t) *t = v;
     return v;
 }
@@ -43,7 +43,7 @@ struct tm *gmtime(const time_t *t)
 time_t mktime(struct tm *fields)
 {
     long long t = _mktime64(fields);
-    return t == -1 ? -1L : narrowed(t);
+    return t == -1 ? -1L : grt_narrowed(t);
 }
 
 char *ctime(const time_t *t)

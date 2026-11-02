@@ -1,0 +1,25 @@
+make static
+make thread_local
+main: token a
+main: rand 41
+main: counter 101
+make thread_local
+thread: errno 0
+thread: token x
+thread: token y
+thread: rand 41 18467
+thread: gmtime year 71
+thread: asctime Fri Jan  1 00:00:00 1971
+thread: thread_local, counter 101
+end thread_local
+main: errno 5
+main: token b
+main: token c
+main: rand 18467
+main: gmtime year 70, same result 1
+main: asctime Thu Jan  1 00:00:00 1970
+main: srand(5) rand 54
+main: thread_local, counter 102
+end thread_local
+end static
+exit 0

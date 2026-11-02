@@ -84,3 +84,39 @@ before and after alternately, twice, best of 7: putc 546 and 490 ms before, 515 
 406 and 405; fwrite 24 and 24, 23 and 24; fread 24 and 23, 24 and 24. The one cost that stays is getc's 2 % (8 ms in
 400), the fast path's test of the flag; no ratio to Microsoft's moved by more than the noise. hello is 3 KB larger:
 the descriptors' and streams' lock calls.
+
+## 2026-11-02 each thread's state in static TLS (design 9.6)
+
+Machine: Intel(R) Core(TM) i5-10400T CPU @ 2.00GHz, loaded by other work (Microsoft's own fgets took 400 ms in one
+run of bench.ps1 and 871 ms in another), so the programs were run alternately: bench.c compiled once, linked with grt
+at 1a408c7's parent (c91559e), at 1a408c7 (the TLS directory, thread_local, each thread's errno, strtok place, time
+results and rand state) and today's (main, strtod's integers per-thread too), every library built by today's
+compilers; best of 5, milliseconds; ratio = GRIDE / Microsoft.
+
+| Test | Before | At 1a408c7 | Today | Microsoft | Ratio before | Ratio at 1a408c7 | Ratio today |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| printf-int | 830 | 844 | 880 | 598 | 1.39 | 1.41 | 1.47 |
+| printf-float | 2403 | 2345 | 2473 | 1054 | 2.28 | 2.22 | 2.35 |
+| printf-string | 419 | 430 | 412 | 456 | 0.92 | 0.94 | 0.90 |
+| printf-stdout | 309 | 311 | 325 | 874 | 0.35 | 0.36 | 0.37 |
+| sscanf-int | 240 | 244 | 274 | 189 | 1.27 | 1.29 | 1.45 |
+| sscanf-float | 472 | 473 | 532 | 394 | 1.20 | 1.20 | 1.35 |
+| fwrite | 24 | 24 | 24 | 23 | 1.04 | 1.04 | 1.04 |
+| fread | 24 | 25 | 24 | 24 | 1.00 | 1.04 | 1.00 |
+| fgets | 406 | 400 | 507 | 405 | 1.00 | 0.99 | 1.25 |
+| putc | 511 | 573 | 616 | 2540 | 0.20 | 0.23 | 0.24 |
+| getc | 420 | 428 | 412 | 2007 | 0.21 | 0.21 | 0.21 |
+| malloc-small | 804 | 794 | 815 | 756 | 1.06 | 1.05 | 1.08 |
+| malloc-mixed | 1106 | 1111 | 1103 | 1047 | 1.06 | 1.06 | 1.05 |
+| qsort | 341 | 295 | 303 | 245 | 1.39 | 1.20 | 1.24 |
+| hello start-to-exit (ms, mean of 200) | 14.10 | 14.41 | 13.76 | 17.11 | 0.82 | 0.84 | 0.80 |
+| hello size (bytes) | 70656 | 70656 | 73216 | 144896 | 0.49 | 0.49 | 0.51 |
+
+- The per-thread state cost nothing measurable: no ratio moved from before to 1a408c7 beyond the noise. putc's 573 ms
+  at 1a408c7 was noise: a810798, which has 1a408c7's changes, took 513 ms against 6c33dce's 520 in the last run below.
+- strtod's integers in static TLS cost nothing either: main's libraries against today's, best of 7, alternately
+  (printf-int 1.49 / 1.46, sscanf-float 1.35 / 1.36, fgets 1.25 / 1.26, hello 0.87 / 0.87).
+- fgets (0.99 to 1.25), sscanf-int (1.29 to 1.45) and sscanf-float (1.20 to 1.35) got slower after 1a408c7, in
+  e423505 (the Debug variants, which also put -g in the Release flags). 6c33dce and a810798 are as fast as 1a408c7,
+  best of 7, alternately with today's: fgets 0.98 and 0.96 against 1.23, sscanf-int 1.26 and 1.28 against 1.45,
+  sscanf-float 1.21 and 1.20 against 1.35. Not yet looked into.

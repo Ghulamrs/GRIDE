@@ -9,6 +9,16 @@
 
 namespace std {
 
+// [stream.types], [fpos]: an offset in a stream and a position in one. A
+// position is an offset from the start here - there is no conversion state to
+// carry - so both are one signed 64-bit count, as cl's streamoff is. Here and
+// not in <ios>, so that <string>'s char_traits can name them without it.
+typedef long long streamoff;
+typedef streamoff streampos;
+
+template <class C> struct char_traits;
+template <class T> class allocator;
+
 class ios_base;
 class ios;
 class ostream;
@@ -21,6 +31,8 @@ class ifstream;
 template <class C> class basic_string;
 typedef basic_string<char> string;
 typedef basic_string<wchar_t> wstring;
+typedef basic_string<char16_t> u16string;
+typedef basic_string<char32_t> u32string;
 
 }  // namespace std
 

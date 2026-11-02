@@ -53,6 +53,9 @@ int flush(FILE *f);
 int put(FILE *f, const char *bytes, unsigned count);
 // The next character when the buffer cannot simply give it: a fill, a CR, CTRL+Z, the end; or EOF.
 int getSlow(FILE *f);
+// fseek's and ftell's work at 64 bits (_fseeki64, _ftelli64): 0 or -1; the position or -1.
+int seek(FILE *f, long long offset, int whence);
+long long tell(FILE *f);
 // The character functions' way when their fast path is not taken (the buffer cannot simply give or take the
 // byte, or the program has threads): the stream locked, the fast path tried under the lock, then the slow one.
 // c as unsigned char, or EOF.

@@ -1,7 +1,7 @@
 // ctype.h - the character classifications.
 //
 // Prototypes only, the way <stdio.h> and <math.h> are: the implementations
-// arrive from the host's C library at link time. All twelve are real exported
+// arrive from the host's C library at link time. All of them are real exported
 // functions on every one of the three targets, which is not true of everything
 // in the standard library - see the note about the UCRT's inlined stdio in
 // help/command-lines.md.
@@ -27,6 +27,7 @@ extern "C" {
 
 int isalnum(int c);
 int isalpha(int c);
+int isblank(int c);
 int iscntrl(int c);
 int isdigit(int c);
 int isgraph(int c);

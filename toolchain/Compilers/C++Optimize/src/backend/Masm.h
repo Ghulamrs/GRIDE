@@ -78,6 +78,8 @@ public:
     void tlsDataSection() override;
     void tlsBssSection() override { tlsDataSection(); }
     void tlsInitialiserEntry(const std::string &fn) override;
+    bool tlsOperandsSpelled() const override { return !comdat_; }
+    void tlsOffsetWord(const std::string &symbol) override;
     void objectType(const std::string &name) override;
     void objectSize(const std::string &name, int size) override;
     void align(int n) override;
@@ -125,6 +127,7 @@ private:
     std::string mangleNames(const std::string &expr);
 
     std::set<std::string> defined_, exported_, referenced_, unreserved_;
+    std::set<std::string> tlsWords_;
     // Keywords this file writes and defines a symbol by, renamed and warned about once (1.30).
     std::set<std::string> renamed_;
     // Referenced inside a SECTIONREL expression, which ml64 refuses to add to a `:PROC` (A2102).
@@ -166,9 +169,11 @@ private:
     // The funclets' .pdata goes to MasmSpelling::trailer_, after every function:
     // .pdata has to be sorted by the address it describes and every funclet
     // lives in .text$x, so emitting beside the parent gives LNK1223.
-    std::size_t funcletMark_ = 0;
+    std::vector<std::size_t> funcletMarks_;
     int funcletIndex_ = 0;
     std::string funcletSymbol_;
+    // The funclets the one being walked was opened inside, with their entries' -g locations.
+    std::vector<std::pair<std::string, std::string> > outerFunclets_;
     const char *funcletKind_ = "$catch$";
     // -g: the variables and types as CodeView, which GRIDE's masm carries into the object
     // (writeDebug); not for ml64, which the driver refuses -g for (1.29).

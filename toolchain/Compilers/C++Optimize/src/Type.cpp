@@ -73,7 +73,8 @@ std::string Type::parameterList() const {
 static std::string arrayDims(const Type *t) {
     std::string dims;
     for (; t->isArray(); t = t->pointee())
-        dims += "[" + (t->boundParam() >= 0
+        dims += "[" + (t->dependentBound() != nullptr ? t->dependentBound()->text
+                       : t->boundParam() >= 0
                            ? "template parameter " + std::to_string(t->boundParam())
                            : std::to_string(t->length())) + "]";
     return dims;
@@ -94,18 +95,20 @@ std::string Type::describe() const {
     // A const pointer is written with the const behind the star, and every
     // other const in front of the type. Saying 'const char *' where the
     // program wrote 'char * const' would send a reader after the wrong error.
-    if (const_)
-        return kind_ == Kind::Pointer ? unqual_->describe() + " const"
-                                      : "const " + unqual_->describe();
+    if (unqual_ != nullptr) {
+        const std::string cv = const_ && volatile_ ? "const volatile" : const_ ? "const" : "volatile";
+        return kind_ == Kind::Pointer ? unqual_->describe() + " " + cv : cv + " " + unqual_->describe();
+    }
     if (kind_ == Kind::Pointer && pointee_->isFunction())
         return pointee_->returns()->describe() + " (*)" + pointee_->parameterList();
     if (kind_ == Kind::Function)
-        return pointee_->describe() + " " + parameterList() + refQualifierSpelling();
+        return pointee_->describe() + " " + parameterList() + cvThisSpelling() + refQualifierSpelling();
     if (kind_ == Kind::Pointer) return pointee_->describe() + " *";
     if (memberFn_)
         return pointee_->returns()->describe() + " (" +
                (enclosing_ != nullptr ? enclosing_->tag() : std::string("?")) +
-               "::*)" + pointee_->parameterList() + pointee_->refQualifierSpelling();
+               "::*)" + pointee_->parameterList() + pointee_->cvThisSpelling() +
+               pointee_->refQualifierSpelling();
     if (kind_ == Kind::MemberPointer)
         return pointee_->describe() + " " +
                (enclosing_ != nullptr ? enclosing_->tag() : std::string("?")) +
@@ -113,7 +116,7 @@ std::string Type::describe() const {
     // A reference to an array is written round the name, the same way a
     // pointer to a function is: 'int (&)[3]', never 'int [3] &'.
     if (isReference() && pointee_->isArray())
-        return pointee_->innermostElement()->describe() + " (&)" +
+        return pointee_->innermostElement()->describe() + (kind_ == Kind::RValueRef ? " (&&)" : " (&)") +
                arrayDims(pointee_);
     if (kind_ == Kind::LValueRef) return pointee_->describe() + " &";
     if (kind_ == Kind::RValueRef) return pointee_->describe() + " &&";
@@ -122,10 +125,12 @@ std::string Type::describe() const {
     if (kind_ == Kind::Array)
         return innermostElement()->describe() + " " + arrayDims(this);
     if (templateNameOnly_) return "template " + templateNamespace_ + templateName_;
+    // An unnamed class is told apart by its first declarator where it has one, as cl tells it apart.
+    const std::string unnamed = unnamed_.empty() ? std::string("<anonymous>") : unnamed_;
     if (kind_ == Kind::Struct)
         return std::string(isClass_ ? "class " : "struct ") +
-               (tag_.empty() ? "<anonymous>" : tag_);
-    if (kind_ == Kind::Union)  return "union "  + (tag_.empty() ? "<anonymous>" : tag_);
+               (tag_.empty() ? unnamed : tag_);
+    if (kind_ == Kind::Union)  return "union "  + (tag_.empty() ? unnamed : tag_);
     if (kind_ == Kind::DependentExpr) return "decltype(" + expr_->text + ")";
     return name();
 }
@@ -162,17 +167,34 @@ std::string Type::displaySpelling(const std::string &key) {
 // did not skip it would hand back the const one for every `char *` in the file.
 const Type *TypeTable::functionType(const Type *returns,
                                     std::vector<const Type *> params,
-                                    bool variadic, RefQual ref) {
+                                    bool variadic, RefQual ref, unsigned cvThis) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::Function && d->pointee() == returns &&
-            d->variadic_ == variadic && d->params_ == params && d->refQual_ == ref)
+        if (d->unqual_ == nullptr && d->kind() == Kind::Function && d->pointee() == returns &&
+            d->variadic_ == variadic && d->params_ == params && d->refQual_ == ref &&
+            d->thisCv_ == cvThis)
             return d;
     Type *t = new Type(Kind::Function, returns, -1);
     t->params_ = std::move(params);
     t->variadic_ = variadic;
     t->refQual_ = ref;
+    t->thisCv_ = cvThis;
     derived_.push_back(t);
     return derived_.back();
+}
+
+// **One type per cv-qualification of an unqualified one**: `const int`, `volatile int` and `const
+// volatile int` each point their unqual_ at `int`, so unqualified() strips both at once.
+const Type *TypeTable::qualified(const Type *t, bool isConst, bool isVolatile) {
+    const Type *u = t->unqualified();
+    if (!isConst && !isVolatile) return u;
+    for (Type *d : derived_)
+        if (d->unqual_ == u && d->const_ == isConst && d->volatile_ == isVolatile) return d;
+    Type *c = new Type(*u);
+    c->const_ = isConst;
+    c->volatile_ = isVolatile;
+    c->unqual_ = u;
+    derived_.push_back(c);
+    return c;
 }
 
 const Type *TypeTable::withConst(const Type *t) {
@@ -186,26 +208,39 @@ const Type *TypeTable::withConst(const Type *t) {
 
     // A function type cannot be const-qualified.
     if (t->isFunction()) return t;
-
-    for (Type *d : derived_)
-        if (d->const_ && d->unqual_ == t) return d;
-
-    Type *c = new Type(*t);
-    c->const_ = true;
-    c->unqual_ = t;
-    derived_.push_back(c);
-    return c;
+    return qualified(t, true, t->isVolatile());
 }
 
 const Type *TypeTable::withoutConst(const Type *t) {
     if (t->isArray() && t->pointee()->isConst())
         return arrayOf(withoutConst(t->pointee()), t->length());
-    return t->unqualified();
+    if (t->isArray()) return t;
+    return qualified(t, false, t->isVolatile());
+}
+
+const Type *TypeTable::withVolatile(const Type *t) {
+    if (t->isVolatile()) return t;
+    if (t->isArray())
+        return arrayOf(withVolatile(t->pointee()), t->length());
+    if (t->isFunction()) return t;
+    return qualified(t, t->isConst(), true);
+}
+
+const Type *TypeTable::withoutVolatile(const Type *t) {
+    if (t->isArray() && t->pointee()->isVolatile())
+        return arrayOf(withoutVolatile(t->pointee()), t->length());
+    if (t->isArray()) return t;
+    return qualified(t, t->isConst(), false);
+}
+
+const Type *TypeTable::withCvOf(const Type *t, const Type *of) {
+    const Type *r = of->isConst() ? withConst(t) : t;
+    return of->isVolatile() ? withVolatile(r) : r;
 }
 
 const Type *TypeTable::pointerTo(const Type *t) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::Pointer && d->pointee() == t)
+        if (d->unqual_ == nullptr && d->kind() == Kind::Pointer && d->pointee() == t)
             return d;
     derived_.push_back(new Type(Kind::Pointer, t, -1));
     return derived_.back();
@@ -215,7 +250,7 @@ const Type *TypeTable::pointerTo(const Type *t) {
 // table keyed by pointer sees the repeat they are.
 const Type *TypeTable::memberPointerTo(const Type *cls, const Type *member) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->pointee() == member && d->enclosing() == cls &&
+        if (d->unqual_ == nullptr && d->pointee() == member && d->enclosing() == cls &&
             (d->kind() == Kind::MemberPointer || d->isMemberFunctionPointer()))
             return d;
     Type *made = new Type(Kind::MemberPointer, member, -1);
@@ -236,7 +271,7 @@ const Type *TypeTable::memberFunctionPointerTo(const Type *cls, const Type *fn,
     const int word = t.sizeOf(Kind::Pointer);
     const int model = microsoft ? cls->microsoftInheritanceModel() : 0;
     for (Type *d : derived_)
-        if (!d->isConst() && d->isMemberFunctionPointer() &&
+        if (d->unqual_ == nullptr && d->isMemberFunctionPointer() &&
             d->pointee() == fn && d->enclosing() == cls)
             return d;
     Type *made = new Type(Kind::Struct, fn, -1);
@@ -259,7 +294,7 @@ const Type *TypeTable::memberFunctionPointerTo(const Type *cls, const Type *fn,
 
 const Type *TypeTable::referenceTo(const Type *t) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::LValueRef && d->pointee() == t)
+        if (d->unqual_ == nullptr && d->kind() == Kind::LValueRef && d->pointee() == t)
             return d;
     derived_.push_back(new Type(Kind::LValueRef, t, -1));
     return derived_.back();
@@ -270,7 +305,7 @@ const Type *TypeTable::referenceTo(const Type *t) {
 // for the same reason every loop here does, or `const T` comes back for `T`.
 const Type *TypeTable::templateParam(int index) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::TemplateParam &&
+        if (d->unqual_ == nullptr && d->kind() == Kind::TemplateParam &&
             d->length() == index)
             return d;
     derived_.push_back(new Type(Kind::TemplateParam, nullptr, index));
@@ -282,7 +317,7 @@ const Type *TypeTable::templateParam(int index) {
 const Type *TypeTable::dependentMember(const Type *owner,
                                        const std::string &name) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::DependentMember &&
+        if (d->unqual_ == nullptr && d->kind() == Kind::DependentMember &&
             d->pointee() == owner && d->tag() == name)
             return d;
     derived_.push_back(new Type(Kind::DependentMember, owner, -1));
@@ -293,7 +328,7 @@ const Type *TypeTable::dependentMember(const Type *owner,
 // The tree kept in expr_, `Dt` against `DT` in length_ (1 and 0), interned on the pair.
 const Type *TypeTable::dependentExpr(const DepExpr *e, bool id) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::DependentExpr && d->expr_ == e &&
+        if (d->unqual_ == nullptr && d->kind() == Kind::DependentExpr && d->expr_ == e &&
             d->length() == (id ? 1 : 0))
             return d;
     derived_.push_back(new Type(Kind::DependentExpr, nullptr, id ? 1 : 0));
@@ -308,6 +343,8 @@ const DepExpr *TypeTable::intern(DepExpr e) {
                       (e.type != nullptr ? patternKey(e.type) : std::string()) + "|" +
                       std::to_string(e.value) + (e.floating ? "f" : "") + "|" +
                       std::to_string(e.index) + "|" + e.name;
+    for (const std::string &s : e.scope) key += "|::" + s;
+    for (const Type *t : e.targs) key += "|<" + patternKey(t) + ">";
     for (const DepExpr *k : e.kids) key += "|" + k->key;
     e.key = key + "}";
     for (DepExpr *d : exprs_)
@@ -318,7 +355,9 @@ const DepExpr *TypeTable::intern(DepExpr e) {
 
 std::string TypeTable::patternKey(const Type *t) {
     if (t == nullptr) return "?";
-    if (t->isConst()) return "const " + patternKey(t->unqualified());
+    if (t->isQualified())
+        return std::string(t->isConst() ? "const " : "") + (t->isVolatile() ? "volatile " : "") +
+               patternKey(t->unqualified());
     switch (t->kind()) {
     case Kind::TemplateParam:   return "$T" + std::to_string(t->length());
     case Kind::DependentExpr:   return (t->length() == 1 ? "$Dt" : "$DT") + t->dependentExpr()->key;
@@ -327,7 +366,9 @@ std::string TypeTable::patternKey(const Type *t) {
     case Kind::Pointer:         return patternKey(t->pointee()) + " *";
     case Kind::LValueRef:       return patternKey(t->pointee()) + " &";
     case Kind::RValueRef:       return patternKey(t->pointee()) + " &&";
-    case Kind::Array:           return patternKey(t->pointee()) + " [" + std::to_string(t->length()) + "]";
+    case Kind::Array:
+        return patternKey(t->pointee()) + " [" +
+               (t->dependentBound() != nullptr ? t->dependentBound()->key : std::to_string(t->length())) + "]";
     case Kind::Function: {
         std::string k = patternKey(t->returns()) + " (";
         for (const Type *p : t->params()) k += patternKey(p) + ",";
@@ -339,7 +380,7 @@ std::string TypeTable::patternKey(const Type *t) {
 
 const Type *TypeTable::packExpansion(const Type *of) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::PackExpansion && d->pointee() == of)
+        if (d->unqual_ == nullptr && d->kind() == Kind::PackExpansion && d->pointee() == of)
             return d;
     derived_.push_back(new Type(Kind::PackExpansion, of, -1));
     return derived_.back();
@@ -347,14 +388,14 @@ const Type *TypeTable::packExpansion(const Type *of) {
 
 const Type *TypeTable::deducedType() {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::Deduced) return d;
+        if (d->unqual_ == nullptr && d->kind() == Kind::Deduced) return d;
     derived_.push_back(new Type(Kind::Deduced, nullptr, -1));
     return derived_.back();
 }
 
 const Type *TypeTable::rvalueReferenceTo(const Type *t) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == Kind::RValueRef && d->pointee() == t)
+        if (d->unqual_ == nullptr && d->kind() == Kind::RValueRef && d->pointee() == t)
             return d;
     derived_.push_back(new Type(Kind::RValueRef, t, -1));
     return derived_.back();
@@ -362,10 +403,19 @@ const Type *TypeTable::rvalueReferenceTo(const Type *t) {
 
 const Type *TypeTable::arrayOf(const Type *t, long long length) {
     for (Type *d : derived_)
-        if (!d->const_ && d->kind() == Kind::Array && d->pointee() == t &&
-            d->length() == length)
+        if (d->unqual_ == nullptr && d->kind() == Kind::Array && d->pointee() == t &&
+            d->length() == length && d->expr_ == nullptr)
             return d;
     derived_.push_back(new Type(Kind::Array, t, length));
+    return derived_.back();
+}
+
+const Type *TypeTable::dependentArrayOf(const Type *t, const DepExpr *bound) {
+    for (Type *d : derived_)
+        if (d->unqual_ == nullptr && d->kind() == Kind::Array && d->pointee() == t && d->expr_ == bound)
+            return d;
+    derived_.push_back(new Type(Kind::Array, t, -1));
+    derived_.back()->expr_ = bound;
     return derived_.back();
 }
 
@@ -404,7 +454,7 @@ void Type::complete(std::vector<Member> members, int size, int align) {
 
 Type *TypeTable::structType(Kind kind, const std::string &tag) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->kind() == kind && d->tag_ == tag) return d;
+        if (d->unqual_ == nullptr && d->kind() == kind && d->tag_ == tag) return d;
     Type *t = new Type(kind);
     t->tag_ = tag;
     derived_.push_back(t);
@@ -424,7 +474,7 @@ const Type *TypeTable::templateNameType(const std::string &name, const std::stri
 
 Type *TypeTable::enumType(const std::string &tag, Kind underlying) {
     for (Type *d : derived_)
-        if (!d->isConst() && d->isEnumeration() && d->tag_ == tag) return d;
+        if (d->unqual_ == nullptr && d->isEnumeration() && d->tag_ == tag) return d;
     Type *t = new Type(underlying);
     t->tag_ = tag;
     derived_.push_back(t);

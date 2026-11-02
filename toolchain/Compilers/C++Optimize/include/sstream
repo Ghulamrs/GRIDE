@@ -26,48 +26,36 @@ namespace std {
 class ostringstream : public ostream {
 public:
     string s_;
+    openmode mode_;
 
-    ostringstream() {
-        fp_ = 0;
-        which_ = 0;
-        state_ = 0;
+    // [ostringstream.cons]: the string the stream starts with, and with `ate`
+    // the put position after it rather than at its start.
+    explicit ostringstream(openmode mode = out) : mode_(mode) { buf_ = &s_; }
+    explicit ostringstream(const string &from, openmode mode = out) : s_(from), mode_(mode) {
         buf_ = &s_;
-        base_ = 10;
-        prec_ = 6;      // [ios_base]'s default, as <iostream> gives the console streams
-        fmt_ = 0;
-        width_ = 0;
+        put_ = (mode & ate) != 0 ? s_.size() : 0;
     }
 
     string str() const { return s_; }
-    void str(const string &v) { s_ = v; }
+    // [stringbuf.members]/3: a new string, written from its start again; the
+    // stream's state is not touched.
+    void str(const string &v) { s_ = v; put_ = (mode_ & ate) != 0 ? s_.size() : 0; }
 };
 
 class istringstream : public istream {
 public:
     string s_;
 
-    istringstream() {
-        fp_ = 0;
-        which_ = 0;
-        state_ = 0;
-        s_ = string();
-        src_ = &s_;
-        pos_ = 0;
-    }
+    explicit istringstream(openmode = in) { src_ = &s_; }
 
     // The string is copied in, not referred to, so it outlives whatever the
     // caller passed - which is what the standard's `istringstream(s)` does too.
-    istringstream(const string &from) {
-        fp_ = 0;
-        which_ = 0;
-        state_ = 0;
-        s_ = from;
-        src_ = &s_;
-        pos_ = 0;
-    }
+    explicit istringstream(const string &from, openmode = in) : s_(from) { src_ = &s_; }
 
     string str() const { return s_; }
-    void str(const string &v) { s_ = v; pos_ = 0; state_ = 0; }
+    // Read from its start again; the stream's state is not touched, so a
+    // stream that reached the end needs clear() as well.
+    void str(const string &v) { s_ = v; pos_ = 0; }
 };
 
 }  // namespace std

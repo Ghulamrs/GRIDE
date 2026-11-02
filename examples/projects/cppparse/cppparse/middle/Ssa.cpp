@@ -52,6 +52,12 @@ void dominanceFrontiers(const IrFunction& f, const std::vector<int>& idom, std::
     }
 }
 
+} // namespace
+
+bool promotableLocal(const IrFunction& f, int local) { return promotable(f, local); }
+
+namespace {
+
 struct Renamer {
     IrFunction&                     f;
     const std::vector<int>&         idom;

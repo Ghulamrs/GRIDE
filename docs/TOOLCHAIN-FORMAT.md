@@ -131,12 +131,12 @@ tools), in that order, from the project's store (`.pro`: `"options": { "debug": 
 | `tabs` | list | the dialog's tabs in order (`General`, `C (c90)`, `C++ (cpp11)`, `Shalimar`) |
 | `options` | object | option id -> the row; the id is `<tool word>.<option>` (`c90.opt`, `shc.g`), `general.*` for the rows several compilers take; the order of the keys is the order each tab shows them |
 | `options.<id>.tab`, `.label`, `.hint` | string | the dialog's tab, the control's text, the line under it (the tip) |
-| `options.<id>.control` | string, required | `check` (the value is `1` / `0`), `choice` (one of `choices`), `text` (`;` between the entries) |
+| `options.<id>.control` | string, required | `check` (the value is `1` / `0`), `choice` (one of `choices`), `text` (`;` between the entries; a text with `flagEach` is a list, which the dialog shows one entry per line in a box with a scroll bar) |
 | `options.<id>.choices` | list | a choice's values; the first is the compiler's own default |
 | `options.<id>.default` | string or object | one default for both configurations, or `{ "Debug": ..., "Release": ... }`; absent: the first choice, `0`, nothing |
 | `options.<id>.flagOn`, `.flagOff` | string | a check's flag when the value is `1` / `0` (`-g`; `--no_compress` when compress is off) |
 | `options.<id>.flag`, `.silent` | string | a choice's flag with `$(Value)` filled in (`-j$(Value)`, `$(Value)`); `silent` names the choice that writes nothing (`Auto`, `-O0`; absent: the first choice) |
-| `options.<id>.flagEach` | string | a text list's flag per entry, `$(Item)` filled in (`-D$(Item)`); an entry holding a space is quoted |
+| `options.<id>.flagEach` | string | a text list's flag per entry, `$(Item)` filled in (`-D$(Item)`): one argument per entry, an entry holding a space, a tab or a quote quoted (`-D"MSG=hi there"`, a quote inside as `\"`); `NAME=value` alone needs no quotes |
 | `options.<id>.environment` | string | the variable the compiler is given instead of a flag (`CPP11_DECLINES`): `1` when the check is on, empty otherwise |
 | `options.<id>.needs`, `.unavailable` | string | when the option applies: `lineTable` (the compiler writes one for the target), `emulated` (the C6747 only), `notEmulated`; `unavailable` is the sentence the dialog shows for a target it does not apply to (`$(Arch)` filled in); an option that does not apply writes nothing |
 

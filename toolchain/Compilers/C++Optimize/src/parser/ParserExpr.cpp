@@ -161,6 +161,39 @@ ExprPtr Parser::overloadedBinary(BinOp op, ExprPtr &lhs, ExprPtr &rhs,
                    "them");
 }
 
+// `a && b`, `a || b`, `a, b` and `a ->* b` with a class or enumeration operand: [over.match.oper]/1
+// makes the expression a call where an operator function takes the operands - both evaluated, the
+// built-in's sequencing gone - and leaves the built-in where none does. Null for the built-in, the
+// operands untouched.
+ExprPtr Parser::overloadedSpelled(const char *spelling, ExprPtr &lhs, ExprPtr &rhs, std::size_t pos) {
+    const Type *lt = lhs->type(), *rt = rhs->type();
+    if (lt == nullptr || rt == nullptr || lt->isVoid() || rt->isVoid()) return nullptr;
+    auto operand = [](const Type *t) {
+        const Type *u = t->unqualified();
+        return (u->isStructOrUnion() && !u->isMemberFunctionPointer()) || u->isEnumeration();
+    };
+    if (!operand(lt) && !operand(rt)) return nullptr;
+    const std::string name = std::string("operator") + spelling;
+    switch (resolveOperator(name, *lhs, rhs.get(), pos)) {
+    case OperatorChoice::Member: {
+        std::vector<ExprPtr> args;
+        args.push_back(std::move(rhs));
+        return memberCallWith(std::move(lhs), lt, name, pos, std::move(args));
+    }
+    case OperatorChoice::NonMember: {
+        std::vector<ExprPtr> args;
+        args.push_back(std::move(lhs));
+        args.push_back(std::move(rhs));
+        const Signature &sig = resolveOverloadBraced(name, args, pos);
+        return completeCall(name, sig.symbol, nullptr, sig.returns, sig.params,
+                            sig.variadic, pos, std::move(args), !sig.owner.empty());
+    }
+    case OperatorChoice::None:
+        break;
+    }
+    return nullptr;
+}
+
 // `-v`, `!v`, `~v`, `*v`, `&v` and the two increments - the same merged candidate
 // set as a binary operator, with one operand. **Null means "carry on with the
 // built-in", not "there is a problem"**: a class with no `operator&` has an address.
@@ -309,6 +342,9 @@ ExprPtr Parser::staticCast(std::size_t pos) {
     ExprPtr v;
     { OverloadTarget hold(*this, to); v = expr(); }
     expect(")");
+    // [class.abstract]/3: no object of an abstract class is made, a cast's result included.
+    if (to->unqualified()->isStructOrUnion())
+        checkNotAbstract(to->unqualified(), pos, "the result of this 'static_cast'");
 
     if (to->isReference()) {
         const Type *referent = to->referent();
@@ -344,15 +380,33 @@ ExprPtr Parser::staticCast(std::size_t pos) {
                 return obj;
             }
         }
+        // **[expr.static.cast]/2-3: a derived lvalue cast to a reference to its base** - the
+        // derived-to-base conversion `B &b = d;` makes, written as a cast (R2: refused before).
+        if (v->type()->unqualified() != referent->unqualified() &&
+            v->type()->unqualified()->isStructOrUnion() && referent->unqualified()->isStructOrUnion() &&
+            accessibleBaseOffset(v->type()->unqualified(), referent->unqualified()) >= 0) {
+            if (v->type()->isConst() && !referent->isConst())
+                src_.fail(pos, "'static_cast<" + to->describe() + ">' of a '" +
+                               v->type()->describe() + "' - a cast does not take const off");
+            const Type *dst = v->type()->isConst() || referent->isConst()
+                            ? types_.withConst(referent->unqualified()) : referent->unqualified();
+            const Type *srcPtr = types_.pointerTo(v->type());
+            ExprPtr addr(new Unary('&', std::move(v)));
+            addr->setType(srcPtr);
+            ExprPtr obj(new Unary('*', convert(std::move(addr), types_.pointerTo(dst))));
+            obj->setType(dst);
+            if (to->isRValueReference()) obj->setXvalue();
+            return obj;
+        }
         if (v->type()->unqualified() != referent->unqualified())
             src_.fail(pos, "'static_cast<" + to->describe() + ">' of a '" +
                            v->type()->describe() + "' - casting a reference "
                            "to a different type is not supported yet, and "
                            "this one names '" + referent->describe() + "'");
-        if (v->type()->isConst() && !referent->isConst())
+        if ((v->type()->isConst() && !referent->isConst()) || (v->type()->isVolatile() && !referent->isVolatile()))
             src_.fail(pos, "'static_cast<" + to->describe() + ">' of a '" +
                            v->type()->describe() + "' - a cast does not take "
-                           "const off; 'const_cast' is what does, and the two "
+                           "const or volatile off; 'const_cast' is what does, and the two "
                            "are written separately on purpose");
         // An lvalue reference cast leaves an lvalue and there is nothing to
         // mark; an rvalue reference cast is the whole point of this function.
@@ -399,11 +453,26 @@ ExprPtr Parser::staticCast(std::size_t pos) {
                                "' - the pointees are unrelated types, and static_cast converts a "
                                "pointer only to or from 'void *' or along a base-derived line; "
                                "reinterpret_cast is the cast that reads the bytes as another type");
+            refuseCastingAwayConst(v->type(), to, pos, "static_cast");
         }
         return convert(std::move(v), to, true);
     }();
     r->setDeclCategory(Expr::Category::Prvalue);
     return r;
+}
+
+// **[expr.static.cast]/1 and [expr.reinterpret.cast]/2: neither casts away constness**
+// ([expr.const.cast]/8) - at any level of the pointer, a const in the source the target drops.
+// `static_cast<int *>(&constInt)` and its reinterpret_cast were accepted (review of 1.30, A1).
+void Parser::refuseCastingAwayConst(const Type *from, const Type *to, std::size_t pos,
+                                    const char *cast) const {
+    for (const Type *f = from, *t = to; f != nullptr && t != nullptr && f->isPointer() && t->isPointer();
+         f = f->pointee(), t = t->pointee())
+        if ((f->pointee()->isConst() && !t->pointee()->isConst()) ||
+            (f->pointee()->isVolatile() && !t->pointee()->isVolatile()))
+            src_.fail(pos, std::string("'") + cast + "<" + to->describe() + ">' of a '" + from->describe() +
+                           "' - a cast does not take const or volatile off; 'const_cast' is what does, "
+                           "and the two are written separately on purpose");
 }
 
 int Parser::downcastOffset(const Type *derived, const Type *base, bool *viaVirtual) const {
@@ -641,7 +710,7 @@ ExprPtr Parser::functionalCast(const Type *to, std::size_t pos) {
     // `T(x)` is a prvalue ([expr.type.conv]/2), whatever node the conversion hands back.
     ExprPtr r = [&]() -> ExprPtr {
         expect("(");
-        if (consume(")")) {
+        auto zero = [&]() {
             if (to->isVoid())
                 src_.fail(pos, "'void()' has no value");
             // The zero that convert can carry to any scalar: a null pointer
@@ -658,6 +727,22 @@ ExprPtr Parser::functionalCast(const Type *to, std::size_t pos) {
                 z->setType(types_.intType());
             }
             return convert(std::move(z), types_.withoutConst(to), true);
+        };
+        if (consume(")")) return zero();
+        // `T(std::forward<A>(a)...)` for a T that is no class: the expansion makes none or one operand.
+        std::vector<ExprPtr> expanded;
+        if (expandPackPattern(expanded)) {
+            if (expanded.size() > 1)
+                src_.fail(pos, "'" + to->describe() + "(a, b)' would need a constructor, and '" +
+                               to->describe() + "' is not a class");
+            expect(")");
+            if (expanded.empty()) return zero();
+            if (to->isVoid()) {
+                ExprPtr c(new Cast(to, decay(std::move(expanded[0]))));
+                c->setType(to);
+                return c;
+            }
+            return convert(decay(std::move(expanded[0])), types_.withoutConst(to), true);
         }
         ExprPtr v = decay(assign());
         if (peek().is(","))
@@ -691,7 +776,8 @@ const Parser::Signature *Parser::pickByTarget(const std::vector<std::size_t> &se
     for (std::size_t i : set) {
         const Signature &f = functions_[i];
         const Type *fn = !f.owner.empty() && !f.isStaticMember ? member : plain;
-        if (fn == nullptr || types_.functionType(f.returns, f.params, f.variadic, f.refThis) != fn) continue;
+        if (fn == nullptr || types_.functionType(f.returns, f.params, f.variadic, f.refThis,
+                                                 thisCvOf(f)) != fn) continue;
         if (found != nullptr) return nullptr;
         found = &f;
     }
@@ -718,6 +804,12 @@ ExprPtr Parser::functionAsValue(const std::string &key, std::size_t pos) {
 }
 
 ExprPtr Parser::functionAddress(const Signature &sig, const std::string &key) {
+    if (sig.name == "main" && sig.cLinkage && sig.owner.empty()) {
+        if (mainDefinedHere())
+            src_.fail(peek().pos, "the address of 'main' cannot be taken - [basic.start.main]/3 forbids "
+                                  "using it within the program");
+        mainUses_.push_back(peek().pos);
+    }
     Var *v = Var::global(key);
     v->setSymbol(sig.symbol);
     ExprPtr target(v);
@@ -740,7 +832,7 @@ ExprPtr Parser::memberFunctionAddress(const Type *cls, const Signature &f, const
         int index = -1;
         const std::vector<VSlot> &slots = vtables_[cls->tag()];
         for (std::size_t i = 0; i < slots.size(); i++)
-            if (overrides(slots[i], f.name, f.params, f.constThis, f.refThis))
+            if (overrides(slots[i], f.name, f.params, f.constThis, f.refThis, f.volatileThis))
                 index = static_cast<int>(i);
         if (index < 0)
             src_.fail(pos, "'" + key + "' is virtual but has "
@@ -757,7 +849,7 @@ ExprPtr Parser::memberFunctionAddress(const Type *cls, const Signature &f, const
     return boundMemberPointer(cls, f, pos);
 }
 
-bool Parser::atBareFunctionArgument() const {
+bool Parser::atBareFunctionArgument(bool braced) const {
     std::size_t k = 0, open = 0;
     for (; peekAt(k).is("&") || peekAt(k).is("("); k++) open += peekAt(k).is("(") ? 1 : 0;
     if (peekAt(k).is("::")) k++;
@@ -765,7 +857,18 @@ bool Parser::atBareFunctionArgument() const {
     while (peekAt(k + 1).is("::") && peekAt(k + 2).kind == TokenKind::Ident) k += 2;
     for (; open > 0; open--, k++)
         if (!peekAt(k + 1).is(")")) return false;
-    return peekAt(k + 1).is(",") || peekAt(k + 1).is(")");
+    return peekAt(k + 1).is(",") || peekAt(k + 1).is(braced ? "}" : ")");
+}
+
+// [over.over]/1: an overloaded name kept behind its placeholder is resolved by the type it initialises.
+void Parser::resolveOverloadPlaceholder(ExprPtr &value, const Type *to, std::size_t pos) {
+    const OverloadArg *oa = value != nullptr ? overloadArgOf(*value) : nullptr;
+    if (oa == nullptr) return;
+    ExprPtr picked = overloadArgumentFor(to, *oa);
+    if (picked == nullptr)
+        src_.fail(pos, "'" + oa->key + "' names " + std::to_string(oa->set.size()) + " functions, and "
+                       "none of them is of the type '" + to->describe() + "' it initialises here");
+    value = std::move(picked);
 }
 
 // [basic.lookup.unqual]/8: a member function named bare in a member is the class's before the namespace's.
@@ -810,7 +913,14 @@ const Parser::OverloadArg *Parser::overloadArgOf(const Expr &e) const {
 }
 
 ExprPtr Parser::overloadArgumentFor(const Type *param, const OverloadArg &oa) {
-    const Signature *f = pickByTarget(oa.set, oa.cls, param);
+    std::vector<std::size_t> set = oa.set;
+    if (!oa.templates.empty()) {
+        const OverloadArg with = oa;
+        const std::vector<std::size_t> made = specializationsFor(with.templates, param, with.pos);
+        set.insert(set.end(), made.begin(), made.end());
+    }
+    const Signature *f = pickByTarget(set, oa.cls, param);
+    if (f != nullptr && f->fromTemplate) markUsed(f);
     if (f == nullptr) return nullptr;
     const OverloadArg mine = oa;
     for (std::size_t i = 0; i < overloadArgs_.size(); i++)
@@ -1024,8 +1134,7 @@ ExprPtr Parser::qualifiedMemberThroughThis(const Type *cls, const Member &m,
     checkAccessible(obj->type(), m, pos);
     const Type *objType = obj->type();
     ExprPtr acc(new MemberAccess(std::move(obj), member, m.offset, m.width, m.bitOffset));
-    acc->setType(objType->isConst() && !m.type->isReference() && !m.isMutable
-                     ? types_.withConst(m.type) : m.type);
+    acc->setType(memberTypeIn(objType, m));
     return useReference(std::move(acc));
 }
 
@@ -1042,6 +1151,13 @@ ExprPtr Parser::primary(Program *program) {
         std::size_t pos = peek().pos;
         at_++;
         return typeidExpression(pos);
+    }
+    if (peek().kind == TokenKind::Ident && peekAt(1).is("(") && isTypeTraitName(peek().text))
+        return typeTrait();
+    if (peek().kind == TokenKind::Ident && peek().text.compare(0, 6, "$trait") == 0) {
+        const std::size_t k = static_cast<std::size_t>(std::stoul(peek().text.substr(6)));
+        at_++;
+        return traitOperand(traitOperands_.at(k));
     }
     if (peek().is("static_cast")) {
         std::size_t pos = peek().pos;
@@ -1429,11 +1545,65 @@ ExprPtr Parser::primary(Program *program) {
     // name rather than left to "expected an expression", which points at a
     // '::' and says nothing.
     if (ExprPtr e = enumeratorThroughEnum()) return e;
+    // **`::g`, `::f()` - [basic.lookup.qual]/4: the name looked up in the global namespace alone**, so a
+    // local, a member or an enclosing namespace's name of the same spelling is passed over; `::N::x` is
+    // N's x. The arguments of a call are read first, in the scope the call is written in.
+    if (peek().is("::") && peekAt(1).kind == TokenKind::Ident) {
+        if (peekAt(2).is("::")) { at_++; return primary(program); }
+        const std::size_t qpos = peek().pos;
+        const std::string name = peekAt(1).text;
+        if (isTemplateName(name, true))
+            src_.fail(qpos, "'::" + name + "' names a function template through the global namespace, "
+                            "which is not supported yet - write the name without the '::'");
+        at_ += 2;
+        struct Outer {
+            std::vector<std::string> &stack; std::vector<std::string> was;
+            ~Outer() { stack = was; }
+        } outer{ namespaceStack_, namespaceStack_ };
+        if (consume("(")) {
+            std::vector<ExprPtr> args;
+            parseArguments(args);
+            namespaceStack_.clear();
+            const Signature sig = resolveOverloadBraced(name, args, qpos);
+            applyDefaults(sig, args, qpos);
+            return completeCall(name, sig.symbol, nullptr, sig.returns, sig.params, sig.variadic, qpos,
+                                std::move(args));
+        }
+        namespaceStack_.clear();
+        if (ExprPtr v = globalRef(name)) return v;
+        if (const EnumConst *e = findEnum(name)) {
+            ExprPtr n(new Num(e->value));
+            n->setType(e->type != nullptr ? e->type : types_.intType());
+            return n;
+        }
+        if (ExprPtr fn = functionAsValue(name, qpos)) return fn;
+        src_.fail(qpos, "'::" + name + "' was not declared in the global namespace");
+    }
+    // **`::operator new(n)`, `::operator delete(p)`** - [expr.call] of the global allocation and deallocation
+    // functions by name, [basic.stc.dynamic]/2 declaring them in every unit (item 32).
+    if (peek().is("::") && peekAt(1).is("operator") && (peekAt(2).is("new") || peekAt(2).is("delete"))) {
+        const std::size_t qpos = peek().pos;
+        std::string name = "operator" + peekAt(2).text;
+        at_ += 3;
+        if (peek().is("[") && peekAt(1).is("]")) { at_ += 2; name += "[]"; }
+        expect("(");
+        std::vector<ExprPtr> args;
+        parseArguments(args);
+        struct Outer {
+            std::vector<std::string> &stack; std::vector<std::string> was;
+            ~Outer() { stack = was; }
+        } outer{ namespaceStack_, namespaceStack_ };
+        namespaceStack_.clear();
+        if (overloadsOf(name) == nullptr)
+            src_.fail(qpos, "'::" + name + "' is not declared - include <new>");
+        const Signature sig = resolveOverload(name, args, qpos);
+        applyDefaults(sig, args, qpos);
+        return completeCall(name, sig.symbol, nullptr, sig.returns, sig.params, sig.variadic, qpos,
+                            std::move(args));
+    }
     if (peek().is("::"))
-        src_.fail(peek().pos, "a name qualified with '::' alone is not "
-                              "supported yet in an expression - as a type, "
-                              "'::Lexer *p;' works. Write the name without it "
-                              "where nothing shadows it");
+        src_.fail(peek().pos, "'::' here is followed by no name this compiler can look up in the "
+                              "global namespace - a destructor is not supported yet");
 
     // ...and `N::S::n` is not this: the chain reaches a *class*, and what follows a
     // class is a member, which the branch below already knows how to find. Asked
@@ -1454,9 +1624,14 @@ ExprPtr Parser::primary(Program *program) {
             scope += "::" + peek().text;
             at_ += 2;
         }
-        // **`std::copy(a, b, c)` - a function template named qualified.**
-        if (peek().kind == TokenKind::Ident && isTemplateName(peek().text, true))
-            return templateCall(program, scope);
+        // **`std::copy(a, b, c)` - a function template named qualified**, one the namespace itself declares.
+        if (peek().kind == TokenKind::Ident && isTemplateName(peek().text, true)) {
+            const auto t = templates_.find(peek().text);
+            std::string reachedIn;
+            if ((t != templates_.end() && t->second.isClass) ||
+                !templatesNamed(peek().text, scope, &reachedIn).empty())
+                return templateCall(program, scope);
+        }
 
         std::string full = scope + "::" + expectIdent("a name");
         // **A member of N's unnamed namespace is reached as `N::x`** -
@@ -1523,6 +1698,7 @@ ExprPtr Parser::primary(Program *program) {
         // and has an enumerator of that name.
         std::string e = peek().text;
         const EnumConst *found = nullptr;
+        const Type *foundIn = nullptr;
         std::size_t took = 0;
         for (std::size_t k = 1; peekAt(k).is("::") &&
                                 peekAt(k + 1).kind == TokenKind::Ident; k += 2) {
@@ -1531,11 +1707,13 @@ ExprPtr Parser::primary(Program *program) {
                 if (cls->isStructOrUnion())
                     if (const EnumConst *c = enumInClass(cls, component)) {
                         found = c;
+                        foundIn = cls;
                         took = k + 2;
                     }
             e += "::" + component;
         }
         if (found != nullptr) {
+            if (!currentFunction_.empty()) checkMemberEnumAccess(foundIn, peekAt(took - 1).text, peekAt(took - 1).pos);
             at_ += took;
             ExprPtr n(new Num(found->value));
             n->setType(found->type != nullptr ? found->type : types_.intType());
@@ -1701,6 +1879,8 @@ ExprPtr Parser::primary(Program *program) {
         if (l == nullptr && boundValueParams_.count(name) != 0 && !peekAt(1).is("::"))
             if (const EnumConst *e = findEnum(name)) {
                 at_++;
+                if (e->paramType != nullptr && takesAddress(e->paramType))
+                    return addressExpression(e->value, e->paramType, pos);
                 ExprPtr n(new Num(e->value));
                 n->setType(e->type != nullptr ? e->type : types_.intType());
                 return n;
@@ -1757,10 +1937,13 @@ ExprPtr Parser::primary(Program *program) {
 
         // **A member function template called by its bare name** is `this->init(...)` too, and it
         // has no declaration to find until it is instantiated, so it is asked for as a template.
+        // In the class's own body too - a static member's initialiser, the sizeof idiom's `sizeof(test<T>(0))`.
+        const Type *enclosingClass = currentClass_ != nullptr ? currentClass_
+                                   : classStack_.empty() ? nullptr : classStack_.back();
         if ((peekAt(1).is("(") || peekAt(1).is("<")) && !callsThroughObject &&
-            currentClass_ != nullptr && l == nullptr && g == nullptr) {
-            const Type *owner = currentClass_->unqualified();
-            const Local *self = findLocal("this");
+            enclosingClass != nullptr && l == nullptr && g == nullptr) {
+            const Type *owner = enclosingClass->unqualified();
+            const Local *self = currentClass_ != nullptr ? findLocal("this") : nullptr;
             // Beside an ordinary member of the name, overload resolution below ranks the two.
             // A specialization of the template already made is listed under the name too, and is not one.
             bool alone = peekAt(1).is("<");
@@ -1790,6 +1973,7 @@ ExprPtr Parser::primary(Program *program) {
         bool inherited = false;
         for (const Type *c = currentClass_; c != nullptr; c = c->base()) {
             if (name == localOf(c->tag())) break;
+            if (c != currentClass_ && inDependentBase(currentClass_, c)) break;
             if (overloadsOf(c->tag() + "::" + name) != nullptr) { inherited = true; break; }
         }
         // **A static member called by its bare name, from inside the class.**
@@ -1798,7 +1982,11 @@ ExprPtr Parser::primary(Program *program) {
         if (peekAt(1).is("(") && !callsThroughObject && currentClass_ != nullptr &&
             l == nullptr && g == nullptr) {
             std::string key;
-            const Type *roots[2] = { currentClass_, lambdaScope() };
+            // Then the classes around it, [basic.lookup.unqual]/7, as the static data members above.
+            std::vector<const Type *> roots(1, currentClass_);
+            if (!inherited)
+                for (const Type *e = currentClass_->enclosing(); e != nullptr; e = e->enclosing()) roots.push_back(e);
+            roots.push_back(lambdaScope());
             for (const Type *root : roots)
                 for (const Type *c = root; c != nullptr && key.empty(); c = c->base())
                     if (hasStaticMemberNamed(c->tag() + "::" + name))
@@ -1918,7 +2106,16 @@ ExprPtr Parser::primary(Program *program) {
         // Class scope.
         if (currentClass_ != nullptr) {
             const Local *self = findLocal("this");
-            if (const Member *m = currentClass_->findMember(name)) {
+            const Member *m = currentClass_->findMember(name);
+            // [temp.dep]/3: a base that depends on a template parameter is not looked in.
+            if (m != nullptr && m->declaredIn != nullptr && inDependentBase(currentClass_, m->declaredIn)) {
+                if (g == nullptr)
+                    src_.fail(pos, "'" + name + "' is a member of '" + m->declaredIn->describe() + "', a base "
+                                   "that depends on a template parameter, and [temp.dep]/3 leaves such a base "
+                                   "out of unqualified lookup - write 'this->" + name + "'");
+                m = nullptr;
+            }
+            if (m != nullptr) {
                 if (m->ambiguous) refuseAmbiguousMember(currentClass_, *m, pos);
                 // **[class.access]/1 applies however the member is spelled**, and this path checked
                 // nothing: `x` inside a derived class reached a private member of its base where
@@ -1946,9 +2143,7 @@ ExprPtr Parser::primary(Program *program) {
                 // The same two rules as the `.` and `->` paths: a const
                 // object does not reach through a reference member, and a
                 // reference member is read by dereferencing what it holds.
-                acc->setType(held->isConst() && !m->type->isReference() &&
-                             !m->isMutable
-                                 ? types_.withConst(m->type) : m->type);
+                acc->setType(memberTypeIn(held, *m));
                 return useReference(std::move(acc));
             }
 
@@ -1967,9 +2162,7 @@ ExprPtr Parser::primary(Program *program) {
                     // The same two rules the three ordinary member paths
                     // follow, which this one did not: a const object reaches
                     // its members as const, a reference or `mutable` apart.
-                    acc->setType(of->isConst() && !om->type->isReference() &&
-                                 !om->isMutable
-                                     ? types_.withConst(om->type) : om->type);
+                    acc->setType(memberTypeIn(of, *om));
                     return useReference(std::move(acc));
                 }
             }
@@ -2157,13 +2350,29 @@ const Type *Parser::decltypeSpecifier() {
     if (t == nullptr)
         src_.fail(pos, "'decltype' needs an expression with a type, and this "
                        "one has none");
-    if (namePath) return t;
     // **An unparenthesised member access answers the member's declared type** whatever its object -
     // `decltype(T().v)` is `double` as `decltype(s.v)` is, though the object is a temporary.
+    // **Declared, so without the const a const object gives the access** - `decltype(cs.m)` is
+    // `int` (review of 1.30, W5: it answered `const int`, the name path included). The record is
+    // the one the access was built from where the name and offset both match it; otherwise the
+    // access's own type.
     if (to >= from + 3 && tokens_[to - 1].kind == TokenKind::Ident &&
-        (tokens_[to - 2].is(".") || tokens_[to - 2].is("->")) &&
-        dynamic_cast<const MemberAccess *>(e.get()) != nullptr)
-        return t;
+        (tokens_[to - 2].is(".") || tokens_[to - 2].is("->"))) {
+        // A reference member is read through the address it holds, `*(s.r)`.
+        const Expr *access = e.get();
+        const Unary *through = dynamic_cast<const Unary *>(access);
+        if (through != nullptr && through->op() == '*') access = &through->operand();
+        if (const MemberAccess *ma = dynamic_cast<const MemberAccess *>(access)) {
+            const Type *cls = ma->object().type() != nullptr ? ma->object().type()->unqualified() : nullptr;
+            if (cls != nullptr && cls->isStructOrUnion())
+                if (const Member *m = cls->findMember(ma->name()))
+                    if (!m->ambiguous && m->offset == ma->offset() && m->type != nullptr &&
+                        (access == e.get() || m->type->isReference()))
+                        return m->type;
+            if (access == e.get()) return t;
+        }
+    }
+    if (namePath) return t;
     // [dcl.type.simple]/4: an xvalue answers `T &&`, an lvalue `T &`, a prvalue `T` - without cv where
     // T is not a class or an array, [expr]/6. A temporary is marked an xvalue so it binds to `T &&` and
     // is a prvalue all the same, so the prvalue mark is asked first; the xvalue mark before the lvalue.
@@ -2187,6 +2396,26 @@ ExprPtr Parser::useReference(ExprPtr e) {
     ExprPtr deref(new Unary('*', std::move(e)));
     deref->setType(referent);
     return deref;
+}
+
+// [expr.ref]/4: a member of a cv object has the cv-union of the object's and its own - const unless it
+// is mutable, volatile whatever it is; a reference member is its referent's type alone.
+const Type *Parser::memberTypeIn(const Type *obj, const Member &m) const {
+    if (m.type->isReference()) return m.type;
+    const Type *t = obj->isConst() && !m.isMutable ? types_.withConst(m.type) : m.type;
+    return obj->isVolatile() ? types_.withVolatile(t) : t;
+}
+// [dcl.init.ref]/5: a reference binds an lvalue whose cv it keeps or adds to, never one it would drop.
+void Parser::refuseDroppedQualifier(const Type *it, const Type *referent, const Type *ref,
+                                    const std::string &what, std::size_t pos) const {
+    if (it->isConst() && !referent->isConst())
+        src_.fail(pos, what + " is '" + ref->describe() + "' and this is '" +
+                       it->describe() + "' - a reference that can write "
+                       "cannot bind to a const");
+    if (it->isVolatile() && !referent->isVolatile())
+        src_.fail(pos, what + " is '" + ref->describe() + "' and this is '" +
+                       it->describe() + "' - a reference to a non-volatile type "
+                       "cannot bind to a volatile object, whose every access is the program's");
 }
 
 // What is stored in a reference is an address, so binding one is taking the
@@ -2245,8 +2474,12 @@ ExprPtr Parser::bindReference(const Type *ref, ExprPtr init, std::size_t pos,
 
     // **An rvalue reference takes exactly what an lvalue one will not.**
     // [dcl.init.ref]: `T &&` binds to a value with nowhere to live and refuses an
-    // object that has somewhere - which is how a move takes an object apart.
-    if (ref->isRValueReference() && isLvalue(*init))
+    // object that has somewhere - which is how a move takes an object apart. An lvalue
+    // of another type that converts makes such a value first, and that one binds (/5).
+    const bool sameKind = it->unqualified() == referent->unqualified() ||
+                          accessibleBaseOffset(it, referent) > -1 ||
+                          (it->isArray() && referent->isArray() && it->sameArrayShape(referent));
+    if (ref->isRValueReference() && isLvalue(*init) && sameKind)
         src_.fail(pos, what + " is '" + ref->describe() + "' and this is an "
                        "object with an address of its own - an rvalue "
                        "reference binds only to a value that has none, so "
@@ -2254,13 +2487,28 @@ ExprPtr Parser::bindReference(const Type *ref, ExprPtr init, std::size_t pos,
 
     // The direct binding: an addressable glvalue of exactly the type named,
     // which the reference then *is*.
+    // **A string literal is an lvalue array** ([expr.prim.general]/1), bound where it lies: `const char (&)[3]`
+    // from "cd" holds the literal's own address, which its decayed first element already is.
+    if (referent->isArray() && it->isArray() && dynamic_cast<const StrLit *>(init.get()) != nullptr &&
+        it->sameArrayShape(referent) &&
+        it->innermostElement()->unqualified() == referent->innermostElement()->unqualified() &&
+        referent->innermostElement()->isConst() && !ref->isRValueReference()) {
+        ExprPtr first = decay(std::move(init));
+        ExprPtr at(new Cast(types_.pointerTo(referent), std::move(first)));
+        at->setType(types_.pointerTo(referent));
+        return at;
+    }
+
+    // [dcl.init.ref]/5: an lvalue reference to other than a non-volatile const binds an lvalue and nothing else.
+    if (!ref->isRValueReference() && (!referent->isConst() || referent->isVolatile()) && sameKind &&
+        (init->isXvalue() || init->declCategory() == Expr::Category::Prvalue))
+        src_.fail(pos, what + " is '" + ref->describe() + "' and this is an rvalue - an lvalue reference "
+                       "that is not to a non-volatile const binds an lvalue alone, [dcl.init.ref]/5");
+
     if (isGlvalue(*init) && noAddressBecause == nullptr &&
         it->unqualified() != referent->unqualified() &&
         accessibleBaseOffset(it, referent) > -1 && !ref->isRValueReference()) {
-        if (it->isConst() && !referent->isConst())
-            src_.fail(pos, what + " is '" + ref->describe() + "' and this is '" +
-                           it->describe() + "' - a reference that can write "
-                           "cannot bind to a const");
+        refuseDroppedQualifier(it, referent, ref, what, pos);
         ExprPtr addr(new Unary('&', std::move(init)));
         addr->setType(types_.pointerTo(it->unqualified()));
         return convert(std::move(addr), types_.pointerTo(referent));
@@ -2277,18 +2525,18 @@ ExprPtr Parser::bindReference(const Type *ref, ExprPtr init, std::size_t pos,
 
     if (isGlvalue(*init) && noAddressBecause == nullptr &&
         (it->unqualified() == referent->unqualified() || arrayBind)) {
-        if (!arrayBind && it->isConst() && !referent->isConst())
-            src_.fail(pos, what + " is '" + ref->describe() + "' and this is '" +
-                           it->describe() + "' - a reference that can write "
-                           "cannot bind to a const");
+        if (!arrayBind) refuseDroppedQualifier(it, referent, ref, what, pos);
         ExprPtr addr(new Unary('&', std::move(init)));
         addr->setType(types_.pointerTo(referent));
         return addr;
     }
 
     // Anything else needs a temporary to bind to, and only a const reference may
-    // have one - [dcl.init.ref]/5. The refusals are separate: a type that does not
-    // match, and a value with no address. An rvalue reference is allowed one.
+    // have one - [dcl.init.ref]/5, a non-volatile one. The refusals are separate: a type
+    // that does not match, and a value with no address. An rvalue reference is allowed one.
+    if (referent->isConst() && referent->isVolatile() && !ref->isRValueReference())
+        src_.fail(pos, what + " is '" + ref->describe() + "', and this would have to be a temporary - "
+                       "[dcl.init.ref]/5 binds one to a reference to non-volatile const alone");
     if (!referent->isConst() && !ref->isRValueReference()) {
         if (noAddressBecause != nullptr)
             src_.fail(pos, "'" + noAddressName + "' is " + noAddressBecause +
@@ -2414,11 +2662,16 @@ bool Parser::classScopeDeclares(const std::string &name) {
                              lambdaScope() };
     for (const Type *root : roots) {
         if (root == nullptr) continue;
-        if (root->findMember(name) != nullptr || root->findStaticMember(name) != nullptr)
+        // Not through a base that depends on a template parameter - [temp.dep]/3.
+        const Member *m = root->findMember(name);
+        if (m != nullptr && m->declaredIn != nullptr && inDependentBase(root, m->declaredIn)) m = nullptr;
+        if (m != nullptr || root->findStaticMember(name) != nullptr)
             return true;
-        for (const Type *c = root; c != nullptr; c = c->base())
+        for (const Type *c = root; c != nullptr; c = c->base()) {
+            if (c != root && inDependentBase(root, c)) break;
             if (name != localOf(c->tag()) && overloadsOf(c->tag() + "::" + name) != nullptr)
                 return true;
+        }
     }
     return findClassEnum(name) != nullptr;
 }
@@ -2494,6 +2747,41 @@ const Type *Parser::qualifiedMemberScope(const Type *obj, std::string &name,
                        "of it, so '" + q + "::" + name + "' is not one of its "
                        "members");
     return cls;
+}
+
+// The offset of `base` in `derived` where every step to it is a direct non-virtual base, or -1.
+static int fixedBaseOffset(const Type *derived, const Type *base) {
+    const Type *d = derived->unqualified();
+    if (d == base->unqualified()) return 0;
+    for (const Type::BaseSpec &s : d->bases()) {
+        if (!s.direct || s.isVirtual) continue;
+        const int deeper = fixedBaseOffset(s.type, base);
+        if (deeper >= 0) return s.offset + deeper;
+    }
+    return -1;
+}
+
+// **`d.L::v` names L's member in d's L subobject** ([class.qual], [expr.ref]/4), and `m` is
+// L's own record, its offsets L's. Reached by a constant offset, the object stays as it is and
+// *offset says how far L is; otherwise - a virtual step on the way, or a member of L's own
+// virtual base, which L's vbptr or vptr finds and d's layout does not (review of 1.30, W2:
+// `d.R::v` read garbage) - the object becomes the L subobject by the derived-to-base
+// conversion, which knows every path. The access was asked of the name already.
+ExprPtr Parser::qualifiedSubobject(ExprPtr object, const Type *obj, const Type *base,
+                                   const Member &m, int *offset) {
+    *offset = 0;
+    if (base == nullptr || base->unqualified() == obj->unqualified()) return object;
+    const int fixed = fixedBaseOffset(obj, base);
+    if (fixed >= 0 && m.inVirtualBase == nullptr) {
+        *offset = fixed;
+        return object;
+    }
+    const Type *to = obj->isConst() ? types_.withConst(base->unqualified()) : base->unqualified();
+    ExprPtr at(new Unary('&', std::move(object)));
+    at->setType(types_.pointerTo(obj));
+    ExprPtr there(new Unary('*', convert(std::move(at), types_.pointerTo(to))));
+    there->setType(to);
+    return there;
 }
 
 // [class.dtor]/14 and [expr.pseudo]: the object is the pointee for `->` and
@@ -2629,6 +2917,28 @@ ExprPtr Parser::postfix() {
         // candidate set is the class's own and memberCall's resolution is it.
         if (peek().is("(") && n->type()->unqualified()->isStructOrUnion()) {
             const Type *self = n->type();
+            // **[over.call.object]/2: the surrogate call** - a class with no `operator()` of its own that
+            // converts to a pointer or a reference to a function is called through what it converts to
+            // (R5). The conversion is called here; the `(` is read below as a call through the pointer.
+            if (!self->isMemberFunctionPointer() && findMemberOwner(self->unqualified(), "operator()") == nullptr) {
+                const Signature *surrogate = nullptr;
+                bool several = false;
+                for (const Type *c = self->unqualified(); c != nullptr; c = c->base())
+                    for (std::size_t k = 0; k < functions_.size(); k++) {
+                        const Signature &f = functions_[k];
+                        if (f.owner != c->tag() || !isConversionName(f.name) || !f.params.empty() || f.isExplicit)
+                            continue;
+                        const Type *gives = f.returns->isReference() ? f.returns->referent() : f.returns;
+                        if (!gives->isFunctionPointer() && !gives->isFunction()) continue;
+                        if (surrogate != nullptr) several = true;
+                        surrogate = &f;
+                    }
+                if (surrogate != nullptr && !several) {
+                    const std::string conv = surrogate->name;
+                    n = memberCallWith(std::move(n), self, conv, pos, std::vector<ExprPtr>());
+                    continue;
+                }
+            }
             at_++;
             n = memberCall(std::move(n), self, "operator()", pos);
             continue;
@@ -2658,7 +2968,10 @@ ExprPtr Parser::postfix() {
                 for (std::size_t i = 0; i < written.size(); i++)
                     args.push_back(std::move(written[i]));
                 std::vector<const Type *> full;
-                full.push_back(types_.pointerTo(types_.get(Kind::Void)));
+                const Type *thisAs = types_.get(Kind::Void);
+                if (fn->cvThis() & Type::kThisConst) thisAs = types_.withConst(thisAs);
+                if (fn->cvThis() & Type::kThisVolatile) thisAs = types_.withVolatile(thisAs);
+                full.push_back(types_.pointerTo(thisAs));
                 for (std::size_t i = 0; i < fn->params().size(); i++)
                     full.push_back(fn->params()[i]);
                 // A call through a member function pointer is a member call, and the
@@ -2760,8 +3073,6 @@ ExprPtr Parser::postfix() {
             consume("template");
             std::string name = declaredName("a member name");
             const Type *scope = qualifiedMemberScope(obj, name, pos);
-            const int adjust = scope == nullptr || scope == obj->unqualified()
-                             ? 0 : publicBaseOffset(obj, scope);
             const Type *in = scope != nullptr ? scope : obj;
             // **A member function template**, `p->head<3>()` - told from `<` as
             // a comparison only because the member is a registered template.
@@ -2803,12 +3114,15 @@ ExprPtr Parser::postfix() {
             if (!m) src_.fail(pos, "'" + in->describe() + "' has no member '" + name + "'");
             if (m->ambiguous) refuseAmbiguousMember(in, *m, pos);
             checkAccessible(obj, *m, pos);
+            int adjust = 0;
+            n = qualifiedSubobject(std::move(n), obj, scope, *m, &adjust);
             // A member of a virtual base is not at a constant offset. The test
             // comes first because the call consumes the object: asking
             // unconditionally moved `n` away from every ordinary access too.
             if (m->inVirtualBase != nullptr) {
-                refuseVirtualBaseMember(obj, *m, name, pos);
-                if (ExprPtr viaVb = virtualBaseMember(std::move(n), obj, *m)) {
+                const Type *from = n->type();
+                refuseVirtualBaseMember(from, *m, name, pos);
+                if (ExprPtr viaVb = virtualBaseMember(std::move(n), from, *m)) {
                     n = std::move(viaVb);
                     continue;
                 }
@@ -2818,9 +3132,7 @@ ExprPtr Parser::postfix() {
             // A member reached through a const object is itself const - [expr.ref]
             // gives it the object's qualification. **But not a reference member's
             // referent**: [dcl.ref] stops the const at the reference itself.
-            acc->setType(obj->isConst() && !m->type->isReference() &&
-                         !m->isMutable
-                             ? types_.withConst(m->type) : m->type);
+            acc->setType(memberTypeIn(obj, *m));
             // A reference member holds an address, so reading one is a
             // dereference - the same `useReference` every mention of a
             // reference local already goes through.
@@ -2847,8 +3159,6 @@ ExprPtr Parser::postfix() {
             consume("template");
             std::string name = declaredName("a member name");
             const Type *scope = qualifiedMemberScope(obj, name, pos);
-            const int adjust = scope == nullptr || scope == obj->unqualified()
-                             ? 0 : publicBaseOffset(obj, scope);
             const Type *in = scope != nullptr ? scope : obj;
             // **A member function template**, `v.head<3>()`.
             if ((peek().is("<") || (peek().is("(") && !hasOrdinaryMember(obj, name))) &&
@@ -2889,28 +3199,29 @@ ExprPtr Parser::postfix() {
             if (!m) src_.fail(pos, "'" + in->describe() + "' has no member '" + name + "'");
             if (m->ambiguous) refuseAmbiguousMember(in, *m, pos);
             checkAccessible(obj, *m, pos);
-            // A member of a virtual base is not at a constant offset. The test
-            // comes first because the call consumes the object: asking
-            // unconditionally moved `n` away from every ordinary access too.
-            if (m->inVirtualBase != nullptr) {
-                refuseVirtualBaseMember(obj, *m, name, pos);
-                if (ExprPtr viaVb = virtualBaseMember(std::move(n), obj, *m)) {
-                    n = std::move(viaVb);
-                    continue;
-                }
-            }
             // [expr.ref]/4: a non-reference member of an rvalue object is an xvalue - `std::move(s).s`
             // and `make().s` bind `std::string &&` (1.27, 2026-10-21, review of 1.25, item 3: they
             // were lvalues, and `take(const std::string &)` took them).
             const bool objectIsRvalue = n->isXvalue() || !isLvalue(*n);
+            int adjust = 0;
+            n = qualifiedSubobject(std::move(n), obj, scope, *m, &adjust);
+            // A member of a virtual base is not at a constant offset. The test
+            // comes first because the call consumes the object: asking
+            // unconditionally moved `n` away from every ordinary access too.
+            if (m->inVirtualBase != nullptr) {
+                const Type *from = n->type();
+                refuseVirtualBaseMember(from, *m, name, pos);
+                if (ExprPtr viaVb = virtualBaseMember(std::move(n), from, *m)) {
+                    n = std::move(viaVb);
+                    continue;
+                }
+            }
             ExprPtr acc(new MemberAccess(std::move(n), name, m->offset + adjust,
                                          m->width, m->bitOffset));
             // A member reached through a const object is itself const - [expr.ref]
             // gives it the object's qualification. **But not a reference member's
             // referent**: [dcl.ref] stops the const at the reference itself.
-            acc->setType(obj->isConst() && !m->type->isReference() &&
-                         !m->isMutable
-                             ? types_.withConst(m->type) : m->type);
+            acc->setType(memberTypeIn(obj, *m));
             if (objectIsRvalue && !m->type->isReference()) acc->setXvalue();
             // A reference member holds an address, so reading one is a
             // dereference - the same `useReference` every mention of a
@@ -3040,6 +3351,23 @@ ExprPtr Parser::unary() {
                                                (s->access == Access::Private ? "private" : "protected"));
                             at_ += q + 1;
                             if (unevaluated_ == 0) usedStaticMembers_.insert(s->symbol);
+                            // With none written outside the class, the one cl lays down where it is used:
+                            // weak, the value the class gave it, and a later definition adding nothing.
+                            if (s->folded && unevaluated_ == 0 && !inClassConstexprStatics_.count(s->symbol)) {
+                                bool defined = false;
+                                for (const Global &g : current_->globals) defined = defined || g.symbol == s->symbol;
+                                if (!defined) {
+                                    GlobalPiece p;
+                                    p.offset = 0;
+                                    p.size = s->type->size(target_);
+                                    p.value = s->value;
+                                    current_->globals.push_back(Global{ cls->tag() + "::" + s->name, s->symbol, s->type,
+                                                                        std::vector<GlobalPiece>(1, p), true, false,
+                                                                        true });
+                                    current_->globals.back().isInline = true;
+                                    inClassConstexprStatics_.insert(s->symbol);
+                                }
+                            }
                             Var *sv = Var::global(cls->tag() + "::" + s->name);
                             sv->setSymbol(s->symbol);
                             ExprPtr object(sv);
@@ -3096,6 +3424,15 @@ ExprPtr Parser::unary() {
         ExprPtr n(new Unary('*', std::move(v)));
         n->setType(elem);
         return n;
+    }
+    // `::new` and `::delete` - [expr.new]/9, [expr.delete]/9: the global allocation functions, a class's
+    // own passed over (R27's `::new (buf) S(2)`).
+    if (peek().is("::") && (peekAt(1).is("new") || peekAt(1).is("delete"))) {
+        std::size_t pos = peek().pos;
+        const bool isNew = peekAt(1).is("new");
+        at_ += 2;
+        globalNewDelete_ = true;
+        return isNew ? newExpression(pos) : deleteExpression(pos);
     }
     if (peek().is("new")) {
         std::size_t pos = peek().pos;
@@ -3169,6 +3506,7 @@ ExprPtr Parser::unary() {
         const Type *measured = declarator(specifiers(&sc), true).type;
         expect(")");
         if (measured->isReference()) measured = measured->referent();
+        realizeMemberClass(measured, true);
         if (!measured->isComplete())
             src_.fail(pos, "alignof needs a complete type");
         ExprPtr n(new Num(static_cast<long long>(measured->align(target_))));
@@ -3190,19 +3528,27 @@ ExprPtr Parser::unary() {
             // slot for destruction and no object is ever built in it.
             Discarded held(this);
             Unevaluated unevaluated(this);
+            std::size_t first = at_;
+            while (tokens_[first].is("(")) first++;
             ExprPtr operand = unary();
             if (const MemberAccess *m = dynamic_cast<const MemberAccess *>(operand.get()))
                 if (m->isBitField())
                     src_.fail(pos, "sizeof cannot be applied to '" + m->name() +
                                    "', which is a bit-field");
+            // [expr.sizeof]/1: a function designator is no operand - `sizeof(&f)` is the pointer's.
+            if (!tokens_[first].is("&") && functionDesignated(*operand) != nullptr)
+                src_.fail(pos, "sizeof cannot be applied to a function - [expr.sizeof]/1");
             measured = operand->type();
         }
+        if (measured->isFunction())
+            src_.fail(pos, "sizeof cannot be applied to a function type - [expr.sizeof]/1");
         // **A dependent `sizeof` outside a template argument or a `decltype`** - an array bound, a
         // `noexcept` - is the one the expression reader is not reached from.
         if (patternOnly_ && (measured->kind() == Kind::TemplateParam ||
                              measured->kind() == Kind::DependentMember))
             src_.fail(pos, "'sizeof' of a template parameter is not supported yet in this place "
                            "of a signature - in a template argument or a 'decltype' it is read");
+        realizeMemberClass(measured, true);
         if (!measured->isComplete())
             src_.fail(pos, "sizeof needs a complete type");
         ExprPtr n(new Num(static_cast<long long>(measured->size(target_))));

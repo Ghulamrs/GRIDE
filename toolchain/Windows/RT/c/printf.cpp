@@ -1,6 +1,7 @@
-// Spec: ISO C 7.19.6.3 - printf is fprintf to stdout. RTS6x's, with the stream locked for the call (StreamWin.h).
+// Spec: ISO C 7.19.6.3 - printf is fprintf to stdout. The format as the Microsoft runtime reads it
+// (fmt\Printer.h), with the stream locked for the call (StreamWin.h).
 #include <stdarg.h>
-#include "stdio/Formatter.h"
+#include "fmt/Printer.h"
 #include "StreamWin.h"
 
 extern "C" int printf(const char *format, ...)
@@ -9,9 +10,7 @@ extern "C" int printf(const char *format, ...)
     va_start(args, format);
     FILE *stream = &_ftable[1];
     bool held = grt::lock(stream);
-    rts6x::Stream to(stream);
-    rts6x::OutputSink out(to.writeDescriptor());
-    int n = to.wrote(rts6x::Formatter(out, &args).run(rts6x::FormatText(format)));
+    int n = grt::printToStream(stream, format, &args);
     grt::unlock(stream, held);
     va_end(args);
     return n;

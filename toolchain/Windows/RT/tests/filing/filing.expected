@@ -111,6 +111,58 @@ getcwd(0, 0): the directory errno 0
 getcwd(0, 1): the directory errno 0
 getcwd(0, 4096): the directory errno 0
 exit 0
+== access, mkdir, rmdir, chdir
+access("file.txt", 0): 0 errno 0
+access("file.txt", 2): 0 errno 0
+access("file.txt", 4): 0 errno 0
+access("file.txt", 6): 0 errno 0
+access("readonly.txt", 0): 0 errno 0
+access("readonly.txt", 2): -1 errno 13
+access("readonly.txt", 4): 0 errno 0
+access("readonly.txt", 6): -1 errno 13
+access("sub", 0): 0 errno 0
+access("sub", 2): 0 errno 0
+access("sub", 4): 0 errno 0
+access("sub", 6): 0 errno 0
+access("missing.txt", 0): -1 errno 2
+access("missing.txt", 2): -1 errno 2
+access("missing.txt", 4): -1 errno 2
+access("missing.txt", 6): -1 errno 2
+access("nodir/x", 0): -1 errno 2
+access("nodir/x", 2): -1 errno 2
+access("nodir/x", 4): -1 errno 2
+access("nodir/x", 6): -1 errno 2
+access("", 0): -1 errno 2
+access("", 2): -1 errno 2
+access("", 4): -1 errno 2
+access("", 6): -1 errno 2
+access("NUL", 0): -1 errno 22
+access("NUL", 2): -1 errno 22
+access("NUL", 4): -1 errno 22
+access("NUL", 6): -1 errno 22
+mkdir("made"): 0 errno 0
+mkdir("made"): -1 errno 17
+mkdir("nodir/x"): -1 errno 2
+mkdir(""): -1 errno 2
+mkdir("made/inner"): 0 errno 0
+mkdir(NULL): -1 errno 2
+rmdir("made"): -1 errno 41
+rmdir("made/inner"): 0 errno 0
+rmdir("made"): 0 errno 0
+rmdir("made"): -1 errno 2
+rmdir("sub"): -1 errno 41
+rmdir("file.txt"): -1 errno 22
+rmdir(""): -1 errno 2
+rmdir("nodir/x"): -1 errno 2
+rmdir(NULL): -1 errno 2
+chdir("sub"): 0 errno 0, now sub
+chdir("missing"): -1 errno 2, now sub
+chdir("file.txt"): -1 errno 2, now sub
+chdir(""): -1 errno 22, now sub
+chdir(".."): 0 errno 0, now the directory
+chdir("./sub/"): 0 errno 0, now sub
+chdir(".."): 0 errno 0, now the directory
+exit 0
 == system: COMSPEC names a shell
 system(NULL): 1 errno 0
   [shell.exe] [/c] [one] [two] [7]

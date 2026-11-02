@@ -74,11 +74,6 @@ int closeStream(FILE *f, unsigned after)
     int wrote = flush(f);
     int closed = f->fd > 2 ? __grt_close(f->fd) : 0;
     if (f->flags & Stream::OwnBuffer) free(f->buf);
-    if (f->flags & Stream::Temporary) {
-        char name[24];
-        Stream::temporaryName(f->slot, name);
-        __grt_unlink(name);
-    }
     f->buf = f->pos = f->bufend = f->buff_stop = 0;
     f->flags = after;       // last: with 0, freeStream may hand the slot out from here on
     return wrote != 0 || closed < 0 ? EOF : 0;
@@ -106,14 +101,19 @@ void closeAll()
 
 namespace rts6x {
 
+// The Microsoft runtime's letters beside C's: D, the file removed when it is closed (_O_TEMPORARY), and C11's x, a
+// file "w" must create (_O_EXCL).
 bool Stream::parseMode(const char *mode, unsigned &host, unsigned &own)
 {
     bool update = false, binary = false;
+    unsigned more = 0;
     if (!mode[0]) return false;
     for (const char *p = mode + 1; *p; p++) {
         if (*p == '+') update = true;
         else if (*p == 'b') binary = true;
         else if (*p == 't') binary = false;
+        else if (*p == 'D') more |= 0x40;
+        else if (*p == 'x' && mode[0] == 'w') more |= 0x100;
         else return false;
     }
     switch (mode[0]) {
@@ -127,6 +127,7 @@ bool Stream::parseMode(const char *mode, unsigned &host, unsigned &own)
         own = Readable | Writable;
     }
     if (binary) host |= CioChannel::Binary;
+    host |= more;
     return true;
 }
 
@@ -157,20 +158,6 @@ int Stream::close()
 {
     grt::valid(f_);
     return grt::closeStream(f_, 0);
-}
-
-void Stream::temporaryName(int slot, char *name)
-{
-    const char *stem = "grt-tmp";
-    int n = 0;
-    while (stem[n]) {
-        name[n] = stem[n];
-        n++;
-    }
-    name[n++] = (char)('0' + slot / 100 % 10);
-    name[n++] = (char)('0' + slot / 10 % 10);
-    name[n++] = (char)('0' + slot % 10);
-    name[n] = 0;
 }
 
 }  // namespace rts6x

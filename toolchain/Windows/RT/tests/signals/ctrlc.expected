@@ -1,0 +1,4 @@
+stderr: sending
+stderr: seen 2, then SIG_DFL
+stderr: sending with SIG_DFL
+exit -1073741510

@@ -160,8 +160,9 @@ protected:
     // Write -2 into the runtime's scratch word.
     virtual void storeUnwindHelp(int slot) { (void)slot; }
 
-    // FH3's scratch word set to -2 before the body's first call; see Walker.cpp.
-    void storeUnwindHelpAtEntry(const Stmt &body);
+    // FH3's scratch word set to -2 before the body's first call; see Walker.cpp. `frame` is the function's
+    // own where it carries one with no `try` (Function::msUnwindHelp).
+    void storeUnwindHelpAtEntry(const Stmt &body, int frame = 0);
 
     // A cleanup funclet is opened the same way and closed differently.
     virtual void endCleanupFunclet() {}
@@ -170,11 +171,18 @@ protected:
     // `pos` is where the handler is written (the `catch`), the line its entry is named by under -g; `number` counts the function's funclets from 1 (DwarfBlock::funclet); `cleanup` tells a destructor funclet from a catch (1.29).
     virtual std::string beginFunclet(std::size_t pos, int number, bool cleanup) { (void)pos; (void)number; (void)cleanup; return std::string(); }
     // The one door to beginFunclet: numbers the funclet and marks the blocks opened inside it as its.
+    // A funclet opened inside another - a handler's own `try` or cleanup - hands it back when it leaves.
     std::string openFunclet(std::size_t pos, bool cleanup) {
+        outerFunclets_.push_back(funcletNo_);
         funcletNo_ = ++funcletCount_;
         return beginFunclet(pos, funcletNo_, cleanup);
     }
-    void leaveFunclet() { funcletNo_ = 0; }
+    void leaveFunclet() {
+        funcletsLifted_.push_back(funcletNo_);
+        funcletNo_ = outerFunclets_.back();
+        outerFunclets_.pop_back();
+    }
+    bool inFuncletBody() const { return funcletNo_ != 0; }
     // Leave the handler funclet early, the runtime continuing at `label`.
     virtual void funcletLeave(const std::string &label) { (void)label; }
     virtual void endFunclet(const std::string &resume) { (void)resume; }
@@ -197,16 +205,20 @@ protected:
         int tryLow = 0, tryHigh = 0, catchHigh = 0;
         std::vector<MsHandlerRow> handlers;
     };
-    struct MsIpRow { std::string label; int state; };
+    // `funclet` is the one whose code the label is in (0 the function's own); `entry` marks a funclet's
+    // first row, whose label is its symbol.
+    struct MsIpRow { std::string label; int state; int funclet = 0; bool entry = false; };
     const std::vector<MsState> &msStates() const { return msStates_; }
     const std::vector<MsTryBlock> &msTryBlocks() const { return msTryBlocks_; }
-    const std::vector<MsIpRow> &msIpRows() const { return msIpRows_; }
-    const std::vector<MsIpRow> &msFuncletRows() const { return msFuncletRows_; }
+    // **The rows in address order**: the body's as walked, then each funclet's in the order it was
+    // lifted out - an inner one before the handler it is written in.
+    std::vector<MsIpRow> msIpTable() const;
     int msUnwindHelpSlot() const { return msUnwindHelpSlot_; }
     void clearMsTries() {
         msStates_.clear(); msTryBlocks_.clear(); msIpRows_.clear();
         msFuncletRows_.clear(); msCurState_ = -1; msUnwindHelpSlot_ = 0;
         funcletCount_ = funcletNo_ = 0;
+        outerFunclets_.clear(); funcletsLifted_.clear();
     }
 
     void resetBlocks(const std::vector<int> &parents);
@@ -235,6 +247,7 @@ private:
     int msUnwindHelpSlot_ = 0;
     // The funclets this function has opened, and the one being walked (0 outside any) - see openFunclet.
     int funcletCount_ = 0, funcletNo_ = 0;
+    std::vector<int> outerFunclets_, funcletsLifted_;
     const Source *lines_ = nullptr;
     std::string compDir_;
     std::vector<DwarfBlock> blocks_;

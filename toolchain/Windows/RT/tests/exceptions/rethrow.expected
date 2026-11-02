@@ -1,0 +1,35 @@
+shape 1
+  inner
+  outer b2
+shape 2
+  b2
+  a1
+shape 3
+  c1
+  a1
+shape 4
+  inner
+  b2
+  a1
+shape 5
+  b2
+  c1
+  a1
+shape 6
+  b2
+  c1
+  a1
+shape 7
+  b2
+  c1
+  a1
+shape 8
+  ~Noisy 3
+  ~Noisy 2
+  caught 3
+  ~Noisy 4
+  ~Noisy 1
+  caught again 3
+  ~Noisy 3
+end
+exit 0

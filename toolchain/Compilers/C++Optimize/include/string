@@ -5,15 +5,15 @@
 // program that reaches for the wrong one gets no error, so it is worth saying
 // twice.
 //
-// What is here is what a program actually calls, and no more: the tree this
-// library was written for uses seventeen members of this class, and each is
-// below. Up to fifteen units are held inside the object, as TI's library does, and
+// Up to fifteen units are held inside the object, as TI's library does, and
 // only a longer string owns a heap buffer; there is no allocator parameter,
-// because there is nowhere to put one that anything would read.
+// because there is nowhere to put one that anything would read -
+// `get_allocator()` answers std::allocator, which every allocator equals.
 //
-// **`basic_string<C>` since 2026-09-26**, so that `wstring` is the same class
-// over `wchar_t` rather than a second copy of it; there is no `char_traits`,
-// the three things a traits class would answer being the three helpers below.
+// **`basic_string<C>` since 2026-09-26**, so that `wstring`, `u16string` and
+// `u32string` are the same class over their unit rather than copies of it. The
+// class does not go through `char_traits`, the three things it would ask being
+// the three helpers below; the traits are here for the programs that ask them.
 //
 // **The class owns memory, which is why it defines all four of the special
 // members** rather than letting the compiler copy its bytes: two strings
@@ -23,11 +23,108 @@
 #define _CXX1_STRING
 
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cctype>     // as libstdc++'s <string> reaches it, so `isupper` is declared beside a string
+#include <initializer_list>
+#include <iosfwd>
+#include <__allocator>
+#include <__iterator_base>
 
 namespace std {
+
+// [char.traits.specializations]: the four units' traits - char's spelled out,
+// since it compares as unsigned char and goes to the C library, and the other
+// three from one template, comparing as their own unsigned values. int_type is
+// wide enough for every unit and eof(), which is -1 converted: cl's WEOF for
+// wchar_t on Windows, glibc's and Darwin's elsewhere. state_type stands in for
+// mbstate_t until <cwchar> is written.
+struct __cxx1_mbstate { int __count; unsigned int __value; };
+
+template <class C> struct __cxx1_int_type { typedef unsigned int type; };
+template <> struct __cxx1_int_type<char16_t> { typedef unsigned short type; };
+#if defined(_WIN32)
+template <> struct __cxx1_int_type<wchar_t> { typedef unsigned short type; };
+#elif defined(__APPLE__)
+template <> struct __cxx1_int_type<wchar_t> { typedef int type; };
+#endif
+
+template <class C> struct char_traits {
+    typedef C char_type;
+    typedef typename __cxx1_int_type<C>::type int_type;
+    typedef streamoff off_type;
+    typedef streampos pos_type;
+    typedef __cxx1_mbstate state_type;
+    static void assign(char_type &c1, const char_type &c2) { c1 = c2; }
+    static bool eq(char_type a, char_type b) { return a == b; }
+    static bool lt(char_type a, char_type b) { return a < b; }
+    static int compare(const char_type *a, const char_type *b, std::size_t n) {
+        for (std::size_t i = 0; i < n; i++)
+            if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
+        return 0;
+    }
+    static std::size_t length(const char_type *s) {
+        std::size_t n = 0;
+        while (s[n] != char_type()) n++;
+        return n;
+    }
+    static const char_type *find(const char_type *s, std::size_t n, const char_type &c) {
+        for (std::size_t i = 0; i < n; i++)
+            if (s[i] == c) return s + i;
+        return 0;
+    }
+    static char_type *move(char_type *to, const char_type *from, std::size_t n) {
+        if (n != 0) std::memmove(to, from, n * sizeof(char_type));
+        return to;
+    }
+    static char_type *copy(char_type *to, const char_type *from, std::size_t n) {
+        if (n != 0) std::memcpy(to, from, n * sizeof(char_type));
+        return to;
+    }
+    static char_type *assign(char_type *s, std::size_t n, char_type c) {
+        for (std::size_t i = 0; i < n; i++) s[i] = c;
+        return s;
+    }
+    static int_type not_eof(int_type c) { return c != eof() ? c : 0; }
+    static char_type to_char_type(int_type c) { return (char_type)c; }
+    static int_type to_int_type(char_type c) { return (int_type)c; }
+    static bool eq_int_type(int_type a, int_type b) { return a == b; }
+    static int_type eof() { return (int_type)-1; }
+};
+
+template <> struct char_traits<char> {
+    typedef char char_type;
+    typedef int int_type;
+    typedef streamoff off_type;
+    typedef streampos pos_type;
+    typedef __cxx1_mbstate state_type;
+    static void assign(char_type &c1, const char_type &c2) { c1 = c2; }
+    static bool eq(char_type a, char_type b) { return a == b; }
+    static bool lt(char_type a, char_type b) { return (unsigned char)a < (unsigned char)b; }
+    static int compare(const char_type *a, const char_type *b, std::size_t n) { return n == 0 ? 0 : std::memcmp(a, b, n); }
+    static std::size_t length(const char_type *s) { return std::strlen(s); }
+    static const char_type *find(const char_type *s, std::size_t n, const char_type &c) {
+        return n == 0 ? 0 : (const char_type *)std::memchr(s, (unsigned char)c, n);
+    }
+    static char_type *move(char_type *to, const char_type *from, std::size_t n) {
+        if (n != 0) std::memmove(to, from, n);
+        return to;
+    }
+    static char_type *copy(char_type *to, const char_type *from, std::size_t n) {
+        if (n != 0) std::memcpy(to, from, n);
+        return to;
+    }
+    static char_type *assign(char_type *s, std::size_t n, char_type c) {
+        if (n != 0) std::memset(s, (unsigned char)c, n);
+        return s;
+    }
+    static int_type not_eof(int_type c) { return c != eof() ? c : 0; }
+    static char_type to_char_type(int_type c) { return (char_type)c; }
+    static int_type to_int_type(char_type c) { return (unsigned char)c; }
+    static bool eq_int_type(int_type a, int_type b) { return a == b; }
+    static int_type eof() { return -1; }
+};
 
 // **`at` throws `out_of_range`, and `out_of_range` holds a `string`**, so the
 // class cannot be named here. What `at` calls is declared here and defined at
@@ -64,16 +161,35 @@ template <class C> inline bool __cxx1_holds(const C *wanted, C c) {
 template <class C>
 class basic_string {
 public:
-    typedef std::size_t size_type;
+    typedef char_traits<C> traits_type;
     typedef C value_type;
+    typedef allocator<C> allocator_type;
+    typedef std::size_t size_type;
+    typedef std::ptrdiff_t difference_type;
+    typedef C &reference;
+    typedef const C &const_reference;
+    typedef C *pointer;
+    typedef const C *const_pointer;
+    // An iterator is a pointer into the units, which is all [string.iterators] asks of one.
+    typedef C *iterator;
+    typedef const C *const_iterator;
+    typedef std::reverse_iterator<iterator> reverse_iterator;
+    typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
     // -1 as a size: "to the end", or "not found". Every function that takes a
     // length accepts it and every search returns it.
     static const size_type npos = (size_type)-1;
 
     basic_string() { init(0, 0); }
+    // [string.cons]'s initializer_list constructor is missing on purpose: cpp11
+    // builds a braced list of strings, `vector<string> v = {"a", "b"}`, through
+    // each element's own initializer_list constructor when it has one, and refuses
+    // the unbraced "a". Until it does not, `string({'a', 'b'})` is the (count,
+    // unit) constructor.
     basic_string(const C *s) { init(s, __cxx1_length(s)); }
     basic_string(const C *s, size_type n) { init(s, n); }
     basic_string(const basic_string &o) { init(o.p(), o.len_); }
+    // A move takes the source's insides and leaves it empty, as cl's does.
+    basic_string(basic_string &&o) noexcept { empty0(); swap(o); }
     basic_string(size_type n, C c) {
         empty0();
         reserve(n);
@@ -90,17 +206,23 @@ public:
         if (this != &o) assignFrom(o.p(), o.len_);
         return *this;
     }
+    basic_string &operator=(basic_string &&o) noexcept {
+        if (this != &o) { clear(); swap(o); }
+        return *this;
+    }
     basic_string &operator=(const C *s) {
         assignFrom(s, __cxx1_length(s));
         return *this;
     }
     basic_string &operator=(C c) { assignFrom(&c, 1); return *this; }
+    basic_string &operator=(initializer_list<C> il) { assignFrom(il.begin(), il.size()); return *this; }
 
     basic_string &operator+=(const basic_string &o) { return appendUnits(o.p(), o.len_); }
     basic_string &operator+=(const C *s) {
         return appendUnits(s, __cxx1_length(s));
     }
     basic_string &operator+=(C c) { return appendUnits(&c, 1); }
+    basic_string &operator+=(initializer_list<C> il) { return appendUnits(il.begin(), il.size()); }
 
     C &operator[](size_type i) { return p()[i]; }
     const C &operator[](size_type i) const { return p()[i]; }
@@ -140,6 +262,16 @@ public:
     C *end() { return p() + len_; }
     const C *begin() const { return p(); }
     const C *end() const { return p() + len_; }
+    const C *cbegin() const { return p(); }
+    const C *cend() const { return p() + len_; }
+    reverse_iterator rbegin() { return reverse_iterator(end()); }
+    reverse_iterator rend() { return reverse_iterator(begin()); }
+    const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
+    const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
+    const_reverse_iterator crbegin() const { return const_reverse_iterator(end()); }
+    const_reverse_iterator crend() const { return const_reverse_iterator(begin()); }
+
+    allocator_type get_allocator() const { return allocator_type(); }
 
     basic_string &append(const basic_string &o) { return appendUnits(o.p(), o.len_); }
     basic_string &append(const C *s) {
@@ -150,10 +282,29 @@ public:
         for (size_type i = 0; i < n; i++) appendUnits(&c, 1);
         return *this;
     }
+    basic_string &append(initializer_list<C> il) { return appendUnits(il.begin(), il.size()); }
 
     // An all-zero object is an empty string: `vector` assigns into `calloc`'d slots.
     void reserve(size_type n) { if (n > capacity()) grow(n, 0, 0); }
     size_type capacity() const { return heap_ != 0 ? cap_ : (size_type)small; }
+    // [string.capacity]: a request, and here a kept one - a string that fits
+    // inside the object goes back there, a longer one to a buffer its own size.
+    void shrink_to_fit() {
+        if (heap_ == 0 || cap_ == len_) return;
+        if (len_ <= (size_type)small) {
+            C *h = heap_;
+            std::memcpy(small_, h, (len_ + 1) * sizeof(C));
+            heap_ = 0;
+            cap_ = 0;
+            std::free(h);
+            return;
+        }
+        C *fresh = (C *)std::malloc((len_ + 1) * sizeof(C));
+        std::memcpy(fresh, heap_, (len_ + 1) * sizeof(C));
+        std::free(heap_);
+        heap_ = fresh;
+        cap_ = len_;
+    }
 
     void resize(size_type n, C c) {
         if (n > len_) {
@@ -166,7 +317,7 @@ public:
     void resize(size_type n) { resize(n, 0); }
 
     basic_string substr(size_type pos, size_type n) const {
-        if (pos > len_) pos = len_;
+        if (pos > len_) std::__throw_out_of_range("string::substr");
         size_type have = len_ - pos;
         return basic_string(p() + pos, n > have ? have : n);
     }
@@ -316,6 +467,7 @@ public:
     basic_string &assign(const C *s, size_type n) { return replaceUnits(0, len_, s, n); }
     basic_string &assign(const C *s) { return replaceUnits(0, len_, s, __cxx1_length(s)); }
     basic_string &assign(size_type n, C c) { clear(); return append(n, c); }
+    basic_string &assign(initializer_list<C> il) { return replaceUnits(0, len_, il.begin(), il.size()); }
 
     basic_string &append(const basic_string &o, size_type pos, size_type n) {
         if (pos > o.len_) pos = o.len_;
@@ -451,6 +603,8 @@ private:
 
 typedef basic_string<char> string;
 typedef basic_string<wchar_t> wstring;
+typedef basic_string<char16_t> u16string;
+typedef basic_string<char32_t> u32string;
 
 // **The comparisons and the concatenations are non-members**, which is what
 // lets `"a" + s` work as well as `s + "a"`: a member would need the left side
@@ -483,6 +637,15 @@ template <class C> inline bool operator<(const basic_string<C> &a, const basic_s
 template <class C> inline bool operator>(const basic_string<C> &a, const basic_string<C> &b) { return a.compare(b) > 0; }
 template <class C> inline bool operator<=(const basic_string<C> &a, const basic_string<C> &b) { return a.compare(b) <= 0; }
 template <class C> inline bool operator>=(const basic_string<C> &a, const basic_string<C> &b) { return a.compare(b) >= 0; }
+// [string.op<] and its neighbours with a C string on either side.
+template <class C> inline bool operator<(const basic_string<C> &a, const C *b) { return a.compare(b) < 0; }
+template <class C> inline bool operator<(const C *a, const basic_string<C> &b) { return b.compare(a) > 0; }
+template <class C> inline bool operator>(const basic_string<C> &a, const C *b) { return a.compare(b) > 0; }
+template <class C> inline bool operator>(const C *a, const basic_string<C> &b) { return b.compare(a) < 0; }
+template <class C> inline bool operator<=(const basic_string<C> &a, const C *b) { return a.compare(b) <= 0; }
+template <class C> inline bool operator<=(const C *a, const basic_string<C> &b) { return b.compare(a) >= 0; }
+template <class C> inline bool operator>=(const basic_string<C> &a, const C *b) { return a.compare(b) >= 0; }
+template <class C> inline bool operator>=(const C *a, const basic_string<C> &b) { return b.compare(a) <= 0; }
 
 template <class C> inline basic_string<C> operator+(const basic_string<C> &a, const basic_string<C> &b) {
     basic_string<C> r(a);
@@ -532,18 +695,92 @@ inline string to_string(long long v) {
     return r;
 }
 
+inline string to_string(unsigned long long v) {
+    char buf[24];
+    int n = 0;
+    do {
+        buf[n] = (char)('0' + (int)(v % 10));
+        n++;
+        v /= 10;
+    } while (v != 0);
+    string r;
+    for (int i = n; i-- > 0; ) r += buf[i];
+    return r;
+}
 inline string to_string(int v) { return to_string((long long)v); }
 inline string to_string(long v) { return to_string((long long)v); }
-inline string to_string(unsigned v) { return to_string((long long)v); }
-inline string to_string(unsigned long v) { return to_string((long long)v); }
+inline string to_string(unsigned v) { return to_string((unsigned long long)v); }
+inline string to_string(unsigned long v) { return to_string((unsigned long long)v); }
 
-inline wstring to_wstring(long long v) {
-    string s = to_string(v);
+// The floating forms are `sprintf`'s "%f" and "%Lf", [string.conversions]/7 -
+// asked twice, since a double near DBL_MAX is three hundred digits before the point.
+inline string __cxx1_to_string(const char *how, long double v, bool isLong) {
+    char small[64];
+    int n = isLong ? std::snprintf(small, sizeof small, how, v) : std::snprintf(small, sizeof small, how, (double)v);
+    if (n < 0) return string();
+    if (n < (int)sizeof small) return string(small, (std::size_t)n);
+    string r((std::size_t)n + 1, '\0');
+    if (isLong) std::snprintf(&r[0], (std::size_t)n + 1, how, v);
+    else std::snprintf(&r[0], (std::size_t)n + 1, how, (double)v);
+    r.resize((std::size_t)n);
+    return r;
+}
+inline string to_string(float v) { return __cxx1_to_string("%f", v, false); }
+inline string to_string(double v) { return __cxx1_to_string("%f", v, false); }
+inline string to_string(long double v) { return __cxx1_to_string("%Lf", v, true); }
+
+// [string.conversions]/14: the same digits, widened.
+inline wstring __cxx1_widen(const string &s) {
     wstring r;
     for (std::size_t i = 0; i < s.size(); i++) r += (wchar_t)s[i];
     return r;
 }
-inline wstring to_wstring(int v) { return to_wstring((long long)v); }
+inline wstring to_wstring(int v) { return __cxx1_widen(to_string(v)); }
+inline wstring to_wstring(unsigned v) { return __cxx1_widen(to_string(v)); }
+inline wstring to_wstring(long v) { return __cxx1_widen(to_string(v)); }
+inline wstring to_wstring(unsigned long v) { return __cxx1_widen(to_string(v)); }
+inline wstring to_wstring(long long v) { return __cxx1_widen(to_string(v)); }
+inline wstring to_wstring(unsigned long long v) { return __cxx1_widen(to_string(v)); }
+inline wstring to_wstring(float v) { return __cxx1_widen(to_string(v)); }
+inline wstring to_wstring(double v) { return __cxx1_widen(to_string(v)); }
+inline wstring to_wstring(long double v) { return __cxx1_widen(to_string(v)); }
+
+// [basic.string.hash]: the four strings' hashes, FNV-1a over the bytes of the
+// units, as cl's own is. The primary template is <functional>'s; declaring it
+// here as well is what lets a program hash a string with <string> alone.
+template <class T> struct hash;
+template <class C> inline std::size_t __cxx1_hash_units(const basic_string<C> &s) {
+    const unsigned char *b = (const unsigned char *)s.data();
+    const std::size_t n = s.size() * sizeof(C);
+#if defined(__TMS320C6X__)
+    std::size_t h = 2166136261u;
+    for (std::size_t i = 0; i < n; i++) { h ^= b[i]; h *= 16777619u; }
+#else
+    unsigned long long h = 14695981039346656037ULL;
+    for (std::size_t i = 0; i < n; i++) { h ^= b[i]; h *= 1099511628211ULL; }
+#endif
+    return (std::size_t)h;
+}
+template <> struct hash<string> {
+    typedef string argument_type;
+    typedef std::size_t result_type;
+    std::size_t operator()(const string &s) const { return __cxx1_hash_units(s); }
+};
+template <> struct hash<wstring> {
+    typedef wstring argument_type;
+    typedef std::size_t result_type;
+    std::size_t operator()(const wstring &s) const { return __cxx1_hash_units(s); }
+};
+template <> struct hash<u16string> {
+    typedef u16string argument_type;
+    typedef std::size_t result_type;
+    std::size_t operator()(const u16string &s) const { return __cxx1_hash_units(s); }
+};
+template <> struct hash<u32string> {
+    typedef u32string argument_type;
+    typedef std::size_t result_type;
+    std::size_t operator()(const u32string &s) const { return __cxx1_hash_units(s); }
+};
 
 }  // namespace std
 

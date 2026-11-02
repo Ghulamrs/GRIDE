@@ -18,8 +18,12 @@ EXPORTS
     MoveFileExW
     GetLastError
     SetLastError
-    ; grt: directories and a file's status (win\getcwd.c, win\findfile.c, win\stat.c)
-    GetFileAttributesW
+    ; grt: directories and a file's status (win\getcwd.c, findfile.c, stat.c, access.c, directory.c)
+    SetCurrentDirectoryW
+    SetEnvironmentVariableW
+    CreateDirectoryW
+    RemoveDirectoryW
+    GetFileAttributesExW
     GetFileInformationByHandle
     PeekNamedPipe
     GetDriveTypeW
@@ -28,15 +32,24 @@ EXPORTS
     FindClose
     GetCurrentDirectoryW
     GetFullPathNameW
+    ; grt: Ctrl+C and Ctrl+Break for signal (win\control.c), and the event a program sends itself
+    SetConsoleCtrlHandler
+    GenerateConsoleCtrlEvent
+    ; grt: the temporary files' folder and names (win\temporary.c)
+    GetTempPathW
+    GetCurrentProcessId
     ; grt: system (win\system.c)
     CreateProcessW
     WaitForSingleObject
     GetExitCodeProcess
-    ; grt: the heap
+    ; grt: the heap, and memory by pages (the string tests' unreadable pages)
     GetProcessHeap
     HeapAlloc
     HeapReAlloc
     HeapFree
+    VirtualAlloc
+    VirtualProtect
+    VirtualFree
     ; grt: the command line, the environment, text in the ANSI code page
     GetCommandLineW
     GetEnvironmentStringsW
@@ -60,6 +73,15 @@ EXPORTS
     ; grt: CreateThread is grtwin's own (win\thread.c), over kernel32's: DATA, so that this library defines
     ; __imp_CreateThread alone and no thunk of the plain name competes with grt's
     CreateThread DATA
+    ; grt: C++ exceptions over structured ones (win\seh.c), and the runtime's block for each thread
+    RaiseException
+    RtlUnwindEx
+    RtlPcToFileHeader
+    RtlLookupFunctionEntry
+    SetUnhandledExceptionFilter
+    FlsAlloc
+    FlsGetValue
+    FlsSetValue
     ; grt: the end
     ExitProcess
     ; the compilers' <windows.h> (cpp11's lib\windows.h): threads, waits, locks, the clock

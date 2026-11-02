@@ -71,13 +71,16 @@ typedef __va_list_tag va_list[1];
  * end. */
 #define va_end(ap)         ((void)0)
 
-/* The four <stdio.h> functions that take a va_list, vsnprintf being C99's. They live here and not
+/* The <stdio.h> functions that take a va_list, vsnprintf and the vscanf three being C99's. They live here and not
  * there because that is where va_list is: a file that never asked for stdarg.h
  * has no use for them and should not have the name in scope. */
 int vprintf(const char *, va_list);
 int vfprintf(void *, const char *, va_list);
 int vsprintf(char *, const char *, va_list);
 int vsnprintf(char *, size_t, const char *, va_list);
+int vscanf(const char *, va_list);
+int vfscanf(void *, const char *, va_list);
+int vsscanf(const char *, const char *, va_list);
 
 
 }  // extern "C"

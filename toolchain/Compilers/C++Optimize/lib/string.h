@@ -27,9 +27,13 @@ size_t strlen(const char *);
 char *strcpy(char *, const char *);
 char *strncpy(char *, const char *, size_t);
 char *strcat(char *, const char *);
+char *strncat(char *, const char *, size_t);
 
 int strcmp(const char *, const char *);
 int strncmp(const char *, const char *, size_t);
+// The locale's collating order, and the transformation that makes strcmp follow it.
+int strcoll(const char *, const char *);
+size_t strxfrm(char *, const char *, size_t);
 
 void *memset(void *, int, size_t);
 void *memcpy(void *, const void *, size_t);

@@ -314,7 +314,7 @@ struct Chunk {
 
 class Encoder {
 public:
-    explicit Encoder(Chunk& c) : m_c(c) {}
+    explicit Encoder(Chunk& c) : m_c(c), m_pendingLine(-1) {}
 
     bool codeLine(const std::string& text, int line);
     bool dataLine(const std::string& text, int line);
@@ -353,6 +353,7 @@ private:
 
     Chunk&      m_c;
     std::string m_line;   // the assembly line being encoded, quoted by the error messages
+    int         m_pendingLine;   // a statement's .line at the function's start, recorded after its first instruction (-1: none)
 };
 
 int Encoder::condCode(const std::string& cc)
@@ -515,6 +516,7 @@ bool Encoder::codeLine(const std::string& raw, int line)
     size_t before = m_c.bytes.size();
     if (!instruction(mn, ops, line)) { m_c.bytes.resize(before); return false; }
     ++m_c.instructions;
+    if (m_pendingLine >= 0) { m_c.lines.push_back(std::make_pair(pos(), m_pendingLine)); m_pendingLine = -1; }
     return true;
 }
 
@@ -529,11 +531,16 @@ bool Encoder::unwindDirective(const std::string& mn, const std::vector<std::stri
         return true;
     }
     if (mn == ".line") {
-        // a ;@line marker of the listing: the source line of the code from this offset on (the last one at an offset wins)
+        // a ;@line marker of the listing: the source line of the code from this offset on (the last one at an offset
+        // wins). The function's own line (the first marker, at offset 0) keeps the first instruction when no prologue
+        // separates it from the first statement's marker, as cl's tables start a function at its own line: that
+        // statement's line is recorded after the first instruction instead
         long n = 0;
         if (opText.size() != 1 || !parseLong(opText[0], n) || n < 0) return fail(".line needs a line number", line);
-        if (!m_c.lines.empty() && m_c.lines.back().first == pos()) m_c.lines.back().second = static_cast<int>(n);
-        else m_c.lines.push_back(std::make_pair(pos(), static_cast<int>(n)));
+        if (!m_c.lines.empty() && m_c.lines.back().first == pos()) {
+            if (m_c.lines.size() == 1 && pos() == 0) m_pendingLine = static_cast<int>(n); else m_c.lines.back().second = static_cast<int>(n);
+        }
+        else { m_c.lines.push_back(std::make_pair(pos(), static_cast<int>(n))); m_pendingLine = -1; }
         return true;
     }
     if (m_c.prologEnd >= 0) return fail(mn + " after .endprolog", line);
@@ -604,16 +611,39 @@ bool buildUnwindInfo(const Chunk& c, const std::string& fn, const std::string& h
         if (!c.ehRanges.empty()) { err = ".ehrange in a PROC FRAME without a handler"; return false; }
         return true;
     }
-    std::vector<std::pair<std::string, unsigned long> > fields;   // symbol (empty: a plain value) and value / addend
-    fields.push_back(std::make_pair(handler, 0UL));
-    fields.push_back(std::make_pair(std::string(), kEhMagic));
-    fields.push_back(std::make_pair(std::string(), static_cast<unsigned long>(c.ehRanges.size())));
-    for (size_t r = 0; r < c.ehRanges.size(); ++r)
+    // the ranges, sorted by their begin, become entries of one word each: the code offset in the function (20 bits)
+    // and the landing pad's number in the pad table that follows (12 bits, 0: none); an entry holds up to the next
+    // one's offset, a pad of 0 marks code outside every region (a gap between two ranges, the end of the last one).
+    // The entries are plain values; only the pad table's addresses need relocations
+    std::vector<std::pair<unsigned long, std::pair<unsigned long, unsigned long> > > ranges;   // begin -> (end, pad)
+    for (size_t r = 0; r < c.ehRanges.size(); ++r) {
+        unsigned long v[3] = { 0, 0, 0 };
         for (int k = 0; k < 3; ++k) {
             std::map<std::string, unsigned long>::const_iterator l = c.labels.find(c.ehRanges[r][static_cast<size_t>(k)]);
             if (l == c.labels.end()) { err = ".ehrange label " + c.ehRanges[r][static_cast<size_t>(k)] + " is not defined"; return false; }
-            fields.push_back(std::make_pair(fn, l->second));
+            v[k] = l->second;
         }
+        if (v[0] < v[1]) ranges.push_back(std::make_pair(v[0], std::make_pair(v[1], v[2])));   // (an empty range holds no code)
+    }
+    std::sort(ranges.begin(), ranges.end());
+    std::vector<unsigned long> entries, pads;
+    std::map<unsigned long, unsigned long> padIndex;
+    for (size_t r = 0; r < ranges.size(); ++r) {
+        const unsigned long pad = ranges[r].second.second;
+        std::map<unsigned long, unsigned long>::iterator p = padIndex.find(pad);
+        if (p == padIndex.end()) { pads.push_back(pad); p = padIndex.insert(std::make_pair(pad, static_cast<unsigned long>(pads.size()))).first; }
+        entries.push_back((ranges[r].first << 12) | p->second);
+        const unsigned long end = ranges[r].second.first;
+        if (r + 1 == ranges.size() || ranges[r + 1].first != end) entries.push_back(end << 12);
+    }
+    if (pads.size() > 4095 || (!ranges.empty() && ranges.back().second.first >= (1UL << 20))) { err = "too many landing pads or too much code for the range table of " + fn; return false; }
+    std::vector<std::pair<std::string, unsigned long> > fields;   // symbol (empty: a plain value) and value / addend
+    fields.push_back(std::make_pair(handler, 0UL));
+    fields.push_back(std::make_pair(std::string(), kEhMagic));
+    fields.push_back(std::make_pair(std::string(), static_cast<unsigned long>(entries.size())));
+    fields.push_back(std::make_pair(std::string(), static_cast<unsigned long>(pads.size())));
+    for (size_t e = 0; e < entries.size(); ++e) fields.push_back(std::make_pair(std::string(), entries[e]));
+    for (size_t p = 0; p < pads.size(); ++p) fields.push_back(std::make_pair(fn, pads[p]));
     for (size_t f = 0; f < fields.size(); ++f) {
         if (!fields[f].first.empty()) { Reloc rl; rl.offset = static_cast<unsigned long>(out.size()); rl.symbol = fields[f].first; rl.type = RelAddr32Nb; relocs.push_back(rl); }
         for (int b = 0; b < 4; ++b) out.push_back(static_cast<unsigned char>((fields[f].second >> (8 * b)) & 0xFF));

@@ -96,6 +96,7 @@ function Transcript([string]$exe) {
     $t = @('== stat') + (Run $exe $root @('stat', $drive) @{})
     $t += @('== find') + (Run $exe $root @('find') @{})
     $t += @('== cwd') + (Run $exe $root @('cwd', "`"$root`"") @{})
+    $t += @('== access, mkdir, rmdir, chdir') + (Run $exe $root @('dirs', "`"$root`"") @{})
     $t += @('== system: COMSPEC names a shell') + (Run $exe "$root\sub" @('system') @{ COMSPEC = "$root\bin1\shell.exe" })
     $t += @('== system: COMSPEC names nothing, cmd.exe in the working folder') + (Run $exe "$root\bin2" @('system') @{ COMSPEC = "$root\nothere\shell.exe" })
     $t += @('== system: no COMSPEC, cmd.exe on PATH') + (Run $exe "$root\sub" @('system') @{ COMSPEC = $null; PATH = $path })

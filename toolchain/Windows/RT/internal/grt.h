@@ -42,7 +42,8 @@ int  __grt_read(int fd, char *bytes, unsigned count);
 int  __grt_write_raw(int fd, const char *bytes, unsigned count);
 int  __grt_read_raw(int fd, char *bytes, unsigned count);
 /* flags as RTS6x's CioChannel spells them: 0 read, 1 write, 2 both, 8 append, 0x200 create,
-   0x400 truncate, 0x8000 binary */
+   0x400 truncate, 0x8000 binary; and as the Microsoft runtime's _O_ flags, 0x40 temporary (the file removed when
+   its last handle closes) and 0x100 exclusive (with create: the file must not exist) */
 int  __grt_open(const char *path, unsigned flags);
 int  __grt_close(int fd);
 long __grt_seek(int fd, long offset, int origin);
@@ -87,11 +88,42 @@ void __grt_unlock(void **lock);
 void __grt_wait(void **condition, void **lock);
 void __grt_wake_all(void **condition);
 
+/* ---- grtwin: win\control.c */
+/* routine set as a console control handler (Ctrl+C 0, Ctrl+Break 1; non-zero when it took the event); 0 or -1 */
+int __grt_on_console_control(int (*routine)(unsigned long));
+
+/* ---- grtwin: win\temporary.c */
+/* a name in the temporary folder no file has, as the Microsoft runtime forms them: letter 's' tmpnam's, 't'
+   tmpfile's; into out (size bytes); 0, or -1 with errno set */
+int __grt_temporary_name(char letter, char *out, unsigned size);
+
 /* ---- grtwin: win\thread.c, CreateThread over kernel32's */
 /* non-zero once the program has started a second thread: from then on the descriptors, the streams and the atexit
    list take their locks, each call deciding once, at its start, whether it locks; a program with one thread takes
    none */
 extern int __grt_threads;
+/* the TLS callback (win\tls.asm) that sets __grt_threads for a thread the runtime did not start */
+void __grt_thread_attach(void *module, unsigned long reason, void *reserved);
+
+/* ---- grtwin: win\seh.c, structured exceptions for C++'s (cxx\exceptions.cpp), and each thread's block */
+void __grt_raise(unsigned long code, unsigned long flags, unsigned long count, const unsigned long long *arguments);
+void __grt_unwind(void *targetFrame, void *targetIp, void *record, void *returnValue, void *context, void *history);
+/* the image an address lies in, or a null pointer */
+void *__grt_image_of(const void *address);
+/* the RUNTIME_FUNCTION of the code at pc, its image's base into *imageBase; a null pointer for a leaf */
+void *__grt_function_of(unsigned long long pc, unsigned long long *imageBase);
+/* the process's unhandled-exception filter replaced; the one before */
+void *__grt_set_unhandled_filter(void *filter);
+/* What the runtime keeps for each thread, made zero at the thread's first use (the last error kept) */
+struct __grt_thread {
+    void *exception;            /* the C++ exception whose catch is running (its EXCEPTION_RECORD) */
+    void *exceptionContext;     /* and its CONTEXT */
+    void *catches;              /* the catches running, innermost first: the objects they hold */
+    int throwing;               /* destructors running between a throw and its catch (uncaught_exception) */
+    void (*terminateHandler)(void);
+    void (*unexpectedHandler)(void);
+};
+struct __grt_thread *__grt_thread(void);
 
 /* ---- grtwin: win\halt.c, the process's end */
 /* ExitProcess with the status (RTS6x's Termination calls this once its list is done) */
@@ -99,6 +131,16 @@ void __rts6x_halt(int status);
 /* the end abort, a failed assert and an uncaught exception take: the fast fail of a Release program,
    exit code 0xC0000409, as the Microsoft runtime's */
 void __grt_fail_fast(void);
+
+/* ---- grtc: c\signals.cpp */
+/* a structured exception's code: non-zero when it was a signal whose handler has now run (main's language handler
+   then lets the program go on), zero to go on searching */
+int __grt_signal_exception(unsigned long code);
+
+/* ---- grtc: c\exit.cpp */
+/* what exit runs before the atexit list: the calling thread's thread_local destructors, set by grtcxx
+   (cxx\threadlocal.cpp) once a thread registers one; null until then */
+extern void (*__grt_exit_thread)(void);
 
 /* ---- grtc: c\StreamOpen.cpp, the standard streams set up at start */
 void __grt_streams_start(void);

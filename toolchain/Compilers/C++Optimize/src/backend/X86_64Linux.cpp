@@ -442,15 +442,30 @@ void X86_64Linux::tlsAddress(const Var &v) {
         return;
     }
     msTlsBlock();
+    // The project's masm spells no SECTIONREL operand: the offset is read from its word, into r10.
+    const bool spelled = plain_->tlsOperandsSpelled();
     if (v.viaWrapper()) {
         const std::string ready = label("tlsready", nextLabel());
-        a_->ins("cmpb", imm(0), tls("__tls_guard", "%rax"));
+        if (spelled) {
+            a_->ins("cmpb", imm(0), tls("__tls_guard", "%rax"));
+        } else {
+            plain_->tlsOffsetWord("__tls_guard");
+            a_->ins("movl", rip("$tlsoff$__tls_guard"), reg("%r10d"));
+            a_->ins("add", reg("%rax"), reg("%r10"));
+            a_->ins("cmpb", imm(0), mem(0, "%r10"));
+        }
         a_->ins("jne", lbl(ready));
         a_->ins("call", lbl("__dyn_tls_on_demand_init"));
         msTlsBlock();
         a_->defLabel(ready);
     }
-    a_->ins("lea", tls(v.symbol(), "%rax"), reg("%rax"));
+    if (spelled) {
+        a_->ins("lea", tls(v.symbol(), "%rax"), reg("%rax"));
+        return;
+    }
+    plain_->tlsOffsetWord(v.symbol());
+    a_->ins("movl", rip("$tlsoff$" + v.symbol()), reg("%r10d"));
+    a_->ins("add", reg("%r10"), reg("%rax"));
 }
 
 // Shifted and added rather than cl's `[rdx+rcx*8]`: the walker writes no indexed operand, the
@@ -1570,7 +1585,8 @@ void X86_64Linux::finishChunk() {
     out_.clear();
 }
 
-namespace { std::vector<const Call *> callsIn(const Node &n, std::vector<const Call *> *outer = nullptr, bool *tlsGuarded = nullptr); }
+namespace { std::vector<const Call *> callsIn(const Node &n, std::vector<const Call *> *outer = nullptr, bool *tlsGuarded = nullptr);
+            bool touchesVolatile(const Node &n); }
 
 // A call with stack arguments writes them above the shadow space, and a callee
 // walked in place may make any call at all.
@@ -1601,10 +1617,14 @@ void X86_64Linux::emit(const Function &fn) {
         }
     if (realign_ > 0 && fn.hasLandingPads() && usesFunclets())
         unsupported("an over-aligned local in a function with a try or a local with a destructor");
-    if (realign_ > 0 && optimizing()) {
+    // **A function that reads or writes a volatile lvalue is written past the optimizer as well**, and
+    // walks no callee in place: the passes do not ask the qualifier, and could keep a volatile read in a
+    // register or drop it. The rest of the file keeps its -O (1.34 compiled the whole of it without).
+    volatileHere_ = optimizer_ && touchesVolatile(fn.body());
+    if ((realign_ > 0 || volatileHere_) && optimizing()) {
         optimizer_->finish();
         a_ = plain_;
-        opt::noteDecline("realigned-frame-no-optimizer", fn.symbol());
+        opt::noteDecline(realign_ > 0 ? "realigned-frame-no-optimizer" : "volatile-no-optimizer", fn.symbol());
     }
 
     a_->functionBegin(fn.symbol(), !fn.isStatic(), fn.isInline());
@@ -1713,7 +1733,7 @@ void X86_64Linux::emit(const Function &fn) {
         a_->defLabel(".Lfunc.end." + fn.symbol());
     // The tables are written below; tell the spelling whether there are any,
     // so its unwind info does not name a FuncInfo that never appears.
-    if (target_.microsoftNames()) a_->noteHasEh(!msStates().empty());
+    if (target_.microsoftNames()) a_->noteHasEh(!msStates().empty() || fn.msUnwindHelp() != 0);
     a_->functionEnd(fn.symbol());
     // The tables below measure slots from the frame as the passes left it.
     if (optimizing()) frameSize_ = optimizer_->frameSize();
@@ -1734,7 +1754,7 @@ void X86_64Linux::emit(const Function &fn) {
             dwarfFns_[i].frameBaseReg = d.frameBaseReg;
         }
     }
-    if (realign_ > 0 && optimizer_) a_ = optimizer_.get();
+    if ((realign_ > 0 || volatileHere_) && optimizer_) a_ = optimizer_.get();
     realign_ = 0;
 
     if (depth_ != 0 || tempDepth_ != 0) {
@@ -1873,8 +1893,14 @@ public:
     int inCall = 0;
     // A thread_local reached through the CRT's guard is a call to `__dyn_tls_on_demand_init` too.
     bool tlsGuarded = false;
+    // An lvalue of volatile type - a variable, a dereference, a member - read or written here.
+    bool volatileSeen = false;
+    void seen(const Expr &n) { if (n.type() != nullptr && n.type()->isVolatile()) volatileSeen = true; }
     void visit(const Num &) override {}
-    void visit(const Var &n) override { if (n.isThreadLocal() && n.viaWrapper()) tlsGuarded = true; }
+    void visit(const Var &n) override {
+        seen(n);
+        if (n.isThreadLocal() && n.viaWrapper()) tlsGuarded = true;
+    }
     void visit(const StrLit &) override {}
     void visit(const Goto &) override {}
     void visit(const Break &) override {}
@@ -1891,7 +1917,7 @@ public:
     void visit(const VaStart &n) override { n.list().accept(*this); }
     void visit(const VaArg &n) override { n.list().accept(*this); }
     void visit(const Assign &n) override { n.target().accept(*this); n.value().accept(*this); }
-    void visit(const Unary &n) override { n.operand().accept(*this); }
+    void visit(const Unary &n) override { seen(n); n.operand().accept(*this); }
     void visit(const Binary &n) override { n.lhs().accept(*this); n.rhs().accept(*this); }
     void visit(const Postfix &n) override { n.target().accept(*this); }
     void visit(const Cast &n) override { n.value().accept(*this); }
@@ -1899,7 +1925,7 @@ public:
     void visit(const Conditional &n) override {
         n.cond().accept(*this); n.thenArm().accept(*this); n.elseArm().accept(*this);
     }
-    void visit(const MemberAccess &n) override { n.object().accept(*this); }
+    void visit(const MemberAccess &n) override { seen(n); n.object().accept(*this); }
     void visit(const ExprStmt &n) override { n.expr().accept(*this); }
     void visit(const Return &n) override { if (n.hasValue()) n.value().accept(*this); }
     void visit(const Block &n) override { for (const StmtPtr &s : n.body()) s->accept(*this); }
@@ -1935,6 +1961,13 @@ std::vector<const Call *> callsIn(const Node &n, std::vector<const Call *> *oute
     return scan.calls;
 }
 
+// Whether a body reads or writes an lvalue of volatile type anywhere.
+bool touchesVolatile(const Node &n) {
+    CallScan scan;
+    n.accept(scan);
+    return scan.volatileSeen;
+}
+
 }
 
 // **A direct call to a function of this unit, walked in its place** where the site is safe -
@@ -1942,10 +1975,17 @@ std::vector<const Call *> callsIn(const Node &n, std::vector<const Call *> *oute
 // a funclet-cut caller reserved - and the inliner's budgets say it is worth it.
 const Function *X86_64Linux::inlineTarget(const Call &n, int stackSlots) const {
     if (!inliner_ || current_ == nullptr || n.callee() != nullptr) return nullptr;
+    // A function written past the optimizer - realigned, or touching a volatile lvalue - walks none in place.
+    if (!optimizing()) return nullptr;
     const auto it = bodies_.find(n.symbol());
     if (it == bodies_.end() || !inliner_->allows(n)) return nullptr;
     const Function &callee = *it->second;
     const std::string site = n.symbol() + " in " + current_->symbol();
+    // A callee that touches a volatile lvalue is called, its body never optimized into the caller's.
+    std::map<const Function *, bool>::const_iterator known = volatileBodies_.find(&callee);
+    if (known == volatileBodies_.end())
+        known = volatileBodies_.insert(std::make_pair(&callee, touchesVolatile(callee.body()))).first;
+    if (known->second) { opt::noteDecline("inline-callee-volatile", site); return nullptr; }
     if (lineSource()) { opt::noteDecline("inline-site-debug-info", site); return nullptr; }
     if (inPlace_) { opt::noteDecline("inline-site-inside-inlined-body", site); return nullptr; }
     if (stackSlots != 0) { opt::noteDecline("inline-site-stack-arguments", site); return nullptr; }
@@ -1957,7 +1997,7 @@ const Function *X86_64Linux::inlineTarget(const Call &n, int stackSlots) const {
     return &callee;
 }
 
-bool X86_64Linux::inlining() const { return inliner_ && !lineSource() && realign_ == 0; }
+bool X86_64Linux::inlining() const { return inliner_ && !lineSource() && realign_ == 0 && !volatileHere_; }
 
 // The callee's walk borrows the caller's state for its own, and gives it
 // back; its frame the optimizer moves below the caller's.
@@ -1989,7 +2029,7 @@ void X86_64Linux::walkInPlace(const Function &fn) {
 // return label every `return` jumps to.
 void X86_64Linux::walkBody(const Function &fn) {
     const std::vector<Param> &ps = fn.params();
-    if (!inPlace_) storeUnwindHelpAtEntry(fn.body());   // a body walked in place is not an entry
+    if (!inPlace_) storeUnwindHelpAtEntry(fn.body(), fn.msUnwindHelp());   // a body walked in place is not an entry
     fn.body().accept(*this);
 
     if (sretSlot_ != 0)                     a_->ins("mov", local(sretSlot_), reg("%rax"));
@@ -2013,7 +2053,8 @@ void X86_64Linux::walkBody(const Function &fn) {
 std::string X86_64Linux::beginFunclet(std::size_t pos, int number, bool cleanup) {
     if (optimizing()) optimizer_->funcletBegin();
     inFunclet_ = true;
-    atOutput([this] { funcletMark_ = out_.size(); });
+    atOutput([this] { funcletMarks_.push_back(out_.size()); });
+    if (!funcletSymbol_.empty()) outerFunclets_.push_back(std::make_pair(funcletSymbol_, funcletEntryLoc_));
     funcletSymbol_ = "$" + std::string(funcletKind_).substr(1) +
                      std::to_string(funcletIndex_++) + "$" + fnSymbol_;
     funcletDebugBegin(funcletSymbol_, pos, number, cleanup);
@@ -2080,7 +2121,7 @@ void X86_64Linux::storeUnwindHelp(int slot) {
 
 // **The funclet's own frame, and the assembler writes its unwind data.**
 void X86_64Linux::closeFunclet(const std::string &tail) {
-    inFunclet_ = false;
+    inFunclet_ = !outerFunclets_.empty();
     funcletDebugEnd();
     const std::string q = "\"" + funcletSymbol_ + "\"";
     const std::string b = "\"$LNbeg$" + funcletSymbol_ + "\"";
@@ -2149,8 +2190,9 @@ void X86_64Linux::closeFunclet(const std::string &tail) {
     // **The body is lifted out of the output where it was written**, which
     // with an optimizer in front is after the function it belongs to.
     atOutput([this, head, f, pdata] {
-        std::string body = out_.substr(funcletMark_);
-        out_.resize(funcletMark_);
+        std::string body = out_.substr(funcletMarks_.back());
+        out_.resize(funcletMarks_.back());
+        funcletMarks_.pop_back();
         // -g: the funclet's `.cv_func_id` is the first thing the walk wrote in it (funcletLinesBegin), and the
         // head's `.cv_loc` names that id, so the declaration goes before the head: the assembler takes a
         // location only of an id it has been told of.
@@ -2164,6 +2206,12 @@ void X86_64Linux::closeFunclet(const std::string &tail) {
         funcletPdata_ += pdata;
     });
     if (optimizing()) optimizer_->funcletEnd();
+    funcletSymbol_.clear();
+    if (!outerFunclets_.empty()) {
+        funcletSymbol_ = outerFunclets_.back().first;
+        funcletEntryLoc_ = outerFunclets_.back().second;
+        outerFunclets_.pop_back();
+    }
 }
 
 // **The FH3 tables for a frame that only cleans up.**
@@ -2183,18 +2231,20 @@ void X86_64Linux::emitCoffEhTables(const Function &fn) {
     o += "\"$cppxdata$" + m + "\":\n";
     o += "  .long 0x19930522\n";
     o += "  .long " + std::to_string(states.size()) + "\n";
-    o += "  .long \"$stateUnwindMap$" + m + "\"@IMGREL\n";
+    o += states.empty() ? "  .long 0\n" : "  .long \"$stateUnwindMap$" + m + "\"@IMGREL\n";
     o += "  .long " + std::to_string(tries.size()) + "\n";
     if (tries.empty()) o += "  .long 0\n";
     else o += "  .long \"$tryMap$" + m + "\"@IMGREL\n";
-    o += "  .long " + std::to_string(1 + msIpRows().size() + msFuncletRows().size()) + "\n";
+    const std::vector<MsIpRow> ip = msIpTable();
+    o += "  .long " + std::to_string(1 + ip.size()) + "\n";
     o += "  .long \"$ip2state$" + m + "\"@IMGREL\n";
     o += "  .long " + std::to_string(establisherOffset(msUnwindHelpSlot())) + "\n";
     o += "  .long 0\n";                     // no exception specification
-    o += "  .long 1\n";                     // EHFlags: compiled with /EHsc
+    // EHFlags: compiled with /EHsc, and 4 for a noexcept function, which the runtime ends the program in.
+    o += "  .long " + std::to_string(1 | (fn.isNoexcept() ? 4 : 0)) + "\n";
 
     // toState, then the action: a cleanup's funclet, or nothing.
-    o += "\"$stateUnwindMap$" + m + "\":\n";
+    if (!states.empty()) o += "\"$stateUnwindMap$" + m + "\":\n";
     for (std::size_t k = 0; k < states.size(); k++) {
         o += "  .long " + std::to_string(states[k].toState) + "\n";
         if (states[k].action.empty()) o += "  .long 0\n";
@@ -2237,13 +2287,9 @@ void X86_64Linux::emitCoffEhTables(const Function &fn) {
     o += "\"$ip2state$" + m + "\":\n";
     o += "  .long \"$LNbeg$" + m + "\"@IMGREL\n";
     o += "  .long -1\n";
-    for (std::size_t k = 0; k < msIpRows().size(); k++) {
-        o += "  .long " + a_->labelText(msIpRows()[k].label) + "@IMGREL\n";
-        o += "  .long " + std::to_string(msIpRows()[k].state) + "\n";
-    }
-    for (std::size_t k = 0; k < msFuncletRows().size(); k++) {
-        o += "  .long " + a_->labelText(msFuncletRows()[k].label) + "@IMGREL\n";
-        o += "  .long " + std::to_string(msFuncletRows()[k].state) + "\n";
+    for (const MsIpRow &r : ip) {
+        o += "  .long " + a_->labelText(r.label) + "@IMGREL\n";
+        o += "  .long " + std::to_string(r.state) + "\n";
     }
     o += "  .text\n";
     out_ += o;
@@ -2255,31 +2301,29 @@ void X86_64Linux::emitCoffClassRtti(const Program &program) {
     if (program.rtti.empty()) return;
     std::string &o = out_;
 
-    // The chain of every class named, closed and deduplicated: a class's array
-    // lists its bases' descriptors, so a base needs the full set of records
-    // even when nothing in this file names it.
+    // Every class named and every base its array lists, closed and deduplicated: a
+    // base needs the full set of records even when nothing in this file names it.
     std::vector<const Type *> all;
-    for (std::size_t i = 0; i < program.rtti.size(); i++)
-        for (const Type *k = program.rtti[i]; k != nullptr; k = k->base()) {
+    for (std::size_t i = 0; i < program.rtti.size(); i++) {
+        int attributes = 0;
+        for (const MicrosoftBaseClass &r : program.msRttiRowsOf(program.rtti[i], &attributes)) {
             bool had = false;
-            for (std::size_t j = 0; j < all.size(); j++) if (all[j] == k) had = true;
-            if (!had) all.push_back(k);
+            for (std::size_t j = 0; j < all.size(); j++) if (all[j] == r.cls) had = true;
+            if (!had) all.push_back(r.cls);
         }
+    }
 
+    std::set<std::string> bases;
     for (std::size_t i = 0; i < all.size(); i++) {
         MicrosoftRtti n;
         std::string why;
         if (!microsoftClassRttiNames(all[i], &n, &why)) continue;
-
-        int contained = 0;
-        for (const Type *k = all[i]->base(); k != nullptr; k = k->base())
-            contained++;
+        int attributes = 0;
+        const std::vector<MicrosoftBaseClass> rows = program.msRttiRowsOf(all[i], &attributes);
 
         const std::string d = a_->labelText(n.descriptor);
-        const std::string bd = a_->labelText(n.baseDescriptor);
         const std::string ar = a_->labelText(n.array);
         const std::string hi = a_->labelText(n.hierarchy);
-        const std::string lo = a_->labelText(n.locator);
 
         // **The descriptor is writable** - its spare word caches the undecorated name
         // __std_type_info_name makes - so `.data`, as cl and clang have it; the four
@@ -2290,40 +2334,48 @@ void X86_64Linux::emitCoffClassRtti(const Program &program) {
         o += "  .asciz \"" + n.decorated + "\"\n";
         msDescriptors_.insert(n.descriptor);
 
-        // Where this class sits inside itself: at the top, never virtual.
-        coffRecord(".rdata$r", bd, 2);
-        o += "  .long " + d + "@IMGREL\n";
-        o += "  .long " + std::to_string(contained) + "\n";
-        o += "  .long 0\n";              // mdisp
-        o += "  .long -1\n";             // pdisp - there is no vbtable
-        o += "  .long 0\n";              // vdisp
-        o += "  .long 0x40\n";           // attributes
-        o += "  .long " + hi + "@IMGREL\n";
+        // Where each class of the array sits inside this one, and what it is there: one record per
+        // place and attributes, `??_R1BA@?0A@EA@I2@@8`, shared by every array that lists it.
+        for (const MicrosoftBaseClass &r : rows) {
+            if (!bases.insert(r.name).second) continue;
+            MicrosoftRtti b;
+            if (!microsoftClassRttiNames(r.cls, &b, &why)) continue;
+            coffRecord(".rdata$r", a_->labelText(r.name), 2);
+            o += "  .long " + a_->labelText(b.descriptor) + "@IMGREL\n";
+            o += "  .long " + std::to_string(r.contained) + "\n";
+            o += "  .long " + std::to_string(r.mdisp) + "\n";
+            o += "  .long " + std::to_string(r.pdisp) + "\n";   // pdisp: -1 outside a virtual base
+            o += "  .long " + std::to_string(r.vdisp) + "\n";
+            o += "  .long " + std::to_string(r.attributes) + "\n";
+            o += "  .long " + a_->labelText(b.hierarchy) + "@IMGREL\n";
+        }
 
         coffRecord(".rdata$r", ar, 2);
-        o += "  .long " + bd + "@IMGREL\n";
-        for (const Type *k = all[i]->base(); k != nullptr; k = k->base()) {
-            MicrosoftRtti b;
-            if (!microsoftClassRttiNames(k, &b, &why)) break;
-            o += "  .long " + a_->labelText(b.baseDescriptor) + "@IMGREL\n";
-        }
+        for (const MicrosoftBaseClass &r : rows) o += "  .long " + a_->labelText(r.name) + "@IMGREL\n";
         o += "  .long 0\n";
 
         coffRecord(".rdata$r", hi, 2);
         o += "  .long 0\n";
-        o += "  .long 0\n";              // attributes - no MI, no virtual bases
-        o += "  .long " + std::to_string(contained + 1) + "\n";
+        o += "  .long " + std::to_string(attributes) + "\n";   // 1: a class here has two bases
+        o += "  .long " + std::to_string(rows.size()) + "\n";
         o += "  .long " + ar + "@IMGREL\n";
 
         // The locator names itself, which is how the runtime recovers the image
-        // base every other field is relative to.
-        coffRecord(".rdata$r", lo, 2);
-        o += "  .long 1\n";
-        o += "  .long 0\n";              // the vfptr's offset in the object
-        o += "  .long 0\n";              // cdOffset
-        o += "  .long " + d + "@IMGREL\n";
-        o += "  .long " + hi + "@IMGREL\n";
-        o += "  .long " + lo + "@IMGREL\n";
+        // base every other field is relative to. One per vftable, at its vfptr.
+        std::vector<Program::MsLocator> locators;
+        for (const Program::MsLocator &l : program.msLocators)
+            if (l.cls == all[i]) locators.push_back(l);
+        if (locators.empty()) locators.push_back(Program::MsLocator{ all[i], n.locator, 0 });
+        for (const Program::MsLocator &l : locators) {
+            const std::string lo = a_->labelText(l.name);
+            coffRecord(".rdata$r", lo, 2);
+            o += "  .long 1\n";
+            o += "  .long " + std::to_string(l.offset) + "\n";   // the vfptr's offset in the object
+            o += "  .long " + std::to_string(l.cdOffset) + "\n";
+            o += "  .long " + d + "@IMGREL\n";
+            o += "  .long " + hi + "@IMGREL\n";
+            o += "  .long " + lo + "@IMGREL\n";
+        }
         o += "  .text\n";
     }
 }

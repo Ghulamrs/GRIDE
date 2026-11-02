@@ -11,6 +11,8 @@
 #define _CXX1_CMATH
 
 #include <math.h>
+#include <float.h>
+#include <cstdlib>  // `abs`: the six overloads are one set, named in `std` there
 
 namespace std {
 
@@ -38,6 +40,41 @@ using ::tan;
 using ::tanh;
 using ::trunc;
 using ::round;
+using ::remainder;
+using ::remquo;
+using ::fma;
+using ::fmax;
+using ::fmin;
+using ::fdim;
+using ::nan;
+using ::exp2;
+using ::expm1;
+using ::log2;
+using ::log1p;
+using ::logb;
+using ::ilogb;
+using ::scalbn;
+using ::scalbln;
+using ::cbrt;
+using ::hypot;
+using ::asinh;
+using ::acosh;
+using ::atanh;
+using ::erf;
+using ::erfc;
+using ::tgamma;
+using ::lgamma;
+using ::lround;
+using ::llround;
+using ::rint;
+using ::lrint;
+using ::llrint;
+using ::nearbyint;
+using ::copysign;
+using ::nextafter;
+using ::nexttoward;
+using ::float_t;
+using ::double_t;
 
 // The C99 classification functions, as C++11's <cmath> has them: a NaN is
 // the one value unequal to itself, an infinity is what is left when the
@@ -51,6 +88,20 @@ inline bool signbit(double v) {
     // The zeros: 1 / -0.0 is -inf.
     return 1.0 / v < 0;
 }
+inline int fpclassify(double v) {
+    if (v != v) return FP_NAN;
+    if (v == 0) return FP_ZERO;
+    if (isinf(v)) return FP_INFINITE;
+    return (v < 0 ? -v : v) < DBL_MIN ? FP_SUBNORMAL : FP_NORMAL;
+}
+inline bool isnormal(double v) { return fpclassify(v) == FP_NORMAL; }
+// The comparisons that are false, rather than an error, when either side is a NaN.
+inline bool isunordered(double x, double y) { return x != x || y != y; }
+inline bool isgreater(double x, double y) { return !isunordered(x, y) && x > y; }
+inline bool isgreaterequal(double x, double y) { return !isunordered(x, y) && x >= y; }
+inline bool isless(double x, double y) { return !isunordered(x, y) && x < y; }
+inline bool islessequal(double x, double y) { return !isunordered(x, y) && x <= y; }
+inline bool islessgreater(double x, double y) { return !isunordered(x, y) && (x < y || x > y); }
 
 }  // namespace std
 

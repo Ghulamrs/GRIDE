@@ -2,9 +2,9 @@
 // ============================================================================
 //  GRIDE 2.0 - RIDE's Compiler Options dialog as a panel (ported from GRIDEd's
 //  CompilerOptionsEditor): one tab per toolchain.json compilerOptions tab, a
-//  control per option (check box, choice, text), the configuration edited chosen
-//  above, an option that means nothing for the target greyed with RIDE's reason
-//  as its tip, the command line the tab's compiler would get shown below, and
+//  control per option (check box, choice, text; a list's box one entry per
+//  line), the configuration edited chosen above, an option that means nothing
+//  for the target greyed with RIDE's reason as its tip, the command line the tab's compiler would get shown below, and
 //  "Restore defaults" per configuration. It edits a draft of a store; Commit
 //  copies the draft back. Tools > Options > Compiler Options edits the settings'
 //  store (what a new project starts with), Project > Compiler Options the
@@ -81,6 +81,15 @@ namespace Gride
                         {
                             TextBox^ field = gcnew TextBox();
                             field->SetBounds(250, y, 380, 24);
+                            // a list (the defines, the undefines): one entry per line, Enter starting the next
+                            // rather than closing the dialog
+                            if (o->IsList())
+                            {
+                                field->Multiline = true; field->AcceptsReturn = true; field->WordWrap = false;
+                                field->ScrollBars = System::Windows::Forms::ScrollBars::Vertical;
+                                field->Height = ListHeight;
+                                y += ListHeight - 24;
+                            }
                             field->TextChanged += gcnew EventHandler(this, &CompilerOptionsEditor::OnChanged);
                             made = field;
                         }
@@ -134,6 +143,7 @@ namespace Gride
         void Commit() { if (original != nullptr) original->CopyFrom(draft); }
 
     private:
+        literal int ListHeight = 96;        // a list's box: six lines
         CompilerOptionStore^ original;
         CompilerOptionStore^ draft;
         TargetInfo^ target;
@@ -159,7 +169,7 @@ namespace Gride
                 TextBox^ field = dynamic_cast<TextBox^>(pair.Value);
                 if (box != nullptr) box->Checked = value == "1";
                 else if (pick != nullptr) { pick->SelectedItem = value; if (pick->SelectedIndex < 0 && pick->Items->Count > 0) pick->SelectedIndex = 0; }
-                else if (field != nullptr) field->Text = value;
+                else if (field != nullptr) field->Text = field->Multiline ? CompilerOptionStore::AsLines(value) : value;
                 String^ why;
                 bool usable = CompilerOptionRules::Available(pair.Key, target->Entry, why);
                 CompilerOptionEntry^ o = ToolchainFile::Current->CompilerOption(pair.Key);
@@ -177,7 +187,8 @@ namespace Gride
             CheckBox^ box = dynamic_cast<CheckBox^>(c);
             ComboBox^ pick = dynamic_cast<ComboBox^>(c);
             TextBox^ field = dynamic_cast<TextBox^>(c);
-            String^ value = box != nullptr ? (box->Checked ? Str("1") : Str("0")) : pick != nullptr ? dynamic_cast<String^>(pick->SelectedItem) : field != nullptr ? field->Text : nullptr;
+            String^ value = box != nullptr ? (box->Checked ? Str("1") : Str("0")) : pick != nullptr ? dynamic_cast<String^>(pick->SelectedItem) :
+                            field != nullptr ? (field->Multiline ? CompilerOptionStore::FromLines(field->Text) : field->Text) : nullptr;
             if (value != nullptr) draft->Set(Config, id, value);
         }
 

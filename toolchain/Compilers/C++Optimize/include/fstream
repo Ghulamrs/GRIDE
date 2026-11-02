@@ -35,11 +35,15 @@ inline const char *_cxx1_mode(int flags, bool reading) {
     return binary ? "wb" : "w";
 }
 
+// [ofstream.members], [ifstream.members]: an open that fails is failbit, one
+// that succeeds clears the state; a stream with no file is good until it is
+// written or read. C++11 adds the `string` forms of the name.
 class ofstream : public ostream {
 public:
-    ofstream() { fp_ = 0; which_ = 0; state_ = 1; buf_ = 0; base_ = 10; prec_ = 6; fmt_ = 0; width_ = 0; }
-    ofstream(const char *path) { fp_ = 0; buf_ = 0; base_ = 10; prec_ = 6; fmt_ = 0; width_ = 0; open(path, ios::out); }
-    ofstream(const char *path, int flags) { fp_ = 0; buf_ = 0; base_ = 10; prec_ = 6; fmt_ = 0; width_ = 0; open(path, flags); }
+    ofstream() {}
+    ofstream(const char *path) { open(path, ios::out); }
+    ofstream(const char *path, int flags) { open(path, flags); }
+    explicit ofstream(const string &path, int flags = ios::out) { open(path.c_str(), flags); }
     ~ofstream() { close(); }
 
     void open(const char *path) { open(path, ios::out); }
@@ -48,8 +52,10 @@ public:
         which_ = 0;
         buf_ = 0;
         fp_ = std::fopen(path, _cxx1_mode(flags, false));
-        state_ = fp_ != 0 ? 0 : 1;
+        if (fp_ != 0) clear();
+        else setstate(failbit);
     }
+    void open(const string &path, int flags = ios::out) { open(path.c_str(), flags); }
     bool is_open() const { return fp_ != 0; }
     void close() {
         if (fp_ != 0) std::fclose(fp_);
@@ -59,9 +65,10 @@ public:
 
 class ifstream : public istream {
 public:
-    ifstream() { fp_ = 0; which_ = 0; state_ = 1; src_ = 0; pos_ = 0; }
-    ifstream(const char *path) { fp_ = 0; src_ = 0; pos_ = 0; open(path, ios::in); }
-    ifstream(const char *path, int flags) { fp_ = 0; src_ = 0; pos_ = 0; open(path, flags); }
+    ifstream() {}
+    ifstream(const char *path) { open(path, ios::in); }
+    ifstream(const char *path, int flags) { open(path, flags); }
+    explicit ifstream(const string &path, int flags = ios::in) { open(path.c_str(), flags); }
     ~ifstream() { close(); }
 
     void open(const char *path) { open(path, ios::in); }
@@ -70,9 +77,12 @@ public:
         which_ = 0;
         src_ = 0;
         pos_ = 0;
+        last_ = before_ = -1;
         fp_ = std::fopen(path, _cxx1_mode(flags, true));
-        state_ = fp_ != 0 ? 0 : 1;
+        if (fp_ != 0) clear();
+        else setstate(failbit);
     }
+    void open(const string &path, int flags = ios::in) { open(path.c_str(), flags); }
     bool is_open() const { return fp_ != 0; }
     void close() {
         if (fp_ != 0) std::fclose(fp_);

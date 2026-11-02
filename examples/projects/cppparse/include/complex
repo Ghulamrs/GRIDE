@@ -100,23 +100,31 @@ private:
     T m_im;
 };
 
-// 26.2.3: the specialisations. A conversion to a wider type is implicit, to a narrower one explicit. Workarounds for
-// cppparse, which inside an explicit specialisation takes the class's own name, injected or with its argument, for
-// the primary template's instantiation (as naming ctype<char> in its own base clause did): the narrowing constructors
-// are templates (a constructor defined after the class does not match it either, S116); assignment is the implicit
-// copy (a value of the type converts through its constructor, as operator=(float) of 26.2.3 would assign); the
-// compound assignments are functions outside the class, through real() and imag()
+// 26.2.3: the specialisations. A conversion to a wider type is implicit, to a narrower one explicit; the narrowing
+// constructors take a specialisation declared here and defined after them
+template <> class complex<double>;
+template <> class complex<long double>;
+
 template <>
 class complex<float> {
 public:
     typedef float value_type;
-    // complex(float re = 0.0f, float im = 0.0f), as three constructors
-    complex() : m_re(0.0f), m_im(0.0f) {}
-    complex(float re) : m_re(re), m_im(0.0f) {}
-    complex(float re, float im) : m_re(re), m_im(im) {}
-    template <class X> explicit complex(const complex<X>& o) : m_re(static_cast<float>(o.real())), m_im(static_cast<float>(o.imag())) {}
+    complex(float re = 0.0f, float im = 0.0f) : m_re(re), m_im(im) {}
+    explicit complex(const complex<double>& o);
+    explicit complex(const complex<long double>& o);
     float real() const { return m_re; }
     float imag() const { return m_im; }
+    complex<float>& operator=(float v) { m_re = v; m_im = 0.0f; return *this; }
+    complex<float>& operator+=(float v) { m_re += v; return *this; }
+    complex<float>& operator-=(float v) { m_re -= v; return *this; }
+    complex<float>& operator*=(float v) { m_re *= v; m_im *= v; return *this; }
+    complex<float>& operator/=(float v) { m_re /= v; m_im /= v; return *this; }
+    complex<float>& operator=(const complex<float>& o) { m_re = o.m_re; m_im = o.m_im; return *this; }
+    template <class X> complex<float>& operator=(const complex<X>& o) { m_re = static_cast<float>(o.real()); m_im = static_cast<float>(o.imag()); return *this; }
+    template <class X> complex<float>& operator+=(const complex<X>& o) { m_re += static_cast<float>(o.real()); m_im += static_cast<float>(o.imag()); return *this; }
+    template <class X> complex<float>& operator-=(const complex<X>& o) { m_re -= static_cast<float>(o.real()); m_im -= static_cast<float>(o.imag()); return *this; }
+    template <class X> complex<float>& operator*=(const complex<X>& o) { __complex_ops<float>::mul(m_re, m_im, static_cast<float>(o.real()), static_cast<float>(o.imag())); return *this; }
+    template <class X> complex<float>& operator/=(const complex<X>& o) { __complex_ops<float>::div(m_re, m_im, static_cast<float>(o.real()), static_cast<float>(o.imag())); return *this; }
 private:
     float m_re;
     float m_im;
@@ -126,14 +134,22 @@ template <>
 class complex<double> {
 public:
     typedef double value_type;
-    // complex(double re = 0.0, double im = 0.0), as three constructors
-    complex() : m_re(0.0), m_im(0.0) {}
-    complex(double re) : m_re(re), m_im(0.0) {}
-    complex(double re, double im) : m_re(re), m_im(im) {}
+    complex(double re = 0.0, double im = 0.0) : m_re(re), m_im(im) {}
     complex(const complex<float>& o) : m_re(o.real()), m_im(o.imag()) {}
-    template <class X> explicit complex(const complex<X>& o) : m_re(static_cast<double>(o.real())), m_im(static_cast<double>(o.imag())) {}
+    explicit complex(const complex<long double>& o);
     double real() const { return m_re; }
     double imag() const { return m_im; }
+    complex<double>& operator=(double v) { m_re = v; m_im = 0.0; return *this; }
+    complex<double>& operator+=(double v) { m_re += v; return *this; }
+    complex<double>& operator-=(double v) { m_re -= v; return *this; }
+    complex<double>& operator*=(double v) { m_re *= v; m_im *= v; return *this; }
+    complex<double>& operator/=(double v) { m_re /= v; m_im /= v; return *this; }
+    complex<double>& operator=(const complex<double>& o) { m_re = o.m_re; m_im = o.m_im; return *this; }
+    template <class X> complex<double>& operator=(const complex<X>& o) { m_re = static_cast<double>(o.real()); m_im = static_cast<double>(o.imag()); return *this; }
+    template <class X> complex<double>& operator+=(const complex<X>& o) { m_re += static_cast<double>(o.real()); m_im += static_cast<double>(o.imag()); return *this; }
+    template <class X> complex<double>& operator-=(const complex<X>& o) { m_re -= static_cast<double>(o.real()); m_im -= static_cast<double>(o.imag()); return *this; }
+    template <class X> complex<double>& operator*=(const complex<X>& o) { __complex_ops<double>::mul(m_re, m_im, static_cast<double>(o.real()), static_cast<double>(o.imag())); return *this; }
+    template <class X> complex<double>& operator/=(const complex<X>& o) { __complex_ops<double>::div(m_re, m_im, static_cast<double>(o.real()), static_cast<double>(o.imag())); return *this; }
 private:
     double m_re;
     double m_im;
@@ -143,50 +159,31 @@ template <>
 class complex<long double> {
 public:
     typedef long double value_type;
-    // complex(long double re = 0.0L, long double im = 0.0L), as three constructors
-    complex() : m_re(0.0L), m_im(0.0L) {}
-    complex(long double re) : m_re(re), m_im(0.0L) {}
-    complex(long double re, long double im) : m_re(re), m_im(im) {}
+    complex(long double re = 0.0L, long double im = 0.0L) : m_re(re), m_im(im) {}
     complex(const complex<float>& o) : m_re(o.real()), m_im(o.imag()) {}
     complex(const complex<double>& o) : m_re(o.real()), m_im(o.imag()) {}
     long double real() const { return m_re; }
     long double imag() const { return m_im; }
+    complex<long double>& operator=(long double v) { m_re = v; m_im = 0.0L; return *this; }
+    complex<long double>& operator+=(long double v) { m_re += v; return *this; }
+    complex<long double>& operator-=(long double v) { m_re -= v; return *this; }
+    complex<long double>& operator*=(long double v) { m_re *= v; m_im *= v; return *this; }
+    complex<long double>& operator/=(long double v) { m_re /= v; m_im /= v; return *this; }
+    complex<long double>& operator=(const complex<long double>& o) { m_re = o.m_re; m_im = o.m_im; return *this; }
+    template <class X> complex<long double>& operator=(const complex<X>& o) { m_re = static_cast<long double>(o.real()); m_im = static_cast<long double>(o.imag()); return *this; }
+    template <class X> complex<long double>& operator+=(const complex<X>& o) { m_re += static_cast<long double>(o.real()); m_im += static_cast<long double>(o.imag()); return *this; }
+    template <class X> complex<long double>& operator-=(const complex<X>& o) { m_re -= static_cast<long double>(o.real()); m_im -= static_cast<long double>(o.imag()); return *this; }
+    template <class X> complex<long double>& operator*=(const complex<X>& o) { __complex_ops<long double>::mul(m_re, m_im, static_cast<long double>(o.real()), static_cast<long double>(o.imag())); return *this; }
+    template <class X> complex<long double>& operator/=(const complex<X>& o) { __complex_ops<long double>::div(m_re, m_im, static_cast<long double>(o.real()), static_cast<long double>(o.imag())); return *this; }
 private:
     long double m_re;
     long double m_im;
 };
 
-// the specialisations' compound assignments (of 26.2.3), by a value of the type or by any complex
-template <class T> struct __complex_assign {
-    static complex<T>& add(complex<T>& a, T re, T im) { a = complex<T>(a.real() + re, a.imag() + im); return a; }
-    static complex<T>& sub(complex<T>& a, T re, T im) { a = complex<T>(a.real() - re, a.imag() - im); return a; }
-    static complex<T>& mul(complex<T>& a, T re, T im) { T x = a.real(), y = a.imag(); __complex_ops<T>::mul(x, y, re, im); a = complex<T>(x, y); return a; }
-    static complex<T>& div(complex<T>& a, T re, T im) { T x = a.real(), y = a.imag(); __complex_ops<T>::div(x, y, re, im); a = complex<T>(x, y); return a; }
-};
-inline complex<float>& operator+=(complex<float>& a, float v) { return __complex_assign<float>::add(a, v, 0.0f); }
-inline complex<float>& operator-=(complex<float>& a, float v) { return __complex_assign<float>::sub(a, v, 0.0f); }
-inline complex<float>& operator*=(complex<float>& a, float v) { a = complex<float>(a.real() * v, a.imag() * v); return a; }
-inline complex<float>& operator/=(complex<float>& a, float v) { a = complex<float>(a.real() / v, a.imag() / v); return a; }
-template <class X> complex<float>& operator+=(complex<float>& a, const complex<X>& b) { return __complex_assign<float>::add(a, static_cast<float>(b.real()), static_cast<float>(b.imag())); }
-template <class X> complex<float>& operator-=(complex<float>& a, const complex<X>& b) { return __complex_assign<float>::sub(a, static_cast<float>(b.real()), static_cast<float>(b.imag())); }
-template <class X> complex<float>& operator*=(complex<float>& a, const complex<X>& b) { return __complex_assign<float>::mul(a, static_cast<float>(b.real()), static_cast<float>(b.imag())); }
-template <class X> complex<float>& operator/=(complex<float>& a, const complex<X>& b) { return __complex_assign<float>::div(a, static_cast<float>(b.real()), static_cast<float>(b.imag())); }
-inline complex<double>& operator+=(complex<double>& a, double v) { return __complex_assign<double>::add(a, v, 0.0); }
-inline complex<double>& operator-=(complex<double>& a, double v) { return __complex_assign<double>::sub(a, v, 0.0); }
-inline complex<double>& operator*=(complex<double>& a, double v) { a = complex<double>(a.real() * v, a.imag() * v); return a; }
-inline complex<double>& operator/=(complex<double>& a, double v) { a = complex<double>(a.real() / v, a.imag() / v); return a; }
-template <class X> complex<double>& operator+=(complex<double>& a, const complex<X>& b) { return __complex_assign<double>::add(a, static_cast<double>(b.real()), static_cast<double>(b.imag())); }
-template <class X> complex<double>& operator-=(complex<double>& a, const complex<X>& b) { return __complex_assign<double>::sub(a, static_cast<double>(b.real()), static_cast<double>(b.imag())); }
-template <class X> complex<double>& operator*=(complex<double>& a, const complex<X>& b) { return __complex_assign<double>::mul(a, static_cast<double>(b.real()), static_cast<double>(b.imag())); }
-template <class X> complex<double>& operator/=(complex<double>& a, const complex<X>& b) { return __complex_assign<double>::div(a, static_cast<double>(b.real()), static_cast<double>(b.imag())); }
-inline complex<long double>& operator+=(complex<long double>& a, long double v) { return __complex_assign<long double>::add(a, v, 0.0L); }
-inline complex<long double>& operator-=(complex<long double>& a, long double v) { return __complex_assign<long double>::sub(a, v, 0.0L); }
-inline complex<long double>& operator*=(complex<long double>& a, long double v) { a = complex<long double>(a.real() * v, a.imag() * v); return a; }
-inline complex<long double>& operator/=(complex<long double>& a, long double v) { a = complex<long double>(a.real() / v, a.imag() / v); return a; }
-template <class X> complex<long double>& operator+=(complex<long double>& a, const complex<X>& b) { return __complex_assign<long double>::add(a, static_cast<long double>(b.real()), static_cast<long double>(b.imag())); }
-template <class X> complex<long double>& operator-=(complex<long double>& a, const complex<X>& b) { return __complex_assign<long double>::sub(a, static_cast<long double>(b.real()), static_cast<long double>(b.imag())); }
-template <class X> complex<long double>& operator*=(complex<long double>& a, const complex<X>& b) { return __complex_assign<long double>::mul(a, static_cast<long double>(b.real()), static_cast<long double>(b.imag())); }
-template <class X> complex<long double>& operator/=(complex<long double>& a, const complex<X>& b) { return __complex_assign<long double>::div(a, static_cast<long double>(b.real()), static_cast<long double>(b.imag())); }
+inline complex<float>::complex(const complex<double>& o) : m_re(static_cast<float>(o.real())), m_im(static_cast<float>(o.imag())) {}
+inline complex<float>::complex(const complex<long double>& o) : m_re(static_cast<float>(o.real())), m_im(static_cast<float>(o.imag())) {}
+inline complex<double>::complex(const complex<long double>& o) : m_re(static_cast<double>(o.real())), m_im(static_cast<double>(o.imag())) {}
+
 // 26.2.6 operators
 template <class T> complex<T> operator+(const complex<T>& a, const complex<T>& b) { complex<T> r(a); r += b; return r; }
 template <class T> complex<T> operator+(const complex<T>& a, const T& b) { complex<T> r(a); r += b; return r; }

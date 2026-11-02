@@ -47,6 +47,12 @@ public:
     static void dominators(const IrFunction& f, std::vector<int>& idom);
     static void naturalLoops(const IrFunction& f, std::vector<LoopInfo>& loops);
     static bool dominates(const std::vector<int>& idom, int a, int b);
+    // the try regions no exception can enter go, with their handlers: a region without an instruction that may throw
+    // inside it (an object's cleanup region, a try block around code that cannot throw), and the function's unwind
+    // region (IrGen's trybegin "unwind", whose handler destroys the objects whose flag is set and rethrows) when no
+    // instruction that may throw can run while a flag is set, since its handler would only rethrow; with it go the
+    // flag stores nothing reads any more. Run by IrGen on every function and by the optimiser after inlining
+    static int  removeDeadRegions(IrFunction& f);
 
 private:
     int  constantFold(IrFunction& f);

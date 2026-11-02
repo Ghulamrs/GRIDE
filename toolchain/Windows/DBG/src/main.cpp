@@ -17,7 +17,8 @@
 //    dv [/t /V]            the frame's locals and parameters with types and values
 //    ?? expr  ?? a = v     a value (names, . -> [] * &), an assignment
 //    r  db <addr> L<n>     registers, memory
-//    .step_filter "pat"    functions a step into does not stop in (module!name, *)
+//    .step_filter "pat"    functions a step into does not stop in (module!name, *), or, for a
+//                          pattern with a \ or /, code whose source file's path it matches
 //    .input text           a line for the program's own input, taken at once, even
 //                          while the program runs (answered with nothing)
 //    .printf  .echo  q
@@ -302,7 +303,10 @@ static Line lineAt(DWORD64 a)
 
 static bool fileThere(const std::string& f) { return !f.empty() && GetFileAttributesA(f.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
-// ---- the step filter (cdb's .step_filter): module!name patterns with * -------------------------------
+// ---- the step filter (cdb's .step_filter): module!name patterns with *, and source-path patterns -------
+// A pattern with a \ or / is matched against the path of the code's source file instead: GRIDE's runtime is
+// linked into the program's own module, so only where its sources lie tells it apart (the session's preamble
+// in toolchain.json names them, and GRIDE leaves them out when "Step into GRIDE's runtime" is set).
 static std::vector<std::string> stepFilter;
 
 static bool wildMatch(const char* p, const char* s)
@@ -312,11 +316,20 @@ static bool wildMatch(const char* p, const char* s)
     return *s != '\0' && (tolower(static_cast<unsigned char>(*p)) == tolower(static_cast<unsigned char>(*s))) && wildMatch(p + 1, s + 1);
 }
 
-static bool filtered(DWORD64 a)
+static bool filtered(DWORD64 a, const std::string& file)
 {
     Sym s = symbolAt(a);
     std::string full = moduleOf(a) + "!" + (s.ok ? s.name : std::string());
-    for (const std::string& f : stepFilter) if (wildMatch(f.c_str(), full.c_str())) return true;
+    std::string path = file;
+    for (char& c : path) if (c == '/') c = '\\';
+    for (std::string f : stepFilter) {
+        if (f.find_first_of("\\/") != std::string::npos) {
+            for (char& c : f) if (c == '/') c = '\\';
+            if (wildMatch(f.c_str(), path.c_str())) return true;
+        } else if (wildMatch(f.c_str(), full.c_str())) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -324,7 +337,7 @@ static bool filtered(DWORD64 a)
 static bool hasSource(DWORD64 a)
 {
     Line l = lineAt(a);
-    return l.ok && fileThere(l.file) && !filtered(a);
+    return l.ok && fileThere(l.file) && !filtered(a, l.file);
 }
 
 // ---- registers and memory --------------------------------------------------------------------------

@@ -1212,20 +1212,48 @@ bool Driver::compile(const Job &job) {
     std::vector<Token> tokens = Lexer(src).tokenize();
     auto t2 = Clock::now();
 
+    const std::vector<Token> probeTokens = tokens;
     Parser parser(src, std::move(tokens), types, target, backend_->abi());
     Program program = parser.parse();
+    // **[temp.res]/8-10: what a template the program never instantiates says wrong of itself** - made with
+    // `int` and with `double` for its type parameters, each in a parser of its own; a failure both readings
+    // meet in the same words at the same place, in a statement that names nothing dependent, is reported.
+    if (parser.probeCandidates() > 0) {
+        std::set<std::size_t> skip;
+        for (int round = 0; round < 6; round++) {
+            Parser::ProbeResult r[2];
+            for (int v = 0; v < 2; v++) {
+                TypeTable probeTypes;
+                Parser probe(src, probeTokens, probeTypes, target, backend_->abi());
+                probe.setProbe(v, skip);
+                (void)probe.parse();
+                r[v] = probe.probeResult();
+            }
+            if (!r[0].failed && !r[1].failed) break;
+            if (r[0].failed && r[1].failed && r[0].report && r[1].report && r[0].pos == r[1].pos &&
+                r[0].why == r[1].why)
+                src.fail(r[0].pos, r[0].why);
+            bool more = false;
+            for (int v = 0; v < 2; v++)
+                if (r[v].failed && skip.insert(r[v].templateAt).second) more = true;
+            if (!more) break;
+        }
+    }
     auto t3 = Clock::now();
 
-    // **A file that writes `volatile` is compiled without -O**, and says so: the
-    // type system drops the qualifier, so an optimizer would take a volatile
+    // **A file that writes `volatile` is compiled without -O**, and says so: the type system keeps
+    // the qualifier (1.34), but the optimiser's passes do not yet ask it, and would take a volatile
     // read for a plain one and keep it in a register or delete it. **Said as a warning at the first
     // `volatile`** (1.10, 2026-10-20), `file:line:col: warning:`: written `cpp11: ...` it had the shape of
     // the compiler's own error, and GRIDE 2.0 stopped the build on it although the compile succeeded.
-    const int level = program.usesVolatile ? 0 : optimize_;
-    if (optimize_ > 0 && program.usesVolatile) {
+    // **Where the backend writes such a function past its optimizer one by one** (x86_64, 1.40), the file
+    // keeps its -O and only those functions go without; the other targets still compile the file without.
+    const bool downgrade = program.usesVolatile && !backend_->optimizesAroundVolatile();
+    const int level = downgrade ? 0 : optimize_;
+    if (optimize_ > 0 && downgrade) {
         volatileDowngrades_++;
-        std::fprintf(stderr, "%s: warning: 'volatile' is something this compiler cannot keep apart "
-                     "from plain memory, so %s is compiled without -O%d\n",
+        std::fprintf(stderr, "%s: warning: 'volatile' accesses are not yet told apart from plain "
+                     "ones by the optimiser, so %s is compiled without -O%d\n",
                      program.volatileAt.empty() ? job.input.c_str() : program.volatileAt.c_str(),
                      job.input.c_str(), optimize_);
     }

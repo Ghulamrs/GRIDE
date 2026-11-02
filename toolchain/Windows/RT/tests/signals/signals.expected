@@ -1,0 +1,30 @@
+signal 2: SIG_DFL errno 0, then handler
+signal 4: SIG_DFL errno 0, then handler
+signal 8: SIG_DFL errno 0, then handler
+signal 11: SIG_DFL errno 0, then handler
+signal 15: SIG_DFL errno 0, then handler
+signal 21: SIG_DFL errno 0, then handler
+signal 22: SIG_DFL errno 0, then handler
+signal 6: SIG_DFL errno 0, then handler
+  handler 2
+raise 2: 0 errno 0, seen 2, then SIG_DFL
+raise 2 ignored: 0 errno 0
+  handler 4
+raise 4: 0 errno 0, seen 4, then other
+raise 4 ignored: 0 errno 0
+  handler 8
+raise 8: 0 errno 0, seen 8, then SIG_DFL
+raise 8 ignored: 0 errno 0
+  handler 11
+raise 11: 0 errno 0, seen 11, then other
+raise 11 ignored: 0 errno 0
+  handler 15
+raise 15: 0 errno 0, seen 15, then SIG_DFL
+raise 15 ignored: 0 errno 0
+  handler 22
+raise 22: 0 errno 0, seen 22, then SIG_DFL
+raise 22 ignored: 0 errno 0
+  handler 21
+raise 21: 0 errno 0, seen 21, then SIG_DFL
+raise 21 ignored: 0 errno 0
+exit 0

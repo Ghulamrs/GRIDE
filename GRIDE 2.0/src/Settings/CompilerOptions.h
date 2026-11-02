@@ -111,18 +111,24 @@ namespace Gride
             for each (KeyValuePair<String^, Dictionary<String^, String^>^> kv in c->values) values[kv.Key] = kv.Value;
         }
 
-        // the entries of a text option: ';' between them, blanks trimmed, empty ones dropped (RIDE's entries)
+        // the entries of a text option: ';' between them, blanks trimmed, empty ones dropped (RIDE's entries);
+        // a line break separates them too - the dialog's box has one entry per line
         static List<String^>^ Entries(String^ list)
         {
             List<String^>^ r = gcnew List<String^>();
             if (list == nullptr) return r;
-            for each (String^ s in list->Split(gcnew array<wchar_t>{ L';' }))
+            for each (String^ s in list->Split(gcnew array<wchar_t>{ L';', L'\r', L'\n' }))
             {
                 String^ t = s->Trim(gcnew array<wchar_t>{ L' ', L'\t' });
                 if (t->Length > 0) r->Add(t);
             }
             return r;
         }
+
+        // a list's value as the dialog's box shows it, one entry per line; and the box's lines back into
+        // the value the files keep, ';' between the entries as RIDE reads them (an older settings.json reads as it is)
+        static String^ AsLines(String^ list) { return String::Join("\r\n", Entries(list)); }
+        static String^ FromLines(String^ text) { return String::Join(";", Entries(text)); }
 
     private:
         Dictionary<String^, Dictionary<String^, String^>^>^ values;
@@ -155,7 +161,7 @@ namespace Gride
 
         // the flags a compiler is given for a configuration and target, in the order the tool's options list
         // them: a check's flagOn / flagOff, a choice's flag unless it is the silent one, a text's flagEach per
-        // entry (quoted when it holds a space); an option that does not apply to the target writes nothing
+        // entry (Argument); an option that does not apply to the target writes nothing
         static String^ Flags(CompilerOptionStore^ store, ToolEntry^ tool, String^ config, TargetEntry^ target)
         {
             if (store == nullptr || tool == nullptr) return String::Empty;
@@ -179,10 +185,28 @@ namespace Gride
                 else if (o->FlagEach->Length > 0 && Available(id, target, why))
                 {
                     for each (String^ item in CompilerOptionStore::Entries(value))
-                        out->Add(o->FlagEach->Replace("$(Item)", item->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) < 0 ? item : String::Concat("\"", item, "\"")));
+                        out->Add(o->FlagEach->Replace("$(Item)", Argument(item)));
                 }
             }
             return String::Join(" ", out);
+        }
+
+        // a define (any one entry of a list) as one argument, as RIDE's options.cpp writes it: as it is, unless it
+        // holds a space, a tab or a quote - then in quotes, a quote inside escaped as \" and the backslashes in front
+        // of a quote, or of the closing one, doubled, as the C runtime splits a command line:
+        // MSG="hi there" -> "MSG=\"hi there\""
+        static String^ Argument(String^ entry)
+        {
+            if (entry->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) < 0) return entry;
+            StringBuilder^ sb = gcnew StringBuilder("\"");
+            int slashes = 0;
+            for each (wchar_t c in entry)
+            {
+                if (c == L'\\') { slashes++; continue; }
+                sb->Append(L'\\', c == L'"' ? 2 * slashes + 1 : slashes)->Append(c);
+                slashes = 0;
+            }
+            return sb->Append(L'\\', 2 * slashes)->Append(L'"')->ToString();
         }
 
         // NAME=value for every option of the tool that names a variable (RIDE's CPP11_DECLINES: 1 when asked for, empty otherwise)

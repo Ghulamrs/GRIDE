@@ -244,6 +244,8 @@ public:
     const std::string &symbol() const { return symbol_.empty() ? name_ : symbol_; }
     void setSymbol(std::string s) { symbol_ = std::move(s); }
     const std::vector<ExprPtr> &args() const { return args_; }
+    // An argument replaced: a constructor's `this` pointed at the object it is to build instead.
+    void setArg(std::size_t i, ExprPtr e) { args_[i] = std::move(e); }
     const Expr *callee() const { return callee_.get(); }
     bool isVariadic() const { return variadic_; }
     int resultSlot() const { return resultSlot_; }
@@ -681,7 +683,12 @@ public:
     // `throw(T...)`'s type_info symbols, for a target whose table states the list; empty where none was written.
     const std::vector<std::string> &exceptionSpec() const { return spec_; }
     void setExceptionSpec(std::vector<std::string> s) { spec_ = std::move(s); }
+    // **Microsoft: a noexcept frame FH3 has to see** though it has no state of its own, the scratch word
+    // the runtime reads; its FuncInfo says noexcept and the runtime ends the program there (Phase 6).
+    int msUnwindHelp() const { return msUnwindHelp_; }
+    void setMsUnwindHelp(int slot) { msUnwindHelp_ = slot; }
 private:
+    int msUnwindHelp_ = 0;
     bool noexcept_ = false;
     std::vector<std::string> spec_;
     bool hasThis_ = false;
@@ -764,6 +771,21 @@ struct Program {
     std::vector<MicrosoftThrow> msThrows;
     // **The classes wanting a Microsoft run-time description**, five each.
     std::vector<const Type *> rtti;
+    // A locator per vftable where a class has more than one, each naming the vfptr's offset (Phase 6);
+    // a class with none listed has the one `??_R4...6B@` at offset 0.
+    // `cdOffset` 4 where a vtordisp is in front of the virtual base holding the vfptr.
+    struct MsLocator { const Type *cls; std::string name; int offset; int cdOffset = 0; };
+    std::vector<MsLocator> msLocators;
+    // A class's base class array where the parser wrote it - one with a virtual base, whose rows read
+    // the vbtable (Phase 6, M3); the others are made from the class alone.
+    struct MsRtti { const Type *cls; int attributes; std::vector<MicrosoftBaseClass> rows; };
+    std::vector<MsRtti> msRtti;
+    // A class's rows: the parser's where it wrote them, else made from the class.
+    std::vector<MicrosoftBaseClass> msRttiRowsOf(const Type *cls, int *attributes) const {
+        for (const MsRtti &r : msRtti)
+            if (r.cls == cls) { *attributes = r.attributes; return r.rows; }
+        return microsoftRttiRows(cls, attributes);
+    }
     // **The function that runs before main** - [basic.start.init]/2.
     std::string initFunction;
     // Whether it names __dso_handle, which ELF wants declared hidden.
@@ -772,9 +794,9 @@ struct Program {
     // Itanium's `_ZTH` aliases name and the Microsoft CRT runs from .CRT$XDU; empty where none needs one.
     std::string tlsInitFunction;
     std::vector<TlsWrapper> tlsWrappers;
-    // **Whether the file wrote `volatile` anywhere.** The type system drops it,
-    // so the optimizer cannot tell a volatile read from a plain one: such a
-    // file is compiled without -O (see Driver::compile).
+    // **Whether the file wrote `volatile` anywhere.** The type system keeps it, and the
+    // optimiser's passes do not ask it, so they cannot tell a volatile read from a plain
+    // one: such a file is compiled without -O (see Driver::compile).
     bool usesVolatile = false;
     // Where the first `volatile` is, `file:line:col`, for the warning that says so.
     std::string volatileAt;

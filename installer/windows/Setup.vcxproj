@@ -1,0 +1,135 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Setup.vcxproj - GRIDE's Windows Setup, GRIDE-Setup-<version>.msi, as a project of the solutions (as RIDE's
+  Installer.vdproj was of RIDE.sln). A Utility project, so Visual Studio loads it with the C++ workload alone: no
+  Installer Projects extension, no WiX, no Inno Setup, no NuGet package. Its build runs build-setup.ps1, which writes
+  the package through Windows Installer's own automation API (msi.dll) and makecab, both part of Windows, then
+  validate-msi.ps1 (the Windows SDK's ICE suite, where the SDK is installed). Every program is started directly,
+  never through cmd.exe.
+
+  In GRIDEd\GRIDE.sln, GRIDE 2.0\GRIDE.sln and GRIDE 1.0\GRIDE.sln it is listed but not built with the solution
+  (Build > Build Setup, or Build on the project, makes the package from the three Release builds already there).
+  Built from installer\windows\Setup.sln - the final Setup - it first builds the three solutions in Release | x64,
+  one after another (they share the toolchain's build folders), then the package. From the command line:
+
+    MSBuild.exe installer\windows\Setup.sln /p:Configuration=Release /p:Platform=x64
+    MSBuild.exe installer\windows\Setup.vcxproj /p:Configuration=Release /p:Platform=x64 [/p:BuildOutlooks=true]
+                [/p:SetupVersion=1.5.0] [/p:CertThumbprint=<sha1> | /p:PfxFile=<file.pfx>] [/p:ValidateSetup=false]
+
+  The package goes to installer\dist; test-setup.ps1 installs and removes it per user (it is not run by the build).
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{5A0E3C71-8D24-4B6F-9E12-C47B9D2A6F35}</ProjectGuid>
+    <RootNamespace>Setup</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <GrideRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..'))</GrideRoot>
+    <SetupDist>$(GrideRoot)\installer\dist</SetupDist>
+    <OutDir>$(SetupDist)\</OutDir>
+    <IntDir>$(SetupDist)\obj\$(Configuration)\</IntDir>
+    <SetupVersion Condition="'$(SetupVersion)'==''">1.5.0</SetupVersion>
+    <SetupMsi>$(SetupDist)\GRIDE-Setup-$(SetupVersion).msi</SetupMsi>
+    <!-- the final Setup (Setup.sln) builds the three outlooks first; inside an outlook's solution, that solution
+         has just been built and the other two are taken as they are -->
+    <BuildOutlooks Condition="'$(BuildOutlooks)'=='' And '$(SolutionFileName)'=='Setup.sln'">true</BuildOutlooks>
+    <BuildOutlooks Condition="'$(BuildOutlooks)'==''">false</BuildOutlooks>
+    <SdkMsiBin>$(MSBuildProgramFiles32)\Windows Kits\10\bin\10.0.26100.0\x86</SdkMsiBin>
+    <ValidateSetup Condition="'$(ValidateSetup)'=='' And Exists('$(SdkMsiBin)\MsiInfo.exe')">true</ValidateSetup>
+    <ValidateSetup Condition="'$(ValidateSetup)'==''">false</ValidateSetup>
+    <PowerShellExe>$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe</PowerShellExe>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="build-setup.ps1" />
+    <None Include="setup-ui.ps1" />
+    <None Include="msi-schema.ps1" />
+    <None Include="Msi-Com.ps1" />
+    <None Include="validate-msi.ps1" />
+    <None Include="test-setup.ps1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Outlook Include="$(GrideRoot)\GRIDEd\GRIDE.sln" />
+    <Outlook Include="$(GrideRoot)\GRIDE 2.0\GRIDE.sln" />
+    <Outlook Include="$(GrideRoot)\GRIDE 1.0\GRIDE.sln" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+
+  <!-- a program started directly (no cmd.exe), each line it writes shown as it comes; the build fails when it
+       exits non-zero -->
+  <UsingTask TaskName="RunLive" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Exe ParameterType="System.String" Required="true" />
+      <Arguments ParameterType="System.String" />
+      <WorkingDirectory ParameterType="System.String" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Diagnostics" />
+      <Using Namespace="System.IO" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        if (!File.Exists(Exe)) { Log.LogError("Setup: no program at " + Exe); return false; }
+        var psi = new ProcessStartInfo(Exe, Arguments ?? "");
+        psi.UseShellExecute = false; psi.CreateNoWindow = true;
+        psi.RedirectStandardOutput = true; psi.RedirectStandardError = true; psi.RedirectStandardInput = true;
+        if (!string.IsNullOrEmpty(WorkingDirectory)) psi.WorkingDirectory = WorkingDirectory;
+        Log.LogMessage(Microsoft.Build.Framework.MessageImportance.High, "> \"" + Exe + "\" " + Arguments);
+        object gate = new object();
+        using (var p = new Process())
+        {
+            p.StartInfo = psi;
+            DataReceivedEventHandler said = (s, e) => { if (e.Data != null) lock (gate) Log.LogMessage(Microsoft.Build.Framework.MessageImportance.High, e.Data); };
+            p.OutputDataReceived += said;
+            p.ErrorDataReceived += said;
+            p.Start(); p.StandardInput.Close(); p.BeginOutputReadLine(); p.BeginErrorReadLine(); p.WaitForExit();
+            if (p.ExitCode != 0) Log.LogError(Path.GetFileName(Exe) + " exited with " + p.ExitCode + " (" + Arguments + ")");
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="SetupRefusesDebug" BeforeTargets="Build" Condition="'$(Configuration)'!='Release'">
+    <Error Text="Setup: GRIDE's Setup is made from the three Release builds - choose Release | x64 and build Setup again" />
+  </Target>
+
+  <!-- the three solutions in Release | x64, one after another, each in an MSBuild of its own: no property of this
+       build (the solution's folder above all, which every tool's output folder is made from) reaches theirs -->
+  <Target Name="BuildOutlooks" BeforeTargets="MakeSetup" Condition="'$(Configuration)'=='Release' And '$(BuildOutlooks)'=='true'">
+    <RunLive Exe="$(MSBuildBinPath)\MSBuild.exe" Arguments="&quot;%(Outlook.FullPath)&quot; /t:Build /p:Configuration=Release /p:Platform=x64 /m /nr:false /nologo /v:minimal" WorkingDirectory="%(Outlook.RootDir)%(Outlook.Directory)" />
+  </Target>
+
+  <Target Name="MakeSetup" AfterTargets="Build" Condition="'$(Configuration)'=='Release'">
+    <PropertyGroup>
+      <SetupSign Condition="'$(CertThumbprint)'!=''"> -CertThumbprint $(CertThumbprint)</SetupSign>
+      <SetupSign Condition="'$(PfxFile)'!=''"> -PfxFile &quot;$(PfxFile)&quot;</SetupSign>
+    </PropertyGroup>
+    <RunLive Exe="$(PowerShellExe)" WorkingDirectory="$(MSBuildThisFileDirectory)"
+             Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build-setup.ps1&quot; -Version $(SetupVersion) -OutDir &quot;$(SetupDist)&quot;$(SetupSign)" />
+    <RunLive Condition="'$(ValidateSetup)'=='true'" Exe="$(PowerShellExe)" WorkingDirectory="$(MSBuildThisFileDirectory)"
+             Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)validate-msi.ps1&quot; -Msi &quot;$(SetupMsi)&quot; -OutDir &quot;$(SetupDist)&quot; -SdkBin &quot;$(SdkMsiBin)&quot;" />
+    <Warning Condition="'$(ValidateSetup)'!='true'" Text="Setup: the Windows SDK's MsiInfo is not in $(SdkMsiBin) - $(SetupMsi) is made but not validated (validate-msi.ps1)" />
+    <Message Importance="High" Text="Setup: $(SetupMsi)" />
+  </Target>
+
+  <Target Name="CleanSetup" AfterTargets="Clean">
+    <Delete Files="$(SetupMsi)" />
+    <RemoveDir Directories="$(SetupDist)\stage;$(SetupDist)\tmp" />
+  </Target>
+</Project>

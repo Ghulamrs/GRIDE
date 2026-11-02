@@ -15,10 +15,13 @@
 ; memset the same way: the byte spread over a register and an xmm, no loop to 256 bytes, rep stosb from 32 KB with ERMSB.
 ; A memcpy whose areas overlap is undefined in C; this one copies as memmove does.
 
+PUBLIC __grt_fma
+
 _DATA SEGMENT
 __grt_ermsb DD 0                ; non-zero: rep movsb and rep stosb are fast (CPUID 7.0:EBX bit 9)
 __grt_avx DD 0                  ; non-zero: 256-bit AVX moves, the processor's (CPUID 1:ECX bit 28) and Windows'
                                 ; (OSXSAVE, bit 27, and XGETBV 0 saving the XMM and YMM state, bits 1 and 2)
+__grt_fma DD 0                  ; non-zero: the fused multiply-add (CPUID 1:ECX bit 12), with AVX as above (c\fma.asm)
 _DATA ENDS
 
 _TEXT SEGMENT
@@ -33,6 +36,7 @@ __grt_memory_start PROC FRAME
     mov r8d, eax                    ; the highest leaf
     mov eax, 1
     cpuid
+    mov r9d, ecx
     and ecx, 18000000h
     cmp ecx, 18000000h
     jne noavx
@@ -42,6 +46,9 @@ __grt_memory_start PROC FRAME
     cmp eax, 6
     jne noavx
     mov DWORD PTR __grt_avx, 1
+    shr r9d, 12
+    and r9d, 1
+    mov DWORD PTR __grt_fma, r9d
 noavx:
     cmp r8d, 7
     jb nofeatures

@@ -761,15 +761,8 @@ namespace Gride
 
         // the defines, each after the tool's switch as RIDE's options.cpp writes them (quoted()): one holding a space,
         // a tab or a quote is quoted whole, an inner quote escaped, so a CCS project's "GREETING=hi there" reaches the
-        // compiler as one argument (-D"GREETING=hi there"); -DNAME and -DNAME=1 as they are
-        static String^ DefineArgument(String^ d)
-        {
-            String^ v = d->Trim();
-            if (v->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) < 0) return v;
-            v = v->Replace("\"", "\\\"");
-            if (v->EndsWith("\\")) v = String::Concat(v, "\\");          // a closing quote after a backslash stays a quote
-            return String::Concat("\"", v, "\"");
-        }
+        // compiler as one argument (-D"GREETING=hi there"); -DNAME and -DNAME=1 as they are - the Compiler Options' rule
+        static String^ DefineArgument(String^ d) { return CompilerOptionRules::Argument(d->Trim()); }
 
         static String^ JoinDefines(String^ sw, List<String^>^ items)
         {

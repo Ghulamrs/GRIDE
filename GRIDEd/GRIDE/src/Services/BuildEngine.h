@@ -16,7 +16,9 @@
 //  project's own cl settings go with it (toolchain.json's projectSettings), no
 //  installation header directory stands in front of Visual Studio's, and
 //  Microsoft's link.exe links the objects. Each progress line names the program
-//  that runs and the file it writes.
+//  that runs and the file it writes; its whole command line goes to the Output
+//  pane when Tools > Options asks for it, and always to the project build's log
+//  (<obj folder>\<project>.build.log) with the folder, variables, output and exit code.
 //  Missing tools give a clear error in the Output pane instead of a crash.
 // =============================================================================
 #pragma once
@@ -110,6 +112,9 @@ namespace Gride { namespace Services {
             projectLines = gcnew List<String^>();
             busy = false;
             Asker = nullptr;
+            logPath = nullptr;
+            logWriter = nullptr;
+            logLock = gcnew Object();
         }
 
         event TextLineHandler^ Output;            // worker thread
@@ -300,6 +305,11 @@ namespace Gride { namespace Services {
         bool rideHeadersSaid;        // an installation header directory kept from cl was named (once)
         bool crtSaid;                // the Windows C runtime of the link was named (once a project build)
         bool busy;
+        String^ logPath;             // the project build's log, opened when its first tool runs; null: none
+        StreamWriter^ logWriter;
+        Object^ logLock;             // a tool's stdout and stderr are read on two threads
+        DateTime logStart;
+        List<String^>^ loggedEnvironment;   // the variables the command logged before was given
 
         // The Windows C runtime a link takes: "grt" (GRIDE's) or "msvc" (Microsoft's). Tools > Options says which;
         // automatic is Microsoft's only where Visual Studio is found and cl's objects are among the inputs - they
@@ -326,6 +336,93 @@ namespace Gride { namespace Services {
             System::Threading::Monitor::Enter(projectLines);
             try { projectLines->Add(s); }
             finally { System::Threading::Monitor::Exit(projectLines); }
+            Log(s);
+        }
+
+        // ---- the project build's log, <obj folder>\<project>.build.log, whatever the Output pane shows ----------
+        // The lines of the build, each tool's command line as it ran (> ...), the folder it ran in, the setup script
+        // it ran after, the variables GRIDE set for it, all it wrote (the Output pane shows a tool's first
+        // MaxToolLines) and its exit code. It is opened when the first tool runs, so a build with nothing to do keeps
+        // the last one's; a log that cannot be written is let go - it never stops a build.
+        void PrepareLog(GrideProject^ p, String^ objDir)
+        {
+            if (logPath != nullptr) return;     // the native tools' build again: the same log goes on
+            logPath = Path::Combine(objDir, p->Name + ".build.log");
+            logStart = DateTime::Now;
+            loggedEnvironment = gcnew List<String^>();
+        }
+
+        void OpenLog()
+        {
+            if (logWriter != nullptr || logPath == nullptr) return;
+            array<String^>^ before;
+            System::Threading::Monitor::Enter(projectLines);
+            try { before = projectLines->ToArray(); }
+            finally { System::Threading::Monitor::Exit(projectLines); }
+            System::Threading::Monitor::Enter(logLock);
+            try
+            {
+                logWriter = gcnew StreamWriter(logPath, false, gcnew UTF8Encoding(false));
+                logWriter->AutoFlush = true;
+                logWriter->WriteLine(String::Format("GRIDE build log, {0:yyyy-MM-dd HH:mm:ss}", logStart));
+                logWriter->WriteLine("Each tool's command line as GRIDE ran it (> ...), the folder it ran in, the variables GRIDE set for it, all it wrote, its exit code.");
+                logWriter->WriteLine();
+                for each (String^ s in before) logWriter->WriteLine(s);
+            }
+            catch (Exception^) { logWriter = nullptr; logPath = nullptr; }
+            finally { System::Threading::Monitor::Exit(logLock); }
+        }
+
+        void Log(String^ s)
+        {
+            if (logWriter == nullptr) return;
+            System::Threading::Monitor::Enter(logLock);
+            try { if (logWriter != nullptr) logWriter->WriteLine(s); }
+            catch (Exception^) { }
+            finally { System::Threading::Monitor::Exit(logLock); }
+        }
+
+        // a tool's command line before it runs: in the Output pane when Tools > Options asks for it, always in the
+        // log - with the variables GRIDE sets that differ from the command before's, the others named
+        void ShowCommand(String^ command, String^ workDir, ToolRunOptions^ options)
+        {
+            if (settings->Env->ShowCommandLines) Output("> " + command);
+            OpenLog();
+            if (logWriter == nullptr) return;
+            Log("> " + command);
+            Log("  in " + workDir);
+            if (options != nullptr && !String::IsNullOrWhiteSpace(options->SetupScript))
+                Log("  through cmd.exe, after: call " + options->SetupScript->Trim());
+            List<String^>^ env = options == nullptr ? gcnew List<String^>() : options->Environment;
+            List<String^>^ same = gcnew List<String^>();
+            for each (String^ v in env)
+            {
+                int eq = v->IndexOf(L'=');
+                if (!loggedEnvironment->Contains(v)) Log("  set " + v);
+                else same->Add(eq > 0 ? v->Substring(0, eq) : v);
+            }
+            if (same->Count > 0) Log("  set as before: " + String::Join(", ", same));
+            loggedEnvironment = gcnew List<String^>(env);
+        }
+
+        void LogExit(int rc, TimeSpan took)
+        {
+            String^ what = rc == ToolRunner::ExitStartFailed ? " - not started" : rc == ToolRunner::ExitCancelled ? " - cancelled" : String::Empty;
+            Log(String::Format("  exit code {0}{1} ({2:0.00} s)", rc, what, took.TotalSeconds));
+        }
+
+        // the project build's last line in its log, which is then closed
+        void EndLog(int result)
+        {
+            if (logWriter != nullptr)
+            {
+                String^ how = result > 0 ? "built" : result == 0 ? "up to date" : result == -2 ? "skipped" : runner->Cancelled ? "cancelled" : "failed";
+                Log(String::Format("------ {0}, {1:0.00} s ------", how, (DateTime::Now - logStart).TotalSeconds));
+            }
+            System::Threading::Monitor::Enter(logLock);
+            try { if (logWriter != nullptr) logWriter->Close(); }
+            catch (Exception^) { }
+            finally { logWriter = nullptr; logPath = nullptr; System::Threading::Monitor::Exit(logLock); }
         }
 
         bool OutputHas(String^ part)
@@ -374,7 +471,11 @@ namespace Gride { namespace Services {
         int RunTool(String^ command, String^ workDir, ToolRunOptions^ options, String^ source, String^ toolName, String^ targetName, bool rideTool)
         {
             BeginTool(source, toolName);
-            int rc = runner->Run(command, workDir, ToolOptions(options, rideTool));
+            ToolRunOptions^ o = ToolOptions(options, rideTool);
+            ShowCommand(command, workDir, o);
+            System::Diagnostics::Stopwatch^ took = System::Diagnostics::Stopwatch::StartNew();
+            int rc = runner->Run(command, workDir, o);
+            LogExit(rc, took->Elapsed);
             EndTool(rc, source, toolName, targetName);
             return rc;
         }
@@ -404,6 +505,7 @@ namespace Gride { namespace Services {
             List<String^>^ Lines;       // what it wrote, in order
             int Code;
             bool Ran;
+            TimeSpan Took;
         };
 
         // a source's compile and the assembly of what it wrote, one after the other on a worker
@@ -432,7 +534,9 @@ namespace Gride { namespace Services {
                     for each (ToolPass^ pass in step->Passes)
                     {
                         into = pass->Lines;
+                        System::Diagnostics::Stopwatch^ took = System::Diagnostics::Stopwatch::StartNew();
                         pass->Code = r->Run(pass->Command, workDir, pass->Options);
+                        pass->Took = took->Elapsed;
                         pass->Ran = true;
                         if (pass->Code != 0) { RemoveFile(pass->Writes); break; }
                     }
@@ -509,7 +613,7 @@ namespace Gride { namespace Services {
             for (;;)
             {
                 while (!failed && read < steps->Count && steps[read]->Done)
-                    if (ReadBack(steps[read++]) != 0) { failed = true; StopWorkers(); }
+                    if (ReadBack(steps[read++], workDir) != 0) { failed = true; StopWorkers(); }
                 int running = 0;
                 for each (CompileStep^ s in steps) if (s->Started && !s->Done) running++;
                 if (failed || runner->Cancelled)
@@ -538,16 +642,18 @@ namespace Gride { namespace Services {
         static int LargerFirst(CompileStep^ a, CompileStep^ b) { return b->Size.CompareTo(a->Size); }
 
         // a finished step read as RunTool reads a tool while it runs; 0, or -1 with failedStep where it failed
-        int ReadBack(CompileStep^ step)
+        int ReadBack(CompileStep^ step, String^ workDir)
         {
             for each (ToolPass^ pass in step->Passes)
             {
                 for each (String^ s in pass->Before) Say(s);
                 if (!pass->Ran) return -1;
                 BeginTool(pass->Source, pass->ToolName);
+                ShowCommand(pass->Command, workDir, pass->Options);
                 writes = pass->Echo;
                 for each (String^ line in pass->Lines) OnToolLine(line);
                 writes = nullptr;
+                LogExit(pass->Code, pass->Took);
                 EndTool(pass->Code, pass->Source, pass->ToolName, pass->TargetName);
                 if (pass->Code == 0) continue;
                 failedStep = pass->Step;
@@ -618,6 +724,7 @@ namespace Gride { namespace Services {
                         crtSaid = false;
                         int result = BuildProject(p, r, false);
                         if (result == -1 && !runner->Cancelled) result = NativeFallback(p, r);
+                        EndLog(result);
                         if (result > 0) summary->Succeeded++;
                         else if (result == 0) summary->UpToDate++;
                         else if (result == -2) summary->Skipped++;
@@ -627,6 +734,7 @@ namespace Gride { namespace Services {
             catch (Exception^ ex)
             {
                 Report(Severity::Error, nullptr, "internal build error: " + ex->Message);
+                EndLog(-1);
                 summary->Failed++;
             }
             summary->Cancelled = runner->Cancelled;
@@ -915,6 +1023,7 @@ namespace Gride { namespace Services {
                 String^ why = Unwritable(dir);
                 if (why != nullptr) { Report(Severity::Error, nullptr, why); return -1; }
             }
+            PrepareLog(p, objDir);
 
             MacroExpander^ mx = BaseMacros(p, cfg, tc, r);
             List<String^>^ objects = gcnew List<String^>();
@@ -1154,6 +1263,8 @@ namespace Gride { namespace Services {
                 crt = WindowsRuntime(clObjects);
                 String^ libs = RideToolchain::CrtLibraries(t, debug, crt, tc->ToolDir, ToolchainSettings::RideRoot);
                 String^ where = RideToolchain::CrtDirectory(t, "grt", tc->ToolDir, ToolchainSettings::RideRoot);
+                // a Debug build links the Debug variants (grtstartd.lib ...), as a Debug build on Microsoft's links libcmtd
+                String^ layers = debug ? "grtstartd, grtcompatd, grtcxxd, grtcd, grtwind" : "grtstart, grtcompat, grtcxx, grtc, grtwin";
                 if (libs == nullptr && settings->Env->EffectiveWindowsRuntime() == "auto" && VisualStudio::Find() != nullptr)
                 {
                     Say("[GRIDE's C runtime is not in " + where + " - Microsoft's (Visual Studio's) is linked instead]");
@@ -1162,7 +1273,7 @@ namespace Gride { namespace Services {
                 }
                 if (libs == nullptr)
                 {
-                    Report(Severity::Error, nullptr, "GRIDE's C runtime is not there: grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib and kernel32.lib are looked for in " + where +
+                    Report(Severity::Error, nullptr, "GRIDE's C runtime is not there: " + layers + " and kernel32.lib are looked for in " + where +
                            " beside GRIDE (Setup installs them; Build Solution writes them into x64\\<Configuration>\\lib)");
                     failedStep = "link";
                     return -1;
@@ -1176,7 +1287,7 @@ namespace Gride { namespace Services {
                 if (!crtSaid)
                 {
                     crtSaid = true;
-                    Say(crt == "grt" ? "[GRIDE's C runtime: grtstart, grtcompat, grtcxx, grtc, grtwin and kernel32.lib from " + where + " - no Visual Studio or Windows SDK library]"
+                    Say(crt == "grt" ? "[GRIDE's C runtime: " + layers + " and kernel32.lib from " + where + " - no Visual Studio or Windows SDK library]"
                                      : "[Microsoft's C runtime: " + RideToolchain::CrtLibraries(t, debug, crt, tc->ToolDir, ToolchainSettings::RideRoot) + ", found through LIB]");
                 }
             }

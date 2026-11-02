@@ -12,7 +12,7 @@
 
 /* GetFullPathNameW's answer for path, or GetCurrentDirectoryW's for a null path, in memory from the process heap;
    0 with errno set */
-static WCHAR *asked(const WCHAR *path)
+static WCHAR *grt_asked(const WCHAR *path)
 {
     WCHAR *s = 0;
     DWORD capacity = 0, n;
@@ -32,7 +32,7 @@ static WCHAR *asked(const WCHAR *path)
 int __grt_drive(void)
 {
     int saved = errno, drive = 0;
-    WCHAR *here = asked(0);
+    WCHAR *here = grt_asked(0);
     errno = saved;
     if (here && here[0] && here[1] == ':')
         drive = (here[0] >= 'a' && here[0] <= 'z' ? here[0] - 'a' + 'A' : here[0]) - 'A' + 1;
@@ -59,7 +59,7 @@ char *_getcwd(char *buf, int size)
         if (size == 0) __grt_fail_fast();
         buf[0] = 0;
     }
-    full = asked(where);
+    full = grt_asked(where);
     if (!full) return 0;
     need = WideCharToMultiByte(GRT_CP_ACP, 0, full, -1, 0, 0, 0, 0);
     if (need <= 0) __grt_set_errno_from(GetLastError());

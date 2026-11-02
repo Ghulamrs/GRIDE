@@ -60,7 +60,7 @@ void __grt_set_errno_from(unsigned long code)
     else errno = EINVAL;
 }
 
-static struct Descriptor *slot_of(int fd)
+static struct Descriptor *grt_slot_of(int fd)
 {
     struct Descriptor *b;
     if (fd < 0 || fd >= GRT_DESCRIPTORS) return 0;
@@ -68,44 +68,44 @@ static struct Descriptor *slot_of(int fd)
     return b ? &b[fd % BLOCK] : 0;
 }
 
-static int is_open(const struct Descriptor *d)
+static int grt_is_open(const struct Descriptor *d)
 {
     return d->mode == GRT_TEXT || d->mode == GRT_BINARY;
 }
 
 /* an open descriptor, unlocked: for what reads its mode and kind alone */
-static struct Descriptor *open_descriptor(int fd)
+static struct Descriptor *grt_open_descriptor(int fd)
 {
-    struct Descriptor *d = slot_of(fd);
-    if (!d || !is_open(d)) { errno = EBADF; return 0; }
+    struct Descriptor *d = grt_slot_of(fd);
+    if (!d || !grt_is_open(d)) { errno = EBADF; return 0; }
     return d;
 }
 
-static void give(struct Descriptor *d, int held)
+static void grt_give(struct Descriptor *d, int held)
 {
     if (held) ReleaseSRWLockExclusive(&d->lock);
 }
 
 /* an open descriptor for one call, locked when the program has threads; *held says whether, for give().
    0 with errno EBADF when fd is not open, or was closed while the lock was awaited. */
-static struct Descriptor *take(int fd, int *held)
+static struct Descriptor *grt_take(int fd, int *held)
 {
-    struct Descriptor *d = slot_of(fd);
+    struct Descriptor *d = grt_slot_of(fd);
     *held = 0;
     if (!d) { errno = EBADF; return 0; }
     if (__grt_threads) {
         AcquireSRWLockExclusive(&d->lock);
         *held = 1;
     }
-    if (!is_open(d)) {
-        give(d, *held);
+    if (!grt_is_open(d)) {
+        grt_give(d, *held);
         errno = EBADF;
         return 0;
     }
     return d;
 }
 
-static int kind_of(HANDLE h)
+static int grt_kind_of(HANDLE h)
 {
     DWORD type, mode;
     if (!h || h == GRT_INVALID_HANDLE) return GRT_KIND_OTHER;
@@ -116,11 +116,11 @@ static int kind_of(HANDLE h)
     return GRT_KIND_OTHER;
 }
 
-static void bind(struct Descriptor *d, HANDLE h, int mode)
+static void grt_bind(struct Descriptor *d, HANDLE h, int mode)
 {
     d->handle = h;
     d->mode = mode;
-    d->kind = kind_of(h);
+    d->kind = grt_kind_of(h);
     d->append = 0;
     d->ended = 0;
     d->aheadAt = d->aheadEnd = 0;
@@ -129,20 +129,20 @@ static void bind(struct Descriptor *d, HANDLE h, int mode)
 /* 0, 1 and 2: the standard handles, in text mode, as a console program starts */
 void __grt_files_start(void)
 {
-    bind(&first[0], GetStdHandle(GRT_STD_INPUT), GRT_TEXT);
-    bind(&first[1], GetStdHandle(GRT_STD_OUTPUT), GRT_TEXT);
-    bind(&first[2], GetStdHandle(GRT_STD_ERROR), GRT_TEXT);
+    grt_bind(&first[0], GetStdHandle(GRT_STD_INPUT), GRT_TEXT);
+    grt_bind(&first[1], GetStdHandle(GRT_STD_OUTPUT), GRT_TEXT);
+    grt_bind(&first[2], GetStdHandle(GRT_STD_ERROR), GRT_TEXT);
 }
 
 int __grt_descriptor(int fd)
 {
-    struct Descriptor *d = open_descriptor(fd);
+    struct Descriptor *d = grt_open_descriptor(fd);
     if (!d) return -1;
     return d->mode | d->kind | (d->append ? GRT_APPEND : 0);
 }
 
 /* every byte to Windows; 0 with errno set if it would not take them */
-static int put(struct Descriptor *d, const char *bytes, unsigned count)
+static int grt_put(struct Descriptor *d, const char *bytes, unsigned count)
 {
     if (d->append) SetFilePointerEx(d->handle, 0, 0, 2);
     while (count > 0) {
@@ -158,43 +158,43 @@ static int put(struct Descriptor *d, const char *bytes, unsigned count)
 int __grt_write_raw(int fd, const char *bytes, unsigned count)
 {
     int held, result;
-    struct Descriptor *d = take(fd, &held);
+    struct Descriptor *d = grt_take(fd, &held);
     if (!d) return -1;
-    result = put(d, bytes, count) ? (int)count : -1;
-    give(d, held);
+    result = grt_put(d, bytes, count) ? (int)count : -1;
+    grt_give(d, held);
     return result;
 }
 
 /* _write's bytes, LF as CR LF in text mode */
-static int write_text(struct Descriptor *d, const char *bytes, unsigned count)
+static int grt_write_text(struct Descriptor *d, const char *bytes, unsigned count)
 {
     char staged[1024];
     unsigned i, n = 0;
-    if (d->mode == GRT_BINARY) return put(d, bytes, count) ? (int)count : -1;
+    if (d->mode == GRT_BINARY) return grt_put(d, bytes, count) ? (int)count : -1;
     for (i = 0; i < count; i++) {
         if (bytes[i] == '\n') staged[n++] = '\r';
         staged[n++] = bytes[i];
         if (n >= sizeof staged - 1) {
-            if (!put(d, staged, n)) return -1;
+            if (!grt_put(d, staged, n)) return -1;
             n = 0;
         }
     }
-    if (n > 0 && !put(d, staged, n)) return -1;
+    if (n > 0 && !grt_put(d, staged, n)) return -1;
     return (int)count;
 }
 
 int __grt_write(int fd, const char *bytes, unsigned count)
 {
     int held, result;
-    struct Descriptor *d = take(fd, &held);
+    struct Descriptor *d = grt_take(fd, &held);
     if (!d) return -1;
-    result = write_text(d, bytes, count);
-    give(d, held);
+    result = grt_write_text(d, bytes, count);
+    grt_give(d, held);
     return result;
 }
 
 /* bytes as Windows gives them: 0 at the end (a pipe whose writer has gone included), -1 on an error */
-static int from_windows(struct Descriptor *d, char *bytes, unsigned count)
+static int grt_from_windows(struct Descriptor *d, char *bytes, unsigned count)
 {
     DWORD got = 0;
     if (!ReadFile(d->handle, bytes, count, &got, 0)) {
@@ -209,7 +209,7 @@ static int from_windows(struct Descriptor *d, char *bytes, unsigned count)
 int __grt_read_raw(int fd, char *bytes, unsigned count)
 {
     int held, result;
-    struct Descriptor *d = take(fd, &held);
+    struct Descriptor *d = grt_take(fd, &held);
     unsigned n, i;
     if (!d) return -1;
     if (d->aheadAt < d->aheadEnd) {            /* left by a _read-style read */
@@ -219,24 +219,24 @@ int __grt_read_raw(int fd, char *bytes, unsigned count)
         d->aheadAt += n;
         result = (int)n;
     } else {
-        result = from_windows(d, bytes, count);
+        result = grt_from_windows(d, bytes, count);
     }
-    give(d, held);
+    grt_give(d, held);
     return result;
 }
 
 /* _read's bytes: a handle that cannot seek through the descriptor's own buffer */
-static int raw(struct Descriptor *d, char *bytes, unsigned count)
+static int grt_raw(struct Descriptor *d, char *bytes, unsigned count)
 {
     unsigned n, i;
     int got;
-    if (d->kind == GRT_KIND_DISK) return from_windows(d, bytes, count);
+    if (d->kind == GRT_KIND_DISK) return grt_from_windows(d, bytes, count);
     if (d->aheadAt == d->aheadEnd) {
         if (!d->ahead) {
             d->ahead = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, AHEAD);
             if (!d->ahead) { errno = ENOMEM; return -1; }
         }
-        got = from_windows(d, (char *)d->ahead, AHEAD);
+        got = grt_from_windows(d, (char *)d->ahead, AHEAD);
         d->aheadAt = 0;
         d->aheadEnd = got > 0 ? (unsigned)got : 0;
         if (got <= 0) return got;
@@ -249,20 +249,20 @@ static int raw(struct Descriptor *d, char *bytes, unsigned count)
 }
 
 /* the one byte raw() just gave, given back */
-static void unread(struct Descriptor *d)
+static void grt_unread(struct Descriptor *d)
 {
     if (d->kind == GRT_KIND_DISK) SetFilePointerEx(d->handle, -1, 0, 1);
     else d->aheadAt--;
 }
 
 /* _read's bytes, CR LF as LF in text mode, CTRL+Z the end of a file or a pipe */
-static int read_text(struct Descriptor *d, char *bytes, unsigned count)
+static int grt_read_text(struct Descriptor *d, char *bytes, unsigned count)
 {
     int n, i, out = 0;
     if (count == 0) return 0;
-    if (d->mode == GRT_BINARY) return raw(d, bytes, count);
+    if (d->mode == GRT_BINARY) return grt_raw(d, bytes, count);
     if (d->ended) return 0;
-    n = raw(d, bytes, count);
+    n = grt_raw(d, bytes, count);
     if (n <= 0) return n;
     for (i = 0; i < n; i++) {
         char c = bytes[i];
@@ -276,9 +276,9 @@ static int read_text(struct Descriptor *d, char *bytes, unsigned count)
         /* a CR that ends what was read: an LF after it makes the two one LF */
         {
             char next;
-            if (raw(d, &next, 1) == 1) {
+            if (grt_raw(d, &next, 1) == 1) {
                 if (next == '\n') { bytes[out++] = '\n'; continue; }
-                unread(d);
+                grt_unread(d);
             }
             bytes[out++] = '\r';
         }
@@ -289,10 +289,10 @@ static int read_text(struct Descriptor *d, char *bytes, unsigned count)
 int __grt_read(int fd, char *bytes, unsigned count)
 {
     int held, result;
-    struct Descriptor *d = take(fd, &held);
+    struct Descriptor *d = grt_take(fd, &held);
     if (!d) return -1;
-    result = read_text(d, bytes, count);
-    give(d, held);
+    result = grt_read_text(d, bytes, count);
+    grt_give(d, held);
     return result;
 }
 
@@ -308,7 +308,7 @@ WCHAR *__grt_widen(const char *path)
 }
 
 /* a free descriptor from 3 up, the table grown by a block when it is full; -1 with errno EMFILE */
-static int claim(void)
+static int grt_claim(void)
 {
     int b, i;
     for (b = 0; b < BLOCKS; b++) {
@@ -328,11 +328,11 @@ static int claim(void)
 }
 
 /* claim() under the table's lock: the descriptor is the caller's until bind() opens it or mode 0 frees it */
-static int free_descriptor(void)
+static int grt_free_descriptor(void)
 {
     int fd, held = __grt_threads;
     if (held) AcquireSRWLockExclusive(&table);
-    fd = claim();
+    fd = grt_claim();
     if (held) ReleaseSRWLockExclusive(&table);
     return fd;
 }
@@ -340,24 +340,29 @@ static int free_descriptor(void)
 int __grt_open(const char *path, unsigned flags)
 {
     WCHAR *wide;
-    DWORD access, disposition;
+    DWORD access, disposition, share = GRT_SHARE_READ_WRITE, attributes = GRT_FILE_ATTRIBUTE_NORMAL;
     HANDLE h;
-    int fd = free_descriptor();
+    int fd = grt_free_descriptor();
     struct Descriptor *d;
     if (fd < 0) return -1;
-    d = slot_of(fd);
+    d = grt_slot_of(fd);
     wide = __grt_widen(path);
     if (!wide) { d->mode = 0; return -1; }
     access = (flags & 3) == 0 ? GRT_GENERIC_READ : (flags & 3) == 1 ? GRT_GENERIC_WRITE : GRT_GENERIC_READ | GRT_GENERIC_WRITE;
-    if ((flags & 0x200) && (flags & 0x400)) disposition = GRT_CREATE_ALWAYS;
+    if ((flags & 0x200) && (flags & 0x100)) disposition = GRT_CREATE_NEW;
+    else if ((flags & 0x200) && (flags & 0x400)) disposition = GRT_CREATE_ALWAYS;
     else if (flags & 0x200) disposition = GRT_OPEN_ALWAYS;
     else if (flags & 0x400) disposition = GRT_TRUNCATE_EXISTING;
     else disposition = GRT_OPEN_EXISTING;
-    h = CreateFileW(wide, access, GRT_SHARE_READ_WRITE, 0, disposition, GRT_FILE_ATTRIBUTE_NORMAL, 0);
+    if (flags & 0x40) {
+        attributes |= GRT_FILE_FLAG_DELETE_ON_CLOSE;
+        share = GRT_SHARE_ALL;
+    }
+    h = CreateFileW(wide, access, share, 0, disposition, attributes, 0);
     if (h == GRT_INVALID_HANDLE) __grt_set_errno_from(GetLastError());
     HeapFree(GetProcessHeap(), 0, wide);
     if (h == GRT_INVALID_HANDLE) { d->mode = 0; return -1; }
-    bind(d, h, (flags & 0x8000) ? GRT_BINARY : GRT_TEXT);
+    grt_bind(d, h, (flags & 0x8000) ? GRT_BINARY : GRT_TEXT);
     d->append = (flags & 8) != 0;
     return fd;
 }
@@ -365,7 +370,7 @@ int __grt_open(const char *path, unsigned flags)
 int __grt_close(int fd)
 {
     int held, ok;
-    struct Descriptor *d = take(fd, &held);
+    struct Descriptor *d = grt_take(fd, &held);
     if (!d) return -1;
     ok = CloseHandle(d->handle);
     if (!ok) __grt_set_errno_from(GetLastError());
@@ -373,11 +378,11 @@ int __grt_close(int fd)
     d->ahead = 0;
     d->handle = 0;
     d->mode = 0;            /* last: from here an open may claim it */
-    give(d, held);
+    grt_give(d, held);
     return ok ? 0 : -1;
 }
 
-static long long seek_to(struct Descriptor *d, long long offset, int origin)
+static long long grt_seek_to(struct Descriptor *d, long long offset, int origin)
 {
     long long at = 0;
     if (origin < 0 || origin > 2) { errno = EINVAL; return -1; }
@@ -391,10 +396,10 @@ long long __grt_seek64(int fd, long long offset, int origin)
 {
     int held;
     long long at;
-    struct Descriptor *d = take(fd, &held);
+    struct Descriptor *d = grt_take(fd, &held);
     if (!d) return -1;
-    at = seek_to(d, offset, origin);
-    give(d, held);
+    at = grt_seek_to(d, offset, origin);
+    grt_give(d, held);
     return at;
 }
 
@@ -436,23 +441,23 @@ int __grt_rename(const char *from, const char *to)
 int _setmode(int fd, int mode)
 {
     int held, old;
-    struct Descriptor *d = take(fd, &held);
+    struct Descriptor *d = grt_take(fd, &held);
     if (!d) return -1;
     if (mode != GRT_TEXT && mode != GRT_BINARY) {
-        give(d, held);
+        grt_give(d, held);
         errno = EINVAL;
         return -1;
     }
     old = d->mode;
     d->mode = mode;
-    give(d, held);
+    grt_give(d, held);
     return old;
 }
 
 /* Spec: Microsoft C runtime, _isatty - non-zero when the descriptor is a character device (NUL included) */
 int _isatty(int fd)
 {
-    struct Descriptor *d = open_descriptor(fd);
+    struct Descriptor *d = grt_open_descriptor(fd);
     if (!d) return 0;
     return d->kind == GRT_KIND_CONSOLE || d->kind == GRT_KIND_DEVICE;
 }

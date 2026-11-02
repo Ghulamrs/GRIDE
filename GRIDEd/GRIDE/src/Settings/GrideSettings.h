@@ -33,6 +33,7 @@ namespace Gride { namespace Settings {
             ReopenLastWorkspace = true;
             SaveBeforeBuild = true;
             JumpToFirstError = true;
+            ShowCommandLines = false;
             AskNativeTools = true;
             RunInIde = true;
             BuildJobs = 0;
@@ -65,6 +66,7 @@ namespace Gride { namespace Settings {
         property bool    ReopenLastWorkspace;
         property bool    SaveBeforeBuild;
         property bool    JumpToFirstError;        // a failed build puts the caret on its first error (RIDE)
+        property bool    ShowCommandLines;        // each tool's whole command line in the Output pane (the build's log has them always)
         property bool    AskNativeTools;          // RIDE's askNative: offer the vendor's assembler/linker when the project's own fail
         property bool    RunInIde;                // Start Without Debugging runs in the Output pane (RIDE); off: an external console window
         property int     BuildJobs;               // how many of a project's files compile and assemble at once: 0 one per processor, 1 one at a time
@@ -141,6 +143,7 @@ namespace Gride { namespace Settings {
             o->SetBool("reopenLastWorkspace", ReopenLastWorkspace);
             o->SetBool("saveBeforeBuild", SaveBeforeBuild);
             o->SetBool("jumpToFirstError", JumpToFirstError);
+            o->SetBool("showCommandLines", ShowCommandLines);
             o->SetBool("askNativeTools", AskNativeTools);
             o->SetBool("runInIde", RunInIde);
             o->SetNumber("buildJobs", BuildJobs);
@@ -182,6 +185,7 @@ namespace Gride { namespace Settings {
             ReopenLastWorkspace = o->GetBool("reopenLastWorkspace", ReopenLastWorkspace);
             SaveBeforeBuild = o->GetBool("saveBeforeBuild", SaveBeforeBuild);
             JumpToFirstError = o->GetBool("jumpToFirstError", JumpToFirstError);
+            ShowCommandLines = o->GetBool("showCommandLines", ShowCommandLines);
             AskNativeTools = o->GetBool("askNativeTools", AskNativeTools);
             RunInIde = o->GetBool("runInIde", RunInIde);
             BuildJobs = Math::Max(0, o->GetInt("buildJobs", BuildJobs));

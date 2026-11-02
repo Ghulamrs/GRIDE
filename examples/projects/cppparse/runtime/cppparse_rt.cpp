@@ -115,6 +115,12 @@ EXCEPTION_DISPOSITION cppparse_eh_handler(struct _EXCEPTION_RECORD* record, void
 
 #define CPPPARSE_EH_MAGIC 0x58505043UL   /* "CPPX", the first word of the range table */
 
+/* the destructors the landing pads run while an exception unwinds (cppparse_unwind_enter / leave below), and the
+   stack pointer of the frame whose pad runs the innermost one */
+#define CPPPARSE_UNWIND_DEPTH 64
+static __declspec(thread) int g_unwinding = 0;
+static __declspec(thread) DWORD64 g_unwindFrame[CPPPARSE_UNWIND_DEPTH];
+
 /* sends the exception in flight to the nearest place that takes it, walking the stack from here with the unwind
    tables: a table landing pad (the range of the frame's call site, --eh=table) is entered with RtlRestoreContext,
    which gives the frame back its callee-saved registers as they were at that call; a setjmp frame (the default
@@ -127,6 +133,9 @@ static void dispatch(void)
     RtlCaptureContext(&ctx);
     for (i = 0; i < 100000 && ctx.Rip; ++i) {
         DWORD64 base = 0;
+        /* the walk has reached the frame whose landing pad is running a destructor: the exception left that
+           destructor during the unwinding (one caught inside it never gets this far) */
+        if (g_unwinding > 0 && g_unwinding <= CPPPARSE_UNWIND_DEPTH && ctx.Rsp >= g_unwindFrame[g_unwinding - 1]) cppparse_terminate();
         PRUNTIME_FUNCTION rf = RtlLookupFunctionEntry(ctx.Rip, &base, 0);
         if (!rf) { ctx.Rip = *(DWORD64*)ctx.Rsp; ctx.Rsp += 8; }      /* a leaf without a table entry */
         else {
@@ -135,14 +144,20 @@ static void dispatch(void)
             DWORD64 establisher = 0;
             PEXCEPTION_ROUTINE handler = RtlVirtualUnwind(UNW_FLAG_EHANDLER, base, ctx.Rip, rf, &ctx, &data, &establisher, 0);
             if (handler && data && ((const unsigned long*)data)[0] == CPPPARSE_EH_MAGIC) {
-                const unsigned long* t = (const unsigned long*)data;
+                /* the table: the entry count, the pad count, then the entries sorted by code offset, one word each:
+                   the offset in the function (20 bits) and the pad's number in the pad table that follows (12 bits,
+                   0: none); an entry holds from its offset to the next one's, a pad of 0 marks code outside every
+                   region, the last entry is such an end */
+                const unsigned long* t = (const unsigned long*)data;   /* t[0] magic, t[1] entries, t[2] pads */
+                const unsigned long* pads = t + 3 + t[1];
                 const DWORD64 at = frame.Rip - base - 1;               /* inside the call instruction */
-                unsigned long k;
-                for (k = 0; k < t[1]; ++k)
-                    if (at >= t[2 + 3 * k] && at < t[3 + 3 * k]) {
-                        frame.Rip = base + t[4 + 3 * k];
-                        RtlRestoreContext(&frame, 0);
-                    }
+                const DWORD64 fnBase = (DWORD64)rf->BeginAddress;
+                unsigned long k, pad = 0;
+                for (k = 0; k < t[1] && at >= fnBase + (t[3 + k] >> 12); ++k) pad = t[3 + k] & 0xFFF;
+                if (pad != 0) {
+                    frame.Rip = base + pads[pad - 1];
+                    RtlRestoreContext(&frame, 0);
+                }
             }
         }
         /* the walk has left the stack frame that holds the innermost setjmp frame */
@@ -362,11 +377,26 @@ void cppparse_catch_unwind(void* handled)
    terminate, whose default handler is abort, as cl's code does */
 void (*cppparse_set_terminate(void (*f)(void)))(void) { void (*old)(void) = g_terminateHandler; g_terminateHandler = f; return old; }
 void (*cppparse_set_unexpected(void (*f)(void)))(void) { void (*old)(void) = g_unexpectedHandler; g_unexpectedHandler = f; return old; }
-/* the landing pads count the destructors they run while an exception is unwinding (cppparse_catch_begin has
-   taken the exception by then): std::uncaught_exception() is true there and from the throw to the handler */
-static __declspec(thread) int g_unwinding = 0;
-void cppparse_unwind_enter(void) { ++g_unwinding; }
-void cppparse_unwind_leave(void) { --g_unwinding; }
+/* the landing pads count the destructors they run while an exception is unwinding (a catch handler's pad has taken
+   the exception with cppparse_catch_begin by then; an object's own cleanup pad, --eh=table, leaves it in flight):
+   std::uncaught_exception() is true there and from the throw to the handler. The pad's frame is noted: an exception
+   that leaves one of those destructors reaches it in dispatch, which calls terminate (C++98 15.5.1) */
+static __declspec(thread) struct cppparse_exception g_parked[CPPPARSE_UNWIND_DEPTH];   /* the exception in flight while the pad's destructor runs */
+void cppparse_unwind_enter(void)
+{
+    if (g_unwinding < CPPPARSE_UNWIND_DEPTH) {
+        static const struct cppparse_exception none = { 0, 0, 0, 0, 0 };
+        g_unwindFrame[g_unwinding] = (DWORD64)_AddressOfReturnAddress() + 8;
+        g_parked[g_unwinding] = g_inflight;   /* the destructor may throw and catch exceptions of its own */
+        g_inflight = none;
+    }
+    ++g_unwinding;
+}
+void cppparse_unwind_leave(void)
+{
+    --g_unwinding;
+    if (g_unwinding >= 0 && g_unwinding < CPPPARSE_UNWIND_DEPTH) g_inflight = g_parked[g_unwinding];   /* in flight again: the pad's rethrow sends it on */
+}
 int cppparse_uncaught_exception(void) { return g_inflight.object != 0 || g_unwinding > 0; }
 void cppparse_unexpected(void)
 {
@@ -389,6 +419,19 @@ void cppparse_rethrow(void)
         g_inflight = g_caught[--g_caughtCount];
     }
     dispatch();
+}
+
+/* the landing pad of an object whose cleanup is one destructor call (--eh=table, IrGen::emitPads) makes the three
+   calls above one: the destructor runs while the exception is parked, as between cppparse_unwind_enter and leave
+   (std::uncaught_exception() is true in it, an exception it catches inside is fine, one that leaves it reaches this
+   frame in dispatch, which calls terminate), then the exception goes on to the next landing pad or to the caller.
+   It does not return */
+void cppparse_unwind_destroy(void* object, void (*dtor)(void*))
+{
+    cppparse_unwind_enter();
+    dtor(object);
+    cppparse_unwind_leave();
+    cppparse_rethrow();
 }
 
 /* atomic counters for code compiled by cppparse (MSVC's InterlockedIncrement is a compiler intrinsic); the library

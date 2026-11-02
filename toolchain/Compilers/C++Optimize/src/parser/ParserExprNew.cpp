@@ -151,12 +151,17 @@ ExprPtr Parser::classTemporary(const Type *cls, std::size_t pos) {
             // **[dcl.init]/8: `P()` value-initialises, and for a class with no
             // user-provided constructor that means zeroing it.** The slot was
             // handed back as it stood, so `f(P())` read whatever the frame held.
+            // Named `$vinit`, which is how a constant reads it as zeroes (a3).
+            obj.reset(Var::local("$vinit", slot));
+            obj->setType(plain);
+            obj->setXvalue();
+            obj->setDeclCategory(Expr::Category::Prvalue);
             ExprPtr chain = zeroChain(*obj, plain);
             if (chain == nullptr) return obj;
             // Comma'd with the object's *address* and dereferenced, which is
             // the shape the argument path below already uses: a comma whose
             // value is a class lvalue is not something every backend spells.
-            ExprPtr again(Var::local("$tmp", slot));
+            ExprPtr again(Var::local("$vinit", slot));
             again->setType(plain);
             ExprPtr at(new Unary('&', std::move(again)));
             at->setType(types_.pointerTo(plain));
@@ -203,7 +208,7 @@ ExprPtr Parser::classTemporary(const Type *cls, std::size_t pos) {
 // as a comma chain in front of the list, the shape `Row({1, 2})` already used.
 ExprPtr Parser::initializerListExpr(const Type *ilType, Init &in, std::size_t pos) {
     std::vector<StmtPtr> setup;
-    ExprPtr list = buildInitializerList(ilType, in, pos, setup);
+    ExprPtr list = buildInitializerList(ilType, in, pos, setup, true);
     ExprPtr chain;
     for (std::size_t i = 0; i < setup.size(); i++) {
         ExprStmt *one = dynamic_cast<ExprStmt *>(setup[i].get());
@@ -343,6 +348,7 @@ ExprPtr Parser::scalarFromList(const Type *to, Init &in, std::size_t pos) {
         }
         return convert(std::move(z), types_.withoutConst(to));
     }
+    resolveOverloadPlaceholder(in.items[0].value, to, in.items[0].pos);
     ExprPtr v = decay(std::move(in.items[0].value));
     checkNarrowing(to, *v, in.items[0].pos, std::string());
     checkAssignable(*v, to, pos, "'" + to->describe() + "{...}'");
@@ -448,6 +454,89 @@ ExprPtr Parser::listTemporary(const Type *to, std::size_t pos) {
     return listTemporaryFrom(to, in, false, pos);
 }
 
+ExprPtr Parser::elementAddress(const std::string &temp, int slot, const Type *elem, std::size_t i) {
+    const Type *pointer = types_.pointerTo(elem);
+    ExprPtr base(Var::local(temp, slot));
+    base->setType(pointer);
+    if (i == 0) return base;
+    const Type *chars = types_.pointerTo(types_.get(Kind::Char));
+    ExprPtr asChars(new Cast(chars, std::move(base)));
+    asChars->setType(chars);
+    ExprPtr skip(new Num(static_cast<long long>(i) * static_cast<long long>(elem->size(target_))));
+    skip->setType(types_.intType());
+    ExprPtr at(new Binary(BinOp::Add, std::move(asChars), std::move(skip)));
+    at->setType(chars);
+    ExprPtr typed(new Cast(pointer, std::move(at)));
+    typed->setType(pointer);
+    return typed;
+}
+
+// **Copy-initialised from its clause where it lives**, [dcl.init.aggr]/2: a braced clause as
+// `T x = {...}` chooses, an initializer_list constructor first; an expression by a constructor
+// that is not explicit.
+ExprPtr Parser::constructListedElement(const Type *made, Init &clause, ExprPtr at, std::size_t pos) {
+    const std::size_t where = clause.pos != 0 ? clause.pos : pos;
+    const std::string what = "an element of 'new " + made->describe() + "[n]{...}'";
+    if (clause.isList && clause.items.empty())
+        src_.fail(where, "'{}' for " + what + " is not supported yet - leave the element out of "
+                         "the list, which value-initialises it");
+    if (clause.isList && isAggregateClass(made))
+        src_.fail(where, "an aggregate built from braces as " + what + " is not supported yet");
+    std::vector<ExprPtr> args;
+    const Type *ilType = nullptr;
+    Signature ctor = Signature();
+    if (clause.isList && initializerListConstructor(made, &ilType) != nullptr) {
+        args.push_back(initializerListExpr(ilType, clause, where));
+        ctor = resolveOverload(constructorKey(made->tag()), args, where);
+    } else if (clause.isList) {
+        ctor = listConstructor(made, clause, args, true, where);
+    } else {
+        args.push_back(std::move(clause.value));
+        convertThroughConversionFunction(args, made, false, where);
+        ctor = resolveOverload(constructorKey(made->tag()), args, where);
+        if (ctor.isExplicit)
+            src_.fail(where, "'" + made->describe() + "' is made from this by an 'explicit' "
+                             "constructor, and " + what + " is copy-initialised, which may not "
+                             "choose one");
+    }
+    applyDefaults(ctor, args, where);
+    if (ctor.access != Access::Public && !insideAccessOf(made, ctor.access) && !isFriendOf(made))
+        src_.fail(where, "'" + made->describe() + "' has no public constructor taking these "
+                         "arguments - the one that matches is " +
+                         (ctor.access == Access::Private ? "private" : "protected"));
+    std::vector<ExprPtr> all;
+    all.push_back(std::move(at));
+    for (std::size_t i = 0; i < args.size(); i++) all.push_back(std::move(args[i]));
+    std::vector<const Type *> full;
+    full.push_back(types_.pointerTo(made));
+    for (std::size_t i = 0; i < ctor.params.size(); i++) full.push_back(ctor.params[i]);
+    return completeCall(made->tag(), ctor.symbol, nullptr, types_.get(Kind::Void), full, false,
+                        where, std::move(all));
+}
+
+// A scalar never narrowed, [dcl.init.aggr]/2; an aggregate by its own braces, or a whole one.
+ExprPtr Parser::listedElementValue(const Type *made, Init &clause) {
+    const std::string what = "an element of 'new " + made->describe() + "[n]{...}'";
+    const Type *plain = made->unqualified();
+    if (plain->isArray())
+        src_.fail(clause.pos, what + ", itself an array, is not supported yet");
+    if (plain->isStructOrUnion()) {
+        if (destructorOf(plain) != nullptr)
+            src_.fail(clause.pos, what + " with a destructor and no constructor is not supported yet");
+        if (clause.isList) return listTemporaryFrom(plain, clause, true, clause.pos);
+        ExprPtr v = decay(std::move(clause.value));
+        if (v->type() == nullptr || v->type()->unqualified() != plain)
+            src_.fail(clause.pos, "braces left out around " + what + " are not supported yet - "
+                                  "brace each element");
+        return v;
+    }
+    if (clause.isList) return scalarFromList(plain, clause, clause.pos);
+    ExprPtr v = decay(std::move(clause.value));
+    checkNarrowing(plain, *v, clause.pos, std::string());
+    checkAssignable(*v, plain, clause.pos, what);
+    return convert(std::move(v), plain);
+}
+
 // **The conversion function on `from` that answers something usable.** The
 // mirror of the converting constructor: that one is a constructor of the
 // *target*, this one a member of the *source*.
@@ -456,27 +545,36 @@ const Parser::Signature *Parser::conversionFunction(const Type *from,
                                                     bool allowExplicit) {
     const Type *plain = from->unqualified();
     if (!plain->isStructOrUnion()) return nullptr;
+    if (to != nullptr) instantiateConversionTemplates(plain, to, peek().pos);
 
     // **Walked over the signature table and not over a member list**, because there is no member
     // list: the table is keyed by `Class::name`, so a class's conversions cannot be asked for
     // without already knowing what they convert to.
     const Signature *best = nullptr;
     bool exact = false;
+    // Two inexact answers are none - unless an exact one comes later in the table (cl09).
+    bool inexactTwice = false;
     for (const Type *c = plain; c != nullptr; c = c->base()) {
         for (std::size_t k = 0; k < functions_.size(); k++) {
             const Signature &f = functions_[k];
             if (f.owner != c->tag()) continue;
             if (!isConversionName(f.name) || !f.params.empty()) continue;
             if (f.isExplicit && !allowExplicit) continue;
-            const Type *gives = f.returns;
+            // `operator const int &()` gives an lvalue of its referent, [class.conv.fct]/1.
+            const Type *gives = f.returns->isReference() ? f.returns->referent() : f.returns;
             if (to == nullptr) {
                 if (!gives->unqualified()->isScalar()) continue;
                 if (gives->isBool()) return &f;          // the one asked for
-                if (best != nullptr && !exact) return nullptr;
-                if (best == nullptr) best = &f;
+                if (best != nullptr) inexactTwice = true;
+                else best = &f;
                 continue;
             }
             if (gives->unqualified() == to->unqualified()) {
+                // [over.match.best]/1: a template's specialization loses a tie to a function that is not one.
+                if (exact && best->fromTemplate != f.fromTemplate) {
+                    if (best->fromTemplate) best = &f;
+                    continue;
+                }
                 if (exact) return nullptr;               // two exact answers
                 best = &f;
                 exact = true;
@@ -484,15 +582,17 @@ const Parser::Signature *Parser::conversionFunction(const Type *from,
             }
             if (exact) continue;
             if (!gives->unqualified()->isScalar() || !to->isScalar()) continue;
-            if (best != nullptr) return nullptr;
+            if (best != nullptr) { inexactTwice = true; continue; }
             best = &f;
         }
     }
-    return best;
+    return exact || !inexactTwice ? best : nullptr;
 }
 
 // **The one conversion this class has to a number or a pointer**, or null when
-// it has none or has more than one.
+// it has none or has more than one. **An `explicit` one is not a candidate**: an operand of a
+// built-in operator is converted implicitly ([over.match.oper]/7, [class.conv.fct]/2) - `s + 1`
+// called `explicit operator int` (review of 1.30, A4). Contextual conversions ask elsewhere.
 const Parser::Signature *Parser::soleNumericConversion(const Type *from) {
     const Type *plain = from->unqualified();
     if (!plain->isStructOrUnion()) return nullptr;
@@ -501,7 +601,7 @@ const Parser::Signature *Parser::soleNumericConversion(const Type *from) {
         for (std::size_t k = 0; k < functions_.size(); k++) {
             const Signature &f = functions_[k];
             if (f.owner != c->tag()) continue;
-            if (!isConversionName(f.name) || !f.params.empty()) continue;
+            if (!isConversionName(f.name) || !f.params.empty() || f.isExplicit) continue;
             if (!f.returns->unqualified()->isScalar()) continue;
             if (only != nullptr) return nullptr;
             only = &f;
@@ -519,6 +619,13 @@ ExprPtr Parser::contextualScalar(ExprPtr e, std::size_t pos, const char *what) {
             e = memberCallWith(std::move(e), object, how->name, pos,
                                std::move(none));
         }
+    }
+    // **[conv.bool]: a pointer to member is true when it is not null** - `if (pm)`, `!pm` (R4). Its
+    // null is not the number 0 (a data member pointer's is -1), which the comparison knows.
+    if (e->type() != nullptr && (e->type()->isMemberPointer() || e->type()->isMemberFunctionPointer())) {
+        ExprPtr none(new Num(0LL));
+        none->setType(types_.intType());
+        e = comparison(BinOp::Ne, std::move(e), std::move(none), pos);
     }
     requireScalar(*e, pos, what);
     return e;
@@ -567,11 +674,40 @@ ExprPtr Parser::userConversion(const Type *param, ExprPtr &arg, std::size_t pos)
     const Type *want = param->isReference() ? param->pointee() : param;
     const Type *plain = want->unqualified();
     if (!plain->isStructOrUnion()) return nullptr;
-    if (param->isReference() && !want->isConst()) return nullptr;
+    // [dcl.init.ref]/5: the temporary is bound by a reference to const or by an rvalue reference.
+    if (param->isReference() && !param->isRValueReference() && !want->isConst()) return nullptr;
     if (arg->type() == nullptr) return nullptr;
     if (arg->type()->unqualified() == plain) return nullptr;
 
     const Signature *ctor = convertingConstructor(plain, *arg, pos);
+    // [over.match.copy]/1: A's constructor from a B and B's own conversion function to A are both candidates, the
+    // reference to B each binds deciding between them ([over.ics.rank]/3.2.6) - or, the same, neither.
+    if (ctor != nullptr && !ctor->fromTemplate && !ctor->params.empty() &&
+        arg->type()->unqualified()->isStructOrUnion()) {
+        const Type *source = arg->type()->unqualified();
+        // B's one conversion function to A by value, declared in B itself and no template.
+        const Signature *how = nullptr;
+        int found = 0;
+        for (const Signature &f : functions_)
+            if (f.owner == source->tag() && isConversionName(f.name) && f.params.empty() && !f.isExplicit &&
+                !f.returns->isReference() && f.returns->unqualified() == plain) {
+                how = &f;
+                found++;
+            }
+        const Type *taken = ctor->params[0]->isReference() ? ctor->params[0]->referent() : ctor->params[0];
+        const unsigned given = (arg->type()->isConst() ? 1u : 0u) | (arg->type()->isVolatile() ? 2u : 0u);
+        const unsigned byConversion = found == 1 ? (how->constThis ? 1u : 0u) | (how->volatileThis ? 2u : 0u) : 0u;
+        if (found == 1 && !how->fromTemplate && how->refThis == RefQual::None && taken->unqualified() == source &&
+            (given & ~byConversion) == 0) {
+            const unsigned byCtor = (taken->isConst() ? 1u : 0u) | (taken->isVolatile() ? 2u : 0u);
+            if (!ctor->params[0]->isReference() || byCtor == byConversion ||
+                ((byCtor & ~byConversion) != 0 && (byConversion & ~byCtor) != 0))
+                src_.fail(pos, "converting '" + source->describe() + "' to '" + plain->describe() + "' is ambiguous: "
+                               "the constructor " + describeSignature(*ctor) + " and the conversion function " +
+                               describeSignature(*how) + " are equally good - [over.match.best]");
+            if ((byConversion & ~byCtor) == 0) ctor = nullptr;
+        }
+    }
     // **The other half of [over.ics.user]: a conversion function on the
     // argument's own class.** `take(const B &)` given an A with `operator B()`
     // was refused as no viable function. Copy-initialisation, so never explicit.
@@ -796,6 +932,7 @@ ExprPtr Parser::dynamicCastToVoid(ExprPtr v, const Type *to) {
     // **The Microsoft ABI keeps no offset-to-top, and does not do this
     // inline.**
     if (target_.microsoftNames()) {
+        const Type *from = v->type();
         const Type *voidPtr = types_.pointerTo(types_.get(Kind::Void));
         const int msSlot = allocateFrameSlot(voidPtr);
         const std::string msTemp = ".dyv" + std::to_string(newTemps_++);
@@ -809,7 +946,11 @@ ExprPtr Parser::dynamicCastToVoid(ExprPtr v, const Type *to) {
         std::vector<ExprPtr> args;
         ExprPtr object(Var::local(msTemp, msSlot));
         object->setType(voidPtr);
-        args.push_back(std::move(object));
+        ExprPtr typed(new Cast(from, std::move(object)));
+        typed->setType(from);
+        ExprPtr vf(new Cast(voidPtr, msToVfptr(std::move(typed), from->pointee()->unqualified())));
+        vf->setType(voidPtr);
+        args.push_back(std::move(vf));
         ExprPtr asked = runtimeCall("__RTCastToVoid", to, std::move(args));
 
         // The same null guard the pointer form uses. The runtime is documented
@@ -899,14 +1040,12 @@ ExprPtr Parser::dynamicCast(std::size_t pos) {
 
 // [expr.dynamic.cast]/9: the pointer form on the operand's address, a null answer
 // being `__cxa_bad_cast()` - the ABI's routine that throws std::bad_cast, as clang calls.
+// On the Microsoft ABI `__RTDynamicCast` is told it is a reference and throws the CRT's
+// std::bad_cast itself, as cl calls it: its answer is never null.
 ExprPtr Parser::dynamicCastReference(ExprPtr v, const Type *to, std::size_t pos) {
     if (to->isRValueReference())
         src_.fail(pos, "'dynamic_cast' to an rvalue reference is not supported yet - the "
                        "lvalue reference form works");
-    if (target_.microsoftNames())
-        src_.fail(pos, "'dynamic_cast' to a reference is not supported yet on x86_64-windows - "
-                       "a failed one throws 'std::bad_cast', a class this target does not throw "
-                       "or catch yet; the pointer form works and answers with a null");
     const Type *referent = to->referent();
     if (!isGlvalue(*v) || !v->type()->unqualified()->isStructOrUnion())
         src_.fail(pos, "'dynamic_cast<" + to->describe() + ">' needs an object of a class to "
@@ -915,6 +1054,12 @@ ExprPtr Parser::dynamicCastReference(ExprPtr v, const Type *to, std::size_t pos)
     const Type *object = v->type();
     ExprPtr addr(new Unary('&', std::move(v)));
     addr->setType(types_.pointerTo(object));
+    if (target_.microsoftNames()) {
+        mayThrow_++;
+        ExprPtr obj(new Unary('*', dynamicCastFrom(std::move(addr), ptr, pos, true)));
+        obj->setType(referent);
+        return obj;
+    }
     ExprPtr answer = dynamicCastFrom(std::move(addr), ptr, pos);
     const int slot = allocateFrameSlot(ptr);
     const std::string temp = ".dynref" + std::to_string(newTemps_++);
@@ -944,7 +1089,7 @@ ExprPtr Parser::dynamicCastReference(ExprPtr v, const Type *to, std::size_t pos)
     return obj;
 }
 
-ExprPtr Parser::dynamicCastFrom(ExprPtr v, const Type *to, std::size_t pos) {
+ExprPtr Parser::dynamicCastFrom(ExprPtr v, const Type *to, std::size_t pos, bool reference) {
     // **[expr.dynamic.cast]/7: `void *` is the other target, and it asks a different question.**
     const bool toVoid = to->isPointer() && to->pointee()->unqualified()->isVoid();
 
@@ -969,7 +1114,11 @@ ExprPtr Parser::dynamicCastFrom(ExprPtr v, const Type *to, std::size_t pos) {
     if (toVoid) return dynamicCastToVoid(std::move(v), to);
 
     const Type *target = to->pointee()->unqualified();
-    // **[expr.dynamic.cast]/5: an upcast is not a question.**
+    // **[expr.dynamic.cast]/5: an upcast is not a question** - and is asked of a base reachable from here.
+    for (const Type::BaseSpec &b : source->bases())
+        if (b.type->unqualified() == target && accessibleBaseOffset(source, target) < 0)
+            src_.fail(pos, "'" + target->describe() + "' is an inaccessible base of '" + source->describe() +
+                           "', so 'dynamic_cast' cannot convert to it - [expr.dynamic.cast]/5");
     if (publicBaseOffset(source, target) >= 0)
         return convert(std::move(v), to);
 
@@ -993,8 +1142,9 @@ ExprPtr Parser::dynamicCastFrom(ExprPtr v, const Type *to, std::size_t pos) {
         if (ms) {
             MicrosoftRtti names;
             std::string why;
-            if (cls->bases().size() <= 1 &&
-                microsoftClassRttiNames(cls, &names, &why))
+            std::vector<MicrosoftBaseClass> rows;
+            int hierarchy = 0;
+            if (microsoftClassRttiNames(cls, &names, &why) && msRttiRows(cls, &rows, &hierarchy))
                 sym = names.descriptor;
         } else {
             sym = emitClassTypeInfo(cls, cls->tag(), pos);
@@ -1002,9 +1152,9 @@ ExprPtr Parser::dynamicCastFrom(ExprPtr v, const Type *to, std::size_t pos) {
         // Itanium writes __vmi_class_type_info for any class; Microsoft's hierarchy is one base deep here.
         if (sym.empty())
             src_.fail(pos, "'dynamic_cast' with '" + cls->describe() + "', which has more than "
-                           "one base, is not supported yet on x86_64-windows - its RTTI hierarchy "
-                           "would carry every base's displacement and the multiple-inheritance "
-                           "flag; a single base works there, and every shape on the other targets");
+                           "one base and a virtual or a repeated one among them, is not supported yet "
+                           "on x86_64-windows - its RTTI would carry a vbtable displacement or an "
+                           "ambiguity flag not measured yet; every shape works on the other targets");
         return sym;
     };
 
@@ -1024,6 +1174,25 @@ ExprPtr Parser::dynamicCastFrom(ExprPtr v, const Type *to, std::size_t pos) {
     std::vector<ExprPtr> args;
     ExprPtr object(Var::local(temp, slot));
     object->setType(voidPtr);
+    // **Where the operand's vfptr is in a virtual base**, the runtime is handed that and how far it is
+    // from the operand, VfDelta, as cl computes them (M3).
+    ExprPtr vfSave;
+    int vfSlot = 0;
+    std::string vfTemp;
+    if (ms && msVfptrInVirtualBase(source)) {
+        vfSlot = allocateFrameSlot(voidPtr);
+        vfTemp = ".dvf" + std::to_string(newTemps_++);
+        ExprPtr typed(new Cast(from, std::move(object)));
+        typed->setType(from);
+        ExprPtr vf(new Cast(voidPtr, msToVfptr(std::move(typed), source)));
+        vf->setType(voidPtr);
+        ExprPtr held(Var::local(vfTemp, vfSlot));
+        held->setType(voidPtr);
+        vfSave.reset(new Assign(std::move(held), std::move(vf)));
+        vfSave->setType(voidPtr);
+        object.reset(Var::local(vfTemp, vfSlot));
+        object->setType(voidPtr);
+    }
     args.push_back(std::move(object));
 
     // **The two runtimes take their arguments in a different order and a
@@ -1031,12 +1200,27 @@ ExprPtr Parser::dynamicCastFrom(ExprPtr v, const Type *to, std::size_t pos) {
     if (ms) {
         ExprPtr delta(new Num(0LL));
         delta->setType(types_.get(Kind::Int));
+        if (vfSave != nullptr) {
+            const Type *chars = types_.pointerTo(types_.get(Kind::Char));
+            ExprPtr a(Var::local(vfTemp, vfSlot));
+            a->setType(voidPtr);
+            ExprPtr ac(new Cast(chars, std::move(a)));
+            ac->setType(chars);
+            ExprPtr b(Var::local(temp, slot));
+            b->setType(voidPtr);
+            ExprPtr bc(new Cast(chars, std::move(b)));
+            bc->setType(chars);
+            ExprPtr diff(new Binary(BinOp::Sub, std::move(ac), std::move(bc)));
+            diff->setType(ptrdiffType());
+            delta.reset(new Cast(types_.get(Kind::Int), std::move(diff)));
+            delta->setType(types_.get(Kind::Int));
+        }
         args.push_back(std::move(delta));
     }
     args.push_back(typeInfoAddress(sourceName));
     args.push_back(typeInfoAddress(targetName));
     if (ms) {
-        ExprPtr isReference(new Num(0LL));
+        ExprPtr isReference(new Num(reference ? 1LL : 0LL));
         isReference->setType(types_.get(Kind::Int));
         args.push_back(std::move(isReference));
     } else {
@@ -1047,6 +1231,11 @@ ExprPtr Parser::dynamicCastFrom(ExprPtr v, const Type *to, std::size_t pos) {
 
     ExprPtr asked = runtimeCall(ms ? "__RTDynamicCast" : "__dynamic_cast",
                                 to, std::move(args));
+    if (vfSave != nullptr) {
+        ExprPtr both(new Comma(std::move(vfSave), std::move(asked)));
+        both->setType(to);
+        asked = std::move(both);
+    }
 
     ExprPtr none(new Num(0LL));
     none->setType(to);
@@ -1137,16 +1326,10 @@ ExprPtr Parser::throwExpression() {
     throwsSeen_++;
     mayThrow_++;
     if (peek().is(";") || peek().is(")") || peek().is(",") || peek().is(":") ||
-        peek().is("]") || peek().is("}")) {
-        if (target_.microsoftNames())
-            src_.fail(tpos, "a rethrow - 'throw' with nothing after it - "
-                            "is not supported yet for x86_64-windows: it "
-                            "is _CxxThrowException with two null pointers "
-                            "from inside a funclet, and that has not been "
-                            "measured on the box");
-        return runtimeCall("__cxa_rethrow", types_.get(Kind::Void), std::vector<ExprPtr>());
-    }
+        peek().is("]") || peek().is("}"))
+        return rethrowCall();
     ExprPtr value = decay(assign());
+    checkThrowOperand(*value, tpos);
     if (inNoexceptFunction_ && !inTryBody_ && !inHandlerBody_) {
         ExprPtr both(new Comma(std::move(value),
                                runtimeCall("abort", types_.get(Kind::Void), std::vector<ExprPtr>())));
@@ -1154,6 +1337,45 @@ ExprPtr Parser::throwExpression() {
         return both;
     }
     return statementsAsExpression(throwStatement(std::move(value), tpos), tpos);
+}
+
+ExprPtr Parser::rethrowCall() {
+    if (!target_.microsoftNames())
+        return runtimeCall("__cxa_rethrow", types_.get(Kind::Void), std::vector<ExprPtr>());
+    const Type *voidPtr = types_.pointerTo(types_.get(Kind::Void));
+    std::vector<ExprPtr> args;
+    for (int i = 0; i < 2; i++) {
+        ExprPtr zero(new Num(0LL));
+        zero->setType(types_.intType());
+        ExprPtr null(new Cast(voidPtr, std::move(zero)));
+        null->setType(voidPtr);
+        args.push_back(std::move(null));
+    }
+    return runtimeCall("_CxxThrowException", types_.get(Kind::Void), std::move(args));
+}
+
+// **[class.copy]/31-32: `throw x;` moves from x where it may** - always from an xvalue or a
+// prvalue; from a function's parameter, which /32 adds to /31's objects; and from the name of an
+// automatic object other than a catch clause's parameter whose scope ends inside the innermost
+// try block around the throw, or with no try block around it at all. Both copied before (review
+// of 1.30, W3). A class parameter that arrived by address is read through it, `*p`.
+bool Parser::throwOperandMoves(const Expr &value) const {
+    if (value.isXvalue() || !isGlvalue(value)) return true;
+    const Var *v = dynamic_cast<const Var *>(&value);
+    bool throughAddress = false;
+    if (v == nullptr)
+        if (const Unary *u = dynamic_cast<const Unary *>(&value))
+            if (u->op() == '*') {
+                v = dynamic_cast<const Var *>(&u->operand());
+                throughAddress = true;
+            }
+    if (v == nullptr || !v->isLocal()) return false;
+    const Local *l = findLocal(v->name());
+    if (l == nullptr || l->offset != v->offset() || l->isCatchParameter || !l->staticName.empty())
+        return false;
+    if (l->isParameter) return !throughAddress || l->byValueByAddress;
+    if (throughAddress) return false;
+    return !inTryBody_ || l->serial > tryBodySerial_;
 }
 
 StmtPtr Parser::microsoftThrow(ExprPtr value, std::size_t pos) {
@@ -1172,8 +1394,14 @@ StmtPtr Parser::microsoftThrow(ExprPtr value, std::size_t pos) {
     // **[except.throw]/3 copy-initialises the exception object**: the copy
     // constructor where there is one, the bytes where there is not.
     ExprPtr store;
-    const Signature *cc = thrown->isStructOrUnion() ? copyConstructorOf(thrown) : nullptr;
+    const Signature *cc = nullptr;
+    if (thrown->isStructOrUnion()) {
+        if (throwOperandMoves(*value)) cc = moveConstructorOf(thrown);
+        if (cc != nullptr) value->setXvalue();
+        else cc = copyConstructorOf(thrown);
+    }
     if (cc != nullptr) {
+        markUsed(cc);
         const Type *thrownPtr = types_.pointerTo(thrown);
         ExprPtr at(new Unary('&', std::move(held)));
         at->setType(thrownPtr);
@@ -1223,7 +1451,39 @@ StmtPtr Parser::microsoftThrow(ExprPtr value, std::size_t pos) {
 // **`throw x;` is three calls and a store, and no new machinery**:
 // __cxa_allocate_exception, the store, __cxa_throw with the type that identifies
 // it. That type_info pointer is the work - fundamental types, the rest refused.
+// [except.throw]/3 and /5: the exception object is copy-initialised from the operand, so its type is
+// complete, not abstract, and not void; for a class, the copy or move and the destructor are
+// accessible however the copy is elided.
+void Parser::checkThrowOperand(const Expr &value, std::size_t pos) {
+    const Type *thrown = value.type()->unqualified();
+    if (thrown->isVoid())
+        src_.fail(pos, "an expression of type 'void' cannot be thrown - [except.throw]/3");
+    const Type *named = thrown->isPointer() ? thrown->pointee()->unqualified() : thrown;
+    if (!named->isVoid() && !named->isFunction() && !named->isComplete())
+        src_.fail(pos, "'" + thrown->describe() + "' cannot be thrown: '" + named->describe() +
+                       "' is an incomplete type - [except.throw]/3");
+    if (!thrown->isStructOrUnion()) return;
+    if (thrown->abstract())
+        src_.fail(pos, "'" + thrown->describe() + "' is an abstract class, and no object of it can be "
+                       "thrown - [class.abstract]/3");
+    auto reachable = [&](const Signature *s) {
+        return s == nullptr || s->access == Access::Public || insideAccessOf(thrown, s->access) ||
+               isFriendOf(thrown);
+    };
+    // A local lvalue is moved from where it can be ([class.copy]/32), so an accessible move answers too.
+    const Signature *mover = moveConstructorOf(thrown);
+    const Signature *copier = mover != nullptr && reachable(mover) ? mover : copyConstructorOf(thrown);
+    const Signature *dtor = destructorOf(thrown);
+    for (const Signature *s : { copier, dtor })
+        if (!reachable(s))
+            src_.fail(pos, "'" + thrown->describe() + "' cannot be thrown: its " +
+                           (s == dtor ? "destructor" : "copy constructor") + " is " +
+                           (s->access == Access::Private ? "private" : "protected") +
+                           " - [except.throw]/5 asks for it whether or not the copy is elided");
+}
+
 StmtPtr Parser::throwStatement(ExprPtr value, std::size_t pos) {
+    checkThrowOperand(*value, pos);
     const Type *thrown = value->type()->unqualified();
     if (target_.microsoftNames()) return microsoftThrow(std::move(value), pos);
 
@@ -1257,7 +1517,9 @@ StmtPtr Parser::throwStatement(ExprPtr value, std::size_t pos) {
     // **[except.throw]/3 copy-initialises the exception object**, and that
     // means the copy constructor where there is one.
     ExprPtr store;
-    const Signature *cc = copyConstructorOf(thrown);
+    const Signature *cc = throwOperandMoves(*value) ? moveConstructorOf(thrown) : nullptr;
+    if (cc != nullptr) value->setXvalue();
+    else cc = copyConstructorOf(thrown);
     if (cc != nullptr) {
         markUsed(cc);
         std::vector<ExprPtr> ctorArgs;
@@ -1384,6 +1646,9 @@ ExprPtr Parser::callNothrowAllocator(bool array, ExprPtr bytes, ExprPtr tag,
 }
 
 ExprPtr Parser::newExpression(std::size_t pos) {
+    struct Global { bool &flag; bool was; ~Global() { flag = was; } } global{ globalAllocation_, globalAllocation_ };
+    globalAllocation_ = globalNewDelete_;
+    globalNewDelete_ = false;
     // **`new (p) T` builds T where p points** - [expr.new]/15 with the
     // library's placement `operator new(size_t, void *)`, which returns its
     // argument, so the address is used as it stands; one pointer argument.
@@ -1415,6 +1680,9 @@ ExprPtr Parser::newExpression(std::size_t pos) {
         (void)ppos;
     }
     const bool userAlloc = !userPlacement.empty();
+    // `new (p) T`: asked below after `placement` has been moved into the address, so kept here - its storage
+    // is the caller's, and a constructor that throws gives nothing back ([new.delete.placement]/7).
+    const bool reservedPlacement = placement != nullptr && !nothrow;
 
     StorageClass sc = StorageNone;
     const Type *made = specifiers(&sc);
@@ -1439,10 +1707,50 @@ ExprPtr Parser::newExpression(std::size_t pos) {
         array = true;
         count = expr();
         expect("]");
-        if (peek().is("["))
-            src_.fail(peek().pos, "an array of arrays from 'new' is not "
-                                  "supported yet - only the first dimension "
-                                  "may be given here");
+        // **`new T[n][3][4]` makes n arrays of `T[3][4]`** - [expr.new]/6: every bound after the
+        // first is a constant, and the pointer answered points at the first of those arrays.
+        std::vector<long long> inner;
+        while (peek().is("[")) {
+            const std::size_t bpos = peekAt(1).pos;
+            at_++;
+            const long long b = constantExpression("an array bound after the first in 'new'");
+            if (b <= 0)
+                src_.fail(bpos, "an array bound after the first in 'new' must be a constant "
+                                "above zero - [expr.new]/6");
+            inner.push_back(b);
+            expect("]");
+        }
+        for (std::size_t k = inner.size(); k-- > 0; ) made = types_.arrayOf(made, inner[k]);
+        if (!inner.empty()) {
+            const Type *leaf = made->innermostElement()->unqualified();
+            if (leaf->isStructOrUnion() && !leaf->tag().empty() &&
+                (hasConstructors(leaf->tag()) || destructorOf(leaf) != nullptr))
+                src_.fail(pos, "an array of arrays of '" + leaf->describe() + "' from 'new' is not "
+                               "supported yet - its elements need constructing, and only the "
+                               "first dimension of those is built here");
+        }
+    }
+
+    // [expr.new]/2: `new auto(e)` is given e's type, as `auto x(e);` would be - one value in
+    // parentheses, read here for its type and below again as the initialiser.
+    if (mentionsDeduced(made)) {
+        if (array || !peek().is("("))
+            src_.fail(pos, "'new " + made->describe() + "' takes its type from one value in "
+                           "parentheses after it, [expr.new]/2" +
+                           (array ? std::string(", and an array has none") : std::string()));
+        const std::size_t resume = at_;
+        const Type *from = nullptr;
+        {
+            Discarded held(this);
+            at_++;
+            ExprPtr init = assign();
+            if (!peek().is(")"))
+                src_.fail(peek().pos, "'new " + made->describe() + "(...)' takes one value, "
+                                      "[expr.new]/2");
+            from = deductionArgType(*init);
+        }
+        at_ = resume;
+        made = deduceAutoFrom(made, from, "new " + made->describe(), pos);
     }
 
     if (!made->isComplete())
@@ -1464,13 +1772,14 @@ ExprPtr Parser::newExpression(std::size_t pos) {
     // **`new T{}` is `new T()`**, [dcl.init]/11; `new T{...}` list-initialises the object,
     // [expr.new]/15 - a constructor's arguments, or an aggregate or scalar made as `T{...}`.
     const bool braces = peek().is("{");
+    // **`new T[n]{a, b}` initialises the array as an aggregate** - [expr.new]/17 and
+    // [dcl.init.aggr]/2,7: each listed element copy-initialised from its clause, the rest
+    // value-initialised (R28).
+    std::vector<Init> elements;
     if (braces && !peekAt(1).is("}")) {
-        if (array)
-            src_.fail(peek().pos, "'new " + made->describe() + "[n]{...}' - a braced list for "
-                                  "the elements of 'new[]' is not supported yet; the empty "
-                                  "pair value-initialises them");
         Init in = parseInitialiser();
-        if (constructed) listConstructor(made, in, ctorArgs, false, pos);
+        if (array) elements = std::move(in.items);
+        else if (constructed) listConstructor(made, in, ctorArgs, false, pos);
         else init = listTemporaryFrom(made, in, false, pos);
         hasInit = true;
     } else if (braces) {
@@ -1509,8 +1818,75 @@ ExprPtr Parser::newExpression(std::size_t pos) {
                      ? arrayCookie(made) : 0;
     int countSlot = 0;
     std::string countTemp;
+    // **[expr.new]/7: a count below zero, or one whose elements and cookie do not fit in a size_t,
+    // allocates nothing and throws std::bad_array_new_length** - through <new>'s
+    // std::__throw_bad_array_new_length, where that header has been read and so the class can be
+    // caught at all. `new int[-1]` asked for 2^64 - 4 bytes and threw bad_alloc, and `new Big[1LL << 61]`
+    // wrapped round and allocated (review of 1.30, W4). A literal count that fits is not checked.
+    ExprPtr countKept;
+    ExprPtr tooMany;
+    ExprPtr tooManyThrows;
+    // Every element listed, by a constant count: no element is left to the default constructor.
+    bool allListed = false;
     if (array) {
-        ExprPtr n = convert(decay(std::move(count)), sizeT);
+        ExprPtr given = decay(std::move(count));
+        const Num *literal = dynamic_cast<const Num *>(given.get());
+        // A constant count below the clauses listed is refused, as clang refuses it; a count known
+        // only when it runs throws below, [expr.new]/7.
+        if (literal != nullptr && literal->value() >= 0 &&
+            static_cast<unsigned long long>(literal->value()) < elements.size())
+            src_.fail(elements[static_cast<std::size_t>(literal->value())].pos,
+                      "excess elements: 'new " + made->describe() + "[" +
+                      std::to_string(literal->value()) + "]' lists " +
+                      std::to_string(elements.size()) + " of them");
+        allListed = literal != nullptr && !elements.empty() &&
+                    static_cast<unsigned long long>(literal->value()) == elements.size();
+        const std::vector<std::size_t> *thrower = overloadsOf("std::__throw_bad_array_new_length");
+        const Type *ct = given->type() != nullptr ? given->type()->unqualified() : nullptr;
+        if (thrower != nullptr && !thrower->empty() && ct != nullptr && ct->isInteger() &&
+            (literal == nullptr || literal->value() < 0)) {
+            const unsigned sizeBytes = static_cast<unsigned>(sizeT->size(target_));
+            const unsigned long long most = sizeBytes >= 8 ? ~0ULL : (1ULL << (8 * sizeBytes)) - 1;
+            const unsigned long long element = static_cast<unsigned long long>(made->size(target_));
+            const unsigned long long limit = element == 0 ? most
+                                           : (most - static_cast<unsigned long long>(cookie)) / element;
+            const int keptSlot = allocateFrameSlot(ct);
+            const std::string keptTemp = ".newk" + std::to_string(newTemps_++);
+            auto kept = [&]() { ExprPtr e(Var::local(keptTemp, keptSlot)); e->setType(ct); return e; };
+            countKept.reset(new Assign(kept(), std::move(given)));
+            countKept->setType(ct);
+            const Type *boolT = types_.get(Kind::Bool);
+            ExprPtr cap(new Num(static_cast<long long>(limit)));
+            cap->setType(sizeT);
+            ExprPtr over(new Binary(BinOp::Gt, convert(kept(), sizeT), std::move(cap)));
+            over->setType(boolT);
+            // Below zero, or below the clauses `new T[n]{...}` lists.
+            if (ct->isSigned(target_) || !elements.empty()) {
+                ExprPtr least(new Num(static_cast<long long>(elements.size())));
+                least->setType(ct);
+                ExprPtr below(new Binary(BinOp::Lt, kept(), std::move(least)));
+                below->setType(boolT);
+                ExprPtr either(new Binary(BinOp::LOr, std::move(below), std::move(over)));
+                either->setType(boolT);
+                over = std::move(either);
+            }
+            Signature &f = functions_[(*thrower)[0]];
+            markUsed(&f);
+            ExprPtr call = completeCall(f.name, f.symbol, nullptr, f.returns, f.params, false, pos,
+                                        std::vector<ExprPtr>());
+            ExprPtr none(new Num(0LL));
+            none->setType(sizeT);
+            ExprPtr thrown(new Comma(std::move(call), std::move(none)));
+            thrown->setType(sizeT);
+            tooMany = std::move(over);
+            tooManyThrows = std::move(thrown);
+            given = kept();
+            mayThrow_++;
+        }
+        count = std::move(given);
+    }
+    if (array) {
+        ExprPtr n = convert(std::move(count), sizeT);
         if (constructed || cookie != 0) {
             countSlot = allocateFrameSlot(sizeT);
             countTemp = ".newc" + std::to_string(newTemps_++);
@@ -1529,6 +1905,14 @@ ExprPtr Parser::newExpression(std::size_t pos) {
             ExprPtr sum(new Binary(BinOp::Add, std::move(bytes), std::move(extra)));
             sum->setType(sizeT);
             bytes = std::move(sum);
+        }
+        // The count kept, then asked, and only then the byte count it makes.
+        if (tooMany != nullptr) {
+            ExprPtr pick(new Conditional(std::move(tooMany), std::move(tooManyThrows), std::move(bytes)));
+            pick->setType(sizeT);
+            ExprPtr seq(new Comma(std::move(countKept), std::move(pick)));
+            seq->setType(sizeT);
+            bytes = std::move(seq);
         }
     }
     // The byte count is wanted twice for `new T[n]()` - once by the allocator
@@ -1549,6 +1933,7 @@ ExprPtr Parser::newExpression(std::size_t pos) {
     const Type *pointer = types_.pointerTo(made);
     const Type *voidPtr = types_.pointerTo(types_.get(Kind::Void));
     ExprPtr raw;
+    int placementDel = -1;
     if (nothrow) {
         raw = callNothrowAllocator(array, std::move(bytes), std::move(placement), pos);
     } else if (placement != nullptr) {
@@ -1562,8 +1947,14 @@ ExprPtr Parser::newExpression(std::size_t pos) {
         }
     } else if (userAlloc) {
         raw = userPlacementAllocation(made, array, std::move(bytes), userPlacement, pos);
+        placementDel = pendingPlacementDelete_;
     } else if (const Signature *own = classAllocator(made, array ? "operatornew[]" : "operatornew")) {
-        // [class.free]/2: a class's own `operator new` allocates its objects.
+        // [class.free]/2: a class's own `operator new` allocates its objects - and [expr.new]/18
+        // asks its access as any member's.
+        if (own->access != Access::Public && !insideAccessOf(made, own->access) && !isFriendOf(made))
+            src_.fail(pos, "'" + made->describe() + "'s 'operator new" + (array ? "[]" : "") +
+                           "' is " + (own->access == Access::Private ? "private" : "protected") +
+                           " and this new-expression is outside the class - [expr.new]/18");
         markUsed(own);
         std::vector<ExprPtr> args;
         args.push_back(std::move(bytes));
@@ -1649,19 +2040,62 @@ ExprPtr Parser::newExpression(std::size_t pos) {
         held->setType(pointer);
         ExprPtr keep(new Assign(std::move(held), std::move(typed)));
         keep->setType(pointer);
-        ExprPtr again(Var::local(baseTemp, baseSlot));
-        again->setType(pointer);
-        ExprPtr n(Var::local(countTemp, countSlot));
-        n->setType(sizeT);
-        ExprPtr built = callVectorLoop(vectorConstructor(made, pos), made,
-                                       std::move(again), std::move(n), pos);
+        // The listed elements first, each built where it lives and then guarded, so that one
+        // that throws after it destroys it on the way out ([except.ctor]/2); the rest by the loop.
+        const Signature *dtor = destructorOf(made);
+        std::vector<Temporary> listed;
+        ExprPtr built;
+        for (std::size_t i = 0; i < elements.size(); i++) {
+            ExprPtr one = constructListedElement(made, elements[i],
+                                                 elementAddress(baseTemp, baseSlot, made, i), pos);
+            if (dtor != nullptr) {
+                const int g = guardFlag();
+                Temporary t{ baseSlot, made, g };
+                t.newElement = true; t.newIndex = static_cast<long long>(i);
+                listed.push_back(t);
+                ExprPtr armed(new Comma(std::move(one), setGuard(g, 1)));
+                armed->setType(types_.intType());
+                one = std::move(armed);
+            }
+            if (built == nullptr) { built = std::move(one); continue; }
+            const Type *ot = one->type();
+            ExprPtr both(new Comma(std::move(built), std::move(one)));
+            both->setType(ot);
+            built = std::move(both);
+        }
+        if (!allListed) {
+            ExprPtr n(Var::local(countTemp, countSlot));
+            n->setType(sizeT);
+            if (!elements.empty()) {
+                ExprPtr k(new Num(static_cast<long long>(elements.size())));
+                k->setType(sizeT);
+                ExprPtr left(new Binary(BinOp::Sub, std::move(n), std::move(k)));
+                left->setType(sizeT);
+                n = std::move(left);
+            }
+            ExprPtr rest = callVectorLoop(vectorConstructor(made, pos), made,
+                                          elementAddress(baseTemp, baseSlot, made, elements.size()),
+                                          std::move(n), pos);
+            if (built == nullptr) built = std::move(rest);
+            else {
+                const Type *rt = rest->type();
+                ExprPtr both(new Comma(std::move(built), std::move(rest)));
+                both->setType(rt);
+                built = std::move(both);
+            }
+        }
+        for (std::size_t i = 0; i < listed.size(); i++) {
+            ExprPtr off(new Comma(std::move(built), setGuard(listed[i].flag, 0)));
+            off->setType(types_.intType());
+            built = std::move(off);
+        }
         // [expr.new]/13: a null from the nothrow allocator initialises nothing.
         if (nothrow) built = guardAgainstNull(baseTemp, baseSlot, pointer, std::move(built));
         // [expr.new]/20: an element constructor that throws gives the storage back.
-        if ((placement == nullptr && !userAlloc) || nothrow) {
+        if ((!reservedPlacement && !userAlloc) || nothrow) {
             const int g = guardFlag();
             Temporary t{ baseSlot, made, g };
-            t.newStorage = true; t.newArray = true; t.newNothrow = nothrow; t.newCookie = cookie;
+            t.newStorage = true; t.newArray = true; t.newNothrow = nothrow; t.newCookie = cookie; t.newGlobal = globalAllocation_;
             statementTemps_.push_back(t);
             ExprPtr armed(new Comma(std::move(keep), setGuard(g, 1)));
             armed->setType(types_.intType());
@@ -1670,6 +2104,8 @@ ExprPtr Parser::newExpression(std::size_t pos) {
             done->setType(types_.intType());
             built = std::move(done);
         }
+        // After the storage, so that unwinding destroys the elements before it gives that back.
+        for (std::size_t i = 0; i < listed.size(); i++) statementTemps_.push_back(listed[i]);
         ExprPtr seq(new Comma(std::move(keep), std::move(built)));
         seq->setType(types_.get(Kind::Void));
         ExprPtr result(Var::local(baseTemp, baseSlot));
@@ -1715,12 +2151,24 @@ ExprPtr Parser::newExpression(std::size_t pos) {
         fill->setSymbol("memset");
         ExprPtr filled(fill);
         filled->setType(voidPtr);
+        // Then the listed elements over the zeroes.
+        for (std::size_t i = 0; i < elements.size(); i++) {
+            ExprPtr value = listedElementValue(made, elements[i]);
+            ExprPtr cell(new Unary('*', elementAddress(temp, slot, made, i)));
+            cell->setType(made);
+            ExprPtr store(new Assign(std::move(cell), std::move(value)));
+            store->setType(made);
+            ExprPtr seq(new Comma(std::move(filled), std::move(store)));
+            seq->setType(made);
+            filled = std::move(seq);
+        }
         if (nothrow) filled = guardAgainstNull(temp, slot, pointer, std::move(filled));
 
         ExprPtr result(Var::local(temp, slot));
         result->setType(pointer);
+        const Type *ft = filled->type();
         ExprPtr both(new Comma(std::move(keep), std::move(filled)));
-        both->setType(voidPtr);
+        both->setType(ft);
         ExprPtr all(new Comma(std::move(both), std::move(result)));
         all->setType(pointer);
         return all;
@@ -1791,11 +2239,12 @@ ExprPtr Parser::newExpression(std::size_t pos) {
             }
         }
         if (nothrow) build = guardAgainstNull(temp, slot, pointer, std::move(build));
-        // [expr.new]/20: a constructor that throws gives the storage back.
-        if (!ctor.isNoexcept && ((placement == nullptr && !userAlloc) || nothrow)) {
+        // [expr.new]/20: a constructor that throws gives the storage back - to a placement form's own
+        // operator delete where one matches (R27).
+        if (!ctor.isNoexcept && ((!reservedPlacement && !userAlloc) || nothrow || placementDel >= 0)) {
             const int g = guardFlag();
             Temporary t{ slot, made, g };
-            t.newStorage = true; t.newNothrow = nothrow;
+            t.newStorage = true; t.newNothrow = nothrow; t.placementDelete = placementDel; t.newGlobal = globalAllocation_;
             statementTemps_.push_back(t);
             ExprPtr armed(new Comma(std::move(keep), setGuard(g, 1)));
             armed->setType(types_.intType());
@@ -1868,6 +2317,9 @@ ExprPtr Parser::newExpression(std::size_t pos) {
 }
 
 ExprPtr Parser::deleteExpression(std::size_t pos) {
+    struct Global { bool &flag; bool was; ~Global() { flag = was; } } global{ globalAllocation_, globalAllocation_ };
+    globalAllocation_ = globalNewDelete_;
+    globalNewDelete_ = false;
     bool array = false;
     if (consume("[")) { expect("]"); array = true; }
 
@@ -1882,6 +2334,17 @@ ExprPtr Parser::deleteExpression(std::size_t pos) {
 
     // **The destructor runs before the memory goes back**, as clang emits it.
     const Signature *dtor = destructorOf(t->pointee());
+    // [expr.delete]/7-10 with [class.access]: the destructor and the class's deallocation function are
+    // accessible where the delete is written.
+    refuseInaccessibleDestructor(t->pointee(), pos, "the object this 'delete' frees");
+    if (!globalAllocation_)
+        if (const Signature *own = classAllocator(t->pointee(), array ? "operatordelete[]" : "operatordelete")) {
+            const Type *cls = t->pointee()->unqualified();
+            if (own->access != Access::Public && !insideAccessOf(cls, own->access) && !isFriendOf(cls))
+                src_.fail(pos, "'" + cls->describe() + "''s 'operator delete' is " +
+                               (own->access == Access::Private ? "private" : "protected") +
+                               ", and this 'delete' cannot call it - [expr.delete]/7");
+        }
 
     // **A virtual destructor is reached through the vtable**, the static type
     // not being the one to destroy; the slot's deleting form frees as well.
@@ -1993,6 +2456,31 @@ ExprPtr Parser::virtualDestructorCall(const std::string &temp, int slot,
     const char *want = ms || !deleting ? "~" : "~$deleting";
     for (std::size_t i = 0; i < slots.size(); i++)
         if (slots[i].name == want) { index = static_cast<int>(i); break; }
+    // On Microsoft a destructor entered at a virtual base is reached through that base's table, the
+    // object's vbtable saying where it is (M3).
+    std::string dispatchTemp = temp;
+    int dispatchSlot = slot;
+    ExprPtr dispatchSave;
+    if (index < 0 && ms)
+        for (const MsVftable &tb : msVftables(cls)) {
+            if (tb.vbase == nullptr || index >= 0) continue;
+            for (std::size_t i = 0; i < tb.slots.size(); i++)
+                if (tb.slots[i].name == "~") {
+                    index = static_cast<int>(i);
+                    ExprPtr obj(Var::local(temp, slot));
+                    obj->setType(t);
+                    ExprPtr there(new Cast(t, msShifted(convert(std::move(obj), types_.pointerTo(tb.vbase)),
+                                                        tb.atInVbase)));
+                    there->setType(t);
+                    dispatchSlot = allocateFrameSlot(t);
+                    dispatchTemp = ".vd" + std::to_string(refTemps_++);
+                    ExprPtr held(Var::local(dispatchTemp, dispatchSlot));
+                    held->setType(t);
+                    dispatchSave.reset(new Assign(std::move(held), std::move(there)));
+                    dispatchSave->setType(t);
+                    break;
+                }
+        }
     if (index < 0)
         src_.fail(pos, "'" + cls->describe() + "' has a virtual destructor "
                        "with no slot for it");
@@ -2007,7 +2495,7 @@ ExprPtr Parser::virtualDestructorCall(const std::string &temp, int slot,
     const Type *fnPtr = types_.pointerTo(fnType);
     const Type *table = types_.pointerTo(fnPtr);
 
-    ExprPtr load(Var::local(temp, slot));
+    ExprPtr load(Var::local(dispatchTemp, dispatchSlot));
     load->setType(t);
     ExprPtr asTable(new Cast(types_.pointerTo(table), std::move(load)));
     asTable->setType(types_.pointerTo(table));
@@ -2025,7 +2513,7 @@ ExprPtr Parser::virtualDestructorCall(const std::string &temp, int slot,
     entry->setType(fnPtr);
 
     std::vector<ExprPtr> args;
-    ExprPtr self(Var::local(temp, slot));
+    ExprPtr self(Var::local(dispatchTemp, dispatchSlot));
     self->setType(t);
     args.push_back(std::move(self));
     if (ms) {
@@ -2033,18 +2521,35 @@ ExprPtr Parser::virtualDestructorCall(const std::string &temp, int slot,
         flag->setType(flagType);
         args.push_back(std::move(flag));
     }
-    return completeCall("~", std::string(), std::move(entry), ret, full, false,
-                        pos, std::move(args));
+    ExprPtr call = completeCall("~", std::string(), std::move(entry), ret, full, false,
+                                pos, std::move(args));
+    if (dispatchSave == nullptr) return call;
+    const Type *rt = call->type();
+    ExprPtr both(new Comma(std::move(dispatchSave), std::move(call)));
+    both->setType(rt);
+    return both;
 }
 
 // A class's own `operator new` or `operator delete`, else null - looked up
 // in the class and then its bases, as [class.free] finds them.
 const Parser::Signature *Parser::classAllocator(const Type *made,
                                                 const char *which) {
+    if (globalAllocation_) return nullptr;
     const Type *cls = made->unqualified();
+    const bool freeing = std::string(which).compare(0, 14, "operatordelete") == 0;
     while (cls != nullptr && cls->isStructOrUnion() && !cls->tag().empty()) {
-        if (const std::vector<std::size_t> *set = overloadsOf(cls->tag() + "::" + which))
+        if (const std::vector<std::size_t> *set = overloadsOf(cls->tag() + "::" + which)) {
+            // The usual one beside any placement form, [basic.stc.dynamic.deallocation]/2 - `(void *)`,
+            // or `(void *, size_t)`; `(size_t)` to allocate. With none, the first, which the call refuses.
+            for (std::size_t k = 0; k < set->size(); k++) {
+                const Signature &f = functions_[(*set)[k]];
+                if (f.params.size() == 1 ||
+                    (freeing && f.params.size() == 2 &&
+                     f.params[1]->unqualified() == types_.get(target_.sizeType())))
+                    return &f;
+            }
             return &functions_[(*set)[0]];
+        }
         const std::vector<Type::BaseSpec> &bs = cls->bases();
         cls = bs.empty() ? nullptr : bs[0].type->unqualified();
     }
@@ -2085,7 +2590,7 @@ ExprPtr Parser::userPlacementAllocation(const Type *made, bool array, ExprPtr by
                                         std::vector<ExprPtr> &extra, std::size_t pos) {
     const char *which = array ? "operatornew[]" : "operatornew";
     std::string key = which;
-    for (const Type *cls = made->unqualified();
+    for (const Type *cls = globalAllocation_ ? nullptr : made->unqualified();
          cls != nullptr && cls->isStructOrUnion() && !cls->tag().empty();
          cls = cls->bases().empty() ? nullptr : cls->bases()[0].type->unqualified())
         if (overloadsOf(cls->tag() + "::" + which) != nullptr) { key = cls->tag() + "::" + which; break; }
@@ -2099,6 +2604,44 @@ ExprPtr Parser::userPlacementAllocation(const Type *made, bool array, ExprPtr by
     const Signature sig = resolveOverload(key, args, pos);
     for (std::size_t i = 1; i < args.size() && i < sig.params.size(); i++)
         if (!sig.params[i]->isReference()) args[i] = convert(std::move(args[i]), sig.params[i]);
+    // **[expr.new]/20: the placement `operator delete` that matches** - the same parameters after the
+    // first, a `void *` - gives the storage back if the constructor throws, with these arguments (R27).
+    // They are kept in the frame so that both calls see one evaluation of each.
+    pendingPlacementDelete_ = -1;
+    const std::string freeKey = key.substr(0, key.size() - std::string(which).size()) +
+                                (array ? "operatordelete[]" : "operatordelete");
+    bool byValue = !array;
+    for (std::size_t i = 1; i < sig.params.size(); i++)
+        if (sig.params[i]->isReference()) byValue = false;
+    if (byValue && !sig.variadic)
+        if (const std::vector<std::size_t> *frees = overloadsOf(freeKey))
+            for (std::size_t k = 0; k < frees->size(); k++) {
+                const Signature &d = functions_[(*frees)[k]];
+                if (d.params.size() != sig.params.size() || d.variadic || !d.params[0]->isPointer() ||
+                    !d.params[0]->pointee()->unqualified()->isVoid())
+                    continue;
+                bool same = true;
+                for (std::size_t i = 1; i < d.params.size(); i++)
+                    if (d.params[i]->unqualified() != sig.params[i]->unqualified()) same = false;
+                if (!same) continue;
+                PlacementDelete pd;
+                pd.fn = d;
+                for (std::size_t i = 1; i < args.size(); i++) {
+                    const Type *at = sig.params[i]->unqualified();
+                    pd.types.push_back(at);
+                    pd.slots.push_back(allocateFrameSlot(at));
+                    pd.names.push_back(".newp" + std::to_string(newTemps_++));
+                    ExprPtr kept(Var::local(pd.names.back(), pd.slots.back()));
+                    kept->setType(at);
+                    ExprPtr keep(new Assign(std::move(kept), std::move(args[i])));
+                    keep->setType(at);
+                    args[i] = std::move(keep);
+                }
+                markUsed(&functions_[(*frees)[k]]);
+                placementDeletes_.push_back(pd);
+                pendingPlacementDelete_ = static_cast<int>(placementDeletes_.size() - 1);
+                break;
+            }
     return completeCall(sig.name, sig.symbol, nullptr, sig.returns, sig.params,
                         false, pos, std::move(args));
 }
@@ -2184,6 +2727,9 @@ ExprPtr Parser::typeidExpression(std::size_t pos) {
     const Type *subject = named != nullptr ? named : operand->type();
     if (subject->isReference()) subject = subject->referent();
     subject = subject->unqualified();
+    // [expr.typeid]/3-4: the type, or the operand's, is not an incomplete class.
+    if (subject->isStructOrUnion() && !subject->isComplete())
+        src_.fail(pos, "'typeid' of '" + subject->describe() + "', an incomplete class - [expr.typeid]/4");
     const bool glvalue = operand != nullptr &&
         (operand->type()->isReference() ||
          dynamic_cast<const MemberAccess *>(operand.get()) != nullptr ||
@@ -2203,7 +2749,7 @@ ExprPtr Parser::typeidExpression(std::size_t pos) {
         ExprPtr at(new Unary('&', std::move(operand)));
         at->setType(types_.pointerTo(subject));
         std::vector<ExprPtr> args;
-        args.push_back(convert(std::move(at), voidPtr));
+        args.push_back(convert(msToVfptr(std::move(at), subject), voidPtr));
         ExprPtr got = runtimeCall("__RTtypeid", voidPtr, std::move(args));
         address.reset(new Cast(infoPtr, std::move(got)));
         address->setType(infoPtr);

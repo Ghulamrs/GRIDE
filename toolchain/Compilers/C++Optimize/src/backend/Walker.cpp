@@ -110,7 +110,7 @@ void Walker::visit(const Block &n) {
     if (msCurState_ != msStateAtEntry) {
         const std::string l = label("stateend", nextLabel());
         defineStateLabel(l);
-        msIpRows_.push_back(MsIpRow{ l, msStateAtEntry });
+        msIpRows_.push_back(MsIpRow{ l, msStateAtEntry, funcletNo_ });
         msCurState_ = msStateAtEntry;
     }
     closeBlock(n.scope());
@@ -337,9 +337,10 @@ static int firstUnwindHelp(const Stmt &s) {
 // **-2 goes into the scratch word on entry, as cl's prologue writes it**: a call that throws before
 // the first region began - a local's constructor - found whatever the stack held there, and the
 // runtime took it for a state and destroyed an object that was never built.
-void Walker::storeUnwindHelpAtEntry(const Stmt &body) {
+void Walker::storeUnwindHelpAtEntry(const Stmt &body, int frame) {
     if (!usesFunclets()) return;
     msUnwindHelpSlot_ = firstUnwindHelp(body);
+    if (msUnwindHelpSlot_ == 0) msUnwindHelpSlot_ = frame;
     if (msUnwindHelpSlot_ != 0) storeUnwindHelp(msUnwindHelpSlot_);
 }
 
@@ -398,9 +399,10 @@ void Walker::msTryStatement(const Try &n) {
     const std::string begin = label("try", id);
     const std::string end = label("tryend", id);
     const std::string resume = label("caught", id);
-    // The FuncInfo names one scratch word per frame: the first region's, for all of them.
+    // The FuncInfo names one scratch word per frame: the first region's, for all of them. Not inside a
+    // handler, whose catch the runtime is in the middle of: it writes -2 there itself when the catch ends.
     if (msUnwindHelpSlot_ == 0) msUnwindHelpSlot_ = n.unwindHelpSlot();
-    storeUnwindHelp(msUnwindHelpSlot_);
+    if (!inFuncletBody()) storeUnwindHelp(msUnwindHelpSlot_);
 
     // This region's state, inside whatever encloses it; the body's own states
     // follow it in number, which is what tryLow..tryHigh relies on.
@@ -410,7 +412,7 @@ void Walker::msTryStatement(const Try &n) {
     s.toState = parent;
     msStates_.push_back(s);
     defineStateLabel(begin);
-    msIpRows_.push_back(MsIpRow{ begin, state });
+    msIpRows_.push_back(MsIpRow{ begin, state, funcletNo_ });
     msCurState_ = state;
     for (std::size_t i = 0; i < n.body().size(); i++) n.body()[i]->accept(*this);
     defineStateLabel(end);
@@ -431,11 +433,16 @@ void Walker::msTryStatement(const Try &n) {
         return;
     }
     msCurState_ = parent;
-    msIpRows_.push_back(MsIpRow{ end, parent });
+    msIpRows_.push_back(MsIpRow{ end, parent, funcletNo_ });
 
     // The funclets come after the range they belong to is closed, so nothing
     // they emit lands between `begin` and `end` - those bound the addresses the
     // runtime matches a thrown object against, and a handler must not be inside.
+    // **Its row is taken where its body ends**, as cl orders them: a `try` inside this body before
+    // this one, a `try` inside a handler of this one after it - the runtime takes the last row whose
+    // handlers hold the state for the catch it is in.
+    const std::size_t tbAt = msTryBlocks_.size();
+    msTryBlocks_.push_back(MsTryBlock());
     MsTryBlock tb;
     tb.tryLow = state;
     tb.tryHigh = static_cast<int>(msStates_.size()) - 1;
@@ -454,16 +461,30 @@ void Walker::msTryStatement(const Try &n) {
         row.constPointer = h.constPointer;
         // Entered on the `catch` line, as cl's funclet is.
         row.funclet = openFunclet(h.pos, false);
+        const int number = funcletNo_;
         msCurState_ = hstate;
         h.body->accept(*this);
         msCurState_ = parent;
         endFunclet(resume);
         leaveFunclet();
-        msFuncletRows_.push_back(MsIpRow{ row.funclet, hstate });
+        msFuncletRows_.push_back(MsIpRow{ row.funclet, hstate, number, true });
         tb.handlers.push_back(row);
     }
     tb.catchHigh = static_cast<int>(msStates_.size()) - 1;
-    msTryBlocks_.push_back(tb);
+    msTryBlocks_[tbAt] = tb;
+}
+
+std::vector<Walker::MsIpRow> Walker::msIpTable() const {
+    std::vector<MsIpRow> rows;
+    for (const MsIpRow &r : msIpRows_)
+        if (r.funclet == 0) rows.push_back(r);
+    for (int f : funcletsLifted_) {
+        for (const MsIpRow &r : msFuncletRows_)
+            if (r.funclet == f) rows.push_back(r);
+        for (const MsIpRow &r : msIpRows_)
+            if (r.funclet == f) rows.push_back(r);
+    }
+    return rows;
 }
 
 void Walker::visit(const Continue &n) {

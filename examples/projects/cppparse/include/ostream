@@ -70,7 +70,7 @@ public:
     basic_ostream& operator<<(bool v)
     {
         if (this->m_numput) return __facet_put(v);
-        if (!(this->m_flags & ios_base::boolalpha)) return __signed(v ? 1 : 0);
+        if (!(this->m_flags & ios_base::boolalpha)) return __put_signed(v ? 1 : 0);
         const numpunct<charT>& np = use_facet<numpunct<charT> >(this->m_loc);
         const basic_string<charT> s = v ? np.truename() : np.falsename();
         return __write(s.data(), s.size());
@@ -78,27 +78,27 @@ public:
     basic_ostream& operator<<(short v)
     {
         const long l = (this->m_flags & (ios_base::hex | ios_base::oct)) ? static_cast<long>(static_cast<unsigned short>(v)) : static_cast<long>(v);
-        return this->m_numput ? __facet_put(l) : __signed(l);
+        return this->m_numput ? __facet_put(l) : __put_signed(l);
     }
-    basic_ostream& operator<<(unsigned short v) { return this->m_numput ? __facet_put(static_cast<unsigned long>(v)) : __unsigned(v); }
+    basic_ostream& operator<<(unsigned short v) { return this->m_numput ? __facet_put(static_cast<unsigned long>(v)) : __put_unsigned(v); }
     basic_ostream& operator<<(int v)
     {
         if (this->m_numput) return __facet_put(static_cast<long>(v));
-        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __unsigned(static_cast<unsigned>(v)) : __signed(v);
+        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __put_unsigned(static_cast<unsigned>(v)) : __put_signed(v);
     }
-    basic_ostream& operator<<(unsigned v) { return this->m_numput ? __facet_put(static_cast<unsigned long>(v)) : __unsigned(v); }
+    basic_ostream& operator<<(unsigned v) { return this->m_numput ? __facet_put(static_cast<unsigned long>(v)) : __put_unsigned(v); }
     basic_ostream& operator<<(long v)
     {
         if (this->m_numput) return __facet_put(v);
-        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __unsigned(static_cast<unsigned long>(v)) : __signed(v);
+        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __put_unsigned(static_cast<unsigned long>(v)) : __put_signed(v);
     }
-    basic_ostream& operator<<(unsigned long v) { return this->m_numput ? __facet_put(v) : __unsigned(v); }
+    basic_ostream& operator<<(unsigned long v) { return this->m_numput ? __facet_put(v) : __put_unsigned(v); }
     basic_ostream& operator<<(long long v)
     {
         if (this->m_numput) return __facet_put(v);
-        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __unsigned(static_cast<unsigned long long>(v)) : __signed(v);
+        return (this->m_flags & (ios_base::hex | ios_base::oct)) ? __put_unsigned(static_cast<unsigned long long>(v)) : __put_signed(v);
     }
-    basic_ostream& operator<<(unsigned long long v) { return this->m_numput ? __facet_put(v) : __unsigned(v); }
+    basic_ostream& operator<<(unsigned long long v) { return this->m_numput ? __facet_put(v) : __put_unsigned(v); }
     basic_ostream& operator<<(float v) { return this->m_numput ? __facet_put(static_cast<double>(v)) : __floating(v); }
     basic_ostream& operator<<(double v) { return this->m_numput ? __facet_put(v) : __floating(v); }
     basic_ostream& operator<<(long double v) { return this->m_numput ? __facet_put(v) : __floating(static_cast<double>(v)); }
@@ -266,7 +266,7 @@ private:
         if (this->m_state == 0 && !this->m_tie && this->m_width == 0 && !(this->m_flags & ios_base::unitbuf)) { __out(buf, k); return *this; }
         return padded(buf, k, split);
     }
-    basic_ostream& __signed(long long v)
+    basic_ostream& __put_signed(long long v)
     {
         char buf[72];
         size_t n = 0;
@@ -274,7 +274,7 @@ private:
                               : __number_text::integer(static_cast<unsigned long long>(v), false, true, this->m_flags, buf + 72, n);
         return __number(p, n, true);
     }
-    basic_ostream& __unsigned(unsigned long long u)
+    basic_ostream& __put_unsigned(unsigned long long u)
     {
         char buf[72];
         size_t n = 0;

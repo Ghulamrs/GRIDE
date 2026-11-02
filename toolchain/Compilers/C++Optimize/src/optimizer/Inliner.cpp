@@ -119,7 +119,8 @@ std::vector<Inliner::Site> Inliner::sitesOf(const Program &program) {
         fn.body().accept(m);
         Measure &measure = measures_[&fn];
         measure.size = m.nodes;
-        measure.why = fn.hasLandingPads() ? "inline-callee-landing-pad" : fn.isVariadic() ? "inline-callee-variadic"
+        measure.why = fn.hasLandingPads() ? "inline-callee-landing-pad" : fn.msUnwindHelp() != 0 ? "inline-callee-eh-frame"
+                    : fn.isVariadic() ? "inline-callee-variadic"
                     : fn.regSaveSlot() != 0 ? "inline-callee-register-save-area" : m.cleanups ? "inline-callee-cleanup"
                     : m.labels ? "inline-callee-label-or-switch" : "";
         measure.eligible = *measure.why == '\0';

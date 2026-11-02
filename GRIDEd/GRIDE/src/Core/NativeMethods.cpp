@@ -16,6 +16,37 @@
 #ifndef EM_SETUNDOLIMIT
 #define EM_SETUNDOLIMIT (WM_USER + 82)
 #endif
+#ifndef EM_SETCHARFORMAT
+#define EM_SETCHARFORMAT (WM_USER + 68)
+#endif
+#ifndef SCF_SELECTION
+#define SCF_SELECTION 0x0001
+#endif
+#ifndef CFM_HIDDEN
+#define CFM_HIDDEN 0x0100
+#endif
+#ifndef CFE_HIDDEN
+#define CFE_HIDDEN 0x0100
+#endif
+
+// CHARFORMAT2W's layout: CFM_HIDDEN is a CHARFORMAT2 bit, and RichEdit checks cbSize
+struct HiddenCharFormat
+{
+    UINT cbSize; DWORD dwMask; DWORD dwEffects; LONG yHeight; LONG yOffset; COLORREF crTextColor;
+    BYTE bCharSet; BYTE bPitchAndFamily; WCHAR szFaceName[32]; WORD wWeight; SHORT sSpacing;
+    COLORREF crBackColor; LCID lcid; DWORD dwReserved; SHORT sStyle; WORD wKerning;
+    BYTE bUnderlineType; BYTE bAnimation; BYTE bRevAuthor; BYTE bReserved1;
+};
+static_assert(sizeof(HiddenCharFormat) == 116, "CHARFORMAT2W is 116 bytes");
+#ifndef EM_GETTEXTEX
+#define EM_GETTEXTEX (WM_USER + 94)
+#endif
+
+// GETTEXTEX; flags 0 (GT_DEFAULT) keeps hidden text and writes a paragraph's end as '\r'
+struct FullTextRequest
+{
+    DWORD cb; DWORD flags; UINT codepage; LPCSTR lpDefaultChar; LPBOOL lpUsedDefChar;
+};
 
 #ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
 #define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE 0x00020016
@@ -182,6 +213,29 @@ namespace Gride { namespace Native {
     void NativeMethods::SetUndoLimit(System::IntPtr hwnd, int limit)
     {
         ::SendMessageW((HWND)hwnd.ToPointer(), EM_SETUNDOLIMIT, (WPARAM)limit, 0);
+    }
+
+    void NativeMethods::SetSelectionHidden(System::IntPtr hwnd, bool hidden)
+    {
+        HiddenCharFormat cf;
+        ::ZeroMemory(&cf, sizeof cf);
+        cf.cbSize = sizeof cf;
+        cf.dwMask = CFM_HIDDEN;
+        cf.dwEffects = hidden ? CFE_HIDDEN : 0;
+        ::SendMessageW((HWND)hwnd.ToPointer(), EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+    }
+
+    System::String^ NativeMethods::GetFullText(System::IntPtr hwnd, int length)
+    {
+        std::vector<wchar_t> buf((size_t)(length < 0 ? 0 : length) + 2, L'\0');
+        FullTextRequest gt;
+        ::ZeroMemory(&gt, sizeof gt);
+        gt.cb = (DWORD)(buf.size() * sizeof(wchar_t));
+        gt.codepage = 1200;
+        LRESULT n = ::SendMessageW((HWND)hwnd.ToPointer(), EM_GETTEXTEX, (WPARAM)&gt, (LPARAM)buf.data());
+        if (n < 0) n = 0;
+        if ((size_t)n >= buf.size()) n = (LRESULT)buf.size() - 1;
+        return gcnew System::String(buf.data(), 0, (int)n);
     }
 
     System::Drawing::Rectangle NativeMethods::GetUpdateRect(System::IntPtr hwnd)

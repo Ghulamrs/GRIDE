@@ -145,11 +145,11 @@ what a program reaches. The layers, top to bottom:
 
 | Library | What is in it | Calls |
 |---|---|---|
-| `grtstart` | the root: `mainCRTStartup` (later `wmainCRTStartup`, `WinMainCRTStartup`), the `.CRT$X*` markers, the TLS directory (`_tls_used`, `.tls` markers, the callback array), `__chkstk`, `_fltused`, `main`'s structured-exception filter, `__setusermatherr` | everything below, and the program's `main` |
+| `grtstart` | the root: `mainCRTStartup` (later `wmainCRTStartup`, `WinMainCRTStartup`), the `.CRT$X*` markers, `__chkstk`, `_fltused`, `main`'s structured-exception filter, `__setusermatherr` | everything below, and the program's `main` |
 | `grtcompat` | legacy and Microsoft-compatibility names: the 32-bit time functions old c90 objects call (`time`, `localtime` with a 32-bit `time_t`), POSIX names Microsoft keeps in `oldnames.lib` (`fileno`, `close`, ...), what cl-built objects need (`/GS`'s `__security_cookie`, `__security_check_cookie`, `__GSHandlerCheck`, `__report_rangecheckfailure`; later `__CxxFrameHandler4`) | `grtcxx`, `grtc`, `grtwin` |
 | `grtcxx` | C++ support: `operator new`/`delete`, the new-handler, `_purecall`, type_info and RTTI, function-local statics, thread_local's dynamic initialisation and destructors, `std::exception`'s helpers, exceptions | `grtc`, `grtwin` |
 | `grtc` | the ISO C library: C90 core and the C99/C11 additions (math, string, memory's front end, the formatting and scanning engines, stdlib, time's calendar, locale, signal, setjmp, assert), and the Windows stream layer | `grtwin` |
-| `grtwin` | the Windows layer, the lowest: descriptors, the allocator's back end, errno's storage, the environment, argv, the clock and the time zone, the filing component's io.h/direct.h/stat functions, `CreateThread`'s wrapper (section 9.6), `system`, the process's end (`ExitProcess`, the fast-fail) | `kernel32` only |
+| `grtwin` | the Windows layer, the lowest: descriptors, the allocator's back end, errno's storage, the environment, argv, the clock and the time zone, the filing component's io.h/direct.h/stat functions, `CreateThread`'s wrapper (section 9.6), the TLS directory (`_tls_used`, `_tls_index`, the `.tls` markers, the callback array: in the lowest layer because errno's thread_local and grtcxx's read `_tls_index`), `system`, the process's end (`ExitProcess`, the fast-fail) | `kernel32` only |
 | `kernel32` | the import library, generated from `kernel32.def` | - |
 | (`shmrt`) | Shalimar's runtime, above all of these (section 14) | all |
 
@@ -358,7 +358,7 @@ array and nothrow forms, and sized `delete`, which cl's objects use. The placeme
 - cpp11 1.30 refuses a polymorphic non-first base on Microsoft's ABI. Virtual bases and several polymorphic
   bases are handled by the algorithm but not yet produced by the compiler.
 
-### 8.4 Exceptions (in widening, before cppparse is an exit test)
+### 8.4 Exceptions (in widening, before cppparse is an exit test; built 2026-10-30, section 16)
 **Why widening and not later:** cppparse (73 lines of try/throw/catch) and the toolchain demo's `shapes.cpp`
 throw. Both are exit tests from stage 2 on, and the toolchain demo runs in stage 3's migration check.
 
@@ -445,12 +445,22 @@ directly through `_tls_index` and gs:[88]. Its layout is the PE TLS directory's,
   only `__imp_CreateThread` and no thunk competes with the wrapper. The wrapper sets "threads exist" before
   the new thread can run. From then on the allocator, the streams, `atexit` and the static guards take an
   SRW lock; a program that never starts a thread never takes one.
-- The TLS callback (DLL_THREAD_ATTACH) stays as a backstop for threads Windows starts itself (the thread
-  pool, Ctrl+C's handler). Those start before they can touch the runtime's state.
-- errno, strtok's state and the formatter's statics are per-thread, in static TLS, the machinery cpp11's
-  `thread_local` uses.
-- GRIDE's link already writes the TLS directory from `_tls_used` (`LINK\src\image.cpp`). The runtime supplies
-  `_tls_used`, `_tls_index`, the `.tls$` start and end markers, and the `.CRT$XLA`..`XLZ` callback array.
+- **The TLS callback is the backstop** (`__grt_thread_attach`, `.CRT$XLB`; built 2026-10-30). It sets the
+  flag in a thread the wrapper did not start, before that thread runs: one Windows starts itself (the thread
+  pool, Ctrl+C's handler), or one a cl-built object starts through `__imp_CreateThread`. A call the creating
+  thread began before the new thread's callback ran still finishes unlocked, so it can meet the new thread's
+  first locked calls. A program whose threads come from the runtime's `CreateThread` has no such window.
+- **The state of each thread is in static TLS**, the machinery cpp11's `thread_local` uses (built
+  2026-10-30): errno (`win\errno.cpp`), strtok's place, gmtime's and localtime's result, asctime's text,
+  rand's state, tmpnam's text, the SIGFPE, SIGILL and SIGSEGV handlers, and strtod's two big integers (RTS6x's
+  `stdlib\FloatTextDecimal.cpp`, 2026-11-02). printf and scanf keep no statics. Each is zero-filled data that
+  no code makes, so `grtc` and `grtwin` need nothing from `grtcxx` for it.
+- **The TLS directory** is `grtwin`'s `win\tls.asm`, which `mainCRTStartup` links into every program; GRIDE's
+  link writes the image's directory from `_tls_used` (`LINK\src\image.cpp`). It holds `_tls_used`,
+  `_tls_index`, the template's markers (`_tls_start` in `.tls`, `_tls_end` in `.tls$ZZZ`) and the callback
+  array from `__xl_a` (`.CRT$XLA`) to `__xl_z` (`.CRT$XLZ`): the backstop (`XLB`), then `grtcxx`'s
+  `__dyn_tls_init` (`XLC`) and thread-local destructors (`XLD`), linked when a program has a `thread_local`
+  (section 8.2).
 - **The locks, as the UCRT takes them** (built 2026-10-27; section 16). Each call decides once, at its start,
   whether it locks, and unlocks only what it locked:
   - *Descriptors* (`win\files.c`): each read, write, seek, close and `_setmode` holds its descriptor's lock. A
@@ -873,6 +883,50 @@ Left for stage 2 by the numbers there (Microsoft's static CRT = 1):
 - The UCRT probes are unchanged: libc, floatvec, nanparse, abi, cxx, mathlogpow, stdio1, c99lib, memtest and nullfile byte-identical at -O2 and -O0, mathvec's 13 rows within 1 ulp, c99math's differing rows the correctly rounded ones. `tests\filing\filing.ps1` gives 146 of 146 lines on each runtime, and the completeness test links 147 of 147 names. `tests\threads\threads.ps1` runs a probe of eight threads. Each opens, writes with `fprintf` and `putc`, reads back and closes its own files 300 times, writes whole lines to one shared `FILE`, and makes function-local statics. Its transcript matches the UCRT's (`threads.expected`) in 30 runs of 30. On the runtime before the locks, 10 runs of 10 ended in an access violation or a corrupted heap.
 - A program with one thread takes no lock. On the benchmarks (`bench\results.md`, which gains putc and getc, 64 MB a byte at a time), no ratio to Microsoft's moved by more than the noise. getc pays 2 % for the fast path's test of the flag, and putc and getc stay about 0.2 of Microsoft's time, whose functions lock on every call.
 - Still single-threaded, for the rest of 9.6: errno, strtok's state and `localtime`'s result are shared, not per-thread (static TLS is not built yet). A thread started without the wrapper is not seen, for example by a cl-built object that calls `__imp_CreateThread` directly; the TLS callback that would see it is not built either.
+
+**Exceptions, thread_local and the state of each thread (2026-10-30).**
+- **Exceptions (8.4)** are `grtcxx`'s `cxx\exceptions.cpp`: `__CxxFrameHandler3` over the FuncInfo cpp11 writes (the state from the ip-to-state map, the try blocks, the handlers matched against the thrown CatchableTypes), and `_CxxThrowException`. A catch is reached by `RtlUnwindEx` with STATUS_UNWIND_CONSOLIDATE, as vcruntime reaches it. Rethrow, nested catches, `std::uncaught_exception(s)`, `terminate`/`set_terminate`, `unexpected` and an uncaught exception's end (the filter, `terminate`, `abort`: 0xC0000409) are there too. `win\seh.c` wraps the kernel32 calls and keeps each thread's block in a fiber-local slot. `cxx\ehcall.asm` holds three guarded calls with hand-written unwind data and language handlers: the catch funclet, a destructor while unwinding (a throw out of it calls `terminate`), and a catch object's copy constructor (a throw out of it calls `abort`). A `nop` follows each call, because a return address on the epilog would tell Windows' unwinder that the helper is already leaving, and it would not call the helper's handler. `bad_cast` and `bad_typeid` are thrown by `cxx\badcast.cpp`.
+- **thread_local (8.2)**: the TLS directory is `grtwin`'s (`win\tls.asm`), not `grtstart`'s as 4.2 first had it, because the layers below the root read `_tls_index`; `mainCRTStartup` links it into every program. `grtcxx`'s `cxx\threadlocal.cpp` and `tlsdata.asm` hold `__dyn_tls_init` (the thread-attach callback that runs `.CRT$XDU`), `__dyn_tls_on_demand_init`, `__tls_guard` and `__tlregdtor`. As in the Microsoft runtime's start-up, the first thread's objects are made after the static objects and before `main` (`.CRT$XCY`). Each thread's destructors run when it ends (the thread-detach callback), and `exit` (`c\exit.cpp`) runs the calling thread's before the `atexit` list.
+- **9.6's state for each thread** is in static TLS: errno (`win\errno.cpp`, which RTS6x's `ErrorNumber` reaches through `_errno` on Windows), strtok's place, gmtime's and localtime's result, asctime's text, and rand's state. `rand` is now `c\rand.cpp`, the Microsoft runtime's generator: RTS6x's is C's example, and its sequence was not the UCRT's. `asctime` pads a one-digit day with a space, as the UCRT does; stage 1 had it as two digits. The thread-attach callback (`__grt_thread_attach`) sets the threads flag for a thread the runtime did not start.
+- The tests: cpp11's conformance suite on GRIDE's runtime (`tests\conformance.ps1`, the 792 valid cases at 1.43) gives Microsoft's verdicts on all but 38 at the two levels. Of those, 34 fail to link for want of C library names that are stage 2's: C99 math, `quick_exit`, `_Exit`, `llabs`/`lldiv`, mb*/wc*, `setvbuf`, `fgetpos`/`fsetpos`, `tmpnam`, the v*scanf trio, `strcoll`/`strxfrm`. One case prints a `%d` with no argument for it (`decl02_decltypeb`, reported to cpp11), and one was a timeout in Windows Error Reporting under load (both runtimes take 8.4 s there). `tests\exceptions\rethrow.cpp` (eight shapes of rethrow and nested catches) and `tests\perthread\perthread.cpp` (the state of each thread, and thread_local objects made and ended in order) are byte-identical to the UCRT's transcripts at -O2 and -O0. The earlier probes, `threads.ps1` (10 of 10), `filing.ps1`, the strings, sort and printf probes, and the completeness test are unchanged.
+
+**The C library names the compilers' headers declare (2026-10-30).** The conformance suite's link failures named them; each was first probed on the UCRT, then built to give its transcript.
+- **stdlib** (`c\stdlib99.cpp`, `c\exit.cpp`): `llabs`, `ldiv`, `lldiv`, `atoll`; `mblen`, `mbtowc`, `wctomb`, `mbstowcs`, `wcstombs` in the "C" locale (a byte is the wide character of its value; above 0xFF, -1 and EILSEQ); `_Exit`, `quick_exit`, `at_quick_exit`. As on the UCRT, `quick_exit` and `_Exit` write no stream and run no `atexit` function, but the calling thread's thread_local objects are still destroyed by the TLS callback ExitProcess calls.
+- **string and ctype** (`c\string99.cpp`): `isblank` (the UCRT's 0x40), `strncat`, `strcoll` and `strxfrm` in the "C" locale.
+- **stdio**: `setvbuf` and `setbuf` (`c\setvbuf.cpp`). As the UCRT does, `_IOLBF` buffers fully, the size is rounded down to even, and a bad mode or size fails fast. A write of whole buffers now goes straight to Windows and the rest is kept, as the UCRT's `fwrite` does, so a program that ends without flushing leaves the same bytes on disk. `fgetpos`, `fsetpos`, `_fseeki64` and `_ftelli64` (`c\fpos.cpp`; files past 2 GB). `tmpnam` (`c\tmpnam.cpp`, per-thread buffer) and `tmpfile` take their names as the UCRT forms them: the temporary folder, `s` or `t`, the process id in base 36, a dot and a count in base 36 (`win\temporary.c`). `tmpfile` creates the file with `x` and `D`, the mode letters fopen now takes (C11's exclusive create, and the UCRT's delete-on-close), so Windows removes it however the program ends. `vfscanf`, `vscanf` and `vsscanf` (`c\vscanf.cpp`).
+- **C99 math**: the exact functions are `c\mathexact.cpp` (copysign, fmax, fmin, fdim, nan, logb, ilogb, scalbn, scalbln, nextafter, nexttoward, lrint, llrint, lround, llround, remainder, remquo by exact long division) and `c\rint.asm` (rint, nearbyint). They give the UCRT's results bit for bit: its NaNs, its errno, `nan()` ignoring its text, `remainder`'s signed NaN for an infinite x where `remquo` gives the plain one, `llrint(2^63)` as LLONG_MIN. `fma` (`c\fma.asm`) is the processor's `vfmadd231sd` where CPUID shows FMA (`__grt_fma`, found with AVX in `c\memory.asm`). Elsewhere it is `c\fmasoft.cpp`, the exact sum in a 256-bit window, which agrees with the instruction on 3,000,000 random cases, subnormals and cancellations included. exp2, expm1, log1p, asinh, acosh, atanh, erf, erfc, tgamma and lgamma (`c\mathspecial.cpp`) are computed in double-double over RTS6x's kernels and rounded once. Against a 110-digit reference every result differing from the UCRT's is within half an ulp, and the UCRT's are off by up to 2.5 ulps (133 in one tgamma case), so GRIDE's runtime is the one correctly rounded there. tgamma also keeps the subnormal results the UCRT flushes to zero.
+- The catalogue has 211 entries, all done for x86_64-windows. `_fseeki64` and `_ftelli64` stay out of it: no header of the compilers declares them.
+- **Signals** (`c\signals.cpp`, which replaces RTS6x's three signal files on Windows) take the UCRT's numbers: SIGINT 2, SIGILL 4, SIGFPE 8, SIGSEGV 11, SIGTERM 15, SIGBREAK 21 and SIGABRT 22, with 6 a second name for SIGABRT. RTS6x's table held 16 and refused SIGABRT. Behaviour follows the UCRT:
+  - `signal` answers 3 and 5 with SIG_ERR, and any other unknown number fails fast.
+  - SIGFPE, SIGILL and SIGSEGV have a handler for each thread.
+  - A handler is set back before it runs: to SIG_DFL, except that `raise` leaves SIGILL's and SIGSEGV's at a third value, as the UCRT's does.
+  - `raise` with SIG_DFL ends the program with 3 and writes no stream.
+  - Ctrl+C and Ctrl+Break reach their handlers through a console control handler (`win\control.c`).
+  - An access violation, an illegal instruction or a floating-point exception in the first thread reaches SIGSEGV's, SIGILL's or SIGFPE's handler through main's language handler. `start\mainguard.asm` calls main with unwind data naming `__grt_main_handler` (start.c), the UCRT start-up's filter. An integer division by zero is not a signal there, and is not one here.
+  - `abort` still reaches SIGABRT's handler, through `SignalTable::deliver`.
+- **The terminate and unexpected handlers** read back, before a program sets one, as the UCRT's do: a handler that aborts, and `terminate`.
+- **exception_ptr**, which cpp11 1.44's `<exception>` builds on libcpmt's nine `__ExceptionPtr` functions in cl's two-word layout, is `cxx\exceptions.cpp`'s:
+  - `current_exception` copies the object of the catch that is running into a counted block, using its exact type's copy constructor;
+  - `rethrow_exception` raises the block's object again;
+  - a catch that ends leaves that object to the block, which destroys it when the last `exception_ptr` goes.
+  - `throw_with_nested` and `rethrow_if_nested` work over them.
+- **exp, log, sin, cos and pow** (10.4) are `c\mathfast.asm`, written with its tables by `tools\mathfast.py`.
+  - exp: Tang's 2^(j/128) table.
+  - log: 128 buckets, each with an 8-bit reciprocal so that z·invc − 1 is exact, and the large terms summed with their errors.
+  - sin and cos: Cody-Waite reduction by π/2 in three parts, and Taylor kernels in two chains.
+  - pow: log's double-double times y, then exp's kernel.
+  - Where CPUID shows FMA, each takes a fused path, written as VEX bytes because GRIDE's masm has no FMA mnemonics.
+  - Everything outside the common case goes to RTS6x's kernels (`c\mathslow.cpp`): specials, range errors, subnormals, huge trigonometric arguments, x ≤ 0 in pow.
+
+  The UCRT probes are unchanged: mathlogpow byte-identical, mathvec within 1 ulp, and `math99.ps1` passes. In a harness of 20,000,000 points against the UCRT, every result is within 1 ulp: exp 99.5 % identical, log 99.999 %, sin and cos 99.4 %, pow 99.9 %. Clearing k's register before `cvtsi2sd` took log from 2.4 to about 1.3 times Microsoft's time; the register would otherwise chain one call to the next.
+- **A cpp11 catch funclet stores a fifth argument over its own saved rbp**: it reserves only the 32 bytes of home. `__grt_call_catch` now keeps rbp itself, as vcruntime's helper does (UWOP_PUSH_NONVOL in its unwind data), so the funclet's loss does not reach the frames above it. The bug was reported to cpp11 with a reduced case.
+- The tests: `tests\names\names.cpp`, `quickexit.cpp` and `exitnow.cpp` are byte-identical to the UCRT's transcripts at -O2 and -O0, as are `tests\signals\signals.cpp`, `badsignal.cpp`, `default.cpp`, `fault.cpp`, `divide.cpp` and `ctrlc.cpp`. The last sends its own console Ctrl+C, and `probe.ps1 -OwnConsole` runs it in a hidden console of its own. `tests\math99\math99.ps1` runs 10,766 lines of special and spread values. The exact functions must match the UCRT's line exactly. The others must be within 1 ulp of it, or be one of the 159 lines `math99.judged` names, where the reference shows the UCRT more than an ulp out and GRIDE's runtime within half of one.
+
+**9.6 finished (2026-11-02).** 1a408c7 had built the TLS directory, thread_local, each thread's state and the backstop. One piece of 9.6's state was still shared.
+- **strtod's long way** (RTS6x's `stdlib\FloatTextDecimal.cpp`, for more than 19 digits or an inexact short way) kept its two 516-byte integers in static storage, as the C6747's one thread allows. Listing every symbol the five layers define in a writable section found it. The rest is the locked tables, flags and tables set once, and what the UCRT also keeps for the whole process. Six threads converting long decimals at once got 19,404 of 24,000 results wrong; the UCRT got none. On Windows the integers are now `thread_local`: zero-filled static TLS that no code makes, so `grtc` still needs nothing from `grtcxx`. Since then, none of 30 runs has a wrong result.
+- **A thread started through `__imp_CreateThread` itself**, as a cl-built object starts one, is seen by the backstop. Six such threads write whole lines to one shared `FILE` (2,400 `fprintf` and 2,400 `fputs` lines, none torn), each with its own errno, strtok place and thread_local, made and ended in each. The transcript matches the UCRT's in 31 runs of 31 at -O2 and at -O0. The one window the backstop leaves is in 9.6.
+- The tests: `tests\perthread` matches the UCRT at -O2, -O0 and on the Debug variants; `threads.ps1` 30 of 30; `filing.ps1` 198 of 198 lines on each runtime; the completeness test 205 of 205 names; stage 2's probes are unchanged. cppparse, sampled at its latest commit and linked by GRIDEd's engine, runs `--health .` with its workers identical to the msvc build in 30 of 30 runs in Release and 30 of 30 in Debug.
+- The benchmarks (`bench\results.md`) were run with the programs alternating, because the machine was loaded. The per-thread state costs nothing measurable: grt at 1a408c7's parent and at 1a408c7 give the same ratios on printf, sscanf, the stream rows, malloc and hello's start. The strtod change costs nothing against main's libraries. fgets went from 0.99 to 1.25 of Microsoft's time, and sscanf from 1.29 to 1.45 (integers) and 1.20 to 1.35 (floats). That came later, in e423505, which also put `-g` in the Release flags; it is not yet looked into.
 
 ---
 

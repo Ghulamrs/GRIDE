@@ -1,9 +1,10 @@
 // probe.cpp - the filing component's probe (docs\Runtime_Design.md 11.2): _stat64i32, _findfirst64i32,
-// _findnext64i32, _findclose, _getcwd and system, called through cpp11's <sys/stat.h>, <io.h>, <direct.h> and
-// <stdlib.h> as cppparse calls them, each answer printed with errno. The same object linked with GRIDE's runtime
-// and with the UCRT must print the same lines; filing.ps1 makes the files it looks at, runs it and compares.
+// _findnext64i32, _findclose, _getcwd, _access, _mkdir, _rmdir, _chdir and system, called through cpp11's
+// <sys/stat.h>, <io.h>, <direct.h> and <stdlib.h> as cppparse calls them, each answer printed with errno. The same
+// object linked with GRIDE's runtime and with the UCRT must print the same lines; filing.ps1 makes the files it
+// looks at, runs it and compares.
 //
-//   probe stat <drive letter>   probe find   probe cwd <the expected directory>   probe system
+//   probe stat <drive letter> | find | cwd <the expected directory> | dirs <the expected directory> | system
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,6 +130,51 @@ static void cwds(const char *expected)
     }
 }
 
+static void access_one(const char *path, int mode)
+{
+    errno = 0;
+    int r = _access(path, mode);
+    printf("access(\"%s\", %d): %d errno %d\n", path, mode, r, errno);
+}
+
+static void dirs(const char *expected)
+{
+    static const char *const paths[] = { "file.txt", "readonly.txt", "sub", "missing.txt", "nodir/x", "", "NUL" };
+    unsigned i;
+    int mode;
+    for (i = 0; i < sizeof paths / sizeof paths[0]; i++)
+        for (mode = 0; mode <= 6; mode += 2) access_one(paths[i], mode);
+    static const char *const made[] = { "made", "made", "nodir/x", "", "made/inner" };
+    for (i = 0; i < sizeof made / sizeof made[0]; i++) {
+        errno = 0;
+        int r = _mkdir(made[i]);
+        printf("mkdir(\"%s\"): %d errno %d\n", made[i], r, errno);
+    }
+    errno = 0;
+    int r = _mkdir(0);
+    printf("mkdir(NULL): %d errno %d\n", r, errno);
+    static const char *const removed[] = { "made", "made/inner", "made", "made", "sub", "file.txt", "", "nodir/x" };
+    for (i = 0; i < sizeof removed / sizeof removed[0]; i++) {
+        errno = 0;
+        r = _rmdir(removed[i]);
+        printf("rmdir(\"%s\"): %d errno %d\n", removed[i], r, errno);
+    }
+    errno = 0;
+    r = _rmdir(0);
+    printf("rmdir(NULL): %d errno %d\n", r, errno);
+    char buf[1024], below[1024];
+    snprintf(below, sizeof below, "%s\\sub", expected);
+    static const char *const moves[] = { "sub", "missing", "file.txt", "", "..", "./sub/", ".." };
+    for (i = 0; i < sizeof moves / sizeof moves[0]; i++) {
+        errno = 0;
+        r = _chdir(moves[i]);
+        int e = errno;
+        char *here = _getcwd(buf, sizeof buf);
+        printf("chdir(\"%s\"): %d errno %d, now %s\n", moves[i], r, e,
+               !here ? "?" : strcmp(here, expected) == 0 ? "the directory" : strcmp(here, below) == 0 ? "sub" : here);
+    }
+}
+
 static void run(const char *command)
 {
     fflush(stdout);
@@ -153,6 +199,7 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "stat") == 0 && argc > 2) { drive = argv[2][0]; stats(); }
     else if (strcmp(argv[1], "find") == 0) finds();
     else if (strcmp(argv[1], "cwd") == 0 && argc > 2) cwds(argv[2]);
+    else if (strcmp(argv[1], "dirs") == 0 && argc > 2) dirs(argv[2]);
     else if (strcmp(argv[1], "system") == 0) systems();
     else { printf("probe: %s?\n", argv[1]); return 2; }
     return 0;

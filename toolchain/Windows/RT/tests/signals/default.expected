@@ -1,0 +1,2 @@
+stderr: raising SIGTERM
+exit 3

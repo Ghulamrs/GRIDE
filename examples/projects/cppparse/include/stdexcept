@@ -7,57 +7,90 @@
 
 namespace std {
 
+// the message is a copy in its own storage, made and freed by two functions no caller expands: a throw site
+// (`throw invalid_argument("...")`) then costs the constructor's few instructions and the call, as with cl, not a
+// basic_string temporary built and destroyed in place; when the copy cannot be made what() is empty
+inline char* __message_copy(const char* s)
+{
+    const size_t n = strlen(s);
+    char* p = static_cast<char*>(malloc(n + 1));
+    if (p) memcpy(p, s, n + 1);
+    return p;
+}
+inline void __message_free(char* p) { free(p); }
+
 class logic_error : public exception {
 public:
-    explicit logic_error(const string& message) : m_message(message) {}
-    virtual ~logic_error() {}
-    virtual const char* what() const { return m_message.c_str(); }
+    explicit logic_error(const string& message) : m_what(__message_copy(message.c_str())) {}
+    explicit logic_error(const char* message) : m_what(__message_copy(message)) {}   // as cl's, no basic_string on the way
+    logic_error(const logic_error& o) : exception(o), m_what(__message_copy(o.what())) {}
+    logic_error& operator=(const logic_error& o)
+    {
+        if (this != &o) { char* p = __message_copy(o.what()); __message_free(m_what); m_what = p; }
+        return *this;
+    }
+    virtual ~logic_error() { __message_free(m_what); }
+    virtual const char* what() const { return m_what ? m_what : ""; }
 private:
-    string m_message;
+    char* m_what;
 };
 
 class runtime_error : public exception {
 public:
-    explicit runtime_error(const string& message) : m_message(message) {}
-    virtual ~runtime_error() {}
-    virtual const char* what() const { return m_message.c_str(); }
+    explicit runtime_error(const string& message) : m_what(__message_copy(message.c_str())) {}
+    explicit runtime_error(const char* message) : m_what(__message_copy(message)) {}
+    runtime_error(const runtime_error& o) : exception(o), m_what(__message_copy(o.what())) {}
+    runtime_error& operator=(const runtime_error& o)
+    {
+        if (this != &o) { char* p = __message_copy(o.what()); __message_free(m_what); m_what = p; }
+        return *this;
+    }
+    virtual ~runtime_error() { __message_free(m_what); }
+    virtual const char* what() const { return m_what ? m_what : ""; }
 private:
-    string m_message;
+    char* m_what;
 };
 
 class out_of_range : public logic_error {
 public:
     explicit out_of_range(const string& message) : logic_error(message) {}
+    explicit out_of_range(const char* message) : logic_error(message) {}
 };
 
 class invalid_argument : public logic_error {
 public:
     explicit invalid_argument(const string& message) : logic_error(message) {}
+    explicit invalid_argument(const char* message) : logic_error(message) {}
 };
 
 class domain_error : public logic_error {
 public:
     explicit domain_error(const string& message) : logic_error(message) {}
+    explicit domain_error(const char* message) : logic_error(message) {}
 };
 
 class length_error : public logic_error {
 public:
     explicit length_error(const string& message) : logic_error(message) {}
+    explicit length_error(const char* message) : logic_error(message) {}
 };
 
 class range_error : public runtime_error {
 public:
     explicit range_error(const string& message) : runtime_error(message) {}
+    explicit range_error(const char* message) : runtime_error(message) {}
 };
 
 class overflow_error : public runtime_error {
 public:
     explicit overflow_error(const string& message) : runtime_error(message) {}
+    explicit overflow_error(const char* message) : runtime_error(message) {}
 };
 
 class underflow_error : public runtime_error {
 public:
     explicit underflow_error(const string& message) : runtime_error(message) {}
+    explicit underflow_error(const char* message) : runtime_error(message) {}
 };
 
 // what <string>'s position checks call (declared there, before class string, which this header needs complete)

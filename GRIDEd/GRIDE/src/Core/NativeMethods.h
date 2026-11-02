@@ -27,6 +27,11 @@ namespace Gride { namespace Native {
         static void LineScroll(System::IntPtr hwnd, int lines);
         // 0 switches the RichEdit undo buffer off (GRIDE keeps its own history)
         static void SetUndoLimit(System::IntPtr hwnd, int limit);
+        // hides or shows the selected text of a rich edit control (CFE_HIDDEN): a folded block
+        static void SetSelectionHidden(System::IntPtr hwnd, bool hidden);
+        // the whole text of a rich edit control, hidden text included (WinForms' Text leaves it
+        // out), a paragraph's end as one '\r' so the positions are RichEdit's; length = TextLength
+        static System::String^ GetFullText(System::IntPtr hwnd, int length);
         // the part of the window WM_PAINT is about to repaint (empty if none)
         static System::Drawing::Rectangle GetUpdateRect(System::IntPtr hwnd);
         static void DestroyIcon(System::IntPtr hicon);

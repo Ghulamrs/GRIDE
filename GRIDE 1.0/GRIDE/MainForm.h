@@ -287,7 +287,7 @@ private:
         StartPosition = System::Windows::Forms::FormStartPosition::CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
-        ClientSize = System::Drawing::Size(640, 490);
+        ClientSize = System::Drawing::Size(640, 610);
 
         // Which configuration's options are edited - not which one builds, which is Build > Debug/Release.
         Label^ forLabel = gcnew Label();
@@ -308,13 +308,14 @@ private:
         Controls->Add(target);
 
         tabs_ = gcnew TabControl();
-        tabs_->SetBounds(12, 48, 616, 290);
+        tabs_->SetBounds(12, 48, 616, 410);
         array<Byte>^ archBytes = Z(arch_);
         pin_ptr<Byte> archPin = &archBytes[0];
         const char* arch = reinterpret_cast<const char*>(archPin);
         for (int t = 0; t < gride_option_tab_count(); ++t) {
             String^ name = FromUtf8(gride_option_tab_name(t));
             TabPage^ page = gcnew TabPage(name);
+            page->AutoScroll = true;
             int y = 14;
             for (int i = 0; i < gride_option_count(); ++i) {
                 if (FromUtf8(gride_option_tab(i)) != name) continue;
@@ -341,10 +342,17 @@ private:
                         pick->SelectedIndexChanged += gcnew EventHandler(this, &OptionsDialog::Changed);
                         made = pick;
                     } else {
+                        // A Text is a list (the defines, the undefines): one entry per line, Enter starting
+                        // the next rather than pressing OK.
                         TextBox^ field = gcnew TextBox();
-                        field->SetBounds(220, y, 360, 24);
+                        field->Multiline = true;
+                        field->AcceptsReturn = true;
+                        field->WordWrap = false;
+                        field->ScrollBars = ScrollBars::Vertical;
+                        field->SetBounds(220, y, 360, ListHeight);
                         field->TextChanged += gcnew EventHandler(this, &OptionsDialog::Changed);
                         made = field;
+                        y += ListHeight - 24;
                     }
                 }
                 array<Byte>^ key = Z(id);
@@ -384,34 +392,50 @@ private:
 
         Label^ heading = gcnew Label();
         heading->Text = "Command line:";
-        heading->SetBounds(12, 350, 200, 20);
+        heading->SetBounds(12, 470, 200, 20);
         Controls->Add(heading);
         preview_ = gcnew TextBox();
         preview_->ReadOnly = true;
         preview_->Multiline = true;
         preview_->Font = gcnew System::Drawing::Font("Consolas", 9.0f);
-        preview_->SetBounds(12, 372, 616, 52);
+        preview_->SetBounds(12, 492, 616, 52);
         Controls->Add(preview_);
 
         Button^ reset = gcnew Button();
         reset->Text = "Restore defaults";
-        reset->SetBounds(12, 444, 140, 30);
+        reset->SetBounds(12, 564, 140, 30);
         reset->Click += gcnew EventHandler(this, &OptionsDialog::RestoreDefaults);
         reset->Enabled = gride_project_is_ccs(project_) == 0;
         Controls->Add(reset);
         Button^ ok = gcnew Button();
         ok->Text = "OK";
         ok->DialogResult = System::Windows::Forms::DialogResult::OK;
-        ok->SetBounds(466, 444, 78, 30);
+        ok->SetBounds(466, 564, 78, 30);
         ok->Click += gcnew EventHandler(this, &OptionsDialog::Accepted);
         Controls->Add(ok);
         Button^ cancel = gcnew Button();
         cancel->Text = "Cancel";
         cancel->DialogResult = System::Windows::Forms::DialogResult::Cancel;
-        cancel->SetBounds(550, 444, 78, 30);
+        cancel->SetBounds(550, 564, 78, 30);
         Controls->Add(cancel);
         AcceptButton = ok;
         CancelButton = cancel;
+    }
+
+    literal int ListHeight = 96;   // a Text's box: six lines
+
+    // A Text list's value one entry per line, as its box shows it, and the box's lines back into the value
+    // the files keep - ';' between the entries (options.h), which an older settings.json already has.
+    static String^ AsLines(String^ list) { return String::Join("\r\n", Entries(list)); }
+    static String^ FromLines(String^ text) { return String::Join(";", Entries(text)); }
+    static array<String^>^ Entries(String^ list) {
+        System::Collections::Generic::List<String^>^ out = gcnew System::Collections::Generic::List<String^>();
+        if (list == nullptr) return out->ToArray();
+        for each (String^ s in list->Split(gcnew array<wchar_t>{ ';', '\r', '\n' })) {
+            String^ t = s->Trim(gcnew array<wchar_t>{ ' ', '\t' });
+            if (t->Length > 0) out->Add(t);
+        }
+        return out->ToArray();
     }
 
     // The draft's values for the configuration shown, into the controls; and back.
@@ -423,7 +447,7 @@ private:
             ComboBox^ pick = dynamic_cast<ComboBox^>(pair.Value);
             if (box != nullptr) box->Checked = value == "1";
             else if (pick != nullptr) pick->SelectedIndex = pick->Items->IndexOf(value);
-            else pair.Value->Text = value;
+            else pair.Value->Text = AsLines(value);
         }
         pushing_ = false;
         ShowPreview();
@@ -436,7 +460,7 @@ private:
             String^ value;
             if (box != nullptr) value = box->Checked ? "1" : "0";
             else if (pick != nullptr) value = pick->SelectedItem == nullptr ? "" : pick->SelectedItem->ToString();
-            else value = pair.Value->Text;
+            else value = FromLines(pair.Value->Text);
             Set(pair.Key, value);
         }
     }

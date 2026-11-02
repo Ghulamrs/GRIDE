@@ -52,7 +52,7 @@ namespace Gride { namespace Services {
         }
 
         // "-D" + list -> -DNAME -DNAME=1 -D"GREETING=hi there": as RIDE's options.cpp quotes them, only a define with a
-        // space, a tab or a quote in it, which then stays one argument (a quote inside is escaped as \")
+        // space, a tab or a quote in it, which then stays one argument (QuoteEntry)
         static String^ JoinDefines(String^ flag, IEnumerable<String^>^ items)
         {
             StringBuilder^ sb = gcnew StringBuilder();
@@ -61,11 +61,26 @@ namespace Gride { namespace Services {
             {
                 if (String::IsNullOrEmpty(s)) continue;
                 if (sb->Length > 0) sb->Append(L' ');
-                sb->Append(flag);
-                if (s->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) < 0) sb->Append(s);
-                else sb->Append(L'"')->Append(s->Replace("\"", "\\\""))->Append(L'"');
+                sb->Append(flag)->Append(QuoteEntry(s));
             }
             return sb->ToString();
+        }
+
+        // a define (any one entry of a list) as one argument: as it is, unless it holds a space, a tab or a quote -
+        // then in quotes, a quote inside escaped as \" and the backslashes in front of a quote, or of the closing
+        // one, doubled, as the C runtime splits a command line: MSG="hi there" -> "MSG=\"hi there\""
+        static String^ QuoteEntry(String^ s)
+        {
+            if (s->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) < 0) return s;
+            StringBuilder^ sb = gcnew StringBuilder("\"");
+            int slashes = 0;
+            for each (wchar_t c in s)
+            {
+                if (c == L'\\') { slashes++; continue; }
+                sb->Append(L'\\', c == L'"' ? 2 * slashes + 1 : slashes)->Append(c);
+                slashes = 0;
+            }
+            return sb->Append(L'\\', 2 * slashes)->Append(L'"')->ToString();
         }
 
         // plain list of quoted items: "a.obj" "b.obj"

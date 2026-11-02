@@ -82,19 +82,52 @@ namespace std { typedef ::type_info type_info; }
 }
 #endif
 
-// What a failed `dynamic_cast` to a reference throws, [expr.dynamic.cast]/9. On the
-// Itanium targets the class is the runtime's own - its destructor and what() are
-// declared here and defined there, as <new> declares bad_alloc.
-#if !defined(_WIN32) && !defined(__TMS320C6X__)
+// What a failed `dynamic_cast` to a reference throws, [expr.dynamic.cast]/9, and what
+// `typeid` of a null pointer's object throws, [expr.typeid]/2. On the Itanium targets
+// the classes are the runtime's own - their destructors and what() are declared here
+// and defined there, as <new> declares bad_alloc; on Windows they are vcruntime_typeinfo.h's,
+// inline over `exception` - the CRT's __RTDynamicCast throws bad_cast, matched by its descriptor's
+// name, `.?AVbad_cast@std@@` on both sides - and on the C6000 self-contained, as <new>'s are.
 #include <exception>
 namespace std {
+#if defined(_WIN32)
+class bad_cast : public exception {
+public:
+    bad_cast() : exception("bad cast", 1) {}
+    virtual ~bad_cast() {}
+};
+class bad_typeid : public exception {
+public:
+    bad_typeid() : exception("bad typeid", 1) {}
+    virtual ~bad_typeid() {}
+};
+#elif defined(__TMS320C6X__)
+class bad_cast : public exception {
+public:
+    bad_cast() {}
+    virtual ~bad_cast() {}
+    virtual const char *what() const { return "std::bad_cast"; }
+};
+class bad_typeid : public exception {
+public:
+    bad_typeid() {}
+    virtual ~bad_typeid() {}
+    virtual const char *what() const { return "std::bad_typeid"; }
+};
+#else
 class bad_cast : public exception {
 public:
     bad_cast() {}
     virtual ~bad_cast();
     virtual const char *what() const;
 };
-}
+class bad_typeid : public exception {
+public:
+    bad_typeid() {}
+    virtual ~bad_typeid();
+    virtual const char *what() const;
+};
 #endif
+}
 
 #endif

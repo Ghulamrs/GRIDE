@@ -11,8 +11,14 @@ namespace rts6x {
 
 namespace {
 
+#if defined(_WIN32)
+// GRIDE's runtime for Windows (toolchain\Windows\RT): one pair for each thread, as the Microsoft runtime's strtod
+// has; zero-filled thread-local data, made by no code (BigNumber has no constructor).
+thread_local BigNumber numerator, denominator;
+#else
 // The integers are large; they live here rather than on the stack, the C6747 running one thread.
 BigNumber numerator, denominator;
+#endif
 
 }  // namespace
 

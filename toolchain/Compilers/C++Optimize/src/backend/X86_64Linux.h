@@ -35,6 +35,7 @@ public:
     const char *const *identityMacros() const override;
     std::unique_ptr<CodeGen> codegen(std::ostream &sink, Syntax syntax) const override;
     bool emitsLineTable(Syntax) const override { return true; }
+    bool optimizesAroundVolatile() const override { return true; }
 private:
     LinuxX86_64Target target_;
 };
@@ -104,9 +105,11 @@ protected:
     // lifting the text back out - what the body appended, in order, IS the
     // funclet, so moving it costs no second code path.
     std::string funclets_;
-    std::size_t funcletMark_ = 0;
+    std::vector<std::size_t> funcletMarks_;
     int funcletIndex_ = 0;
     std::string funcletSymbol_;
+    // The funclets the one being walked was opened inside, with their entries' -g locations.
+    std::vector<std::pair<std::string, std::string> > outerFunclets_;
     // The Microsoft type descriptors this file has laid down, so a class both
     // described for RTTI and thrown gets its `??_R0` once.
     std::set<std::string> msDescriptors_;
@@ -153,6 +156,10 @@ protected:
     Op local(long long slot) const { return realign_ > 0 ? mem(top_ - slot, "%rbx") : mem(-slot, "%rbp"); }
     Op frameSlot(long long disp) const { return disp < 0 ? local(-disp) : mem(disp, "%rbp"); }   // below rbp a slot, above it the caller's
     int realign_ = 0;
+    // The function being written reads or writes a volatile lvalue, so the optimizer is passed by (emit).
+    bool volatileHere_ = false;
+    // Which callees touch one, asked once each: such a callee is never walked in place.
+    mutable std::map<const Function *, bool> volatileBodies_;
     int top_ = 0;
     Spelling *plain_ = nullptr;   // under the optimizer, written to directly for a realigned frame - see emit()
     bool optimizing() const { return optimizer_ && a_ == optimizer_.get(); }
@@ -169,7 +176,7 @@ protected:
         // Microsoft frames carry FH3 tables, not an LSDA.
         if (target_.microsoftNames()) {
             // One table for cleanups and tries alike, nested or not: a state tree.
-            if (msStates().empty()) {
+            if (msStates().empty() && fn.msUnwindHelp() == 0) {
                 out_ += funclets_; funclets_.clear(); funcletIndex_ = 0;
             } else {
                 emitCoffEhTables(fn);

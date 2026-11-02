@@ -3,10 +3,11 @@
 # window) - each with the toolchain beside it, chosen on the second screen, White last. What the user
 # sees names only GRIDE and the outlooks (the user's rules of 2026-10-16 and 2026-10-19): the screens,
 # the folders GRIDE\Black, GRIDE\Grey and GRIDE\White, the Start menu, Programs and Features. Written
-# through Windows Installer's own automation API (msi.dll): no WiX, no Inno Setup, no setup project.
-# Adapted from GRIDE-Installer's build-msi.ps1 (one IDE, dummy tools).
+# through Windows Installer's own automation API (msi.dll) and makecab: no WiX, no Inno Setup, no NuGet,
+# no Installer Projects extension. Setup.vcxproj (in the three solutions and installer\windows\Setup.sln)
+# runs this script as its build. Adapted from GRIDE-Installer's build-msi.ps1 (one IDE, dummy tools).
 #
-#   build-setup.ps1 [-Version 1.4.0] [-OutDir <GRIDEx3\installer\dist>]
+#   build-setup.ps1 [-Version 1.5.0] [-OutDir <GRIDEx3\installer\dist>]
 #                   [-CertThumbprint <sha1> | -PfxFile <file.pfx> [-PfxPassword <SecureString>]]
 #                   [-TimestampUrl <url>] [-SignTool <signtool.exe>]
 #
@@ -25,7 +26,10 @@
 # projects; the CCS samples) and programs\ (single files).
 # Build the three first (one at a time: they share the toolchain's build folders). Left out: .pdb, .ilk,
 # .metagen. Added: Visual Studio 2022's VC++ runtime DLLs beside GRIDE.exe (app-local, as Microsoft
-# allows for Microsoft.VC143.CRT), so a machine without the VC++ Redistributable runs it.
+# allows for Microsoft.VC143.CRT), so a machine without the VC++ Redistributable runs it - GRIDE.exe is
+# C++/CLI and the one program that loads them; the tools carry the static runtime. Each outlook's lib\ holds
+# GRIDE's runtime for Windows (grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib, kernel32.lib, the Shalimar runtime over them), so its programs link with no
+# Visual Studio and no Windows SDK on the machine, and gride-dbg, GRIDE's Windows debugger, sits beside GRIDE.exe.
 #
 # The package: features Black (level 1), Grey and White (level 3, so not installed unless chosen); the
 # second dialog's Install button removes the two not chosen and adds the one chosen. A quiet install
@@ -35,7 +39,7 @@
 # the ProductCode a hash of the version, the UpgradeCode fixed - still made from "GRIDEx2", so this
 # Setup replaces 1.1.0.
 param(
-    [string]$Version = "1.4.0",
+    [string]$Version = "1.5.0",
     [string]$OutDir = "",
     [string]$VsRoot = "D:\Microsoft Visual Studio 2026",
     [string]$CrtFolder = "",
@@ -120,8 +124,12 @@ Say "[1/5] Stage: $stage"
 foreach ($ide in $ides) {
     $rel = Join-Path $root "$($ide.Source)\x64\Release"
     if (-not (Test-Path "$rel\GRIDE.exe")) { throw "$rel has no GRIDE.exe - build $($ide.Source)\GRIDE.sln in Release | x64 first" }
-    foreach ($t in "c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747") {
-        if (-not (Test-Path "$rel\$t.exe")) { throw "$rel has no $t.exe - the solution builds all eleven tools" }
+    foreach ($t in "c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747", "gride-dbg") {
+        if (-not (Test-Path "$rel\$t.exe")) { throw "$rel has no $t.exe - the solution builds all eleven tools and gride-dbg" }
+    }
+    # the three link Windows programs with GRIDE's own runtime (toolchain\Windows\RT, the grt project): packed with lib\
+    foreach ($l in "grtstart.lib", "grtcompat.lib", "grtcxx.lib", "grtc.lib", "grtwin.lib", "kernel32.lib", "shmrt-x86_64-windows-grt.lib", "shmrt-x86_64-windows-grt-debug.lib") {
+        if (-not (Test-Path "$rel\lib\$l")) { throw "$rel has no lib\$l - the grt project of $($ide.Source)\GRIDE.sln writes it" }
     }
     $dest = Join-Path $stage $ide.Folder
     New-Item -ItemType Directory -Force $dest | Out-Null
@@ -146,7 +154,7 @@ foreach ($ide in $ides) {
 Say "  VC++ runtime from $CrtFolder"
 if ($sign) {
     # GRIDE's own programs only: the VC++ runtime DLLs carry Microsoft's signature already
-    $own = foreach ($ide in $ides) { foreach ($t in "GRIDE", "c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747") { Join-Path $stage "$($ide.Folder)\$t.exe" } }
+    $own = foreach ($ide in $ides) { foreach ($t in "GRIDE", "c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747", "gride-dbg") { Join-Path $stage "$($ide.Folder)\$t.exe" } }
     Invoke-Sign @($own) "GRIDE"
 }
 

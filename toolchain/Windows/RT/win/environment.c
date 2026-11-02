@@ -12,7 +12,7 @@
 #include "grt.h"
 #include "win32.h"
 
-static char *narrow(const WCHAR *wide, int count)
+static char *grt_narrow(const WCHAR *wide, int count)
 {
     int n = WideCharToMultiByte(GRT_CP_ACP, 0, wide, count, 0, 0, 0, 0);
     char *s = (char *)malloc((size_t)n + 1);
@@ -43,7 +43,7 @@ void __grt_arguments(int *argc, char ***argv)
             else word[n++] = *p;
             p++;
         }
-        vector[count++] = narrow(word, n);
+        vector[count++] = grt_narrow(word, n);
     }
     for (;;) {
         int n = 0;
@@ -72,7 +72,7 @@ void __grt_arguments(int *argc, char ***argv)
             vector = grown;
             cap *= 2;
         }
-        vector[count++] = narrow(word, n);
+        vector[count++] = grt_narrow(word, n);
     }
     vector[count] = 0;
     free(word);
@@ -96,7 +96,7 @@ char **__grt_environment(void)
         for (s = block; *s; ) {
             int n = 0;
             while (s[n]) n++;
-            if (*s != '=' && k < count) environment[k++] = narrow(s, n);
+            if (*s != '=' && k < count) environment[k++] = grt_narrow(s, n);
             s += n + 1;
         }
         FreeEnvironmentStringsW(block);
@@ -105,7 +105,7 @@ char **__grt_environment(void)
     return environment;
 }
 
-static int same_letter(char a, char b)
+static int grt_same_letter(char a, char b)
 {
     if (a >= 'a' && a <= 'z') a = (char)(a - 'a' + 'A');
     if (b >= 'a' && b <= 'z') b = (char)(b - 'a' + 'A');
@@ -123,7 +123,7 @@ char *getenv(const char *name)
         if (name[n] == '=') return 0;
     for (; *e; e++) {
         size_t i = 0;
-        while (i < n && (*e)[i] && same_letter((*e)[i], name[i])) i++;
+        while (i < n && (*e)[i] && grt_same_letter((*e)[i], name[i])) i++;
         if (i == n && (*e)[n] == '=') return *e + n + 1;
     }
     return 0;

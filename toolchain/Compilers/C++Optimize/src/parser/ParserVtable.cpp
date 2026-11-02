@@ -104,7 +104,7 @@ const Parser::VSlot *Parser::declaredSlot(const Type *cls, const VSlot &s) const
     for (std::size_t i = 0; i < it->second.size(); i++) {
         const VSlot &c = it->second[i];
         if (dtor ? c.name == s.name
-                 : overrides(c, s.name, s.params, s.constThis, s.refThis))
+                 : overrides(c, s.name, s.params, s.constThis, s.refThis, s.volatileThis))
             return &c;
     }
     return nullptr;

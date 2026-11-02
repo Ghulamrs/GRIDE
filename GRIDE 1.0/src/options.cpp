@@ -16,12 +16,12 @@ static const Def kDefs[] = {
     { "general.time", "General", "Phase timings (-time)", Check, "", "c90 and cpp11" },
     { "c90.opt", "C (c90)", "Optimization", Choice, "-O0|-O1|-O2", "x86_64 targets only; -O2 is -O1 today" },
     { "c90.g", "C (c90)", "Debug line table (-g)", Check, "", "" },
-    { "c90.defines", "C (c90)", "Defines (-D)", Text, "", "';' between them: NAME or NAME=value" },
-    { "c90.undefines", "C (c90)", "Undefines (-U)", Text, "", "';' between them" },
+    { "c90.defines", "C (c90)", "Defines (-D)", Text, "", "one per line: NAME or NAME=value" },
+    { "c90.undefines", "C (c90)", "Undefines (-U)", Text, "", "one per line: NAME" },
     { "cpp11.opt", "C++ (cpp11)", "Optimization", Choice, "-O0|-O1|-O2", "tms6747: -O1 schedules packets and keeps locals in registers, -O2 adds pipelining; x86_64: -O2 adds inlining" },
     { "cpp11.g", "C++ (cpp11)", "Debug line table (-g)", Check, "", "" },
-    { "cpp11.defines", "C++ (cpp11)", "Defines (-D)", Text, "", "';' between them: NAME or NAME=value" },
-    { "cpp11.undefines", "C++ (cpp11)", "Undefines (-U)", Text, "", "';' between them" },
+    { "cpp11.defines", "C++ (cpp11)", "Defines (-D)", Text, "", "one per line: NAME or NAME=value" },
+    { "cpp11.undefines", "C++ (cpp11)", "Undefines (-U)", Text, "", "one per line: NAME" },
     { "cpp11.declines", "C++ (cpp11)", "Report what the optimizer declined (CPP11_DECLINES)", Check, "", "one line on stderr per function or call not optimized" },
     { "cpp11.compress", "C++ (cpp11)", "Compact 16-bit instructions (off: --no_compress)", Check, "", "tms6747 only; the C674x runs them natively, and TI's cl6x writes them by default" },
     { "shc.opt", "Shalimar", "Optimization", Choice, "-O0|-O1|-O2", "x86_64 targets only; -O2 is -O1 today" },
@@ -114,11 +114,13 @@ bool available(const std::string& id, const std::string& arch, std::string& why)
     return true;
 }
 
+// A Text list's entries: ';' between them - or a line break, the dialog's box having one entry per line -
+// blanks trimmed, empty ones dropped.
 static std::vector<std::string> entries(const std::string& list) {
     std::vector<std::string> out;
     size_t at = 0;
     while (at <= list.size()) {
-        size_t semi = list.find(';', at);
+        size_t semi = list.find_first_of(";\r\n", at);
         std::string one = list.substr(at, semi == std::string::npos ? std::string::npos : semi - at);
         size_t a = one.find_first_not_of(" \t"), b = one.find_last_not_of(" \t");
         if (a != std::string::npos) out.push_back(one.substr(a, b - a + 1));
@@ -128,8 +130,21 @@ static std::vector<std::string> entries(const std::string& list) {
     return out;
 }
 
+// An entry as one argument: as it is, unless it holds a space, a tab or a quote - then in quotes, a quote
+// inside escaped as \" and the backslashes in front of a quote, or of the closing one, doubled, as the C
+// runtime splits a command line: MSG="hi there" -> "MSG=\"hi there\"".
 static std::string quoted(const std::string& s) {
-    return s.find_first_of(" \t\"") == std::string::npos ? s : "\"" + s + "\"";
+    if (s.find_first_of(" \t\"") == std::string::npos) return s;
+    std::string out = "\"";
+    size_t slashes = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\\') { ++slashes; continue; }
+        out.append(s[i] == '"' ? 2 * slashes + 1 : slashes, '\\');
+        out += s[i];
+        slashes = 0;
+    }
+    out.append(2 * slashes, '\\');
+    return out + "\"";
 }
 
 std::string flags(const Store& store, ToolchainKind kind, Configuration config, const std::string& arch) {

@@ -344,6 +344,26 @@ void MasmSpelling::ins(const std::string &m, const Op &a) {
 
 void MasmSpelling::ins(const std::string &m, const Op &a, const Op &b) {
     afterCall_ = false;
+    // **The project's masm writes no segment override**: the thread's TLS array, cl's `mov rcx, gs:[58h]`,
+    // goes in as its bytes - 65 48 8B 0C 25 58 00 00 00 for rcx - the register in ModRM's reg field (Phase 6).
+    if (comdat_ && m == "mov" && a.kind == Op::Seg && b.kind == Op::Reg) {
+        static const char *const regs[16] = { "%rax", "%rcx", "%rdx", "%rbx", "%rsp", "%rbp", "%rsi", "%rdi",
+                                              "%r8", "%r9", "%r10", "%r11", "%r12", "%r13", "%r14", "%r15" };
+        int n = -1;
+        for (int i = 0; i < 16; i++) if (std::string(b.text) == regs[i]) n = i;
+        if (n < 0 || std::string(a.text) != "%gs") give_up(m, "a segment load this spelling cannot write as bytes");
+        const unsigned d = static_cast<unsigned>(a.disp);
+        const unsigned bytes[9] = { 0x65, 0x48u | (n >= 8 ? 4u : 0u), 0x8B, 0x04u | ((n & 7u) << 3), 0x25,
+                                    d & 0xFF, (d >> 8) & 0xFF, (d >> 16) & 0xFF, (d >> 24) & 0xFF };
+        o_ += "  DB ";
+        for (int i = 0; i < 9; i++) {
+            char hex[8];
+            std::snprintf(hex, sizeof hex, "0%02XH", bytes[i]);
+            o_ += hex;
+            o_ += i < 8 ? ", " : "\n";
+        }
+        return;
+    }
     const Rule *r = ruleFor(m);
     if (r == nullptr) give_up(m, "an instruction this spelling does not know");
 
@@ -776,8 +796,6 @@ void MasmSpelling::bssSection() {
 // **`.tls$`, with the dot**: ml64 names a `_TLS SEGMENT` `_TLS` and the linker builds no template
 // from it - measured with dumpbin. The project's masm has no SECTIONREL to reach the object with.
 void MasmSpelling::tlsDataSection() {
-    if (comdat_) give_up(".tls$", "a thread_local is not supported yet in the project's own masm, "
-                                  "which has no SECTIONREL operator - the GNU spelling and ml64 have it");
     flushPending();
     if (seg_ == Tls) return;
     closeDataBlock();
@@ -786,12 +804,31 @@ void MasmSpelling::tlsDataSection() {
     seg_ = Tls;
 }
 
+// `$tlsoff$x DD SECTIONREL x`, once per object this file reaches, in a segment of its own: the project's
+// masm relocates SECTIONREL in a DD (the line tables' way) and in no operand.
+void MasmSpelling::tlsOffsetWord(const std::string &symbol) {
+    if (!tlsWords_.insert(symbol).second) return;
+    referencedData_.insert(symbol);
+    predefine({ "$tlsoff$" + symbol });
+    trailer_ += "\n.rdata$tls SEGMENT READONLY ALIGN(4) 'DATA'\n" + mangle("$tlsoff$" + symbol) +
+                " DD SECTIONREL " + mangle(symbol) + "\n.rdata$tls ENDS\n";
+}
+
 void MasmSpelling::tlsInitialiserEntry(const std::string &fn) {
     flushPending();
     closeDataBlock();
     o_ += "\n.CRT$XDU SEGMENT READONLY ALIGN(8) 'DATA'\n" + mangle(fn + "$initializer$") + " DQ ";
     o_ += mangle(fn);
-    o_ += "\n.CRT$XDU ENDS\n.drectve SEGMENT INFO\n  DB \" /include:__dyn_tls_init\"\n.drectve ENDS\n";
+    o_ += "\n.CRT$XDU ENDS\n";
+    // The project's masm writes no INFO segment: a word naming __dyn_tls_init brings it into the link as
+    // the directive does (Phase 6).
+    if (comdat_) {
+        referenced_.insert("__dyn_tls_init");
+        o_ += ".rdata$tli SEGMENT READONLY ALIGN(8) 'DATA'\n" + mangle(fn + "$dyn_tls_init$") +
+              " DQ __dyn_tls_init\n.rdata$tli ENDS\n";
+    } else {
+        o_ += ".drectve SEGMENT INFO\n  DB \" /include:__dyn_tls_init\"\n.drectve ENDS\n";
+    }
     seg_ = None;
 }
 
@@ -946,6 +983,9 @@ void MasmSpelling::preamble(std::ostream &sink) {
 
     for (const std::string &e : exported_) {
         const std::string spelt = mangle(e);
+        // cl's `<unnamed-type-x>`: an object or a specialization of an unnamed class no other unit can name,
+        // kept in this one under the respelt name rather than exported under one MASM cannot hold.
+        if (e.find("<unnamed-type-") != std::string::npos) continue;
         // Renaming an exported name would break the link; only a dot was ever renamed in one.
         if (e.find_first_not_of(std::string(kMasmNameChars) + ".") != std::string::npos)
             give_up(e, "an exported name holds a character no MASM name can spell");
@@ -985,19 +1025,21 @@ int MasmCodeGen::establisherOffset(int slot) const {
 // only place the frame moves: `[rbp-slot]` written here comes out as `[rbp + frameSize - slot]`
 // there, which is the same arithmetic establisherOffset does for the tables.
 void MasmCodeGen::storeUnwindHelp(int slot) {
-    if (optimizer_) optimizer_->sharedSlot(-slot, 8);
+    if (optimizing()) optimizer_->sharedSlot(-slot, 8);
     a_->ins("movq", imm(-2), mem(-slot, "%rbp"));
 }
 
 // **A funclet is a slice of the ordinary output, lifted.** Walking the handler
 // appends its code like any other, so remembering where that began and cutting
 // back to it gives the body exactly - and the code generator knows none of it.
+// **One opened inside another is cut out of it first**, a handler's own `try` or cleanup: the slices nest.
 std::string MasmCodeGen::beginFunclet(std::size_t pos, int number, bool cleanup) {
-    if (optimizer_) optimizer_->funcletBegin();
+    if (optimizing()) optimizer_->funcletBegin();
     atOutput([this] {
         masm_.raw("");                   // nothing pending inside the slice
-        funcletMark_ = out_.size();
+        funcletMarks_.push_back(out_.size());
     });
+    if (!funcletSymbol_.empty()) outerFunclets_.push_back(std::make_pair(funcletSymbol_, funcletEntryLoc_));
     funcletSymbol_ = masm_.mangledName() + funcletKind_ +
                      std::to_string(funcletIndex_++);
     funcletDebugBegin(funcletSymbol_, pos, number, cleanup);
@@ -1082,15 +1124,22 @@ void MasmCodeGen::closeFunclet(const std::string &tail) {
     // with an optimizer in front is after the function it belongs to.
     atOutput([this, head, f] {
         masm_.raw("");
-        const std::string body = out_.substr(funcletMark_);
-        out_.resize(funcletMark_);
+        const std::string body = out_.substr(funcletMarks_.back());
+        out_.resize(funcletMarks_.back());
+        funcletMarks_.pop_back();
         funclets_ += head + body + f;
     });
-    if (optimizer_) optimizer_->funcletEnd();
+    if (optimizing()) optimizer_->funcletEnd();
+    funcletSymbol_.clear();
+    if (!outerFunclets_.empty()) {
+        funcletSymbol_ = outerFunclets_.back().first;
+        funcletEntryLoc_ = outerFunclets_.back().second;
+        outerFunclets_.pop_back();
+    }
 }
 
 void MasmCodeGen::emitExceptionTables(const Function &fn) {
-    if (msStates().empty()) {
+    if (msStates().empty() && fn.msUnwindHelp() == 0) {
         if (!callSites().empty()) emitLsda(fn.symbol(), false);
         out_ += funclets_;
         funclets_.clear();
@@ -1112,16 +1161,18 @@ void MasmCodeGen::emitExceptionTables(const Function &fn) {
     o += "\n.xdata SEGMENT READONLY ALIGN(8) 'DATA'" + masm_.associative() + "\n";
     o += "$cppxdata$" + m + " DD 019930522H\n";
     o += "  DD " + std::to_string(states.size()) + "\n";
-    o += "  DD imagerel $stateUnwindMap$" + m + "\n";
+    o += states.empty() ? "  DD 00H\n" : "  DD imagerel $stateUnwindMap$" + m + "\n";
     o += "  DD " + std::to_string(tries.size()) + "\n";
     o += tries.empty() ? "  DD 00H\n" : "  DD imagerel $tryMap$" + m + "\n";
-    o += "  DD " + std::to_string(1 + msIpRows().size() + msFuncletRows().size()) + "\n";
+    const std::vector<MsIpRow> ip = msIpTable();
+    o += "  DD " + std::to_string(1 + ip.size()) + "\n";
     o += "  DD imagerel $ip2state$" + m + "\n";
     o += "  DD " + std::to_string(establisherOffset(msUnwindHelpSlot())) + "\n";
     o += "  DD 00H\n";                      // no exception specification
-    o += "  DD 01H\n";                      // EHFlags: compiled with /EHsc
+    // EHFlags: compiled with /EHsc, and 4 for a noexcept function, which the runtime ends the program in.
+    o += "  DD 0" + std::to_string(1 | (fn.isNoexcept() ? 4 : 0)) + "H\n";
 
-    o += "$stateUnwindMap$" + m;
+    if (!states.empty()) o += "$stateUnwindMap$" + m;
     for (std::size_t k = 0; k < states.size(); k++) {
         o += (k == 0 ? " DD " : "  DD ");
         o += (states[k].toState < 0 ? std::string("0ffffffffH")
@@ -1162,18 +1213,13 @@ void MasmCodeGen::emitExceptionTables(const Function &fn) {
         }
     }
 
-    // Where each state begins, in address order; a funclet is wholly inside
+    // Where each state begins, in address order; a catch funclet is entered in
     // its own handler state.
     o += "$ip2state$" + m + " DD imagerel $LNbeg$" + m + "\n";
     o += "  DD 0ffffffffH\n";
-    for (std::size_t k = 0; k < msIpRows().size(); k++) {
-        o += "  DD imagerel " + masm_.labelName(msIpRows()[k].label) + "\n";
-        o += "  DD " + (msIpRows()[k].state < 0 ? std::string("0ffffffffH")
-                                                  : std::to_string(msIpRows()[k].state)) + "\n";
-    }
-    for (std::size_t k = 0; k < msFuncletRows().size(); k++) {
-        o += "  DD imagerel " + msFuncletRows()[k].label + "\n";
-        o += "  DD " + std::to_string(msFuncletRows()[k].state) + "\n";
+    for (const MsIpRow &r : ip) {
+        o += "  DD imagerel " + (r.entry ? r.label : masm_.labelName(r.label)) + "\n";
+        o += "  DD " + (r.state < 0 ? std::string("0ffffffffH") : std::to_string(r.state)) + "\n";
     }
     o += ".xdata ENDS\n\n.CODE\n";
     out_ += o;
@@ -1200,25 +1246,25 @@ void MasmCodeGen::emitClassRtti(const Program &program) {
     if (program.rtti.empty()) return;
     std::string &o = out_;
 
-    // The chain of every class named, closed and deduplicated: a class's array
-    // lists its bases' descriptors, so a base needs the full set of records
-    // even when nothing in this file names it.
+    // Every class named and every base its array lists, closed and deduplicated: a
+    // base needs the full set of records even when nothing in this file names it.
     std::vector<const Type *> all;
-    for (std::size_t i = 0; i < program.rtti.size(); i++)
-        for (const Type *k = program.rtti[i]; k != nullptr; k = k->base()) {
+    for (std::size_t i = 0; i < program.rtti.size(); i++) {
+        int attributes = 0;
+        for (const MicrosoftBaseClass &r : program.msRttiRowsOf(program.rtti[i], &attributes)) {
             bool had = false;
-            for (std::size_t j = 0; j < all.size(); j++) if (all[j] == k) had = true;
-            if (!had) all.push_back(k);
+            for (std::size_t j = 0; j < all.size(); j++) if (all[j] == r.cls) had = true;
+            if (!had) all.push_back(r.cls);
         }
+    }
 
+    std::set<std::string> bases;
     for (std::size_t i = 0; i < all.size(); i++) {
         MicrosoftRtti n;
         std::string why;
         if (!microsoftClassRttiNames(all[i], &n, &why)) continue;
-
-        int contained = 0;
-        for (const Type *k = all[i]->base(); k != nullptr; k = k->base())
-            contained++;
+        int attributes = 0;
+        const std::vector<MicrosoftBaseClass> rows = program.msRttiRowsOf(all[i], &attributes);
 
         // **The descriptor is writable** - its spare word caches the undecorated name - so
         // `.data$r`, which the linker folds into .data: a segment named `.data` is MASM's
@@ -1230,42 +1276,51 @@ void MasmCodeGen::emitClassRtti(const Program &program) {
         o += ".data$r ENDS\n";
         msDescriptors_.insert(n.descriptor);
 
-        // Where this class sits inside itself: at the top, never virtual. Those
-        // four numbers are constant because a class with a second base is
-        // refused - its first base is always at offset zero.
-        o += record(".rdata$r", 4, n.baseDescriptor, true);
-        o += n.baseDescriptor + " DD imagerel " + n.descriptor + "\n";
-        o += "  DD 0" + std::to_string(contained) + "H\n";
-        o += "  DD 00H\n";              // mdisp
-        o += "  DD 0ffffffffH\n";       // pdisp - -1, there is no vbtable
-        o += "  DD 00H\n";              // vdisp
-        o += "  DD 040H\n";             // attributes
-        o += "  DD imagerel " + n.hierarchy + "\n";
-
-        o += record(".rdata$r", 4, n.array, false);
-        o += n.array + " DD imagerel " + n.baseDescriptor + "\n";
-        for (const Type *k = all[i]->base(); k != nullptr; k = k->base()) {
+        // Where each class of the array sits inside this one, and what it is there: one record per
+        // place and attributes, `??_R1BA@?0A@EA@I2@@8`, shared by every array that lists it.
+        bool first = true;
+        for (const MicrosoftBaseClass &r : rows) {
+            if (!bases.insert(r.name).second) continue;
             MicrosoftRtti b;
-            if (!microsoftClassRttiNames(k, &b, &why)) break;
-            o += "  DD imagerel " + b.baseDescriptor + "\n";
+            if (!microsoftClassRttiNames(r.cls, &b, &why)) continue;
+            o += record(".rdata$r", 4, r.name, first);
+            first = false;
+            o += r.name + " DD imagerel " + b.descriptor + "\n";
+            o += "  DD " + std::to_string(r.contained) + "\n";
+            o += "  DD " + std::to_string(r.mdisp) + "\n";
+            o += "  DD " + std::to_string(r.pdisp) + "\n";   // pdisp: -1 outside a virtual base
+            o += "  DD " + std::to_string(r.vdisp) + "\n";
+            o += "  DD " + std::to_string(r.attributes) + "\n";
+            o += "  DD imagerel " + b.hierarchy + "\n";
         }
+
+        o += record(".rdata$r", 4, n.array, first);
+        o += n.array;
+        for (std::size_t k = 0; k < rows.size(); k++)
+            o += (k == 0 ? " DD imagerel " : "  DD imagerel ") + rows[k].name + "\n";
         o += "  DD 00H\n";
 
         o += record(".rdata$r", 4, n.hierarchy, false);
         o += n.hierarchy + " DD 00H\n";
-        o += "  DD 00H\n";              // attributes - no MI, no virtual bases
-        o += "  DD 0" + std::to_string(contained + 1) + "H\n";
+        o += "  DD " + std::to_string(attributes) + "\n";    // 1: a class here has two bases
+        o += "  DD " + std::to_string(rows.size()) + "\n";
         o += "  DD imagerel " + n.array + "\n";
 
         // The locator names itself, which is how the runtime recovers the image
-        // base every other field is relative to.
-        o += record(".rdata$r", 4, n.locator, false);
-        o += n.locator + " DD 01H\n";
-        o += "  DD 00H\n";              // the vfptr's offset in the object
-        o += "  DD 00H\n";              // cdOffset
-        o += "  DD imagerel " + n.descriptor + "\n";
-        o += "  DD imagerel " + n.hierarchy + "\n";
-        o += "  DD imagerel " + n.locator + "\n";
+        // base every other field is relative to. One per vftable, at its vfptr.
+        std::vector<Program::MsLocator> locators;
+        for (const Program::MsLocator &l : program.msLocators)
+            if (l.cls == all[i]) locators.push_back(l);
+        if (locators.empty()) locators.push_back(Program::MsLocator{ all[i], n.locator, 0 });
+        for (const Program::MsLocator &l : locators) {
+            o += record(".rdata$r", 4, l.name, false);
+            o += l.name + " DD 01H\n";
+            o += "  DD " + std::to_string(l.offset) + "\n";   // the vfptr's offset in the object
+            o += "  DD " + std::to_string(l.cdOffset) + "\n";
+            o += "  DD imagerel " + n.descriptor + "\n";
+            o += "  DD imagerel " + n.hierarchy + "\n";
+            o += "  DD imagerel " + l.name + "\n";
+        }
         o += ".rdata$r ENDS\n";
     }
 }
@@ -1334,20 +1389,26 @@ void MasmCodeGen::run(const Program &program) {
     // **And every class descriptor this file defines**, for the same reason: the spelling writes an
     // EXTERN for each name a call mentions, and these are mentioned by the `lea` in front of every
     // __RTDynamicCast while being laid down a few lines above it.
-    for (std::size_t i = 0; i < program.rtti.size(); i++)
-        for (const Type *k = program.rtti[i]; k != nullptr; k = k->base()) {
+    for (std::size_t i = 0; i < program.rtti.size(); i++) {
+        int attributes = 0;
+        for (const MicrosoftBaseClass &r : program.msRttiRowsOf(program.rtti[i], &attributes)) {
             MicrosoftRtti n;
             std::string why;
-            if (!microsoftClassRttiNames(k, &n, &why)) break;
+            if (!microsoftClassRttiNames(r.cls, &n, &why)) break;
             // **All five, not the descriptor alone.** The descriptor is the
             // one a `lea` mentions, so it was the only one that had to be here
             // while only instructions recorded a reference.
             mine.push_back(n.descriptor);
             mine.push_back(n.baseDescriptor);
+            mine.push_back(r.name);
             mine.push_back(n.array);
             mine.push_back(n.hierarchy);
-            mine.push_back(n.locator);
+            bool listed = false;
+            for (const Program::MsLocator &l : program.msLocators) listed = listed || l.cls == r.cls;
+            if (!listed) mine.push_back(n.locator);
         }
+    }
+    for (const Program::MsLocator &l : program.msLocators) mine.push_back(l.name);
     masm_.predefine(mine);
     // **Before the code, not after it.** The base run() flushes what it has
     // built when it finishes, so anything appended afterwards goes to a buffer

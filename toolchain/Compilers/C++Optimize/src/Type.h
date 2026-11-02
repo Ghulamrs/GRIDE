@@ -69,7 +69,12 @@ struct DepExpr {
         QualifiedParamName, // `sr <type> <name>`
         Cast,               // `cv <type> <kid>`, one operand
         CastList,           // `cv <type> _ <kids> E`, none or several
-        StaticCast          // `sc <type> <kid>`
+        StaticCast,         // `sc <type> <kid>`
+        ExternalName,       // the one function a qualified name resolves to, `L <its symbol> E`; `name` the symbol
+        QualifiedName,      // `sr <scope>... E <name> [I <targs> E]`: an overloaded or template function named qualified
+        TypeTrait,          // `u <name> <targs> E`: a type-trait built-in of the parameters, `name` its spelling
+        PackExpansion,      // `sp <kid>`: `f(std::forward<A>(a)...)`'s argument, one expression per member
+        ScopedMember        // `sr <levels> E <name>`: `std::is_integral<T>::value`, `type` the dependent member
     };
     Op op = Literal;
     std::string code;
@@ -78,6 +83,8 @@ struct DepExpr {
     bool floating = false;
     int index = -1;
     std::string name;
+    std::vector<std::string> scope;
+    std::vector<const Type *> targs;
     std::vector<const DepExpr *> kids;
     std::string key;    // the identity: equivalent expressions have one key and one node
     std::string text;   // what a diagnostic shows
@@ -89,6 +96,10 @@ struct DepExpr {
 struct TemplateArg {
     const Type *type = nullptr;
     bool isType = true;
+    // A function template's non-type parameter declared with a type that depends on another parameter -
+    // `T v` after `class T`: that declared type, standing for itself, which Itanium writes as `Tn<type>`
+    // before the value. Null otherwise, and on every argument of a class template.
+    const Type *declaredAs = nullptr;
     long long value = 0;
     // **A non-type argument that is a reference to a template parameter**, the
     // `N` in the pattern `V<N>`.
@@ -112,6 +123,23 @@ struct TemplateArg {
     // **A template template argument**, `Holder<Box, int>`'s Box: `type` is the stand-in TypeTable::templateNameType makes,
     // or a Kind::TemplateParam where a pattern names an enclosing template template parameter.
     bool isTemplate = false;
+    // **An address or a member pointer as a non-type argument** ([temp.arg.nontype]/1): `deref<&gv>`, `call<fn>`,
+    // `inc<gv>`, `member<&S::m>`, `nv<nullptr>`. `value` is the parser's index of it, `address` how a key spells
+    // it, `entity` the symbol of what it names in this target's ABI - cl's `?gv@@3HA`, clang's `_Z2gv`, empty for
+    // a null one - and `form` how the ABIs wrap that: 'p' a pointer or member pointer, 'c' a pointer gaining a
+    // const on the way, 'r' a reference, 'a' an array named bare, its `element` the parameter's pointee, 'm' a data
+    // member at `offset`, 'n' null. 0 otherwise.
+    char form = 0;
+    std::string address;
+    std::string entity;
+    const Type *element = nullptr;
+    int offset = 0;
+    // What Itanium mangles in place of `entity`, so the scopes and parameter types in it are substitution
+    // candidates as clang counts them: the name it was found under (`ns::nv`, `S::f`), a member's class,
+    // and a function's type. Unset where `entity` is not a `_Z` name of its own.
+    std::string name;
+    const Type *scope = nullptr;
+    const Type *function = nullptr;
 };
 
 int homogeneousFloatCount(const Type *t, Kind *elem);
@@ -163,6 +191,14 @@ public:
     bool isConst() const {
         return const_ || (kind_ == Kind::Array && pointee_->isConst());
     }
+    // And volatile the same way ([basic.type.qualifier]): `volatile int *` is not `int *`, and a read
+    // through one is an access the program asked for.
+    bool isVolatile() const {
+        return volatile_ || (kind_ == Kind::Array && pointee_->isVolatile());
+    }
+    // Whether this is a cv-qualified copy of unqualified() - the question every "is const" test that
+    // compared a type with its unqualified() was asking about the qualifier as a whole.
+    bool isQualified() const { return unqual_ != nullptr; }
     const Type *unqualified() const { return unqual_ != nullptr ? unqual_ : this; }
 
     const Type *pointee() const { return pointee_; }
@@ -175,6 +211,9 @@ public:
         return kind_ == Kind::Array && length_ <= -2 ? static_cast<int>(-2 - length_) : -1;
     }
 
+    // **An array whose bound is an expression over a pattern's parameters**, `char (*)[sizeof(T) == 4]` read as a
+    // pattern: length_ is an unknown bound's -1, and the expression rides beside it.
+    const DepExpr *dependentBound() const { return kind_ == Kind::Array ? expr_ : nullptr; }
     // The expression a `Kind::DependentExpr` is `decltype` of, and whether it is spelled `Dt`.
     const DepExpr *dependentExpr() const { return kind_ == Kind::DependentExpr ? expr_ : nullptr; }
     bool dependentIdExpression() const { return kind_ == Kind::DependentExpr && length_ == 1; }
@@ -261,6 +300,18 @@ public:
         c.local_ = local;
         if (in != nullptr && c.enclosing_ == nullptr) c.enclosing_ = in;
         if (inNamespace) c.inNamespace_ = true;
+    }
+
+    // **An unnamed class no typedef names for linkage**, as a template argument names it: cl's
+    // `<unnamed-type-x>` after its first declarator - `scope` its class's or namespace's key, `::` ended -
+    // and clang's `$_N` by `index`. Such a specialization has no linkage outside this unit.
+    const std::string &unnamedName() const { return cls().unnamed_; }
+    int unnamedIndex() const { return cls().unnamedIndex_; }
+    void nameUnnamed(const std::string &scopedName, int index) const {
+        Type &c = const_cast<Type &>(cls());
+        if (!c.tag_.empty() || !c.unnamed_.empty()) return;
+        c.unnamed_ = scopedName;
+        c.unnamedIndex_ = index;
     }
 
     // `class X` and `struct X` build the same kind of type and differ only in the
@@ -441,11 +492,13 @@ public:
                                // minus that class's own vbptr offset
         const Type *base;      // the direct base holding it, null where this
                                // class introduced the pointer itself
+        const Type *via;       // the base of this class it was reached through, which
+                               // names the table where `base` alone names two
     };
     const std::vector<VbPtr> &vbptrs() const { return cls().vbptrs_; }
-    void addVbptr(int offset, const Type *owner, const Type *base) {
+    void addVbptr(int offset, const Type *owner, const Type *base, const Type *via = nullptr) {
         if (vbptrs_.empty()) { vbptrOffset_ = offset; vbptrOwner_ = owner; }
-        vbptrs_.push_back(VbPtr{ offset, owner, base });
+        vbptrs_.push_back(VbPtr{ offset, owner, base, via != nullptr ? via : base });
     }
 
     // **The Itanium ABI's primary base**: the first non-virtual base written
@@ -530,6 +583,13 @@ public:
     const char *refQualifierSpelling() const {
         return refQual_ == RefQual::LValue ? " &" : refQual_ == RefQual::RValue ? " &&" : "";
     }
+    // **The cv-qualifier-seq of a member function's type**, [dcl.fct]/6: `int (S::*)(int) const` is not
+    // `int (S::*)(int)`. kThisConst and kThisVolatile, or 0.
+    enum { kThisConst = 1, kThisVolatile = 2 };
+    unsigned cvThis() const { return thisCv_; }
+    const char *cvThisSpelling() const {
+        return thisCv_ == 3 ? " const volatile" : thisCv_ == 2 ? " volatile" : thisCv_ == 1 ? " const" : "";
+    }
 
 private:
     friend class TypeTable;
@@ -540,6 +600,7 @@ private:
     // one, this copy having been taken before the struct was complete.
     const Type *unqual_ = nullptr;
     bool const_ = false;
+    bool volatile_ = false;
     const DepExpr *expr_ = nullptr;
 
     const Type *pointee_ = nullptr;
@@ -548,10 +609,13 @@ private:
     std::vector<const Type *> params_;
     bool variadic_ = false;
     RefQual refQual_ = RefQual::None;
+    unsigned thisCv_ = 0;
 
     std::string tag_;
     std::string local_;
     std::string localOwner_;
+    std::string unnamed_;
+    int unnamedIndex_ = -1;
     bool inNamespace_ = false;
     std::string displayTag_;
     const Type *enumScope_ = nullptr;
@@ -600,6 +664,11 @@ public:
 
     const Type *withConst(const Type *t);
     const Type *withoutConst(const Type *t);
+    const Type *withVolatile(const Type *t);
+    const Type *withoutVolatile(const Type *t);
+    // t with exactly this cv, whatever it had; and t with `of`'s cv added to its own.
+    const Type *qualified(const Type *t, bool isConst, bool isVolatile);
+    const Type *withCvOf(const Type *t, const Type *of);
     const Type *pointerTo(const Type *t);
     const Type *memberPointerTo(const Type *cls, const Type *member);
     const Type *memberFunctionPointerTo(const Type *cls, const Type *fn,
@@ -607,9 +676,10 @@ public:
     const Type *referenceTo(const Type *t);
     const Type *rvalueReferenceTo(const Type *t);
     const Type *arrayOf(const Type *t, long long length);
+    const Type *dependentArrayOf(const Type *t, const DepExpr *bound);
     const Type *functionType(const Type *returns,
                              std::vector<const Type *> params, bool variadic,
-                             RefQual ref = RefQual::None);
+                             RefQual ref = RefQual::None, unsigned cvThis = 0);
     // The Nth parameter of the template being mangled.
     const Type *templateParam(int index);
     // `auto`, before deduction has replaced it.

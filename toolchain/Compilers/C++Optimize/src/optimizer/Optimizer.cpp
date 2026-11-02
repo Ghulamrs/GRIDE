@@ -68,7 +68,7 @@ void Optimizer::defLabel(const std::string &l) {
 void Optimizer::stateLabel(const std::string &l) {
     if (!inFunction_) { under_.stateLabel(l); return; }
     defLabel(l);
-    fn_.stream.back().state = true;
+    current().stream.back().state = true;
 }
 
 void Optimizer::functionBegin(const std::string &name, bool exported, bool mergeable) {
@@ -91,8 +91,10 @@ void Optimizer::functionBegin(const std::string &name, bool exported, bool merge
 // **A funclet is a function of its own to the passes** - the runtime calls it, with the parent's
 // frame under rbp - and a piece, never whole: no pass takes a register for it that its prologue does
 // not save. What it reads or writes of the parent's frame is shared with the parent, whose passes then leave those slots alone.
+// One begun inside another - a handler's own `try` or cleanup - holds the outer aside until it ends.
 void Optimizer::funcletBegin() {
-    assert(inFunction_ && !funclet_ && "a funclet inside a funclet");
+    assert(inFunction_ && "a funclet outside a function");
+    if (funclet_) outerFunclets_.push_back(std::move(funclet_));
     funclet_.reset(new opt::Function(*costs_));
     funclet_->name = fn_.name;
     funclet_->convention = fn_.convention;
@@ -104,8 +106,13 @@ void Optimizer::funcletEnd() {
     assert(funclet_ && "no funclet is held");
     improve(*funclet_);
     fn_.shared.addAccessesOf(funclet_->stream);
+    for (std::unique_ptr<opt::Function> &outer : outerFunclets_) outer->shared.addAccessesOf(funclet_->stream);
     funclets_.push_back(std::move(funclet_->stream));
     funclet_.reset();
+    if (!outerFunclets_.empty()) {
+        funclet_ = std::move(outerFunclets_.back());
+        outerFunclets_.pop_back();
+    }
 }
 
 void Optimizer::defer(std::function<void()> call) {

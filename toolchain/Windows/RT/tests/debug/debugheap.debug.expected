@@ -1,0 +1,7 @@
+malloc(8): cd cd cd cd cd cd cd cd
+after it: fd fd fd fd
+calloc(2, 4): 00 00 00 00 00 00 00 00
+realloc(12): 01 cd cd cd cd cd cd 07 cd cd cd cd
+after it: fd fd fd fd
+freed
+exit 0

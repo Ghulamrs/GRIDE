@@ -1,0 +1,3 @@
+stderr: before
+stderr: handler 11, then SIG_DFL
+exit 7

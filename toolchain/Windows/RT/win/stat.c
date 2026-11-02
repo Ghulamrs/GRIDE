@@ -39,16 +39,16 @@ struct _stat64i32 {
     long long st_atime, st_mtime, st_ctime;
 };
 
-static int slash(WCHAR c) { return c == '\\' || c == '/'; }
-static int letter(WCHAR c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
+static int grt_slash(WCHAR c) { return c == '\\' || c == '/'; }
+static int grt_letter(WCHAR c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
 
-static int root_or_empty(const WCHAR *path)
+static int grt_root_or_empty(const WCHAR *path)
 {
-    if (letter(path[0]) && path[1] == ':') path += 2;
-    return path[0] == 0 || (slash(path[0]) && path[1] == 0);
+    if (grt_letter(path[0]) && path[1] == ':') path += 2;
+    return path[0] == 0 || (grt_slash(path[0]) && path[1] == 0);
 }
 
-static int executable(const WCHAR *path)
+static int grt_executable(const WCHAR *path)
 {
     static const char kinds[4][5] = { ".exe", ".cmd", ".bat", ".com" };
     const WCHAR *dot = 0;
@@ -66,22 +66,22 @@ static int executable(const WCHAR *path)
     return 0;
 }
 
-static unsigned short mode_of(DWORD attributes, const WCHAR *path)
+static unsigned short grt_mode_of(DWORD attributes, const WCHAR *path)
 {
     unsigned short m;
     attributes &= 0xFF;
-    m = (unsigned short)((attributes & GRT_FILE_ATTRIBUTE_DIRECTORY) || root_or_empty(path) ? S_IFDIR | S_IEXEC : S_IFREG);
+    m = (unsigned short)((attributes & GRT_FILE_ATTRIBUTE_DIRECTORY) || grt_root_or_empty(path) ? S_IFDIR | S_IEXEC : S_IFREG);
     m |= (attributes & GRT_FILE_ATTRIBUTE_READONLY) ? S_IREAD : S_IREAD | S_IWRITE;
-    if (executable(path)) m |= S_IEXEC;
+    if (grt_executable(path)) m |= S_IEXEC;
     m |= (m & 0700) >> 3;
     m |= (m & 0700) >> 6;
     return m;
 }
 
-static int drive_of(const WCHAR *path, struct _stat64i32 *s)
+static int grt_drive_of(const WCHAR *path, struct _stat64i32 *s)
 {
     int drive;
-    if (letter(path[0]) && path[1] == ':') {
+    if (grt_letter(path[0]) && path[1] == ':') {
         if (path[2] == 0) { __grt_set_errno_from(GRT_ERROR_FILE_NOT_FOUND); return 0; }
         drive = (path[0] >= 'A' && path[0] <= 'Z' ? path[0] - 'A' + 'a' : path[0]) - 'a' + 1;
     } else
@@ -90,13 +90,13 @@ static int drive_of(const WCHAR *path, struct _stat64i32 *s)
     return 1;
 }
 
-static long long stat_time(const GRT_FILETIME *t, long long otherwise)
+static long long grt_stat_time(const GRT_FILETIME *t, long long otherwise)
 {
     if (t->low == 0 && t->high == 0) return otherwise;
     return __grt_file_time(t->low, t->high);
 }
 
-static int by_handle(const WCHAR *path, HANDLE h, struct _stat64i32 *s)
+static int grt_by_handle(const WCHAR *path, HANDLE h, struct _stat64i32 *s)
 {
     GRT_FILE_INFORMATION i;
     DWORD type = GetFileType(h) & ~(DWORD)GRT_FILE_TYPE_REMOTE, waiting;
@@ -110,44 +110,44 @@ static int by_handle(const WCHAR *path, HANDLE h, struct _stat64i32 *s)
     if (type == GRT_FILE_TYPE_UNKNOWN) { errno = EBADF; return 0; }
     if (type != GRT_FILE_TYPE_DISK) { __grt_set_errno_from(GetLastError()); return 0; }
     s->st_nlink = 1;
-    if (!drive_of(path, s)) return 0;
+    if (!grt_drive_of(path, s)) return 0;
     if (!GetFileInformationByHandle(h, &i)) { __grt_set_errno_from(GetLastError()); return 0; }
-    s->st_mode = mode_of(i.dwFileAttributes, path);
-    s->st_mtime = stat_time(&i.ftLastWriteTime, 0);
-    s->st_atime = stat_time(&i.ftLastAccessTime, s->st_mtime);
-    s->st_ctime = stat_time(&i.ftCreationTime, s->st_mtime);
+    s->st_mode = grt_mode_of(i.dwFileAttributes, path);
+    s->st_mtime = grt_stat_time(&i.ftLastWriteTime, 0);
+    s->st_atime = grt_stat_time(&i.ftLastAccessTime, s->st_mtime);
+    s->st_ctime = grt_stat_time(&i.ftCreationTime, s->st_mtime);
     if (i.nFileSizeHigh != 0 || i.nFileSizeLow > 2147483647ul) { errno = EOVERFLOW; return 0; }
     s->st_size = (long)i.nFileSizeLow;
     return 1;
 }
 
 /* \\server\share, with or without one slash after it */
-static int share_root(const WCHAR *path)
+static int grt_share_root(const WCHAR *path)
 {
     const WCHAR *p;
     unsigned n = 0;
     while (path[n]) n++;
-    if (n < 5 || !slash(path[0]) || !slash(path[1]) || slash(path[2])) return 0;
+    if (n < 5 || !grt_slash(path[0]) || !grt_slash(path[1]) || grt_slash(path[2])) return 0;
     p = path + 2;
-    while (*++p) if (slash(*p)) break;
+    while (*++p) if (grt_slash(*p)) break;
     if (p[0] == 0 || p[1] == 0) return 0;
-    while (*++p) if (slash(*p)) break;
+    while (*++p) if (grt_slash(*p)) break;
     return p[0] == 0 || p[1] == 0;
 }
 
 /* a root Windows knows, though it could not be opened (a drive with no medium) */
-static int usable_root(const WCHAR *path)
+static int grt_usable_root(const WCHAR *path)
 {
     WCHAR *full = 0;
     DWORD capacity = 0, n;
     const WCHAR *p;
     int root = 0;
-    for (p = path; *p && *p != '.' && !slash(*p); p++) {}
+    for (p = path; *p && *p != '.' && !grt_slash(*p); p++) {}
     if (!*p) return 0;
     for (;;) {
         n = GetFullPathNameW(path, capacity, full, 0);
         if (n == 0) break;
-        if (n < capacity) { root = n == 3 || share_root(full); break; }
+        if (n < capacity) { root = n == 3 || grt_share_root(full); break; }
         if (full) HeapFree(GetProcessHeap(), 0, full);
         capacity = n;
         full = (WCHAR *)HeapAlloc(GetProcessHeap(), 0, (unsigned long long)capacity * sizeof(WCHAR));
@@ -157,13 +157,13 @@ static int usable_root(const WCHAR *path)
     return root && GetDriveTypeW(path) > GRT_DRIVE_NO_ROOT_DIR;
 }
 
-static int unopened(const WCHAR *path, struct _stat64i32 *s)
+static int grt_unopened(const WCHAR *path, struct _stat64i32 *s)
 {
     int fields[9];
-    if (!usable_root(path)) { __grt_set_errno_from(GRT_ERROR_FILE_NOT_FOUND); return 0; }
-    s->st_mode = mode_of(GRT_FILE_ATTRIBUTE_DIRECTORY, path);
+    if (!grt_usable_root(path)) { __grt_set_errno_from(GRT_ERROR_FILE_NOT_FOUND); return 0; }
+    s->st_mode = grt_mode_of(GRT_FILE_ATTRIBUTE_DIRECTORY, path);
     s->st_nlink = 1;
-    if (!drive_of(path, s)) return 0;
+    if (!grt_drive_of(path, s)) return 0;
     fields[0] = fields[1] = fields[2] = 0;
     fields[3] = 1;
     fields[4] = 0;
@@ -174,7 +174,7 @@ static int unopened(const WCHAR *path, struct _stat64i32 *s)
     return 1;
 }
 
-static void clear(struct _stat64i32 *s)
+static void grt_clear(struct _stat64i32 *s)
 {
     s->st_dev = s->st_rdev = 0;
     s->st_ino = s->st_mode = 0;
@@ -192,14 +192,14 @@ int _stat64i32(const char *path, struct _stat64i32 *buf)
     wide = __grt_widen(path);
     if (!wide) return -1;
     if (!buf) __grt_fail_fast();
-    clear(buf);
+    grt_clear(buf);
     h = CreateFileW(wide, GRT_FILE_READ_ATTRIBUTES, GRT_SHARE_ALL, 0, GRT_OPEN_EXISTING, GRT_FILE_FLAG_BACKUP_SEMANTICS, 0);
     if (h != GRT_INVALID_HANDLE) {
-        ok = by_handle(wide, h, buf);
+        ok = grt_by_handle(wide, h, buf);
         CloseHandle(h);
     } else
-        ok = unopened(wide, buf);
-    if (!ok) clear(buf);
+        ok = grt_unopened(wide, buf);
+    if (!ok) grt_clear(buf);
     HeapFree(GetProcessHeap(), 0, wide);
     return ok ? 0 : -1;
 }

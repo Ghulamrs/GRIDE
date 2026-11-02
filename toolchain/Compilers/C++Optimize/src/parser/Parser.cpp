@@ -601,7 +601,7 @@ bool Parser::atTypeName() const {
                                      "typename",
                                      // And this one *is* a type, written as a
                                      // question about an expression.
-                                     "decltype" };
+                                     "decltype", "__underlying_type" };
     for (const char *k : t)
         if (peek().is(k)) return true;
     // `::Lexer *p;` declares a p - the leading `::` says where to look and
@@ -615,6 +615,7 @@ bool Parser::atTypeName() const {
     auto tmpl = templates_.find(peek().text);
     if (tmpl != templates_.end() && tmpl->second.isClass && peekAt(1).is("<"))
         return true;
+    if (peekAt(1).is("<") && memberClassTemplate(peek().text) != nullptr) return true;
     if (findTypedef(peek().text) != nullptr) return true;
     // `N::S` names a type as much as `Outer::Inner` does, and neither answers to
     // its leading name alone. One of those is a namespace and the other a class;
@@ -634,13 +635,16 @@ std::size_t Parser::qualifiedTypeEnd() const {
                             peekAt(k + 1).kind == TokenKind::Ident;
          k += 2) {
         q += "::" + peekAt(k + 1).text;
+        const Type *outer = cur;
         if (const Type *t = findTypedef(q)) { typeEnd = k + 2; cur = t; }
         // `std::string::size_type`: a member type of the class a typedef reached.
         else if (cur != nullptr && cur->isStructOrUnion() &&
                  (cur = lookupInClass(cur, peekAt(k + 1).text)) != nullptr)
             typeEnd = k + 2;
-        // **`std::vector<int> v;` - the name stops at a class template too.**
-        if (peekAt(k + 2).is("<") && isClassTemplate(q)) typeEnd = k + 2;
+        // **`std::vector<int> v;` - the name stops at a class template too**, and at a member one, `S::In<int>`.
+        if (peekAt(k + 2).is("<") &&
+            (isClassTemplate(q) || memberClassTemplateOf(outer, peekAt(k + 1).text) != nullptr))
+            typeEnd = k + 2;
     }
     return typeEnd;
 }
@@ -785,7 +789,39 @@ void Parser::skipBracedBlock() {
     // A function try block's handlers are its body too, [dcl.fct.def.general]/1.
     const bool functionTry = peek().is("try");
     // A constructor's body may be preceded by its mem-initializer list, so
-    // what is skipped starts at the ':' and the '{' is found from there.
+    // what is skipped starts at the ':' and the '{' is found from there - **past
+    // each entry's own arguments, which may be braced**: `: i{v}, d{1.5} {}` held
+    // `{v}` as the body (R-list).
+    if (functionTry && peekAt(1).is(":")) at_++;
+    if (peek().is(":")) {
+        at_++;
+        auto skipGroup = [&]() {
+            int depth = 0;
+            do {
+                if (peek().kind == TokenKind::End)
+                    src_.fail(peek().pos, "this mem-initialiser is never closed");
+                if (peek().is("(") || peek().is("{") || peek().is("[")) depth++;
+                else if (peek().is(")") || peek().is("}") || peek().is("]")) depth--;
+                at_++;
+            } while (depth > 0);
+        };
+        for (;;) {
+            int angle = 0;
+            while (angle > 0 || (!peek().is("(") && !peek().is("{"))) {
+                if (peek().kind == TokenKind::End)
+                    src_.fail(peek().pos, "this member function has no body after all");
+                if (peek().is("<")) angle++;
+                else if (peek().is(">")) angle--;
+                else if (peek().is(">>")) angle -= 2;
+                else if (angle > 0 && (peek().is("(") || peek().is("["))) { skipGroup(); continue; }
+                if (angle < 0) angle = 0;
+                at_++;
+            }
+            skipGroup();
+            consume("...");
+            if (!consume(",")) break;
+        }
+    }
     while (!peek().is("{")) {
         if (peek().kind == TokenKind::End)
             src_.fail(peek().pos, "this member function has no body after all");
@@ -1013,6 +1049,7 @@ void Parser::replayInlineBodies(std::vector<PendingBody> mine) {
     localTypes_ = outer.localTypes;
     // A body replayed here was written inside a class body, so every definition it produces is implicitly inline.
     replayingInline_ = true;
+    const bool wasFriend = friendDeclaration_;
 
     // **The outer function comes back on every way out**: a member template instantiated
     // inside a trial may throw from here, and the call that follows still reads its locals.
@@ -1032,12 +1069,15 @@ void Parser::replayInlineBodies(std::vector<PendingBody> mine) {
         const bool scoped = mine[i].freeFunction && !mine[i].tag.empty();
         const Type *scope = scoped ? findTypedef(mine[i].tag) : nullptr;
         if (scope != nullptr) classStack_.push_back(scope);
+        friendDeclaration_ = mine[i].freeFunction;
         topLevel(*current_);
+        friendDeclaration_ = wasFriend;
         if (scope != nullptr) classStack_.pop_back();
         inlineOwner_.clear();
         inlineOwnerName_.clear();
     }
     } catch (...) {
+        friendDeclaration_ = wasFriend;
         inlineOwner_.clear();
         inlineOwnerName_.clear();
         restoreFunctionState(outer);
@@ -1133,6 +1173,12 @@ int Parser::declare(const std::string &name, const Type *type, std::size_t pos,
     for (std::size_t i = from; i < locals_.size(); i++)
         if (locals_[i].name == name)
             src_.fail(pos, "'" + name + "' is declared twice in this block");
+    // [basic.scope.block]/2: the outermost block of a function body is the parameters' scope too.
+    if (bodyScope_ != 0 && scopeStarts_.size() == bodyScope_ && !inParams_)
+        for (std::size_t i = 0; i < from; i++)
+            if (locals_[i].isParameter && locals_[i].name == name)
+                src_.fail(pos, "'" + name + "' redeclares a parameter in the outermost block of the "
+                               "function - [basic.scope.block]/2");
 
     int offset = 0;
     const Type *storedType = type->isReference() ? types_.pointerTo(type->referent()) : type;

@@ -112,18 +112,24 @@ namespace Gride { namespace Settings {
             if (other != nullptr) FromJson(other->ToJson());
         }
 
-        // the entries of a text option: ';' between them, blanks trimmed, empty ones dropped (RIDE's entries)
+        // the entries of a text option: ';' between them, blanks trimmed, empty ones dropped (RIDE's entries);
+        // a line break separates them too - the dialog's box has one entry per line
         static List<String^>^ Entries(String^ list)
         {
             List<String^>^ r = gcnew List<String^>();
             if (list == nullptr) return r;
-            for each (String^ s in list->Split(gcnew array<wchar_t>{ L';' }))
+            for each (String^ s in list->Split(gcnew array<wchar_t>{ L';', L'\r', L'\n' }))
             {
                 String^ t = s->Trim(gcnew array<wchar_t>{ L' ', L'\t' });
                 if (t->Length > 0) r->Add(t);
             }
             return r;
         }
+
+        // a list's value as the dialog's box shows it, one entry per line; and the box's lines back into
+        // the value the files keep, ';' between the entries as RIDE reads them (an older settings.json reads as it is)
+        static String^ AsLines(String^ list) { return String::Join("\r\n", Entries(list)); }
+        static String^ FromLines(String^ text) { return String::Join(";", Entries(text)); }
 
     private:
         Dictionary<String^, Dictionary<String^, String^>^>^ values;

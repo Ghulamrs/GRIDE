@@ -28,6 +28,44 @@ extern "C" {
 // 1e400 has no finite double to round to, so it folds to +inf here exactly as
 // it does under gcc - which was checked rather than assumed before writing it.
 #define HUGE_VAL 1e400
+#define HUGE_VALF ((float)HUGE_VAL)
+#define HUGE_VALL ((long double)HUGE_VAL)
+
+// C99's: an infinity and a quiet NaN of type float. Infinity times zero is a NaN
+// with the sign bit set on these processors, so the NaN is that one negated - the
+// spelling the UCRT's header falls back to where it has no __builtin_nanf.
+#define INFINITY ((float)HUGE_VAL)
+#define NAN      (-(float)(INFINITY * 0.0F))
+
+// What fpclassify answers, in each platform's own numbering: the UCRT's, Darwin's,
+// and glibc's, which the C6000 takes as well.
+#if defined(_WIN32)
+#define FP_INFINITE  1
+#define FP_NAN       2
+#define FP_NORMAL    (-1)
+#define FP_SUBNORMAL (-2)
+#define FP_ZERO      0
+#elif defined(__APPLE__)
+#define FP_NAN       1
+#define FP_INFINITE  2
+#define FP_ZERO      3
+#define FP_NORMAL    4
+#define FP_SUBNORMAL 5
+#else
+#define FP_NAN       0
+#define FP_INFINITE  1
+#define FP_ZERO      2
+#define FP_SUBNORMAL 3
+#define FP_NORMAL    4
+#endif
+
+#define MATH_ERRNO     1
+#define MATH_ERREXCEPT 2
+
+// The types float and double arithmetic is evaluated in: themselves, on every
+// target here, as FLT_EVAL_METHOD 0 in <float.h> says.
+typedef float  float_t;
+typedef double double_t;
 
 // The M_ constants are **not in C90**, and are here on purpose.
 //
@@ -95,6 +133,39 @@ double __c6xabi_nround(double);
 double trunc(double);
 double round(double);
 #endif
+double remainder(double, double);
+double remquo(double, double, int *);
+double fma(double, double, double);
+double fmax(double, double);
+double fmin(double, double);
+double fdim(double, double);
+double nan(const char *);
+double exp2(double);
+double expm1(double);
+double log2(double);
+double log1p(double);
+double logb(double);
+int ilogb(double);
+double scalbn(double, int);
+double scalbln(double, long);
+double cbrt(double);
+double hypot(double, double);
+double asinh(double);
+double acosh(double);
+double atanh(double);
+double erf(double);
+double erfc(double);
+double tgamma(double);
+double lgamma(double);
+long lround(double);
+long long llround(double);
+double rint(double);
+long lrint(double);
+long long llrint(double);
+double nearbyint(double);
+double copysign(double, double);
+double nextafter(double, double);
+double nexttoward(double, long double);
 
 
 }  // extern "C"

@@ -44,6 +44,21 @@ typedef long          ptrdiff_t;
 
 #endif
 
+// **max_align_t, C11's and [support.types]/5's: the most aligned scalar**, as
+// each platform's own header has it. cl's <cstddef> makes it `double`, Apple's
+// clang `long double`; glibc's two-member struct is what reaches x87's 16 on
+// x86_64-linux.
+#if defined(_WIN32)
+typedef double max_align_t;
+#elif defined(__APPLE__) || defined(__TMS320C6X__)
+typedef long double max_align_t;
+#else
+typedef struct {
+    long long __max_align_ll;
+    long double __max_align_ld;
+} max_align_t;
+#endif
+
 // glibc spells this ((void *)0). Here it is 0, because a null pointer constant
 // in C is an integer constant expression with value zero, and this compiler
 // accepts that in every place a pointer is wanted. The difference shows only

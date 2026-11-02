@@ -1,14 +1,21 @@
 # test-setup.ps1 - the Setup's health, per user (MSIINSTALLPERUSER=1, no elevation), once for each
 # choice: msiexec /i with IDE=Black, IDE=Grey or IDE=White, then the chosen folder holds GRIDE.exe and
 # the ten programs and the other two folders are absent, the Start menu shortcut and the registry values are there,
-# GRIDE.exe starts and answers and cpp11 runs; a deleted program comes back with msiexec /fa; msiexec /x
-# takes the folder, the shortcut and the registry values away again.
+# GRIDE.exe starts and answers and cpp11 runs; for Black, GRIDE's runtime for Windows is in lib\ and a C program
+# built and linked with it alone runs, and the programs need no VC++ runtime DLL; a deleted program comes back
+# with msiexec /fa; msiexec /x takes the folder, the shortcut and the registry values away again.
 #
-#   test-setup.ps1 [-Msi <GRIDE-Setup-ver.msi>] [-Choices Black,Grey,White] [-Cpp11Version 1.29]
-param([string]$Msi = "", [string[]]$Choices = @("Black", "Grey", "White"), [string]$Cpp11Version = "1.29")
+#   test-setup.ps1 [-Msi <GRIDE-Setup-ver.msi>] [-Choices Black,Grey,White] [-Cpp11Version 1.46]
+# Without -Cpp11Version the version expected is the one the sources say (C++Optimize\src\Version.h's CXX1_VERSION).
+param([string]$Msi = "", [string[]]$Choices = @("Black", "Grey", "White"), [string]$Cpp11Version = "")
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Msi-Com.ps1")
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+if (-not $Cpp11Version) {
+  $m = Select-String -Path (Join-Path $root "toolchain\Compilers\C++Optimize\src\Version.h") -Pattern '#define\s+CXX1_VERSION\s+"([^"]+)"' | Select-Object -First 1
+  if (-not $m) { throw "no CXX1_VERSION in C++Optimize\src\Version.h - pass -Cpp11Version" }
+  $Cpp11Version = $m.Matches[0].Groups[1].Value
+}
 if (-not $Msi) { $Msi = Get-ChildItem (Join-Path $root "installer\dist") -Filter "GRIDE-Setup-*.msi" | Sort-Object LastWriteTime | Select-Object -Last 1 -ExpandProperty FullName }
 $logs = Join-Path (Split-Path $Msi) "logs"; New-Item -ItemType Directory -Force $logs | Out-Null
 # the package's own name, version, publisher and ProductCode, as Programs and Features shows them
@@ -26,6 +33,22 @@ public static class SetupWin {
 '@
 $script:fail = 0
 function Check([bool]$ok, [string]$what) { if ($ok) { "  ok    $what" } else { "  FAIL  $what"; $script:fail++ } }
+# the DLLs a program imports, read from its PE import directory
+function Get-Imports([string]$exe) {
+  $b = [IO.File]::ReadAllBytes($exe)
+  $pe = [BitConverter]::ToInt32($b, 0x3c); $nsec = [BitConverter]::ToUInt16($b, $pe + 6)
+  $optSize = [BitConverter]::ToUInt16($b, $pe + 20); $opt = $pe + 24
+  $imp = [BitConverter]::ToUInt32($b, $opt + 120)
+  $secs = @(for ($i = 0; $i -lt $nsec; $i++) { $s = $opt + $optSize + 40 * $i
+    , @([BitConverter]::ToUInt32($b, $s + 12), [Math]::Max([BitConverter]::ToUInt32($b, $s + 8), [BitConverter]::ToUInt32($b, $s + 16)), [BitConverter]::ToUInt32($b, $s + 20)) })
+  $off = { param($rva) foreach ($s in $secs) { if ($rva -ge $s[0] -and $rva -lt $s[0] + $s[1]) { return [int]($rva - $s[0] + $s[2]) } } }
+  $p = & $off $imp
+  while (($n = [BitConverter]::ToUInt32($b, $p + 12)) -ne 0) {
+    $o = & $off $n; $e = $o; while ($b[$e] -ne 0) { $e++ }
+    [Text.Encoding]::ASCII.GetString($b, $o, $e - $o)
+    $p += 20
+  }
+}
 function Msiexec([string[]]$a, [string]$log) {
   $p = Start-Process msiexec.exe -ArgumentList ($a + @("/l*v", "`"$logs\$log`"")) -Wait -PassThru
   $p.ExitCode
@@ -42,21 +65,44 @@ foreach ($c in $Choices) {
   Check ($rc -eq 0) "msiexec /i IDE=$c -> $rc"
   $dir = Join-Path $base $folders[$c]
   Check (Test-Path "$dir\GRIDE.exe") "$dir\GRIDE.exe"
-  $missing = @("c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747" | Where-Object { -not (Test-Path "$dir\$_.exe") })
-  Check ($missing.Count -eq 0) "the ten programs beside it$(if ($missing) { ' - missing: ' + ($missing -join ', ') })"
+  $missing = @("c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747", "gride-dbg" | Where-Object { -not (Test-Path "$dir\$_.exe") })
+  Check ($missing.Count -eq 0) "the ten programs and gride-dbg beside it$(if ($missing) { ' - missing: ' + ($missing -join ', ') })"
   # Black and Grey read toolchain.json, White the settings.json it ships beside it; all three install the one
   # examples folder - cppparse's .pro (the one GRIDE format) and its Visual Studio solution, the projects, the programs
   if ($c -eq "White") { Check (Test-Path "$dir\settings.json") "settings.json" } else { Check (Test-Path "$dir\toolchain.json") "toolchain.json" }
   $cp = "$dir\examples\projects\cppparse"
   Check ((Test-Path "$cp\cppparse.pro") -and (Test-Path "$cp\cppparse.sln") -and (Test-Path "$cp\cppparse\cppparse.vcxproj")) "examples\projects\cppparse (its .pro, solution and project)"
-  # 28 .pro projects - the 14 of RIDE's set and cppparse's line, the showcase's 3, the classic Shalimar 11 - and
-  # the 3 CCS projects; the 11 single-file programs; the one toolchain demo (2026-10-21: GRIDE1's examples in)
-  Check ((Get-ChildItem "$dir\examples\projects" -Recurse -Filter *.pro -ErrorAction SilentlyContinue).Count -eq 28) "examples\projects: 28 .pro projects"
+  # 29 .pro projects - the 14 of RIDE's set and cppparse's line, cpp-sampleext (2026-10-27), the showcase's 3, the
+  # classic Shalimar 11 - and the 3 CCS projects; the 11 single-file programs; the one toolchain demo
+  Check ((Get-ChildItem "$dir\examples\projects" -Recurse -Filter *.pro -ErrorAction SilentlyContinue).Count -eq 29) "examples\projects: 29 .pro projects"
   Check ((Get-ChildItem "$dir\examples\projects\ccs" -Recurse -Filter .project -Force -ErrorAction SilentlyContinue).Count -eq 3) "examples\projects\ccs: the 3 CCS projects"
   Check ((Test-Path "$dir\examples\projects\showcase\solve3-cpp11\solve3-cpp11.pro") -and (Test-Path "$dir\examples\projects\shalimar-classic\factorial\factorial.pro")) "the showcase and the classic Shalimar set"
   Check ((Get-ChildItem "$dir\examples\programs" -File -ErrorAction SilentlyContinue).Count -eq 11) "examples\programs: 11 programs"
   Check ((Test-Path "$dir\examples\toolchain-demo\demo.ps1") -and -not (Test-Path "$dir\examples\toolchain-demo\out")) "examples\toolchain-demo, without a run's output"
-  Check ((Get-ChildItem "$dir\lib" -Recurse -Filter *.lib -ErrorAction SilentlyContinue).Count -eq 8) "the 8 runtime libraries under lib\"
+  # GRIDE adds its runtime for Windows to the 8: five layered libraries, their kernel32.lib and the Shalimar
+  # runtime over them - in the three outlooks since 2026-10-26 (Black's alone before) - and since 2026-10-30
+  # the five layers' Debug variants a Debug link takes (grtstartd ... grtwind)
+  $libs = 21
+  Check ((Get-ChildItem "$dir\lib" -Recurse -Filter *.lib -ErrorAction SilentlyContinue).Count -eq $libs) "the $libs runtime libraries under lib\"
+  $grt = @("grtstart.lib", "grtcompat.lib", "grtcxx.lib", "grtc.lib", "grtwin.lib", "grtstartd.lib", "grtcompatd.lib", "grtcxxd.lib", "grtcd.lib", "grtwind.lib",
+           "kernel32.lib", "shmrt-x86_64-windows-grt.lib", "shmrt-x86_64-windows-grt-debug.lib" | Where-Object { -not (Test-Path "$dir\lib\$_") })
+  Check ($grt.Count -eq 0) "GRIDE's runtime in lib\: grtstart, grtcompat, grtcxx, grtc, grtwin and their Debug variants, kernel32.lib, the Shalimar runtime over them$(if ($grt) { ' - missing: ' + ($grt -join ', ') })"
+  $list = (& "$dir\link.exe" /LIB /LIST "$dir\lib\grtstart.lib" 2>&1) + (& "$dir\link.exe" /LIB /LIST "$dir\lib\kernel32.lib" 2>&1)
+  Check (($list -match '^\s+mainCRTStartup$').Count -eq 1 -and ($list -match '^\s+__imp_ExitProcess$').Count -eq 1) "link /LIB /LIST: grtstart.lib defines mainCRTStartup, kernel32.lib imports ExitProcess"
+  # a C program built by the installed toolchain and linked with GRIDE's runtime alone: no LIB, no INCLUDE
+  $t = Join-Path $logs "grt-$c"; if (Test-Path $t) { Remove-Item $t -Recurse -Force }; New-Item -ItemType Directory $t | Out-Null
+  [IO.File]::WriteAllText("$t\hello.c", "#include <stdio.h>`nint main(void) { printf(""hello from %s\n"", ""GRIDE's runtime""); return 7; }`n")
+  $savedLib = $env:LIB; $savedInc = $env:INCLUDE; $env:LIB = ""; $env:INCLUDE = ""
+  & "$dir\c90.exe" -S "$t\hello.c" -o "$t\hello.s" -arch x86_64-windows -O2 -masm=masm -nologo 2>&1 | Out-Null
+  & "$dir\masm.exe" -t x64 "$t\hello.s" -o "$t\hello.obj" 2>&1 | Out-Null
+  & "$dir\link.exe" /nologo /subsystem:console "/out:$t\hello.exe" "$t\hello.obj" "$dir\lib\grtstart.lib" "$dir\lib\grtcompat.lib" "$dir\lib\grtcxx.lib" "$dir\lib\grtc.lib" "$dir\lib\grtwin.lib" "$dir\lib\kernel32.lib" 2>&1 | Out-Null
+  $env:LIB = $savedLib; $env:INCLUDE = $savedInc
+  $said = if (Test-Path "$t\hello.exe") { & "$t\hello.exe" } else { "" }
+  $imports = if (Test-Path "$t\hello.exe") { @(Get-Imports "$t\hello.exe") } else { @() }
+  Check ("$said" -eq "hello from GRIDE's runtime" -and $LASTEXITCODE -eq 7 -and ($imports -join ',') -eq "KERNEL32.dll") "a C program linked with GRIDE's runtime alone runs: '$said', exit $LASTEXITCODE, imports $($imports -join ', ')"
+  # the programs carry the static VC++ runtime: only GRIDE.exe (C++/CLI) needs the DLLs beside it
+  $dynamic = @("c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747", "gride-dbg" | Where-Object { (Test-Path "$dir\$_.exe") -and (@(Get-Imports "$dir\$_.exe") -match '^(?i)(vcruntime|msvcp|api-ms-win-crt)').Count -gt 0 })
+  Check ($dynamic.Count -eq 0) "the programs need no VC++ runtime DLL$(if ($dynamic) { ' - these do: ' + ($dynamic -join ', ') })"
   Check (Test-Path "$dir\docs\GRIDE_Help.html") "the shared Help, docs\GRIDE_Help.html"
   Check (Test-Path "$dir\vcruntime140.dll") "the VC++ runtime beside GRIDE.exe"
   foreach ($o in $others) { Check (-not (Test-Path (Join-Path $base $folders[$o]))) "$($folders[$o]) not installed" }
@@ -65,8 +111,11 @@ foreach ($c in $Choices) {
   $name = try { [string](Get-MsiProp $inst "ProductInfo" @($prop.ProductCode, "InstalledProductName")) } catch { "" }
   $publisher = try { [string](Get-MsiProp $inst "ProductInfo" @($prop.ProductCode, "Publisher")) } catch { "" }
   Check ($name -eq $prop.ProductName -and $publisher -eq $prop.Manufacturer) "Programs and Features: '$name', publisher '$publisher'"
-  $v = & "$dir\cpp11.exe" --version 2>&1 | Where-Object { "$_" -match '^Version ' } | Select-Object -First 1
-  Check ($LASTEXITCODE -eq 0 -and "$v" -match "^Version $([regex]::Escape($Cpp11Version))\b") "cpp11 --version: $v"
+  # all of its output first: a Select-Object -First on the pipe stops it early, and the exit code is then -1
+  $said = @(& "$dir\cpp11.exe" --version 2>&1)
+  $rc = $LASTEXITCODE
+  $v = $said | Where-Object { "$_" -match '^Version ' } | Select-Object -First 1
+  Check ($rc -eq 0 -and "$v" -match "^Version $([regex]::Escape($Cpp11Version))\b") "cpp11 --version: $v (exit $rc)"
   $p = Start-Process "$dir\GRIDE.exe" -PassThru
   $h = [IntPtr]::Zero
   for ($i = 0; $i -lt 60 -and $h -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 500; $p.Refresh(); if ($p.HasExited) { break }; $h = $p.MainWindowHandle }

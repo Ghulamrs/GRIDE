@@ -198,6 +198,8 @@ namespace Gride { namespace UI {
             reopen = Check("Reopen the last workspace at start-up", env->ReopenLastWorkspace); Row(String::Empty, reopen);
             saveBefore = Check("Save all files before building", env->SaveBeforeBuild); Row(String::Empty, saveBefore);
             jumpFirst = Check("Go to the first error when a build fails", env->JumpToFirstError); Row(String::Empty, jumpFirst);
+            showCommands = Check("Show each tool's command line in the Output pane (the build's log in the obj folder has them always)", env->ShowCommandLines);
+            Row(String::Empty, showCommands);
             askNative = Check("Offer Visual Studio's (or TI's) assembler and linker when the project's own fail", env->AskNativeTools); Row(String::Empty, askNative);
             runInIde = Check("Run programs in the Output pane, with an input line (off: an external console window)", env->RunInIde); Row(String::Empty, runInIde);
             buildJobs = gcnew NumericUpDown(); buildJobs->Minimum = Decimal(0); buildJobs->Maximum = Decimal(64); buildJobs->Value = Decimal(Math::Min(64, Math::Max(0, env->BuildJobs)));
@@ -223,6 +225,7 @@ namespace Gride { namespace UI {
             env->ReopenLastWorkspace = reopen->Checked;
             env->SaveBeforeBuild = saveBefore->Checked;
             env->JumpToFirstError = jumpFirst->Checked;
+            env->ShowCommandLines = showCommands->Checked;
             env->AskNativeTools = askNative->Checked;
             env->RunInIde = runInIde->Checked;
             env->BuildJobs = Decimal::ToInt32(buildJobs->Value);
@@ -231,7 +234,7 @@ namespace Gride { namespace UI {
         EnvironmentSettings^ env;
         ComboBox^ theme;
         NumericUpDown^ tabSize; NumericUpDown^ buildJobs;
-        CheckBox^ insertSpaces; CheckBox^ lineNumbers; CheckBox^ whitespace; CheckBox^ reopen; CheckBox^ saveBefore; CheckBox^ jumpFirst; CheckBox^ askNative; CheckBox^ runInIde;
+        CheckBox^ insertSpaces; CheckBox^ lineNumbers; CheckBox^ whitespace; CheckBox^ reopen; CheckBox^ saveBefore; CheckBox^ jumpFirst; CheckBox^ showCommands; CheckBox^ askNative; CheckBox^ runInIde;
     };
 
     // ---- Environment > Fonts and Colors ----------------------------------------------------
@@ -831,7 +834,7 @@ namespace Gride { namespace UI {
         CompilerOptionsPage(GrideSettings^ s)
         {
             Label^ n = gcnew Label();
-            n->Text = "The Compiler Options as the installation sets them: what a new project starts with. A project's own are under Project > Compiler Options; a build takes the project's.";
+            n->Text = "The Compiler Options as the installation sets them: what a new project starts with, and what a file built with no project open takes. A project's own are under Project > Compiler Options; a project's build takes the project's.";
             n->AutoSize = true; n->Tag = "muted"; n->MaximumSize = SD::Size(700, 0);
             grid->ColumnStyles[0]->Width = 0;
             Row(String::Empty, n);

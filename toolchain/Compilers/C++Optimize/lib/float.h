@@ -27,6 +27,8 @@ extern "C" {
 // which is what all three of these are set to when a program starts.
 #define FLT_RADIX       2
 #define FLT_ROUNDS      1
+// C99's: float and double are evaluated in their own precision, on SSE, NEON and the C6000 alike.
+#define FLT_EVAL_METHOD 0
 
 // Base-2 digits in the significand, base-10 digits that survive a round trip.
 #define FLT_MANT_DIG    24
@@ -57,8 +59,8 @@ extern "C" {
 #define FLT_EPSILON     1.19209289550781250000e-7F
 #define DBL_EPSILON     2.22044604925031308085e-16
 
-// long double. x87's 80-bit format on System V, and double everywhere else.
-#if defined(_WIN32) || defined(__APPLE__)
+// long double. x87's 80-bit format on System V, and double everywhere else - the C6000's EABI too.
+#if defined(_WIN32) || defined(__APPLE__) || defined(__TMS320C6X__)
 
 #define LDBL_MANT_DIG   53
 #define LDBL_DIG        15
@@ -69,6 +71,8 @@ extern "C" {
 #define LDBL_MAX        1.79769313486231570815e+308L
 #define LDBL_MIN        2.22507385850720138309e-308L
 #define LDBL_EPSILON    2.22044604925031308085e-16L
+// C99's: the decimal digits that carry any floating value there and back, the widest type's.
+#define DECIMAL_DIG     17
 
 #else
 
@@ -85,6 +89,7 @@ extern "C" {
 #define LDBL_MAX        1.18973149535723176502e+4932L
 #define LDBL_MIN        3.36210314311209350626e-4932L
 #define LDBL_EPSILON    1.08420217248550443401e-19L
+#define DECIMAL_DIG     21
 
 #endif
 

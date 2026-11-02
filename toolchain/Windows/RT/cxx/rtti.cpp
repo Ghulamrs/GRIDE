@@ -16,14 +16,14 @@
 //                            decorated name, and name() undecorated as vcruntime's undecorator spells it
 //                            ("struct Both", "int", "char const * __ptr64", "class std::vector<int>")
 //
-// A failed reference cast and typeid of a null pointer throw std::bad_cast and std::bad_typeid; until
-// grt handles exceptions (see exceptions.cpp) they end the program with that said.
+// A failed reference cast and typeid of a null pointer throw std::bad_cast and std::bad_typeid (badcast.cpp).
 
 #include <stdlib.h>
 #include <string.h>
 #include "grt.h"
 
-extern "C" void __grt_cxx_unhandled(const char *type, const char *what);
+extern "C" void __grt_throw_bad_cast();
+extern "C" void __grt_throw_bad_typeid();
 
 namespace {
 
@@ -391,7 +391,7 @@ extern "C" void *__RTCastToVoid(void *object)
 
 extern "C" void *__RTtypeid(void *object)
 {
-    if (!object) __grt_cxx_unhandled("class std::bad_typeid", "Attempted a typeid of nullptr pointer!");
+    if (!object) __grt_throw_bad_typeid();
     const Locator *l = locatorOf(object);
     return const_cast<char *>(imageOf(l) + l->type);
 }
@@ -442,6 +442,6 @@ extern "C" void *__RTDynamicCast(void *object, long vfDelta, void *source, void 
         }
     }
     if (ok && found) return found;
-    if (isReference) __grt_cxx_unhandled("class std::bad_cast", "Bad dynamic_cast!");
+    if (isReference) __grt_throw_bad_cast();
     return 0;
 }

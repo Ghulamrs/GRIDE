@@ -4,12 +4,12 @@
 
 extern "C" char *asctime(const struct tm *tm)
 {
-    static char result[32];
-    rts6x::TimeFormatter f(result, sizeof result);
-#if defined(_WIN32)   // grt: the Microsoft runtime writes the day with two digits, "Sep 06"
-    f.run("%a %b %d %H:%M:%S %Y\n", tm);
+#if defined(_WIN32)   // grt: one result for each thread, as the Microsoft runtime keeps it
+    static thread_local char result[32];
 #else
-    f.run("%a %b %e %H:%M:%S %Y\n", tm);
+    static char result[32];
 #endif
+    rts6x::TimeFormatter f(result, sizeof result);
+    f.run("%a %b %e %H:%M:%S %Y\n", tm);
     return result;
 }

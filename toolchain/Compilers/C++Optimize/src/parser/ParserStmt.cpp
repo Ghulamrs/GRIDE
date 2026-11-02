@@ -86,7 +86,13 @@ void Parser::checkOneDeducedType(const Type *&first, const Type *now,
 
 StmtPtr Parser::declaration() {
     std::size_t pos = peek().pos;
-    attributedDeclarationAhead();  // `[[x]] n = 2;` reaches here, atDeclarationStart taking any `[[`
+    // `[[x]] n = 2;` reaches here, atDeclarationStart taking any `[[`: past them it is a statement.
+    const bool attributed = peek().is("[") && peekAt(1).is("[");
+    if (attributed && !attributedDeclarationAhead()) {
+        StmtPtr s = statementBody();
+        if (s) s->setPos(pos);
+        return s;
+    }
     StmtPtr s = declarationBody();
     if (s) s->setPos(pos);
     return s;
@@ -96,6 +102,7 @@ StmtPtr Parser::declarationBody() {
     StorageClass sc;
     Qualifiers quals;
     const std::size_t specStart = at_;
+    noreturnAt_ = 0;
     const Type *base = specifiers(&sc, &quals);
     // [dcl.stc]/4: a block-scope thread_local has static storage whether or not `static` is written.
     if (quals.isThreadLocal && sc == StorageNone) sc = StorageStatic;
@@ -171,6 +178,7 @@ StmtPtr Parser::declarationBody() {
     const Type *deducedSoFar = nullptr;
     do {
         Declared d = declarator(base);
+        d.type = constexprObjectType(d.type, quals);
         // **A condition declares one name and must initialise it**, and both
         // are settled here: the loop below leaves by more than one path, so
         // asking at the end would mean asking in several places.
@@ -203,6 +211,8 @@ StmtPtr Parser::declarationBody() {
         if (d.type->isConst() && !peek().is("=") && !peek().is("(") &&
             !peek().is("{"))
             requireConstInitialised(d.type, d.name, d.pos);
+        if (sc != StorageExtern) refuseInaccessibleDestructor(d.type, d.pos, "'" + d.name + "'");
+        refuseNoreturnObject(d.name);
 
         // An object of a class with constructors is built by calling one, asked before
         // the branch below - `Point p(1)` and a function declaration look alike until
@@ -410,7 +420,54 @@ StmtPtr Parser::declarationBody() {
             int off = early ? declare(d.name, d.type, d.pos, quals.alignAs) : 0;
             const std::size_t mine = locals_.size() - 1;
             ExprPtr init;
-            if (peek().is("{")) {
+            const Type *listArray = d.type->referent()->isArray() &&
+                                    (peek().is("{") || (peek().is("=") && peekAt(1).is("{")))
+                                    ? d.type->referent() : nullptr;
+            if (listArray != nullptr) {
+                // **[dcl.init.list]/3 with [dcl.init.ref]/5: `int (&&ra)[3] = {1, 2, 3};` initialises a
+                // temporary array from the list and binds the reference to it**, for as long as the reference
+                // lives ([class.temporary]/5) - a local of its own, under a name no source can spell (R22).
+                const std::size_t bpos = peek().pos;
+                if (!d.type->isRValueReference() && (!listArray->isConst() || listArray->isVolatile()))
+                    src_.fail(bpos, "'" + d.name + "' is '" + d.type->describe() + "', and a braced list makes a "
+                                    "temporary array - [dcl.init.ref]/5 binds one to an rvalue reference or a "
+                                    "reference to const alone");
+                if (listArray->length() < 0)
+                    src_.fail(bpos, "'" + d.name + "' refers to an array of unknown bound, and C++11 gives a "
+                                    "braced list no array type to make for it - write the bound");
+                consume("=");
+                const std::string held = d.name + "$list";
+                const int heldAt = declare(held, listArray, d.pos);
+                Init in = parseInitialiser();
+                std::vector<InitStep> path;
+                emitInit(held, path, listArray, in, inits);
+                if (destructorOf(listArray->innermostElement()) != nullptr) {
+                    long long count = 1;
+                    for (const Type *t = listArray; t->isArray(); t = t->pointee()) count *= t->length();
+                    Alive whole{ held, heldAt, listArray->innermostElement()->unqualified() };
+                    whole.count = count;
+                    alive_.push_back(whole);
+                }
+                ExprPtr v(Var::local(held, heldAt));
+                v->setType(listArray);
+                v->setXvalue();                 // the temporary an rvalue reference takes
+                init = std::move(v);
+            } else if ((peek().is("{") || (peek().is("=") && peekAt(1).is("{"))) &&
+                       d.type->referent()->unqualified()->isStructOrUnion()) {
+                // [dcl.init.list]/3: `const auto &r = {5, 6};`, `const S &s{1, 2}` - a temporary of the class the
+                // reference names, copy-list-initialised, bound and kept for as long as the reference.
+                consume("=");
+                const std::size_t bpos = peek().pos;
+                const Type *to = d.type->referent();
+                if (!d.type->isRValueReference() && (!to->isConst() || to->isVolatile()))
+                    src_.fail(bpos, "'" + d.name + "' is '" + d.type->describe() + "', and a braced list makes a "
+                                    "temporary - [dcl.init.ref]/5 binds one to an rvalue reference or a "
+                                    "reference to const alone");
+                Init in = parseInitialiser();
+                init = isInitializerListType(to) ? buildInitializerList(to->unqualified(), in, bpos, inits)
+                                                 : listTemporaryFrom(to, in, true, bpos);
+                init->setXvalue();
+            } else if (peek().is("{")) {
                 // [dcl.init.list]/3: `const int &r{9};` binds the reference to the list's one element
                 // (1.27, 2026-10-21, review of 1.25, item 3: only `=` was read here).
                 const std::size_t bpos = peek().pos;
@@ -425,6 +482,12 @@ StmtPtr Parser::declarationBody() {
                 OverloadTarget hold(*this, d.type);
                 init = assign();
             }
+            // [expr.const]/2-3 with [dcl.constexpr]/9: a constexpr reference binds an object of static
+            // storage duration, and a temporary in a block has none.
+            if (quals.isConstexpr && sc != StorageStatic && !isLvalue(*init) &&
+                dynamic_cast<const StrLit *>(init.get()) == nullptr)
+                src_.fail(d.pos, "'" + d.name + "' is a 'constexpr' reference, and it would bind a temporary - a "
+                                 "constant expression refers only to an object with static storage duration");
             if (!early) off = declare(d.name, d.type, d.pos, quals.alignAs);
             locals_[early ? mine : locals_.size() - 1].guardsJump = true;
             const Type *slot = types_.pointerTo(d.type->referent());
@@ -457,6 +520,9 @@ StmtPtr Parser::declarationBody() {
                                   (peek().is("=") || atBracedInitialiser(d.name));
         if (!d.type->isComplete() && !sizedByInitialiser)
             src_.fail(d.pos, "'" + d.name + "' has an incomplete type");
+        if (sc != StorageExtern && d.type->isArray() && !d.type->innermostElement()->isComplete())
+            src_.fail(d.pos, "'" + d.name + "' is an array of the incomplete type '" +
+                             d.type->innermostElement()->describe() + "'");
         checkNotAbstract(d.type, d.pos, "'" + d.name + "'");
 
         if (sc == StorageStatic) {
@@ -549,6 +615,7 @@ StmtPtr Parser::declarationBody() {
         if (hasInit) {
             long long value = 0;
             long double dvalue = 0;
+            ConstObject constantArray;
             if (constantInitialiser(d.type, in, &value)) {
                 locals_[mine].isConstantValue = true;
                 locals_[mine].constantValue = value;
@@ -558,6 +625,14 @@ StmtPtr Parser::declarationBody() {
                 locals_[mine].constantDouble = dvalue;
             } else if (quals.isConstexpr && d.type->innermostElement()->unqualified()->isStructOrUnion()) {
                 if (d.type->isArray()) refuseConstexprClassObject(d.name, d.pos);
+            } else if (quals.isConstexpr && d.type->isArray() &&
+                       (d.type->innermostElement()->isArithmetic() || d.type->innermostElement()->isPointer()) &&
+                       constObjectFromInit(d.type, in, 0, &constantArray)) {
+                // [dcl.constexpr]/9: an array of numbers or pointers, read as a constant object's leaves are.
+                const std::unique_ptr<Var> self(Var::local(d.name, off));
+                constObjects_[constObjectKey(*self)] = constantArray;
+            } else if (quals.isConstexpr && d.type->isPointer() &&
+                       constantPointerInit(in, currentFunction_ + "@" + std::to_string(off))) {
             } else if (quals.isConstexpr) {
                 src_.fail(d.pos, "'" + d.name + "' is 'constexpr', so its value "
                                  "has to be known while this is compiled, and "
@@ -797,6 +872,10 @@ StmtPtr Parser::rangeForStatement(int scope) {
 
         elemPtr = types_.pointerTo(rt->pointee());
 
+        // `for (int x : H().a)`: `auto &&__range` binds a member of the temporary H(), which then
+        // lives as long as __range does - to the loop's end, [class.temporary]/5, as clang has it.
+        const bool kept = extendTemporary(*range, ".rt" + std::to_string(refTemps_++));
+
         // `T *__b = a;` - the array decayed, evaluated here and nowhere else.
         bSlot = declare(".rb" + std::to_string(refTemps_), elemPtr, rpos);
         bName = ".rb" + std::to_string(refTemps_++);
@@ -805,6 +884,7 @@ StmtPtr Parser::rangeForStatement(int scope) {
         ExprPtr startAt(new Assign(std::move(b), decay(std::move(range))));
         startAt->setType(elemPtr);
         setup.push_back(StmtPtr(new ExprStmt(std::move(startAt))));
+        if (kept) rangeBuilt_.push_back(std::make_pair(setup.size(), alive_.size()));
 
         // `T *__e = __b + N;`
         eSlot = declare(".re" + std::to_string(refTemps_), elemPtr, rpos);
@@ -913,11 +993,6 @@ StmtPtr Parser::rangeForStatement(int scope) {
     // The range temporary and the iterators die after the loop, in the reverse order,
     // and on the way out of an exception too - a cleanup region from where each was built.
     if (alive_.size() != aliveMark) {
-        if (target_.microsoftNames() && inHandlerBody_)
-            src_.fail(rpos, "a range-based 'for' whose range or iterator has a destructor, "
-                            "inside a 'catch' handler, is not supported yet for "
-                            "x86_64-windows - a cleanup there is a funclet, and the "
-                            "handler is one already");
         std::vector<std::pair<std::size_t, std::size_t> > built;
         for (std::size_t i = 0; i < ownBuilt.size(); i++)
             if (ownBuilt[i].second > aliveMark &&
@@ -1001,6 +1076,61 @@ ExprPtr Parser::whileConditionDeclaration() {
     return set;
 }
 
+// At a condition's declaration: whether it declares an object only a declaration can make - a class,
+// a reference, an array, or one `auto` deduces - which the loops below build as a block each turn.
+bool Parser::conditionDeclaresObject() {
+    const std::size_t save = at_;
+    StorageClass sc;
+    Qualifiers quals;
+    const Type *base = specifiers(&sc, &quals);
+    const Declared d = declarator(base);
+    at_ = save;
+    return d.type->isStructOrUnion() || d.type->isReference() || d.type->isArray() || mentionsDeduced(d.type);
+}
+
+// [stmt.while]/2: `while (T t = e) s` is `label: { T t = e; if (t) { s; goto label; } }`, the object
+// made and destroyed on every turn, and a `for` condition the same with its step after the body
+// ([stmt.for]/1). Lowered as a `for (;;)` whose body is that block, its own `break` reaching the object
+// as a block's does; the step, read here, runs once the object is gone.
+StmtPtr Parser::declaringLoop(std::size_t pos, bool forStep) {
+    loopDepth_++;
+    enterScope();
+    const int inner = enterBlock();
+    const std::size_t aliveMark = alive_.size();
+    loopMarks_.push_back(aliveMark);
+    breakMarks_.push_back(aliveMark);
+    std::vector<StmtPtr> steps;
+    ExprPtr cond = contextualScalar(ifConditionDeclaration(steps), peek().pos, "this condition");
+    std::vector<std::pair<std::size_t, std::size_t> > built;
+    if (alive_.size() != aliveMark) built.push_back(std::make_pair(steps.size(), alive_.size()));
+    ExprPtr step;
+    if (forStep) {
+        expect(";");
+        if (!peek().is(")")) step = endFullExpression(decay(expr()));
+    }
+    expect(")");
+    ExprPtr stop(new Unary('!', std::move(cond)));
+    stop->setType(types_.get(Kind::Bool));
+    steps.push_back(StmtPtr(new If(std::move(stop),
+                                   jumpLeaving(StmtPtr(new Break()), aliveMark, pos, handlersLeftByBreak()),
+                                   StmtPtr())));
+    steps.push_back(statement());
+    breakMarks_.pop_back();
+    loopMarks_.pop_back();
+    loopDepth_--;
+    if (alive_.size() != aliveMark) {
+        emitDestructors(steps, aliveMark, pos);
+        steps = target_.microsoftNames() ? wrapMsCleanups(std::move(steps), built, aliveMark, pos)
+                                         : wrapCleanups(std::move(steps), built, aliveMark, pos);
+        alive_.resize(aliveMark);
+    }
+    leaveBlock();
+    leaveScope();
+    Block *turn = new Block(std::move(steps));
+    turn->setScope(inner);
+    return StmtPtr(new For(StmtPtr(), ExprPtr(), std::move(step), StmtPtr(turn)));
+}
+
 StmtPtr Parser::forStatement() {
     const std::size_t pos = peek().pos;
     expect("for");
@@ -1018,38 +1148,52 @@ StmtPtr Parser::forStatement() {
         else { ExprPtr e = endFullExpression(expr()); expect(";"); init = StmtPtr(new ExprStmt(std::move(e))); }
     }
 
-    ExprPtr cond;
-    if (!peek().is(";")) cond = endFullExpression(decay(expr()));
-    expect(";");
+    StmtPtr loop;
+    ExprPtr cond, step;
+    StmtPtr body;
+    if (!peek().is(";") && atConditionDeclaration() && conditionDeclaresObject()) {
+        loop = declaringLoop(pos, true);
+    } else {
+        if (!peek().is(";")) cond = endFullExpression(decay(expr()));
+        expect(";");
 
-    ExprPtr step;
-    if (!peek().is(")")) step = endFullExpression(decay(expr()));
-    expect(")");
+        if (!peek().is(")")) step = endFullExpression(decay(expr()));
+        expect(")");
 
-    // The mark is taken after the init-statement: `for (S s; ...)` builds s
-    // once for the whole loop, and a break must not destroy it.
-    loopDepth_++;
-    loopMarks_.push_back(alive_.size());
-    breakMarks_.push_back(alive_.size());
-    StmtPtr body = statement();
-    breakMarks_.pop_back();
-    loopMarks_.pop_back();
-    loopDepth_--;
+        // The mark is taken after the init-statement: `for (S s; ...)` builds s
+        // once for the whole loop, and a break must not destroy it.
+        loopDepth_++;
+        loopMarks_.push_back(alive_.size());
+        breakMarks_.push_back(alive_.size());
+        body = statement();
+        breakMarks_.pop_back();
+        loopMarks_.pop_back();
+        loopDepth_--;
+    }
 
     leaveBlock();
     leaveScope();
     if (alive_.size() == aliveAtEntry) {
-        For *f = new For(std::move(init), std::move(cond), std::move(step), std::move(body));
-        f->setScope(scope);
-        return StmtPtr(f);
+        if (loop == nullptr) {
+            For *f = new For(std::move(init), std::move(cond), std::move(step), std::move(body));
+            f->setScope(scope);
+            return StmtPtr(f);
+        }
+        std::vector<StmtPtr> both;
+        if (init != nullptr) both.push_back(std::move(init));
+        both.push_back(std::move(loop));
+        Block *b = new Block(std::move(both));
+        b->setScope(scope);
+        return StmtPtr(b);
     }
+    if (loop == nullptr) loop.reset(new For(StmtPtr(), std::move(cond), std::move(step), std::move(body)));
 
     // **`for (S s; ...)` destroys s when the loop is done**, the way a block destroys what it built
     // at its '}' - and on the way out of an exception, so the init stands in front of the loop, in
     // the statement's scope, and the loop is a cleanup region from there, as an `if`'s condition is.
     std::vector<StmtPtr> steps;
     steps.push_back(std::move(init));
-    steps.push_back(StmtPtr(new For(StmtPtr(), std::move(cond), std::move(step), std::move(body))));
+    steps.push_back(std::move(loop));
     const std::vector<std::pair<std::size_t, std::size_t> > built(1, std::make_pair(std::size_t(1), alive_.size()));
     emitDestructors(steps, aliveAtEntry, pos);
     steps = target_.microsoftNames() ? wrapMsCleanups(std::move(steps), built, aliveAtEntry, pos)
@@ -1341,9 +1485,12 @@ StmtPtr Parser::block(bool functionTry) {
     // further - [namespace.udir]/2 - so the list is cut back to what it held
     // on the way in.
     const std::size_t usingAtEntry = usingNamespaces_.size();
+    const std::size_t undoAtEntry = blockUndo_.size();
     const std::size_t aliveAtEntry = alive_.size();
     bool isBody = atFunctionBody_;
     atFunctionBody_ = false;
+    const std::size_t outerBody = bodyScope_;
+    if (isBody) bodyScope_ = scopeStarts_.size();
     // The regions of a function body reach back to its by-value parameters
     // on the target whose callee destroys them; every other block's start at
     // what was alive when it opened.
@@ -1389,12 +1536,6 @@ StmtPtr Parser::block(bool functionTry) {
     if (!built.empty()) {
         // **A `try` among these statements is split around, not refused.** It
         // is a row of its own and its pad destroys what it found alive.
-        // **A cleanup inside a handler would be a funclet inside a funclet.**
-        if (target_.microsoftNames() && inHandlerBody_)
-            src_.fail(pos, "a local with a destructor inside a 'catch' handler is "
-                           "not supported yet for x86_64-windows - a cleanup there "
-                           "is a funclet, and the handler is one already; beside "
-                           "the 'try' and inside its body both work on this target");
         body = target_.microsoftNames()
                    ? wrapMsCleanups(std::move(body), built, regionFrom, pos,
                                     temps)
@@ -1403,10 +1544,17 @@ StmtPtr Parser::block(bool functionTry) {
     }
     alive_.resize(aliveAtEntry);
     usingNamespaces_.resize(usingAtEntry);
+    while (blockUndo_.size() > undoAtEntry) {
+        const BlockUndo &u = blockUndo_.back();
+        if (u.was.empty()) u.table->erase(u.key);
+        else (*u.table)[u.key] = u.was;
+        blockUndo_.pop_back();
+    }
 
     if (!functionTry) expect("}");
     if (!isBody) leaveBlock();
     leaveScope();
+    bodyScope_ = outerBody;
     Block *b = new Block(std::move(body));
     b->setScope(scope);
 
@@ -1423,9 +1571,40 @@ StmtPtr Parser::statement() {
     return s;
 }
 
+// A listed type is caught as `catch (T &)` would catch it, [except.spec]/8, and named by no slot.
+std::vector<MsHandler> Parser::msSpecHandlers(const std::vector<const Type *> &allowed, StmtPtr last,
+                                              std::size_t pos) {
+    std::vector<MsHandler> handlers;
+    for (const Type *t : allowed) {
+        MicrosoftThrow names;
+        std::string why;
+        if (!microsoftThrowNames(t, t->size(target_), &names, &why))
+            src_.fail(pos, "a 'throw(...)' list cannot name '" + t->describe() + "': " + why);
+        finishMicrosoftThrow(names, false);
+        MsHandler h;
+        h.pos = pos;
+        h.descriptor = names.descriptor;
+        h.objectSize = t->size(target_);
+        h.byReference = true;
+        h.constPointer = names.isConst;
+        mayThrow_++;
+        std::vector<StmtPtr> rethrow;
+        rethrow.push_back(StmtPtr(new ExprStmt(rethrowCall())));
+        h.body = StmtPtr(new Block(std::move(rethrow)));
+        handlers.push_back(std::move(h));
+    }
+    MsHandler all;
+    all.pos = pos;
+    std::vector<StmtPtr> body;
+    body.push_back(std::move(last));
+    all.body = StmtPtr(new Block(std::move(body)));
+    handlers.push_back(std::move(all));
+    return handlers;
+}
+
 // **`try` is a block, a landing pad, and no new statement machinery.**
 StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bodyFn, bool rethrows,
-                             const std::string &spec) {
+                             const std::string &spec, const std::vector<const Type *> *allowed) {
     // What is alive when the `try` is reached.
     const std::size_t aliveOutside = alive_.size();
     // **The two ABIs disagree about who picks the handler**, so this reads one grammar
@@ -1433,14 +1612,6 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
     // handlers kept whole for the runtime to call.
     const bool microsoft = target_.microsoftNames();
     functionHasTry_ = true;
-    // **Inside a handler is inside a funclet**, and a funclet's handlers would
-    // be funclets inside it, which the slicing that lifts one out cannot nest.
-    if (inHandlerBody_ && target_.microsoftNames())
-        src_.fail(pos, "a 'try' inside a 'catch' handler is not supported yet for "
-                       "x86_64-windows - a handler there is a funclet, and a "
-                       "nested try's handlers would be funclets inside it. A "
-                       "'try' inside a 'try' body works on this target, and both "
-                       "shapes on the Itanium targets");
 
     const Type *voidPtr = types_.pointerTo(types_.get(Kind::Void));
     // **A nested `try` shares the slots of the one it sits in.**
@@ -1476,13 +1647,16 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
     }
 
     const bool wasInTry = inTryBody_;
+    const int wasTrySerial = tryBodySerial_;
     inTryBody_ = true;
+    tryBodySerial_ = localSerial_;
     if (!bodyFn && !peek().is("{"))
         src_.fail(peek().pos, "'try' takes a block");
     tryFrom_.push_back(peek().pos);
     StmtPtr body = bodyFn ? bodyFn() : block();
     tryFrom_.pop_back();
     inTryBody_ = wasInTry;
+    tryBodySerial_ = wasTrySerial;
     handlerResumeLabel_ = wasHandlerLabel;
     handlerResumePtr_ = wasHandlerPtr;
     handlerResumeSel_ = wasHandlerSel;
@@ -1535,6 +1709,7 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
         const Type *caught = nullptr;      // what the type_info names
         const Type *declaredType = nullptr; // what the handler's own name is
         bool byRef = false;
+        bool constReferent = false;
         if (consume("...")) {
             sawCatchAll = true;
         } else {
@@ -1552,12 +1727,27 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
             // so the type_info names the referent with its qualifiers off, and the reference is a
             // slot holding the pointer the runtime already has.
             byRef = d.type->isReference();
+            constReferent = byRef && d.type->referent()->isConst();
             declaredType = byRef ? d.type : d.type->unqualified();
             caught = byRef ? d.type->referent()->unqualified()
                            : d.type->unqualified();
+            // [except.handle]/1: not an incomplete type, an abstract class, nor a pointer or reference to an
+            // incomplete type other than cv void *.
+            {
+                const Type *named = caught->isPointer() ? caught->pointee()->unqualified() : caught;
+                if (named->isVoid() && !caught->isPointer())
+                    src_.fail(d.pos, "a handler cannot catch 'void' - [except.handle]/1");
+                if (!named->isVoid() && !named->isComplete())
+                    src_.fail(d.pos, "a handler cannot catch '" + d.type->describe() + "', which names the "
+                                     "incomplete type '" + named->describe() + "' - [except.handle]/1");
+                if (!byRef && !caught->isPointer() && caught->isStructOrUnion() && caught->abstract())
+                    src_.fail(d.pos, "a handler cannot catch the abstract class '" + caught->describe() +
+                                     "' by value - [except.handle]/1");
+            }
             // A reference to a pointer would bind to what the runtime hands
             // back for a pointer - the value, not the object - so it is refused.
-            if (byRef && caught->isPointer())
+            // The Microsoft runtime hands a reference handler the object's address, a pointer's too.
+            if (byRef && caught->isPointer() && !microsoft)
                 src_.fail(d.pos, "catching a pointer by reference - '" +
                                  d.type->describe() + "' - is not supported "
                                  "yet: the runtime hands a handler the pointer "
@@ -1598,9 +1788,11 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
                 mh.descriptor = names.descriptor;
                 mh.objectSize = caught->size(target_);
                 mh.byReference = byRef;
-                mh.constPointer = names.isConst;
+                // `T *const &` is const as cl flags it, the referent's; `const T *&` the pointee's.
+                mh.constPointer = names.isConst || (caught->isPointer() && constReferent);
                 if (!caughtName.empty()) {
                     mh.objectSlot = declare(caughtName, declaredType, cpos);
+                    locals_.back().isCatchParameter = true;
                     // **Caught by value, the runtime built the copy and the handler
                     // destroys it** on every way out - cl's funclet does before returning.
                     if (!byRef && destructorOf(caught->unqualified()) != nullptr)
@@ -1619,7 +1811,19 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
             handlerLoopDepth_.push_back(loopDepth_);
             handlerSwitchDepth_.push_back(switchDepth_);
             handlerFrom_.push_back(peek().pos);
+            const bool wasCtorHandler = inCtorTryHandler_;
+            inCtorTryHandler_ = rethrows;
             mh.body = block();
+            inCtorTryHandler_ = wasCtorHandler;
+            // [except.handle]/15: flowing off the end of a constructor's or destructor's function-try
+            // handler rethrows - from the funclet, as cl ends one.
+            if (rethrows) {
+                mayThrow_++;
+                std::vector<StmtPtr> then;
+                then.push_back(std::move(mh.body));
+                then.push_back(StmtPtr(new ExprStmt(rethrowCall())));
+                mh.body = StmtPtr(new Block(std::move(then)));
+            }
             // Falling off the end destroys the caught object; a jump out did for itself.
             if (alive_.size() > aliveBeforeCaught) {
                 std::vector<StmtPtr> both;
@@ -1651,6 +1855,7 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
 
         if (caught != nullptr && !caughtName.empty()) {
             const int slot = declare(caughtName, declaredType, cpos);
+            locals_.back().isCatchParameter = true;
             // **A reference holds what __cxa_begin_catch handed back.**
             const Type *slotType = byRef
                 ? types_.pointerTo(declaredType->referent())
@@ -1865,6 +2070,30 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
         handlers.push_back(std::move(h));
     }
 
+    // **Microsoft: a `throw(T...)` list is handlers that rethrow what it allows, and a catch-all calling
+    // unexpected** (Phase 6): what that throws goes on where the list allows it, is std::bad_exception where
+    // the list names that, and ends the program otherwise - [except.unexpected]. cl ignores the list.
+    if (microsoft && !spec.empty()) {
+        std::vector<StmtPtr> call;
+        call.push_back(StmtPtr(new ExprStmt(runtimeCall("unexpected", types_.get(Kind::Void), std::vector<ExprPtr>()))));
+        const Signature *makeBad = nullptr;
+        const Type *bad = nullptr;
+        for (const Type *t : *allowed)
+            if (t->isStructOrUnion() && t->tag() == "std::bad_exception" && defaultConstructorOf(t) != nullptr) {
+                bad = t;
+                makeBad = defaultConstructorOf(t);
+            }
+        StmtPtr otherwise = bad != nullptr
+            ? microsoftThrow(constructTemporary(bad, *makeBad, std::vector<ExprPtr>(), false, pos), pos)
+            : StmtPtr(new ExprStmt(runtimeCall("terminate", types_.get(Kind::Void), std::vector<ExprPtr>())));
+        Try *inner = new Try(std::move(call), nullptr, allocateFrameSlot(voidPtr),
+                             allocateFrameSlot(types_.intType()), std::vector<std::string>(allowed->size() + 1));
+        inner->setHandlers(msSpecHandlers(*allowed, std::move(otherwise), pos));
+        inner->setUnwindHelpSlot(msUnwindHelp());
+        msHandlers = msSpecHandlers(*allowed, StmtPtr(inner), pos);
+        types.assign(msHandlers.size(), std::string());
+    }
+
     // Microsoft: no chain to build, because nothing in this frame chooses.
     if (microsoft) {
         std::vector<StmtPtr> guardedMs;
@@ -1896,18 +2125,42 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
         after.push_back(StmtPtr(t));
         std::string skip;
         after.push_back(StmtPtr(new Goto(msExitLabel(skip, "skip"))));
+        // **Inside a handler this is a funclet too**, and an exit that leaves it hands on to the exit
+        // of the `try` around - the handler's funclet destroyed what the jump left, both handlers' share.
+        const bool chains = inMsHandler_ && msExit_ != nullptr;
         if (!msExit.ret.empty()) {
             ExprPtr give;
             if (msExit.retSlot != 0) {
                 give.reset(Var::local(msExit.retTemp, msExit.retSlot));
                 give->setType(returnType_);
             }
-            after.push_back(StmtPtr(new Label(msExit.ret, StmtPtr(new Return(std::move(give))))));
+            StmtPtr then;
+            if (chains) {
+                std::vector<StmtPtr> pass;
+                if (give != nullptr) {
+                    if (msExit_->retSlot == 0) {
+                        msExit_->retSlot = allocateFrameSlot(returnType_);
+                        msExit_->retTemp = ".ret" + std::to_string(refTemps_++);
+                    }
+                    ExprPtr keep(Var::local(msExit_->retTemp, msExit_->retSlot));
+                    keep->setType(returnType_);
+                    ExprPtr save(new Assign(std::move(keep), std::move(give)));
+                    save->setType(returnType_);
+                    pass.push_back(StmtPtr(new ExprStmt(std::move(save))));
+                }
+                pass.push_back(StmtPtr(new FuncletLeave(msExitLabel(msExit_->ret, "ret"))));
+                then.reset(new Block(std::move(pass)));
+            } else {
+                then.reset(new Return(std::move(give)));
+            }
+            after.push_back(StmtPtr(new Label(msExit.ret, std::move(then))));
         }
         if (!msExit.brk.empty())
-            after.push_back(StmtPtr(new Label(msExit.brk, StmtPtr(new Break()))));
+            after.push_back(StmtPtr(new Label(msExit.brk, chains && handlersLeftByBreak() > 0
+                ? StmtPtr(new FuncletLeave(msExitLabel(msExit_->brk, "brk"))) : StmtPtr(new Break()))));
         if (!msExit.cont.empty())
-            after.push_back(StmtPtr(new Label(msExit.cont, StmtPtr(new Continue()))));
+            after.push_back(StmtPtr(new Label(msExit.cont, chains && handlersLeftByContinue() > 0
+                ? StmtPtr(new FuncletLeave(msExitLabel(msExit_->cont, "cont"))) : StmtPtr(new Continue()))));
         // The funclet destroyed what the jump left, so the parent's half only jumps on.
         for (const std::pair<std::string, std::string> &e : gotoExits)
             after.push_back(StmtPtr(new Label(e.first, gotoStatement(e.second, pos, false))));
@@ -1984,6 +2237,133 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
     return StmtPtr(t);
 }
 
+void Parser::enterBlockEntry(std::map<std::string, std::string> &table, const std::string &key,
+                             const std::string &value) {
+    std::map<std::string, std::string>::const_iterator had = table.find(key);
+    blockUndo_.push_back(BlockUndo{ &table, key, had != table.end() ? had->second : std::string() });
+    table[key] = value;
+}
+
+// `using N::f;` in a block, at `using`: [namespace.udecl]/1 declares `f` from here to the block's
+// '}' as the entity N's `f` is. A function's name - an operator's or a template's too - is entered
+// in the using-declarations for the block, which keeps it unqualified for argument-dependent lookup;
+// every other later unqualified `f` there is rewritten to N's name in place - as a namespace alias
+// is - until a nested declaration of `f` hides it.
+void Parser::blockUsingDeclaration() {
+    const std::size_t pos = peek().pos;
+    at_++;
+    const bool fromGlobal = consume("::");
+    std::string target;
+    for (;;) {
+        if (peek().is("operator")) {
+            at_++;
+            if (peek().kind == TokenKind::Str) {
+                std::string suffix = peek().udSuffix;
+                at_++;
+                if (suffix.empty()) suffix = expectIdent("a literal operator's suffix");
+                target += "operator\"\" " + suffix;
+            } else if (peek().is("(") && peekAt(1).is(")")) {
+                at_ += 2;
+                target += "operator()";
+            } else if (peek().is("[") && peekAt(1).is("]")) {
+                at_ += 2;
+                target += "operator[]";
+            } else if (peek().kind == TokenKind::Punct) {
+                target += "operator" + peek().text;
+                at_++;
+            } else {
+                src_.fail(peek().pos, "expected an operator after 'operator' in this using-declaration");
+            }
+            break;
+        }
+        target += expectIdent("a name after 'using'");
+        if (!consume("::")) break;
+        target += "::";
+    }
+    expect(";");
+    const std::string::size_type cut = target.rfind("::");
+    if (!fromGlobal && cut == std::string::npos)
+        src_.fail(pos, "a using-declaration names something declared elsewhere, so it takes a "
+                       "qualified name: 'using N::f;', or 'using ::f;' for one at global scope");
+    const std::string written = target;
+    if (cut != std::string::npos) {
+        const Type *owner = findTypedef(written.substr(0, cut));
+        if (owner != nullptr && owner->unqualified()->isStructOrUnion())
+            src_.fail(pos, "'" + written + "' is a member of a class, and a using-declaration in a block "
+                           "names a namespace's member only - [namespace.udecl]/8");
+    }
+    if (!fromGlobal && cut != std::string::npos) {
+        const std::string::size_type first = target.find("::");
+        const std::string scope = namespaceNamed(target.substr(0, first));
+        if (!scope.empty()) target = scope + target.substr(first);
+    }
+    target = followUsingDeclaration(target);
+    bool fnTemplate = false;
+    {
+        const std::string::size_type c = target.rfind("::");
+        std::map<std::string, std::vector<TemplateDecl> >::const_iterator ft =
+            fnTemplates_.find(c == std::string::npos ? target : target.substr(c + 2));
+        const std::string ns = c == std::string::npos ? std::string() : target.substr(0, c + 2);
+        if (ft != fnTemplates_.end())
+            for (const TemplateDecl &t : ft->second) fnTemplate = fnTemplate || t.ns == ns;
+    }
+    if (!hasTypeNamed(target) && !hasFunctionNamed(target) && !hasGlobalNamed(target) &&
+        !hasEnumNamed(target) && !isTemplateName(target) && !fnTemplate)
+        src_.fail(pos, "'" + written + "' is not declared, so there is nothing here for this "
+                       "using-declaration to name");
+    const std::string name = cut == std::string::npos ? written : written.substr(cut + 2);
+    if (target == name) return;
+    if ((hasFunctionNamed(target) || fnTemplate) && !hasTypeNamed(target) && !hasGlobalNamed(target)) {
+        enterBlockEntry(usingDeclarations_, namespacePrefix() + name, target);
+        return;
+    }
+
+    static const char *const typeWords[] = { "int", "char", "bool", "short", "long", "signed", "unsigned",
+                                             "float", "double", "void", "auto", "wchar_t", "char16_t",
+                                             "char32_t", "const", "volatile" };
+    auto typeEnds = [&](std::size_t k) {
+        if (tokens_[k].kind == TokenKind::Ident || tokens_[k].is(">")) return true;
+        for (const char *w : typeWords) if (tokens_[k].is(w)) return true;
+        return false;
+    };
+    auto startsStatement = [&](std::size_t k) {
+        return tokens_[k].is(";") || tokens_[k].is("{") || tokens_[k].is("}");
+    };
+    // `T f`, `T *f`, `T &f` followed by what a declarator ends with: a declaration of `f` there.
+    auto declaresAt = [&](std::size_t i) {
+        const Token &next = tokens_[i + 1];
+        if (!(next.is("=") || next.is(";") || next.is(",") || next.is("[") || next.is("{") ||
+              next.is("(") || next.is(")")))
+            return false;
+        if (typeEnds(i - 1)) return true;
+        if (!(tokens_[i - 1].is("*") || tokens_[i - 1].is("&") || tokens_[i - 1].is("&&")) || i < 3) return false;
+        std::size_t k = i - 2;
+        if (!typeEnds(k)) return false;
+        while (k > 0 && (typeEnds(k) || tokens_[k].is("::"))) k--;
+        return startsStatement(k);
+    };
+    int depth = 0, hidden = -1;
+    for (std::size_t i = at_; i + 1 < tokens_.size() && tokens_[i].kind != TokenKind::End; i++) {
+        if (tokens_[i].is("{")) { depth++; continue; }
+        if (tokens_[i].is("}")) {
+            if (--depth < 0) break;
+            if (hidden >= 0 && depth < hidden) hidden = -1;
+            continue;
+        }
+        if (hidden >= 0 || tokens_[i].kind != TokenKind::Ident || tokens_[i].text != name) continue;
+        const Token &before = tokens_[i - 1];
+        if (before.is("::") || before.is(".") || before.is("->") || before.is("~") || before.is("goto") ||
+            before.is("struct") || before.is("class") || before.is("union") || before.is("enum"))
+            continue;
+        if (declaresAt(i)) {
+            if (depth == 0) break;
+            hidden = depth;
+            continue;
+        }
+        tokens_[i].text = target;
+    }
+}
+
 StmtPtr Parser::statementBody() {
     // A static_assert declares nothing, so the statement it becomes is empty.
     if (staticAssertion()) return StmtPtr(new Block({}));
@@ -2007,22 +2387,20 @@ StmtPtr Parser::statementBody() {
         usingNamespaces_.push_back(resolved);
         return StmtPtr(new Block({}));
     }
-    // [namespace.alias] allows one in a block; the rewrite behind it reaches a namespace's
-    // close and not a block's, so it is refused here by name.
-    if (peek().is("namespace") && peekAt(1).kind == TokenKind::Ident && peekAt(2).is("="))
-        src_.fail(peek().pos, "a namespace alias inside a block is not supported yet - "
-                              "write it at namespace scope, where it works");
+    // [namespace.alias] in a block: the alias's reach is the rest of the block, [basic.scope.block].
+    if (peek().is("namespace") && peekAt(1).kind == TokenKind::Ident && peekAt(2).is("=")) {
+        const std::size_t pos = peek().pos;
+        const std::string name = peekAt(1).text;
+        at_ += 3;
+        namespaceAlias(name, pos, true);
+        return StmtPtr(new Block({}));
+    }
 
-    // **The using-*declaration* is refused inside a block**, where the one at namespace scope is
-    // not: a name declared here lasts to the end of the block and takes part in overload resolution
-    // against the locals beside it, and neither is what the alias at namespace scope does.
     if (aliasDeclaration("")) return StmtPtr(new Block({}));
-    if (peek().is("using"))
-        src_.fail(peek().pos, "a using-declaration inside a block is not "
-                              "supported yet - it declares a name for the rest "
-                              "of this block rather than naming one; at "
-                              "namespace scope it works, and 'using namespace "
-                              "N;' works here");
+    if (peek().is("using")) {
+        blockUsingDeclaration();
+        return StmtPtr(new Block({}));
+    }
 
     if (peek().is("try")) {
         const std::size_t tpos = peek().pos;
@@ -2038,22 +2416,15 @@ StmtPtr Parser::statementBody() {
         // name and nothing to allocate.
         if (peek().is(";")) {
             at_++;
-            if (target_.microsoftNames())
-                src_.fail(tpos, "a rethrow - 'throw' with nothing after it - "
-                                "is not supported yet for x86_64-windows: it "
-                                "is _CxxThrowException with two null pointers "
-                                "from inside a funclet, and that has not been "
-                                "measured on the box");
             // [except.throw]/8: with no exception being handled this calls
-            // std::terminate, which is what __cxa_rethrow does by itself -
+            // std::terminate, which is what both runtimes do by themselves -
             // so it is well-formed here, as clang has it, and needs no check.
             mayThrow_++;
-            return StmtPtr(new ExprStmt(
-                runtimeCall("__cxa_rethrow", types_.get(Kind::Void),
-                            std::vector<ExprPtr>())));
+            return StmtPtr(new ExprStmt(rethrowCall()));
         }
         mayThrow_++;
         ExprPtr value = decay(expr());
+        checkThrowOperand(*value, tpos);
         // **A thrown expression's temporary is destroyed by the throw itself.**
         expect(";");
         // **[except.spec]/9: an exception that escapes a `noexcept` function
@@ -2089,6 +2460,13 @@ StmtPtr Parser::statementBody() {
                     found = decayedType(value->type());
                 expect(";");
             }
+            // [expr.prim.lambda]/4 as CWG 975 gives it to C++11: every return deduces the one type, a
+            // scalar's cv dropped by the lvalue-to-rvalue conversion.
+            auto deduced = [](const Type *t) { return t->unqualified()->isStructOrUnion() ? t : t->unqualified(); };
+            if (*deducingReturn_ != nullptr && deduced(*deducingReturn_) != deduced(found))
+                src_.fail(pos, "return type '" + found->describe() + "' must match previous return type '" +
+                               (*deducingReturn_)->describe() + "' when lambda expression has unspecified "
+                               "explicit return type");
             if (*deducingReturn_ == nullptr) *deducingReturn_ = found;
             return StmtPtr(new Return(nullptr));
         }
@@ -2115,9 +2493,10 @@ StmtPtr Parser::statementBody() {
             // [stmt.return]/2: `return {4, 5};` copy-list-initialises the returned object from the
             // braces, [dcl.init.list] (1.27, 2026-10-21, review of 1.25, item 3 - "expected an
             // expression").
-            if (peek().is("{") && !returnType_->isReference() && !returnType_->isVoid())
-                returned = listTemporary(returnType_, pos);
-            else
+            if (peek().is("{") && !returnType_->isReference() && !returnType_->isVoid()) {
+                Init in = parseInitialiser();
+                returned = listTemporaryFrom(returnType_, in, true, pos);
+            } else
                 returned = returnType_->isReference() ? expr() : decay(expr());
         }
         // **The temporary that *is* the returned value must not be destroyed
@@ -2353,6 +2732,19 @@ StmtPtr Parser::statementBody() {
         // afresh each turn - see whileConditionDeclaration. It still needs a
         // scope of its own, or the name would outlive the loop.
         const bool declares = atConditionDeclaration();
+        if (declares && conditionDeclaresObject()) {
+            enterScope();
+            const int outer = enterBlock();
+            StmtPtr loop = declaringLoop(pos, false);
+            leaveBlock();
+            leaveScope();
+            std::vector<StmtPtr> wrap;
+            wrap.push_back(std::move(loop));
+            Block *b = new Block(std::move(wrap));
+            b->setScope(outer);
+            b->setPos(pos);
+            return StmtPtr(b);
+        }
         int scope = -1;
         if (declares) { enterScope(); scope = enterBlock(); }
         ExprPtr cond = declares

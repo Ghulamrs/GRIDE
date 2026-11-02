@@ -1,0 +1,4 @@
+stderr: leaving
+stderr: two
+stderr: one
+exit 3

@@ -1,16 +1,22 @@
-// <ios> - the pieces both directions share: the size type and the open modes.
+// <ios> - what both directions share: the size and position types, the
+// formatting state, the stream state, the open modes, and the manipulators
+// that set the state.
 //
-// **`ios` is a bag of constants and nothing else.** The standard makes it a
-// base class carrying the stream's state, formatting flags and locale; there
-// are no flags and no locale here, and the state lives in `ostream` and
-// `istream` as a plain `int`. What a program actually reaches for from this
-// header is `std::ios::binary`, and that is what is here.
+// **`ios_base` holds the formatting state and `ios` the stream state, and both
+// streams derive from `ios`** - [ios.base], [ios] - so a manipulator is a
+// function of `ios_base &`, as the standard writes it, and `in >> std::hex`
+// reaches the same function `out << std::hex` does. There is no locale and no
+// streambuf: `narrow` and `widen` are the identity of the "C" locale.
 //
 // The constants are `static const int` with their values written in the class,
 // which needs no definition anywhere and gets no symbol - the value is folded
-// in wherever it is read.
+// in wherever it is read. Their values are this implementation's own, one bit
+// each, as [bitmask.types] asks.
 #ifndef _CXX1_IOS
 #define _CXX1_IOS
+
+#include <iosfwd>
+#include <stdexcept>
 
 namespace std {
 
@@ -18,36 +24,193 @@ namespace std {
 // enough for a file offset, which is `long` on every target here.
 typedef long streamsize;
 
-// **[ios.base]: the flags, as one integer.** A program saves `os.flags()`,
-// writes `std::fixed` and a precision, and puts the flags back - so what is
-// handed out has to carry everything a manipulator can change. The float
-// format sits in the low byte and the conversion base above it; `fixed`
-// and `scientific` are the values <ostream>'s manipulators store, and the
-// three base constants are the bases themselves, shifted.
 class ios_base {
 public:
     typedef int fmtflags;
-    static const int fixed      = 1;
-    static const int scientific = 2;
-    static const int floatfield = 3;
-    static const int dec        = 10 << 8;
-    static const int hex        = 16 << 8;
-    static const int oct        = 8 << 8;
-    static const int basefield  = 0xff00;
+    static const fmtflags boolalpha   = 0x0001;
+    static const fmtflags dec         = 0x0002;
+    static const fmtflags fixed       = 0x0004;
+    static const fmtflags hex         = 0x0008;
+    static const fmtflags internal    = 0x0010;
+    static const fmtflags left        = 0x0020;
+    static const fmtflags oct         = 0x0040;
+    static const fmtflags right       = 0x0080;
+    static const fmtflags scientific  = 0x0100;
+    static const fmtflags showbase    = 0x0200;
+    static const fmtflags showpoint   = 0x0400;
+    static const fmtflags showpos     = 0x0800;
+    static const fmtflags skipws      = 0x1000;
+    static const fmtflags unitbuf     = 0x2000;
+    static const fmtflags uppercase   = 0x4000;
+    static const fmtflags adjustfield = left | right | internal;
+    static const fmtflags basefield   = dec | oct | hex;
+    static const fmtflags floatfield  = scientific | fixed;
+
+    // [ios::iostate], with cl's values; [ios::openmode] and [ios::seekdir].
+    typedef int iostate;
+    static const iostate goodbit = 0x0;
+    static const iostate eofbit  = 0x1;
+    static const iostate failbit = 0x2;
+    static const iostate badbit  = 0x4;
+    typedef int openmode;
+    static const openmode in     = 1;
+    static const openmode out    = 2;
+    static const openmode ate    = 4;
+    static const openmode app    = 8;
+    static const openmode trunc  = 16;
+    static const openmode binary = 32;
+    typedef int seekdir;
+    static const seekdir beg = 0;
+    static const seekdir cur = 1;
+    static const seekdir end = 2;
+
+    // [ios::failure]: what a stream throws for a state its exceptions() mask
+    // names. C++11 derives it from system_error; there is no <system_error>
+    // here, so from the runtime_error that system_error derives from.
+    class failure : public runtime_error {
+    public:
+        explicit failure(const string &msg) : runtime_error(msg) {}
+        explicit failure(const char *msg) : runtime_error(msg) {}
+    };
+
+    // [ios::Init]: nothing to build - the standard streams are built in every
+    // unit that includes <iostream>.
+    class Init {
+    public:
+        Init() {}
+        ~Init() {}
+    };
+
+    // [ios.members.static]: the streams here are stdio's own, so synchronised
+    // whatever is asked; what is answered is the setting before the call.
+    static bool sync_with_stdio(bool sync = true) {
+        static bool now = true;
+        bool was = now;
+        now = sync;
+        return was;
+    }
+    // [ios.base.storage]: the next unused index, from 0.
+    static int xalloc() {
+        static int next = 0;
+        return next++;
+    }
+
+    // **[fmtflags.state]: the state a manipulator writes, read back and put
+    // back.** Each setter answers the old value, which is what lets
+    // `os.precision(os.precision(4))` and a save-and-restore work.
+    fmtflags flags() const { return flags_; }
+    fmtflags flags(fmtflags f) { fmtflags was = flags_; flags_ = f; return was; }
+    fmtflags setf(fmtflags f) { fmtflags was = flags_; flags_ |= f; return was; }
+    fmtflags setf(fmtflags f, fmtflags mask) {
+        fmtflags was = flags_;
+        flags_ = (flags_ & ~mask) | (f & mask);
+        return was;
+    }
+    void unsetf(fmtflags mask) { flags_ &= ~mask; }
+    streamsize precision() const { return prec_; }
+    streamsize precision(streamsize n) { streamsize was = prec_; prec_ = n; return was; }
+    streamsize width() const { return width_; }
+    streamsize width(streamsize n) { streamsize was = width_; width_ = n; return was; }
+
+    // Public, as the streams' own fields are: <iomanip> writes them directly.
+    fmtflags flags_;
+    streamsize prec_;
+    streamsize width_;
+
+protected:
+    // [basic.ios.cons]/3's defaults: skipws and dec, precision 6, width 0. A
+    // stream adds to them - `cerr` its unitbuf.
+    explicit constexpr ios_base(fmtflags more = 0) : flags_(skipws | dec | more), prec_(6), width_(0) {}
 };
 
+// [ios]: basic_ios's part - the stream state, the exception mask, the tied
+// stream and the fill.
 class ios : public ios_base {
 public:
-    // The open modes, as the standard names them. The values are this
-    // implementation's own - nothing outside may depend on them, and a program
-    // that writes `std::ios::binary` rather than `4` never sees one.
-    static const int in     = 1;
-    static const int out    = 2;
-    static const int ate    = 4;
-    static const int app    = 8;
-    static const int trunc  = 16;
-    static const int binary = 32;
+    // [iostate.flags]: setting a state the exception mask names throws, with
+    // the message cl's library gives.
+    iostate rdstate() const { return state_; }
+    void clear(iostate s = goodbit) {
+        state_ = s;
+        const iostate thrown = state_ & except_;
+        if (thrown != 0)
+            throw failure((thrown & badbit) != 0 ? "ios_base::badbit set: iostream stream error"
+                          : (thrown & failbit) != 0 ? "ios_base::failbit set: iostream stream error"
+                          : "ios_base::eofbit set: iostream stream error");
+    }
+    void setstate(iostate s) { clear(state_ | s); }
+    bool good() const { return state_ == goodbit; }
+    bool eof() const { return (state_ & eofbit) != 0; }
+    bool fail() const { return (state_ & (failbit | badbit)) != 0; }
+    bool bad() const { return (state_ & badbit) != 0; }
+    // A stream in a condition - `if (out)` and `while (in >> x)`.
+    operator bool() const { return !fail(); }
+    bool operator!() const { return fail(); }
+    iostate exceptions() const { return except_; }
+    void exceptions(iostate mask) { except_ = mask; clear(state_); }
+
+    // [basic.ios.members]: a stream flushed before every operation on this one.
+    ostream *tie() const { return tie_; }
+    ostream *tie(ostream *s) { ostream *was = tie_; tie_ = s; return was; }
+    char fill() const { return fill_; }
+    char fill(char c) { char was = fill_; fill_ = c; return was; }
+    // Everything but the state: the mask last, so a state it names throws.
+    ios &copyfmt(const ios &from) {
+        if (this == &from) return *this;
+        flags_ = from.flags_;
+        prec_ = from.prec_;
+        width_ = from.width_;
+        fill_ = from.fill_;
+        tie_ = from.tie_;
+        exceptions(from.except_);
+        return *this;
+    }
+    char narrow(char c, char) const { return c; }
+    char widen(char c) const { return c; }
+
+    // Public, as the formatting state is: <iomanip>, <sstream> and <fstream>
+    // write them directly.
+    iostate state_;
+    iostate except_;
+    ostream *tie_;
+    char fill_;
+
+protected:
+    explicit constexpr ios(fmtflags more = 0, ostream *tie = 0)
+        : ios_base(more), state_(goodbit), except_(goodbit), tie_(tie), fill_(' ') {}
 };
+
+// [std.ios.manip], [adjustfield.manip], [basefield.manip], [floatfield.manip]:
+// each sets or clears its flags and answers the stream, so `os << std::left`
+// and `in >> std::hex` are a call of one of these through the stream's
+// `operator<<` or `operator>>` for an `ios_base &(*)(ios_base &)`.
+inline ios_base &boolalpha(ios_base &s)   { s.setf(ios_base::boolalpha); return s; }
+inline ios_base &noboolalpha(ios_base &s) { s.unsetf(ios_base::boolalpha); return s; }
+inline ios_base &showbase(ios_base &s)    { s.setf(ios_base::showbase); return s; }
+inline ios_base &noshowbase(ios_base &s)  { s.unsetf(ios_base::showbase); return s; }
+inline ios_base &showpoint(ios_base &s)   { s.setf(ios_base::showpoint); return s; }
+inline ios_base &noshowpoint(ios_base &s) { s.unsetf(ios_base::showpoint); return s; }
+inline ios_base &showpos(ios_base &s)     { s.setf(ios_base::showpos); return s; }
+inline ios_base &noshowpos(ios_base &s)   { s.unsetf(ios_base::showpos); return s; }
+inline ios_base &skipws(ios_base &s)      { s.setf(ios_base::skipws); return s; }
+inline ios_base &noskipws(ios_base &s)    { s.unsetf(ios_base::skipws); return s; }
+inline ios_base &uppercase(ios_base &s)   { s.setf(ios_base::uppercase); return s; }
+inline ios_base &nouppercase(ios_base &s) { s.unsetf(ios_base::uppercase); return s; }
+inline ios_base &unitbuf(ios_base &s)     { s.setf(ios_base::unitbuf); return s; }
+inline ios_base &nounitbuf(ios_base &s)   { s.unsetf(ios_base::unitbuf); return s; }
+
+inline ios_base &internal(ios_base &s) { s.setf(ios_base::internal, ios_base::adjustfield); return s; }
+inline ios_base &left(ios_base &s)     { s.setf(ios_base::left, ios_base::adjustfield); return s; }
+inline ios_base &right(ios_base &s)    { s.setf(ios_base::right, ios_base::adjustfield); return s; }
+
+inline ios_base &dec(ios_base &s) { s.setf(ios_base::dec, ios_base::basefield); return s; }
+inline ios_base &hex(ios_base &s) { s.setf(ios_base::hex, ios_base::basefield); return s; }
+inline ios_base &oct(ios_base &s) { s.setf(ios_base::oct, ios_base::basefield); return s; }
+
+inline ios_base &fixed(ios_base &s)        { s.setf(ios_base::fixed, ios_base::floatfield); return s; }
+inline ios_base &scientific(ios_base &s)   { s.setf(ios_base::scientific, ios_base::floatfield); return s; }
+inline ios_base &hexfloat(ios_base &s)     { s.setf(ios_base::fixed | ios_base::scientific, ios_base::floatfield); return s; }
+inline ios_base &defaultfloat(ios_base &s) { s.unsetf(ios_base::floatfield); return s; }
 
 }  // namespace std
 

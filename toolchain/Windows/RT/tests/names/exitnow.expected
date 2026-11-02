@@ -1,0 +1,3 @@
+stderr: leaving
+stderr: thread_local destroyed
+exit 4

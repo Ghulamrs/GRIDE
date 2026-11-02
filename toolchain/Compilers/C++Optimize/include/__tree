@@ -7,11 +7,14 @@
 // it goes to the largest. An erased node is unlinked and its neighbour moved into its place by
 // relinking - never by copying a value - so every other node, and every iterator to one, stays.
 //
-// KeyOf says what a value is ordered by: the pair's first for a map, the value for a set.
+// KeyOf says what a value is ordered by: the pair's first for a map, the value for a set; Compare
+// orders two keys, as the container's comparison object. insertUnique is a map's and a set's,
+// insertEqual a multimap's and a multiset's - an equal key goes after those already there.
 #ifndef _CXX1___TREE
 #define _CXX1___TREE
 
 #include <cstddef>
+#include <__iterator_base>
 
 namespace std {
 
@@ -56,6 +59,10 @@ template <class V>
 class __tree_iterator {
 public:
     typedef V value_type;
+    typedef std::ptrdiff_t difference_type;
+    typedef V *pointer;
+    typedef V &reference;
+    typedef bidirectional_iterator_tag iterator_category;
     __tree_iterator() : n_(0), head_(0) {}
     __tree_iterator(__tree_link *n, __tree_link *head) : n_(n), head_(head) {}
     V &operator*() const { return static_cast<__tree_node<V> *>(n_)->value; }
@@ -77,6 +84,10 @@ template <class V>
 class __tree_const_iterator {
 public:
     typedef V value_type;
+    typedef std::ptrdiff_t difference_type;
+    typedef const V *pointer;
+    typedef const V &reference;
+    typedef bidirectional_iterator_tag iterator_category;
     __tree_const_iterator() : n_(0), head_(0) {}
     __tree_const_iterator(const __tree_link *n, const __tree_link *head)
         : n_(const_cast<__tree_link *>(n)), head_(const_cast<__tree_link *>(head)) {}
@@ -90,12 +101,13 @@ public:
     bool operator==(const __tree_const_iterator &o) const { return n_ == o.n_; }
     bool operator!=(const __tree_const_iterator &o) const { return n_ != o.n_; }
     __tree_link *link() const { return n_; }
+    __tree_link *head() const { return head_; }
 private:
     __tree_link *n_;
     __tree_link *head_;
 };
 
-template <class V, class KeyOf>
+template <class V, class KeyOf, class Compare>
 class __tree {
 public:
     typedef typename KeyOf::key_type key_type;
@@ -103,10 +115,11 @@ public:
     typedef __tree_iterator<V> iterator;
     typedef __tree_const_iterator<V> const_iterator;
 
-    __tree() : size_(0) {}
-    __tree(const __tree &o) : size_(0) { insertAll(o); }
+    __tree() : comp_(), size_(0) {}
+    explicit __tree(const Compare &c) : comp_(c), size_(0) {}
+    __tree(const __tree &o) : comp_(o.comp_), size_(0) { insertAll(o); }
     __tree &operator=(const __tree &o) {
-        if (this != &o) { clear(); insertAll(o); }
+        if (this != &o) { clear(); comp_ = o.comp_; insertAll(o); }
         return *this;
     }
     ~__tree() { clear(); }
@@ -120,7 +133,9 @@ public:
         if (head_.left != 0) head_.left->parent = &head_;
         if (o.head_.left != 0) o.head_.left->parent = &o.head_;
         size_type s = size_; size_ = o.size_; o.size_ = s;
+        Compare c = comp_; comp_ = o.comp_; o.comp_ = c;
     }
+    const Compare &compare() const { return comp_; }
 
     iterator begin() { return iterator(head_.left != 0 ? __tree_leftmost(head_.left) : &head_, &head_); }
     iterator end() { return iterator(&head_, &head_); }
@@ -134,7 +149,7 @@ public:
         __tree_link *n = head_.left;
         __tree_link *at = const_cast<__tree_link *>(&head_);
         while (n != 0) {
-            if (KeyOf::get(nodeValue(n)) < k) n = n->right;
+            if (comp_(KeyOf::get(nodeValue(n)), k)) n = n->right;
             else { at = n; n = n->left; }
         }
         return at;
@@ -143,15 +158,20 @@ public:
         __tree_link *n = head_.left;
         __tree_link *at = const_cast<__tree_link *>(&head_);
         while (n != 0) {
-            if (k < KeyOf::get(nodeValue(n))) { at = n; n = n->left; }
+            if (comp_(k, KeyOf::get(nodeValue(n)))) { at = n; n = n->left; }
             else n = n->right;
         }
         return at;
     }
     __tree_link *findLink(const key_type &k) const {
         __tree_link *at = lowerLink(k);
-        if (at == &head_ || k < KeyOf::get(nodeValue(at))) return const_cast<__tree_link *>(&head_);
+        if (at == &head_ || comp_(k, KeyOf::get(nodeValue(at)))) return const_cast<__tree_link *>(&head_);
         return at;
+    }
+    size_type countKey(const key_type &k) const {
+        size_type n = 0;
+        for (__tree_link *at = lowerLink(k), *to = upperLink(k); at != to; at = __tree_next(at)) n++;
+        return n;
     }
 
     // Where the value is, and whether this call put it there.
@@ -162,8 +182,8 @@ public:
         bool goLeft = true;
         while (n != 0) {
             parent = n;
-            if (k < KeyOf::get(nodeValue(n))) { goLeft = true; n = n->left; }
-            else if (KeyOf::get(nodeValue(n)) < k) { goLeft = false; n = n->right; }
+            if (comp_(k, KeyOf::get(nodeValue(n)))) { goLeft = true; n = n->left; }
+            else if (comp_(KeyOf::get(nodeValue(n)), k)) { goLeft = false; n = n->right; }
             else { *inserted = false; return n; }
         }
         __tree_link *made = new __tree_node<V>(v);
@@ -172,6 +192,23 @@ public:
         size_++;
         rebalance(parent);
         *inserted = true;
+        return made;
+    }
+    __tree_link *insertEqual(const V &v) {
+        const key_type &k = KeyOf::get(v);
+        __tree_link *parent = &head_;
+        __tree_link *n = head_.left;
+        bool goLeft = true;
+        while (n != 0) {
+            parent = n;
+            if (comp_(k, KeyOf::get(nodeValue(n)))) { goLeft = true; n = n->left; }
+            else { goLeft = false; n = n->right; }
+        }
+        __tree_link *made = new __tree_node<V>(v);
+        made->parent = parent;
+        if (goLeft) parent->left = made; else parent->right = made;
+        size_++;
+        rebalance(parent);
         return made;
     }
 
@@ -263,11 +300,12 @@ private:
         destroy(n->right);
         delete static_cast<__tree_node<V> *>(n);
     }
+    // In order, each after its equals, so a multi container's copy keeps their order.
     void insertAll(const __tree &o) {
-        bool made;
-        for (const_iterator i = o.begin(); i != o.end(); ++i) insertUnique(*i, &made);
+        for (const_iterator i = o.begin(); i != o.end(); ++i) insertEqual(*i);
     }
 
+    Compare comp_;
     __tree_link head_;
     size_type size_;
 };

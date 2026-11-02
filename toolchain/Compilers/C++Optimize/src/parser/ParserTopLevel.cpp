@@ -20,7 +20,10 @@ bool Parser::linkageSpecification() {
                        "and every other spelling is the implementation's own");
 
     bool c = language == "C";
+    // [dcl.link]/4: the innermost specification decides - `extern "C++"` inside a C block.
+    const int outer = cLinkage_;
     if (c) cLinkage_++;
+    else cLinkage_ = 0;
 
     if (consume("{")) {
         while (!peek().is("}")) {
@@ -36,11 +39,12 @@ bool Parser::linkageSpecification() {
         directLinkage_ = false;
     }
 
-    if (c) cLinkage_--;
+    cLinkage_ = outer;
     return true;
 }
 
 void Parser::topLevel(Program &program) {
+    noreturnAt_ = 0;
     // `namespace N { ... }` - a scope that qualifies what is declared in it, and nothing else.
     // Everything inside is read by this same function, so a namespace nests, may be reopened,
     // and may hold anything a file may hold. `inline namespace N { }` is [namespace.def]/8.
@@ -160,6 +164,22 @@ void Parser::topLevel(Program &program) {
             const std::string shortName =
                 cut == std::string::npos ? written : written.substr(cut + 2);
             const std::string declared = namespacePrefix() + shortName;
+            // **[namespace.udecl]/10: a using-declaration of a function adds its overloads to the set the name
+            // has here** - `using N::f; using M::f;` is one set, and a function of the name declared here
+            // already is in it (R11; an alias to one of them hid the rest). What N adds later stays out (/11).
+            if (declared != target && hasFunctionNamed(target) && !hasTypeNamed(target) && !hasGlobalNamed(target)) {
+                std::vector<std::size_t> from = *overloadsOf(target);
+                auto had = usingDeclarations_.find(declared);
+                if (had != usingDeclarations_.end()) {
+                    if (const std::vector<std::size_t> *earlier = overloadsOf(had->second))
+                        from.insert(from.begin(), earlier->begin(), earlier->end());
+                    usingDeclarations_.erase(had);
+                }
+                std::vector<std::size_t> &set = functionIndex_[declared];
+                for (std::size_t k = 0; k < from.size(); k++)
+                    if (std::find(set.begin(), set.end(), from[k]) == set.end()) set.push_back(from[k]);
+                return;
+            }
             if (declared != target) usingDeclarations_[declared] = target;
             return;
         }
@@ -283,6 +303,20 @@ void Parser::topLevel(Program &program) {
     if (constexprFunction && !d.type->isFunction())
         d.type = types_.withoutConst(d.type);
 
+    // [dcl.align]/1: an alignment-specifier appertains to a variable, a data member or a class.
+    if (quals.alignAs != 0 && (peek().is("(") || d.paramsAt != 0 || d.type->isFunction()))
+        src_.fail(d.pos, "'alignas' cannot be applied to a function - [dcl.align]/1");
+    // [basic.start.main]/2-3: the global `main` returns int and is neither static, inline nor constexpr.
+    if (d.name == "main" && d.qualifier.empty() && namespaceStack_.empty() && classStack_.empty() &&
+        cLinkage_ == 0 && (peek().is("(") || d.paramsAt != 0)) {
+        if (d.type->unqualified()->kind() != Kind::Int || d.type->isConst() || d.type->isVolatile())
+            src_.fail(d.pos, "'main' must return 'int' - [basic.start.main]/2");
+        if (sc == StorageStatic || inlineFunction || constexprFunction)
+            src_.fail(d.pos, std::string("'main' is not allowed to be declared ") +
+                             (sc == StorageStatic ? "static" : inlineFunction ? "inline" : "constexpr") +
+                             " - [basic.start.main]/3");
+    }
+
     // **`int ns::f(int)` defines the `f` declared in namespace `ns`**: a
     // qualifier that names a namespace is folded into the name, which is how
     // a function in a namespace is keyed throughout (the review's A17).
@@ -380,6 +414,8 @@ void Parser::topLevel(Program &program) {
     }
 
     if ((!peek().is("(") || constructionAhead) && d.paramsAt == 0) {
+        refuseNoreturnObject(d.name);
+        if (sc != StorageExtern) refuseInaccessibleDestructor(d.type, d.pos, "'" + d.name + "'");
         // `int a::b::v = k;` is read as if written in a::b, its initialiser too - [basic.lookup.unqual]/13.
         if (!absoluteName.empty()) {
             inNamespace.enter(definedIn);
@@ -387,6 +423,7 @@ void Parser::topLevel(Program &program) {
         }
         const Type *deducedSoFar = nullptr;
         for (;;) {
+            d.type = constexprObjectType(d.type, quals);
             if (mentionsDeduced(d.type)) {
                 d.type = deduceAuto(d.type, d.name, d.pos);
                 checkOneDeducedType(deducedSoFar, lastDeducedAuto_, d.name,
@@ -406,7 +443,6 @@ void Parser::topLevel(Program &program) {
                                      prev->type->describe() + "', not '" +
                                      d.type->describe() + "'");
                 const bool internal = internalLinkage(sc);
-                refuseVolatileWithLinkage(quals.isVolatile, internal, d.pos);
                 const std::string symbol = prev != nullptr
                     ? prev->symbol : dataSymbol(gname, d.type, internal, d.pos);
                 const bool defines = !(sc == StorageExtern && !peek().is("="));
@@ -491,7 +527,6 @@ void Parser::topLevel(Program &program) {
                     if (prev != nullptr && prev->emitted)
                         src_.fail(d.pos, "'" + d.name + "' is defined twice");
                     const bool internal = internalLinkage(sc) || d.type->isConst();
-                    refuseVolatileWithLinkage(quals.isVolatile, internal, d.pos);
                     const std::string symbol = prev != nullptr
                         ? prev->symbol
                         : dataSymbol(gname, d.type, internal, d.pos);
@@ -605,7 +640,16 @@ void Parser::topLevel(Program &program) {
                         refuseConstexprClassObject(d.name, d.pos);
                     constObjects_[selfKey] = value;
                 }
-                if (!constantKnown && !constantDoubleKnown && quals.isConstexpr &&
+                // [dcl.constexpr]/9: an array of numbers or pointers, its elements read as a constant object's leaves are.
+                bool constantArray = false;
+                if (quals.isConstexpr && d.type->isArray() &&
+                    (d.type->innermostElement()->isArithmetic() || d.type->innermostElement()->isPointer())) {
+                    ConstObject value;
+                    constantArray = constObjectFromInit(d.type, in, 0, &value);
+                    if (constantArray) constObjects_[selfKey] = value;
+                }
+                if (quals.isConstexpr && d.type->isPointer()) constantArray = constantPointerInit(in, selfKey);
+                if (!constantKnown && !constantDoubleKnown && !constantArray && quals.isConstexpr &&
                     !d.type->innermostElement()->unqualified()->isStructOrUnion())
                     src_.fail(d.pos, "'" + d.name + "' is 'constexpr', so its "
                                      "value has to be known while this is "
@@ -640,6 +684,18 @@ void Parser::topLevel(Program &program) {
                 (namespaceStack_.empty() || cLinkage_ > 0)
                     ? d.name : namespacePrefix() + d.name;
             GlobalSym *prev = registered ? nullptr : findGlobalToUpdate(gname);
+            // [dcl.meaning]/1: `int N::x = 1;` defines an x N declared; [basic.scope.declarative]/4: a variable
+            // does not take the name of a function in the same scope.
+            if (prev == nullptr && !registered && !absoluteName.empty())
+                src_.fail(d.pos, "'" + absoluteName + "' is defined with a qualified name, and it was never "
+                                 "declared in its namespace - [dcl.meaning]/1");
+            if (prev == nullptr && hasFunctionNamed(gname) && cLinkage_ == 0)
+                src_.fail(d.pos, "'" + d.name + "' redeclares a function as a variable - "
+                                 "[basic.scope.declarative]/4");
+            // [dcl.stc]/7: an object declared with external linkage is not redeclared `static`.
+            if (prev != nullptr && sc == StorageStatic && internalGlobals_.count(gname) == 0)
+                src_.fail(d.pos, "'" + d.name + "' was declared with external linkage, and a later 'static' "
+                                 "declaration cannot give it internal linkage - [dcl.stc]/7");
             if (prev != nullptr) {
                 const Type *both = composite(prev->type, d.type);
                 if (both == nullptr)
@@ -697,7 +753,7 @@ void Parser::topLevel(Program &program) {
             // would be external, may not. Nothing outside can name it.
             bool internal = sc == StorageStatic ||
                             (objectIsConst && sc != StorageExtern);
-            refuseVolatileWithLinkage(quals.isVolatile, internal, d.pos);
+            if (internal) internalGlobals_.insert(gname);
             std::string symbol = dataSymbol(gname, d.type, internal, d.pos);
             const bool dynamic = (dynamicScalar.value != nullptr || dynamicScalar.isList);
             GlobalSym made{ gname, symbol, d.type, objectIsConst,
@@ -768,6 +824,7 @@ void Parser::topLevel(Program &program) {
     }
 
     std::vector<std::size_t> defaults;
+    std::vector<std::string> paramNames;
     if (!consume(")")) {
         if (peek().is("void") && peekAt(1).is(")")) {
             at_ += 2;
@@ -805,6 +862,7 @@ void Parser::topLevel(Program &program) {
                     src_.fail(pscPos, "'register' is the only storage class a "
                                       "parameter may have");
                 Declared pd = declarator(pt, true);
+                if (peek().is("(")) pd.type = functionTypeParameter(pd.type);
                 if (mentionsDeduced(pd.type))
                     src_.fail(pd.pos, "a parameter's type cannot be deduced - "
                                       "`auto` there is C++14, and this "
@@ -850,6 +908,7 @@ void Parser::topLevel(Program &program) {
                 }
                 params.push_back(types_.withoutConst(pd.type));
                 written.push_back(parameterAsWritten(declared, params.back()));
+                paramNames.push_back(pd.name);
                 paramSlots.push_back(Param{ held->isReference()
                                             ? types_.pointerTo(held->referent())
                                             : held, off });
@@ -858,11 +917,9 @@ void Parser::topLevel(Program &program) {
                 // happens twice, and the same way: a place in the token stream.
                 defaults.resize(params.size(), 0);
                 if (consume("=")) {
-                    if (peek().is("{"))
-                        src_.fail(peek().pos, "a braced default argument is not "
-                                              "supported yet - write the value");
                     defaults.back() = at_;
                     skipDefaultArgument();
+                    checkDefaultArgument(defaults.back(), at_, paramNames, nullptr, false);
                 }
                 if (consume(")")) break;
                 expect(",");
@@ -884,8 +941,9 @@ void Parser::topLevel(Program &program) {
     bool sawDefault = false;
     for (std::size_t i = 0; i < defaults.size(); i++)
         if (defaults[i] != 0) sawDefault = true;
+    // Checked against the earlier declarations' defaults where they meet ([dcl.fct.default]/4, R8).
     if (sawDefault) {
-        requireDefaultsAreASuffix(defaults, d.pos);
+        pendingDefaultsAt_ = d.pos;
         pendingDefaults_ = defaults;
     }
 
@@ -902,8 +960,11 @@ void Parser::topLevel(Program &program) {
     // A member function's constness is written after the parameter list, and
     // it is part of which member this is - Point::get() const and
     // Point::get() are two functions.
-    bool constThis = false;
-    if (memberOf != nullptr && consume("const")) constThis = true;
+    bool constThis = false, volatileThis = false;
+    while (memberOf != nullptr && (peek().is("const") || peek().is("volatile"))) {
+        if (consume("const")) constThis = true;
+        else if (consume("volatile")) volatileThis = sawVolatile();
+    }
     // The same C++11 rule the class body applies, to every member function but a constructor - and
     // a static one, which has no `this` to be const: the lookup below lets that one match without.
     const bool impliedConst = memberOf != nullptr && constexprFunction && !constThis &&
@@ -924,7 +985,11 @@ void Parser::topLevel(Program &program) {
     const DynamicSpec declaredSpec = pendingSpec_;
     if (trailing) d.type = readTrailingReturn(0);
 
-    if (consume(";")) {
+    // A member template only declared, made for the arguments it is asked for: its signature below, no body.
+    const bool onlyDeclared = memberOf != nullptr && memberTemplateInst_ && d.name == memberTemplateOf_;
+    // `S::S() = default;` is a definition, read below with the member it defines.
+    const bool defaultedHere = memberOf != nullptr && pendingSpecial_ == SpecialDef::Defaulted;
+    if (!onlyDeclared && !defaultedHere && consume(";")) {
         if (memberOf != nullptr)
             src_.fail(d.pos, "'" + d.qualifier + "::" + d.name + "' is declared "
                              "inside the class - this says it again outside, "
@@ -949,6 +1014,7 @@ void Parser::topLevel(Program &program) {
             if (const std::vector<std::size_t> *set = overloadsOf(key))
                 for (std::size_t k = 0; k < set->size(); k++)
                     if (functions_[(*set)[k]].constThis == constThis &&
+                        functions_[(*set)[k]].volatileThis == volatileThis &&
                         functions_[(*set)[k]].refThis == refThis &&
                         sameParameters(functions_[(*set)[k]].params, params))
                         declared = true;
@@ -977,10 +1043,14 @@ void Parser::topLevel(Program &program) {
                                                         memberTemplateArgs_, false, &c2, &why);
                 else if (target_.microsoftNames())
                     ok = microsoftMemberTemplateName(d.qualifier, memberOf, d.name,
-                          fnType, memberTemplateArgs_, code, constThis, refThis, &sym, &why);
+                          fnType, memberTemplateArgs_, code,
+                          (constThis ? Type::kThisConst : 0u) | (volatileThis ? Type::kThisVolatile : 0u),
+                          refThis, &sym, &why);
                 else
                     ok = itaniumMemberTemplateName(d.qualifier, memberOf, d.name,
-                          patternFn, memberTemplateArgs_, constThis, refThis, &sym, &why);
+                          patternFn, memberTemplateArgs_,
+                          (constThis ? Type::kThisConst : 0u) | (volatileThis ? Type::kThisVolatile : 0u),
+                          refThis, &sym, &why);
                 if (!ok)
                     src_.fail(d.pos, "'" + key + "' cannot be given a name the "
                                      "linker can hold: " + why);
@@ -997,17 +1067,31 @@ void Parser::topLevel(Program &program) {
                 functions_.back().fromTemplate = true;
                 functions_.back().isStaticMember = staticTemplate;
                 functions_.back().refThis = refThis;
+                functions_.back().volatileThis = volatileThis;
                 // **The defaults its parameter list just read.**
+                requireDefaultsAreASuffix(pendingDefaults_, pendingDefaultsAt_);
                 if (!pendingDefaults_.empty()) {
                     defaultArgs_[sym] = pendingDefaults_;
                     defaultArgNamespace_[sym] = definitionNamespace_.empty() ? namespaceStack_ : definitionNamespace_;
+                    // A member template's: read at the call with the class's parameters and its own (item 40).
+                    if (!instantiatingParams_.empty())
+                        defaultArgBindings_[sym] = DefaultBinding{ instantiatingParams_, instantiatingBinding_,
+                                                                   instantiatingValues_, Packs() };
                 }
+            }
+            if (consume(";")) {
+                alive_.resize(alive_.size() - aliveParams);
+                return;
             }
         }
         if (const std::vector<std::size_t> *set = overloadsOf(key)) {
             for (std::size_t k = 0; k < set->size() && member == nullptr; k++) {
                 const Signature &f = functions_[(*set)[k]];
+                // A member template's specialization defines itself and an ordinary member's definition defines no
+                // specialization, though their parameters agree: `P(const P<Y> &)` at Y = P's own (item 30).
+                if (f.fromTemplate != memberTemplateInst_) continue;
                 if ((f.constThis == constThis || (impliedConst && f.isStaticMember)) &&
+                    f.volatileThis == volatileThis &&
                     f.refThis == refThis && sameParameters(f.params, params))
                     member = &f;
             }
@@ -1019,8 +1103,32 @@ void Parser::topLevel(Program &program) {
             src_.fail(d.pos, "'" + key + "' was declared to return '" +
                              member->returns->describe() + "' and this says '" +
                              d.type->describe() + "'");
-        if (member->defined)
+        if (member->defined || member->defaultedOutside)
             src_.fail(d.pos, "'" + key + "' is defined twice");
+        // **`S::S() = default;`**: a special member the class declared, given here the body the
+        // implicit one would have - user-provided all the same, [dcl.fct.def.default]/4-5.
+        if (defaultedHere) {
+            takeSpecialDef();
+            const std::string local = localOf(d.qualifier);
+            const Type *p = params.size() == 1 ? params[0] : nullptr;
+            const bool ofSelf = p != nullptr && p->isReference() &&
+                                p->referent()->unqualified() == memberOf->unqualified();
+            if (!((d.name == local && (params.empty() || ofSelf)) || (d.name == "~" + local && params.empty()) ||
+                  (d.name == "operator=" && ofSelf)) || variadic)
+                src_.fail(pendingSpecialAt_, "'" + key + "' is not a special member function, and only one of "
+                                             "those can be defaulted - [dcl.fct.def.default]/1");
+            for (std::size_t i = 0; i < defaults.size(); i++)
+                if (defaults[i] != 0)
+                    src_.fail(pendingSpecialAt_, "a defaulted function cannot have default arguments - "
+                                                 "[dcl.fct.def.default]/1");
+            Signature &m = const_cast<Signature &>(*member);
+            m.defaultedOutside = true;
+            m.used = true;
+            expect(";");
+            alive_.resize(alive_.size() - aliveParams);
+            currentClass_ = nullptr;
+            return;
+        }
         // **This used to write `member->pos` into the *first* overload's entry.**
         const_cast<Signature *>(member)->defined = true;
         // From here a failure is the body's, and a trial around this instantiation reports it.
@@ -1035,6 +1143,7 @@ void Parser::topLevel(Program &program) {
             // was declared with - so a const member function cannot write through it, by
             // the ordinary rule that a const object's members are const.
             const Type *pointee = constThis ? types_.withConst(memberOf) : memberOf;
+            if (volatileThis) pointee = types_.withVolatile(pointee);
             const Type *thisType = types_.pointerTo(pointee);
             inParams_ = true;
             thisOffset_ = declare("this", thisType, d.pos);
@@ -1107,7 +1216,24 @@ void Parser::topLevel(Program &program) {
     std::set<std::string> namedInInit;
     std::map<std::string, std::vector<ExprPtr> > baseArgs;
     std::map<std::string, std::vector<ExprPtr> > memberExprs;
+    std::map<std::string, Init> memberLists;
     std::map<std::string, std::size_t> where;
+    // **[intro.execution]/10: each mem-initialiser is a full-expression of its own**, so the
+    // temporaries its arguments make stay with it and die once it has run - in declaration
+    // order, below, not in the order the list is read. Left pending, they were never destroyed.
+    std::map<std::string, std::vector<Temporary> > memberTemps, baseTemps;
+    std::vector<Temporary> delegateTemps;
+    auto clearGuards = [&](const std::vector<Temporary> &temps, std::vector<StmtPtr> &into) {
+        for (const Temporary &t : temps)
+            if (t.flag != 0) into.push_back(StmtPtr(new ExprStmt(setGuard(t.flag, 0))));
+    };
+    auto destroyOwn = [&](std::vector<Temporary> &temps, std::vector<StmtPtr> &into) {
+        std::vector<Temporary> outer;
+        outer.swap(pendingTemps_);
+        pendingTemps_.swap(temps);
+        flushTemporaries(into);
+        pendingTemps_.swap(outer);
+    };
     // The members written `: m()`, and for one with a constructor the index of the one
     // to run; functions_.size() says there is none. Out here with the other two: the
     // declaration-order walk below reads all three from outside that block.
@@ -1116,6 +1242,7 @@ void Parser::topLevel(Program &program) {
     // [class.base.init]/6: `: S(args)` names the class itself - the target constructor
     // does everything a list would, so the entry is the list's only one.
     bool delegates = false;
+    bool namesVirtualBase = false;
     std::vector<ExprPtr> delegateArgs;
     std::size_t delegatePos = 0;
     std::size_t entries = 0;
@@ -1124,16 +1251,13 @@ void Parser::topLevel(Program &program) {
     const bool ctorTry = memberOf != nullptr && peek().is("try") &&
                          (isCtor || d.name == "~" + localOf(d.qualifier));
     const std::size_t ctorTryAt = peek().pos;
-    if (ctorTry && target_.microsoftNames())
-        src_.fail(ctorTryAt, "a constructor's or destructor's function try block is not supported yet for "
-                             "x86_64-windows - its handlers end by rethrowing, and a rethrow is refused there");
     if (ctorTry && memberOf->hasVirtualBase())
         src_.fail(ctorTryAt, "a function try block on a constructor or destructor of a class with a virtual "
                              "base is not supported yet - the complete object's one deals with those, outside this one");
     if (ctorTry) at_++;
-    // **`throw(T...)` on the hosts is a filter around the whole body**, mem-initialisers included, whose
-    // pads hand over the way a function try block's do; TI's table states the list, and cl ignores it.
-    const bool specFilter = declaredSpec.written && !target_.microsoftNames() && !target_.specInTable();
+    // **`throw(T...)` on the hosts and Windows is a filter around the whole body**, mem-initialisers
+    // included, whose pads hand over the way a function try block's do; TI's table states the list.
+    const bool specFilter = declaredSpec.written && !target_.specInTable();
     const bool specialHandsOver = ctorTry || (specFilter && memberOf != nullptr &&
                                               (isCtor || d.name == "~" + localOf(d.qualifier)));
     if (specialHandsOver && !ctorTry && memberOf->hasVirtualBase())
@@ -1144,7 +1268,73 @@ void Parser::topLevel(Program &program) {
             src_.fail(peek().pos, "an initialiser list belongs to a "
                                   "constructor, and '" + d.name + "' is not one");
         at_++;
+        // `: Bs()...`, `: Bs(std::forward<A>(a))...` - [temp.variadic]/4: one mem-initializer per member of
+        // the pack, each read from a copy of the pattern with the pack bound to that member; nextEntry steps
+        // to the next copy, and past the `...` after the last.
+        struct Expansion {
+            bool active;
+            std::size_t from, end, members, m;
+            std::vector<Shadow> undo;
+        } expansion{ false, 0, 0, 0, 0, std::vector<Shadow>() };
+        struct Unbind {
+            Parser *p; std::vector<Shadow> *u;
+            ~Unbind() { p->unbindTemplateParameters(*u); }
+        } unbindExpansion{ this, &expansion.undo };
+        auto nextEntry = [&]() -> bool {
+            if (expansion.active) {
+                unbindTemplateParameters(expansion.undo);
+                expansion.undo.clear();
+                if (++expansion.m < expansion.members) {
+                    bindPatternMember(expansion.from, expansion.end, expansion.m, &expansion.undo);
+                    return true;
+                }
+                expansion.active = false;
+                at_ = expansion.end;
+            }
+            return consume(",");
+        };
         for (;;) {
+            if (!expansion.active) {
+                // The entry's name, its arguments, and a `...` after them.
+                std::size_t e = at_;
+                int angle = 0, paren = 0;
+                for (; e < tokens_.size() && tokens_[e].kind != TokenKind::End; e++) {
+                    const Token &t = tokens_[e];
+                    if (angle == 0 && paren == 0 && (t.is("(") || t.is("{"))) break;
+                    if (t.is("<")) angle++;
+                    else if (t.is(">")) angle--;
+                    else if (t.is(">>")) angle -= 2;
+                    else if (t.is("(")) paren++;
+                    else if (t.is(")")) paren--;
+                }
+                for (int depth = 0; e < tokens_.size() && tokens_[e].kind != TokenKind::End; e++) {
+                    if (tokens_[e].is("(") || tokens_[e].is("{")) depth++;
+                    else if ((tokens_[e].is(")") || tokens_[e].is("}")) && --depth == 0) break;
+                }
+                std::size_t members = 0;
+                bool any = false;
+                for (std::size_t i = at_; e + 1 < tokens_.size() && tokens_[e + 1].is("...") && i < e; i++) {
+                    const auto pk = tokens_[i].kind == TokenKind::Ident ? packs_.find(tokens_[i].text) : packs_.end();
+                    if (pk == packs_.end()) continue;
+                    if (any && pk->second.types.size() != members)
+                        src_.fail(tokens_[e + 1].pos, "the packs expanded by this '...' have different lengths");
+                    members = pk->second.types.size();
+                    any = true;
+                }
+                if (any && members == 0) {
+                    at_ = e + 2;
+                    if (!consume(",")) break;
+                    continue;
+                }
+                if (any) {
+                    expansion.active = true;
+                    expansion.from = at_;
+                    expansion.end = e + 2;
+                    expansion.members = members;
+                    expansion.m = 0;
+                    bindPatternMember(expansion.from, expansion.end, 0, &expansion.undo);
+                }
+            }
             std::size_t epos = peek().pos;
             // **A base written as a template-id - `: P<int>(x)` - is read as a
             // type**, the way the base-clause reads it; expectIdent stopped at
@@ -1175,19 +1365,88 @@ void Parser::topLevel(Program &program) {
                     entry += "::" + expectIdent("a name after '::'");
                 }
             }
-            expect("(");
+            // **`: m{v}`, a braced mem-initialiser** ([class.base.init]/7 with [dcl.init.list]): its
+            // values, as `: m(v)` gives them, with what the braces add - no narrowing for a scalar, and
+            // for a class the list-initialisation the parentheses do not have (R-list, C++11: every
+            // braced one was "expected a type").
+            const bool braced = peek().is("{");
+            const std::size_t bracePos = peek().pos;
+            // An array member, or a class member given values, takes the braces as a list.
+            if (braced && templateBase == nullptr) {
+                const Member *listed = memberOf->findMember(entry);
+                if (listed != nullptr && listed->declaredIn == nullptr && !listed->type->isReference() &&
+                    (listed->type->isArray() ||
+                     (listed->type->unqualified()->isStructOrUnion() && !peekAt(1).is("}")))) {
+                    if (memberExprs.count(entry))
+                        src_.fail(epos, "'" + entry + "' is initialised twice");
+                    std::vector<Temporary> listTemps;
+                    listTemps.swap(pendingTemps_);
+                    memberLists[entry] = parseInitialiser();
+                    listTemps.swap(pendingTemps_);
+                    entries++;
+                    memberExprs[entry] = std::vector<ExprPtr>();
+                    memberTemps[entry] = std::move(listTemps);
+                    namedInInit.insert(entry);
+                    where[entry] = epos;
+                    if (!nextEntry()) break;
+                    continue;
+                }
+            }
+            if (!braced) expect("(");
             const int frameBeforeArgs = frameSize_;
             std::vector<ExprPtr> args;
-            parseArguments(args);
+            std::vector<Temporary> argTemps;
+            argTemps.swap(pendingTemps_);
+            if (braced) {
+                at_++;
+                while (!peek().is("}")) {
+                    if (peek().is("{"))
+                        src_.fail(peek().pos, "a braced list inside a braced mem-initialiser is not "
+                                              "supported yet - name the type, 'T{...}'");
+                    args.push_back(assign());
+                    if (!consume(",")) break;
+                }
+                expect("}");
+            } else {
+                parseArguments(args);
+            }
+            argTemps.swap(pendingTemps_);
             entries++;
+            // What the braces ask beyond the parentheses: no narrowing of a scalar's value; a class
+            // with an initializer_list constructor, an aggregate or an array is refused by name.
+            auto bracedFor = [&](const Type *t, const std::string &what) {
+                if (!braced || t == nullptr) return;
+                if (t->isReference()) return;
+                const Type *u = t->unqualified();
+                if (u->isArray())
+                    src_.fail(bracePos, "a braced mem-initialiser for the array '" + what + "' is not "
+                                        "supported yet - give the elements their values in the body");
+                if (u->isStructOrUnion()) {
+                    const Type *il = nullptr;
+                    if (initializerListConstructor(u, &il) != nullptr)
+                        src_.fail(bracePos, "'" + what + "{...}' would list-initialise '" + u->describe() +
+                                            "' through its initializer_list constructor, which a "
+                                            "mem-initialiser does not do yet - write the list as an "
+                                            "argument in parentheses");
+                    if (!hasConstructors(u->tag()) && !args.empty())
+                        src_.fail(bracePos, "'" + what + "{...}' would aggregate-initialise '" +
+                                            u->describe() + "', which a mem-initialiser does not do "
+                                            "yet - give the class a constructor, or assign its members "
+                                            "in the body");
+                    return;
+                }
+                if (args.size() == 1) checkNarrowing(t, *args[0], bracePos, "'" + what + "'");
+            };
             {
                 const Type *named = templateBase != nullptr ? templateBase : findTypedef(entry);
                 if (entry == d.qualifier || entry == localOf(d.qualifier) ||
                     (named != nullptr && named->unqualified() == memberOf->unqualified())) {
+                    bracedFor(memberOf, entry);
                     delegates = true;
                     delegateArgs = std::move(args);
+                    delegateTemps = std::move(argTemps);
                     delegatePos = epos;
-                    if (!consume(",")) break;
+                    if (!nextEntry()) break;
                     continue;
                 }
             }
@@ -1212,6 +1471,7 @@ void Parser::topLevel(Program &program) {
                     isBase = true;
                     baseKey = bs[i].type->tag();
                     wasVirtualBase = bs[i].isVirtual;
+                    bracedFor(bs[i].type, entry);
                     break;
                 }
 
@@ -1230,7 +1490,10 @@ void Parser::topLevel(Program &program) {
                                     "argument made of the parameters and "
                                     "constants works");
                 baseArgs[baseKey] = std::move(args);
+                baseTemps[baseKey] = std::move(argTemps);
+                namesVirtualBase = namesVirtualBase || wasVirtualBase;
             } else if (const Member *m = memberOf->findMember(entry)) {
+                bracedFor(m->type, entry);
                 if (m->declaredIn != nullptr)
                     src_.fail(epos, "member initialiser '" + entry + "' names a member of a "
                                     "base of '" + d.qualifier + "' - the base's constructor "
@@ -1280,20 +1543,30 @@ void Parser::topLevel(Program &program) {
                 // answer any more.** A class-typed member takes as many as one of its
                 // constructors does, so the check moved down with the construction.
                 memberExprs[entry] = std::move(args);
+                memberTemps[entry] = std::move(argTemps);
                 namedInInit.insert(entry);
                 where[entry] = epos;
             } else {
+                // [temp.variadic]/5: a pack of bases is initialised with the '...' that expands it.
+                if (packs_.count(entry) != 0)
+                    src_.fail(epos, "'" + entry + "' is a parameter pack, and here it is written without the "
+                                    "'...' that expands it");
                 src_.fail(epos, "'" + entry + "' is neither a member of '" +
                                 d.qualifier + "' nor a direct base of it");
             }
-            if (!consume(",")) break;
+            if (!nextEntry()) break;
         }
 
     }
 
     StmtPtr delegateCall;
-    if (delegates) delegateCall = delegatingCall(d, memberOf, std::move(delegateArgs),
-                                                 delegatePos, entries);
+    if (delegates) {
+        // Pending while the call is built, which takes over what it passes by value.
+        pendingTemps_.swap(delegateTemps);
+        delegateCall = delegatingCall(d, memberOf, std::move(delegateArgs),
+                                      delegatePos, entries);
+        pendingTemps_.swap(delegateTemps);
+    }
 
     // **Every member, in declaration order, by the first of three rules that applies to
     // it** - [class.base.init]/8, /9 and /11: named in the list, its own initialiser, or
@@ -1314,7 +1587,16 @@ void Parser::topLevel(Program &program) {
         // The statements the member before this one added, and which member that was.
         std::size_t doneFrom = memberInits.size();
         int doneMember = -1;
+        // What was pending before a listed member's own temporaries took its place.
+        std::vector<Temporary> outerTemps;
+        bool ownPending = false;
         auto settle = [&]() {
+            if (ownPending) {
+                flushTemporaries(memberInits);
+                pendingTemps_.swap(outerTemps);
+                outerTemps.clear();
+                ownPending = false;
+            }
             memberDone.resize(memberInits.size(), -1);
             if (doneMember >= 0 && memberInits.size() > doneFrom) memberDone.back() = doneMember;
         };
@@ -1351,6 +1633,20 @@ void Parser::topLevel(Program &program) {
                 continue;
             }
             std::size_t epos = where[m->name];
+            {
+                std::vector<Temporary> &own = memberTemps[m->name];
+                clearGuards(own, memberInits);
+                outerTemps.swap(pendingTemps_);
+                pendingTemps_.swap(own);
+                ownPending = true;
+            }
+
+            std::map<std::string, Init>::iterator listed = memberLists.find(m->name);
+            if (listed != memberLists.end()) {
+                memberInits.push_back(listInitialiseMember(d.qualifier, memberOf, *m, thisOffset_,
+                                                           listed->second, epos));
+                continue;
+            }
 
             // **An empty pair belongs to value-initialisation, and only to it.**
             const bool valueInitialised = valueInit.count(m->name) != 0;
@@ -1425,6 +1721,17 @@ void Parser::topLevel(Program &program) {
         settle();
     }
 
+    // [dcl.constexpr]/3-4: the definition's parameter types, and a function's return type, are literal types;
+    // a specialization that falls short is only not constexpr, [dcl.constexpr]/6.
+    if (constexprFunction && instantiationKey_.empty() && (memberOf == nullptr || !memberOf->isSpecialization())) {
+        for (const Type *p : params)
+            if (plainlyNotLiteral(p))
+                src_.fail(d.pos, "'" + d.name + "' is 'constexpr', and its parameter type '" + p->describe() +
+                                 "' is not a literal type - [dcl.constexpr]/3");
+        if (!isCtor && plainlyNotLiteral(d.type))
+            src_.fail(d.pos, "'" + d.name + "' is 'constexpr', and its return type '" + d.type->describe() +
+                             "' is not a literal type - [dcl.constexpr]/3");
+    }
     returnType_ = d.type;
     functionName_ = d.name;
     staticSymbols_.clear();
@@ -1577,7 +1884,9 @@ void Parser::topLevel(Program &program) {
                 body = guardSubobject(std::move(body), whole, d.pos);
             }
             std::vector<StmtPtr> withTarget;
+            clearGuards(delegateTemps, withTarget);
             withTarget.push_back(std::move(delegateCall));
+            destroyOwn(delegateTemps, withTarget);
             withTarget.push_back(std::move(body));
             body = StmtPtr(new Block(std::move(withTarget)));
         }
@@ -1637,6 +1946,12 @@ void Parser::topLevel(Program &program) {
                 // [class.copy]/12: a trivially copyable base copied by name, `: B(b)`, has no copy constructor
                 // to call - its copy is the bytes, as `B c(b);` makes it.
                 bool copyBytes = false;
+                // The entry's temporaries are pending while its call is built, which takes over
+                // what it passes by value; what is left is destroyed after the call.
+                std::map<std::string, std::vector<Temporary> >::iterator ownTemps =
+                    baseTemps.find(base->tag());
+                const bool ownSwapped = building && ownTemps != baseTemps.end();
+                if (ownSwapped) pendingTemps_.swap(ownTemps->second);
                 if (building && named != baseArgs.end()) {
                     chosenArgs.swap(named->second);
                     const Type *from = chosenArgs.size() == 1 && chosenArgs[0]->type() != nullptr
@@ -1722,12 +2037,18 @@ void Parser::topLevel(Program &program) {
                         body = guardSubobject(std::move(body), one, d.pos, builtBefore(one));
                     }
                     std::vector<StmtPtr> wrapped;
+                    if (ownSwapped) {
+                        pendingTemps_.swap(ownTemps->second);
+                        clearGuards(ownTemps->second, wrapped);
+                    }
                     wrapped.push_back(StmtPtr(new ExprStmt(std::move(copy))));
+                    if (ownSwapped) destroyOwn(ownTemps->second, wrapped);
                     wrapped.push_back(std::move(body));
                     body = StmtPtr(new Block(std::move(wrapped)));
                     continue;
                 }
                 std::vector<ExprPtr> args;
+                if (!building && target_.microsoftNames()) me = msShifted(std::move(me), msThisAdjust(symbol));
                 args.push_back(std::move(me));
                 std::vector<const Type *> params2;
                 params2.push_back(basePtr);
@@ -1743,6 +2064,7 @@ void Parser::topLevel(Program &program) {
                 ExprPtr call = completeCall(base->tag(), symbol, nullptr,
                                             types_.get(Kind::Void), params2, false,
                                             d.pos, std::move(args), false, 0);
+                if (ownSwapped) pendingTemps_.swap(ownTemps->second);
 
                 std::vector<StmtPtr> wrapped;
                 if (building) {
@@ -1753,7 +2075,9 @@ void Parser::topLevel(Program &program) {
                         one.base = static_cast<int>(which);
                         body = guardSubobject(std::move(body), one, d.pos, builtBefore(one));
                     }
+                    if (ownSwapped) clearGuards(ownTemps->second, wrapped);
                     wrapped.push_back(StmtPtr(new ExprStmt(std::move(call))));
+                    if (ownSwapped) destroyOwn(ownTemps->second, wrapped);
                     wrapped.push_back(std::move(body));
                 } else {
                     wrapped.push_back(std::move(body));
@@ -1766,7 +2090,7 @@ void Parser::topLevel(Program &program) {
         // **The most-derived guard goes outside the base calls**, because a
         // virtual base is built before every non-virtual one: cl's `R::R` stores
         // the vbtable pointer and calls `V::V` and only then `D1::D1`.
-        if (msVbInitSlot_ >= 0 && memberOf != nullptr &&
+        if (msVbInitSlot_ >= 0 && memberOf != nullptr && !delegates &&
             d.name == localOf(d.qualifier)) {
             std::vector<Alive> vbs;
             std::vector<StmtPtr> guarded =
@@ -1792,7 +2116,7 @@ void Parser::topLevel(Program &program) {
                            : block(functionTry);
             if (!ctorTry) assemble();
             return std::move(body);
-        }, false, spec);
+        }, false, spec, &declaredSpec.types);
         inNamespace.leave();
         wrapUp();
     } else if (ctorTry) {
@@ -1806,16 +2130,53 @@ void Parser::topLevel(Program &program) {
         assemble();
     }
 
+    // **A frame the Microsoft runtime ends the program in**: a `noexcept` function that calls something
+    // carries a FuncInfo and its scratch word whatever it holds - cl's EHFlags 5 (Phase 6).
+    const bool msFrame = target_.microsoftNames() && inNoexceptFunction_ && mayThrow_ > 0;
+    const int msHelp = msFrame ? msUnwindHelp() : 0;
     int frame = alignTo(frameSize_, 16);
     const Type *emittedReturn = d.type->isReference()
                               ? types_.pointerTo(d.type->referent()) : d.type;
     if (definedSymbol.empty())
         definedSymbol = lookupSignature(absoluteName.empty() ? d.name : absoluteName, params,
                                         variadic, d.pos).symbol;
+    // **Entered at a later base's vfptr** (Phase 6): cl reads the members past the adjustor, and moving
+    // `this` back by it first is the same function to every caller.
+    if (member != nullptr && !member->isStaticMember && body != nullptr && msThisAdjust(definedSymbol) != 0) {
+        const Type *selfType = types_.pointerTo(constThis ? types_.withConst(memberOf) : memberOf);
+        const Type *chars = types_.pointerTo(types_.get(Kind::Char));
+        ExprPtr me(Var::local("this", thisOffset_));
+        me->setType(selfType);
+        ExprPtr asChars(new Cast(chars, std::move(me)));
+        asChars->setType(chars);
+        ExprPtr back(new Num(-static_cast<long long>(msThisAdjust(definedSymbol))));
+        back->setType(types_.intType());
+        ExprPtr moved(new Binary(BinOp::Add, std::move(asChars), std::move(back)));
+        moved->setType(chars);
+        ExprPtr typed(new Cast(selfType, std::move(moved)));
+        typed->setType(selfType);
+        ExprPtr self(Var::local("this", thisOffset_));
+        self->setType(selfType);
+        ExprPtr set(new Assign(std::move(self), std::move(typed)));
+        set->setType(selfType);
+        std::vector<StmtPtr> both;
+        both.push_back(StmtPtr(new ExprStmt(std::move(set))));
+        both.push_back(std::move(body));
+        body = StmtPtr(new Block(std::move(both)));
+    }
 
+    if (namesVirtualBase) virtualBaseInitialisers_.insert(definedSymbol);
     // Recorded before `body` is moved into the Function, where what the pointer names lives on; a
     // constexpr constructor is kept whole, also under the C2 name a derived class calls it by.
     if (isCtor && body != nullptr && (constexprFunction || constexprCtorSymbols_.count(definedSymbol))) {
+        // [dcl.constexpr]/4: every non-static data member is initialised - by the list or its own initialiser.
+        if (!delegates && memberOf->kind() != Kind::Union)
+            for (const Member &m : memberOf->members())
+                if (m.declaredIn == nullptr && !m.name.empty() && m.anonUnion == nullptr &&
+                    namedInInit.count(m.name) == 0 && memberInit_.count(d.qualifier + "::" + m.name) == 0 &&
+                    !m.type->innermostElement()->unqualified()->isStructOrUnion())
+                    src_.fail(d.pos, "'constexpr' constructor of '" + d.qualifier + "' leaves the member '" +
+                                     m.name + "' uninitialised - [dcl.constexpr]/4");
         ConstexprCtor ctor;
         ctor.body = body.get();
         ctor.thisSlot = thisOffset_;
@@ -1843,9 +2204,14 @@ void Parser::topLevel(Program &program) {
     currentFunctionName_.clear();
     currentFunctionInline_ = false;
     localTypes_.clear();
-    // **`static` on a member says which member, not which linkage.**
-    const bool internal = memberOf != nullptr ? inUnnamedNamespace_
-                                              : internalLinkage(sc);
+    // **`static` on a member says which member, not which linkage.** [basic.link]/8: one named through an
+    // unnamed class - `sz<decltype(anon_s)>` - has none outside this unit, its symbol another unit's too.
+    bool unnamedArgument = definedSymbol.find("<unnamed-type-") != std::string::npos;
+    for (std::size_t i = 1; i + 2 < definedSymbol.size() && !unnamedArgument; i++)
+        unnamedArgument = definedSymbol[i] == '$' && definedSymbol[i + 1] == '_' &&
+                          definedSymbol[i - 1] >= '0' && definedSymbol[i - 1] <= '9' &&
+                          definedSymbol[i + 2] >= '0' && definedSymbol[i + 2] <= '9';
+    const bool internal = unnamedArgument || (memberOf != nullptr ? inUnnamedNamespace_ : internalLinkage(sc));
     program.functions.push_back(Function(d.name, emittedReturn, std::move(paramSlots),
                                          std::move(body), frame,
                                          internal, sretSlot,
@@ -1870,6 +2236,7 @@ void Parser::topLevel(Program &program) {
     program.functions.back().setHasLandingPads(functionHasPads_);
     program.functions.back().setNoexcept(inNoexceptFunction_);
     if (declaredSpec.written && target_.specInTable()) program.functions.back().setExceptionSpec(specSymbols);
+    if (msFrame) program.functions.back().setMsUnwindHelp(msHelp);
     // Everything replayed from inside a class body - and every member of a
     // template specialization, which is replayed the same way - is implicitly
     // inline, so its definition may appear in several translation units.
@@ -1953,12 +2320,18 @@ Program Parser::parse() {
     current_ = &program;
     while (peek().kind != TokenKind::End)
         topLevel(program);
+    if (!mainUses_.empty() && mainDefinedHere())
+        src_.fail(mainUses_[0], "'main' cannot be used within the program - [basic.start.main]/3");
     // **Each of these two can give the other more to do, so they alternate.**
     for (int pass = 0; pass < 64; pass++) {
         const std::size_t had = program.functions.size();
         instantiatePending();
         defineImplicitFunctions();
         if (program.functions.size() == had) break;
+    }
+    if (probeVariant_ >= 0) {
+        probeUninstantiated(program);
+        return program;
     }
     pruneExternalVtables(program);
     pruneUnchosenCandidates(program);
@@ -2003,7 +2376,7 @@ std::string Parser::resolveNamespaceName(const std::string &written) const {
 // `namespace A = N;`, the `=` consumed. [namespace.alias]: A names N from here to the end of
 // the enclosing namespace. Every later `A::` in that reach is rewritten to N's name in place -
 // one token's text, never a token added - so the string-keyed lookups meet N and never A.
-void Parser::namespaceAlias(const std::string &name, std::size_t pos) {
+void Parser::namespaceAlias(const std::string &name, std::size_t pos, bool inBlock) {
     std::string written = consume("::") ? "::" : "";
     written += expectIdent("a namespace name after '='");
     while (peek().is("::")) {
@@ -2015,11 +2388,13 @@ void Parser::namespaceAlias(const std::string &name, std::size_t pos) {
     if (target.empty())
         src_.fail(pos, "'" + written + "' is not a namespace, so there is nothing for "
                        "'namespace " + name + "' to be an alias of");
-    if (findTypedef(namespacePrefix() + name) != nullptr ||
-        namespaces_.count(namespacePrefix() + name))
+    // One in a block hides a namespace or class of the name around it, [basic.scope.hiding].
+    if (!inBlock && (findTypedef(namespacePrefix() + name) != nullptr ||
+                     namespaces_.count(namespacePrefix() + name)))
         src_.fail(pos, "'" + name + "' is already declared here, and a namespace alias "
                        "cannot reuse the name");
-    namespaceAliases_[namespacePrefix() + name] = target;
+    if (inBlock) enterBlockEntry(namespaceAliases_, namespacePrefix() + name, target);
+    else namespaceAliases_[namespacePrefix() + name] = target;
 
     // Inside the enclosing block an unqualified `A ::` means the alias; past its closing
     // brace `N :: A ::` does, for a target within N. A name after `::`, `.` or `->` is not it.
@@ -2036,7 +2411,7 @@ void Parser::namespaceAlias(const std::string &name, std::size_t pos) {
         else if (tokens_[i].is("}") && --depth < 0) break;
         else if (plainAt(i)) tokens_[i].text = target;
     }
-    if (namespaceStack_.empty()) return;
+    if (inBlock || namespaceStack_.empty()) return;
     const std::string prefix = namespacePrefix();
     if (target.compare(0, prefix.size(), prefix) != 0) return;
     const std::string tail = target.substr(prefix.size());
@@ -2078,6 +2453,19 @@ const Type *Parser::readTrailingReturn(std::size_t paramsOpen) {
         int index = 0;
         while (!consume(")")) {
             if (consume("...")) continue;
+            // `A &&... a`: one parameter standing for the pack in a pattern, `a$0`... in an instantiation.
+            std::vector<const Type *> packTypes;
+            std::vector<std::string> packNames;
+            if (packParameter(&packTypes, &packNames)) {
+                for (std::size_t k = 0; k < packTypes.size(); k++, index++) {
+                    if (k >= packNames.size() || packNames[k].empty()) continue;
+                    locals_.push_back(Local{ packNames[k], 0, packTypes[k], false, std::string() });
+                    locals_.back().isParameter = true;
+                    locals_.back().trailingParam = index;
+                }
+                consume(",");
+                continue;
+            }
             StorageClass psc;
             const Type *pt = specifiers(&psc);
             Declared pd = declarator(pt, true);
@@ -2166,10 +2554,6 @@ StmtPtr Parser::delegatingCall(const Declared &d, const Type *cls, std::vector<E
         src_.fail(pos, "a delegating constructor's initialiser list names '" +
                        localOf(d.qualifier) + "' and nothing else - the constructor it "
                        "delegates to builds the bases and members, [class.base.init]/6");
-    if (cls->hasVirtualBase())
-        src_.fail(pos, "a delegating constructor of a class with a virtual base is not "
-                       "supported yet - the target would have to be told whether this "
-                       "object is the most derived one");
     const std::string key = constructorKey(cls->tag());
     Signature chosen = resolveOverload(key, args, pos);
     applyDefaults(chosen, args, pos);
@@ -2180,11 +2564,41 @@ StmtPtr Parser::delegatingCall(const Declared &d, const Type *cls, std::vector<E
     all.push_back(std::move(me));
     std::vector<const Type *> params;
     params.push_back(self);
+    // **A class with a virtual base**: the target builds them where this constructor would. On cl's ABI this
+    // one's most-derived flag is handed on; on Itanium this C2 calls the target's C2 with its VTT, and C1 -
+    // building the virtual bases by default before it - stands in for the target's C1, which is only right where
+    // the target's list names none of them.
+    std::string symbol = chosen.symbol;
+    if (cls->hasVirtualBase() && !target_.microsoftNames()) {
+        if (!chosen.defined || virtualBaseInitialisers_.count(chosen.symbol) != 0)
+            src_.fail(pos, "this delegating constructor of a class with a virtual base delegates to one " +
+                           std::string(chosen.defined ? "whose list initialises a virtual base"
+                                                      : "not defined before it") +
+                           ", and that is not supported yet on this target");
+        const std::map<std::string, std::string>::const_iterator c2 = constructorC2_.find(chosen.symbol);
+        const std::size_t c1 = symbol.find("C1E");
+        if (c2 != constructorC2_.end()) symbol = c2->second;
+        else if (c1 != std::string::npos) symbol.replace(c1, 3, "C2E");
+        if (takesVtt(cls)) {
+            ExprPtr vtt(Var::local(".vtt", vttSlot_));
+            vtt->setType(vttType());
+            all.push_back(std::move(vtt));
+            params.push_back(vttType());
+        }
+    }
     for (std::size_t i = 0; i < chosen.params.size(); i++) {
         all.push_back(std::move(args[i]));
         params.push_back(chosen.params[i]);
     }
-    return StmtPtr(new ExprStmt(completeCall(cls->tag(), chosen.symbol, nullptr,
+    if (cls->hasVirtualBase() && target_.microsoftNames()) {
+        ExprPtr flag(Var::local(".initVBases", msVbInitSlot_));
+        flag->setType(types_.intType());
+        all.push_back(std::move(flag));
+        params.push_back(types_.intType());
+        return StmtPtr(new ExprStmt(completeCall(cls->tag(), symbol, nullptr, types_.get(Kind::Void), params,
+                                                 false, pos, std::move(all), false, -1)));
+    }
+    return StmtPtr(new ExprStmt(completeCall(cls->tag(), symbol, nullptr,
                                              types_.get(Kind::Void), params, false, pos,
                                              std::move(all), false, 0)));
 }

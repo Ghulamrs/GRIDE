@@ -14,6 +14,8 @@
 
 namespace std {
 
+using ::size_t;
+
 using ::memchr;
 using ::memcmp;
 using ::memcpy;
@@ -22,10 +24,12 @@ using ::memset;
 using ::strcat;
 using ::strchr;
 using ::strcmp;
+using ::strcoll;
 using ::strcpy;
 using ::strcspn;
 using ::strerror;
 using ::strlen;
+using ::strncat;
 using ::strncmp;
 using ::strncpy;
 using ::strpbrk;
@@ -33,6 +37,7 @@ using ::strrchr;
 using ::strspn;
 using ::strstr;
 using ::strtok;
+using ::strxfrm;
 
 }  // namespace std
 

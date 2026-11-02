@@ -1,0 +1,27 @@
+width  1:    333049 comparisons, hash dae53138
+width  2:    334059 comparisons, hash e6adc4e5
+width  3:    333265 comparisons, hash 0fc579a0
+width  4:    331965 comparisons, hash f91bd5fe
+width  5:    333827 comparisons, hash 39c9a7ab
+width  8:    333510 comparisons, hash 8ae234cd
+width 12:    333315 comparisons, hash d9336e9a
+width 16:    333077 comparisons, hash 43f8a4fb
+width 24:    333071 comparisons, hash b6e1fe36
+width 40:    332388 comparisons, hash 41f02323
+  1000 records, order 0:     10321 comparisons, hash b1369db0
+  1000 records, order 1:      7964 comparisons, hash d506fc98
+  1000 records, order 2:      7996 comparisons, hash 1fc9bbd0
+  1000 records, order 3:      1999 comparisons, hash 54ecc26c
+  4096 records, order 0:     46970 comparisons, hash 6c0b8320
+  4096 records, order 1:     31793 comparisons, hash 8225ac60
+  4096 records, order 2:     31959 comparisons, hash e4d50198
+  4096 records, order 3:      8191 comparisons, hash 5d6f8800
+ 10000 records, order 0:    107986 comparisons, hash fa9d6c59
+ 10000 records, order 1:     77776 comparisons, hash 3dfedd30
+ 10000 records, order 2:     78124 comparisons, hash 6e596968
+ 10000 records, order 3:     19999 comparisons, hash 314d8778
+100000 records, order 0:   1067148 comparisons, hash 7d8e70c5
+100000 records, order 1:    776626 comparisons, hash a96cc260
+100000 records, order 2:    780124 comparisons, hash 81157298
+100000 records, order 3:    199999 comparisons, hash 20fb7930
+exit 0

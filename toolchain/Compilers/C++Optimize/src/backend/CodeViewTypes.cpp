@@ -83,7 +83,7 @@ unsigned CodeViewTypes::fundamental(const Type *t) const {
 }
 
 unsigned CodeViewTypes::pointer(const Type *to, int mode) {
-    const bool plain = to == nullptr || (fundamental(to) != kTNoType && !to->isConst() &&
+    const bool plain = to == nullptr || (fundamental(to) != kTNoType && !to->isConst() && !to->isVolatile() &&
                                          !to->isEnumeration() && !to->isNullPtr());
     if (mode == kModePointer && plain) return kT64Pointer | (to ? fundamental(to) : kTVoid);
     Bytes b;
@@ -212,10 +212,11 @@ unsigned CodeViewTypes::index(const Type *t) {
         numeric(b, t->length() > 0 ? static_cast<long long>(t->size(target_)) : 0);
         text(b, "");
         n = record(kLfArray, b);
-    } else if (t->isConst() && t->unqualified() != t) {
+    } else if (t->isQualified()) {
+        // LF_MODIFIER's bits: const 1, volatile 2.
         Bytes b;
         u32(b, index(t->unqualified()));
-        u16(b, 1);
+        u16(b, static_cast<unsigned>((t->isConst() ? 1 : 0) | (t->isVolatile() ? 2 : 0)));
         n = record(kLfModifier, b);
     } else if (t->isPointer()) {
         n = pointer(t->pointee(), kModePointer);

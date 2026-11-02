@@ -124,13 +124,14 @@ bool qualificationConvertible(TypeTable& types, const Type* s, const Type* d)
 }
 
 // 13.3.3.2/3: of two qualification conversions to similar types, the one whose target's cv-qualification signature
-// is a proper subset of the other's is better (int** to int* const* beats int** to const int* const*), and of two
-// reference bindings to one type the less qualified one; negative: a better, positive: b better
+// is a proper subset of the other's is better (int** to int* const* beats int** to const int* const*, int M::* to
+// const int M::* beats int M::* to const volatile int M::*), and of two reference bindings to one type the less
+// qualified one; negative: a better, positive: b better
 int compareQualifications(TypeTable& types, const Type* a, const Type* b)
 {
     if (!a || !b || a->kind != b->kind) return 0;
     const bool refs = a->kind == Type::Reference;
-    if (!refs && a->kind != Type::Pointer) return 0;
+    if (!refs && a->kind != Type::Pointer && (a->kind != Type::MemberPointer || a->memberClass != b->memberClass)) return 0;
     a = a->inner; b = b->inner;
     bool aMore = false, bMore = false;
     for (;;) {
@@ -461,7 +462,7 @@ Conversion Sema::convertType(const Type* from, bool lvalue, bool nullConstant, c
         if (!cvOk) return c;
         const Type* spu = m_types.unqualified(sp); const Type* dpu = m_types.unqualified(dp);
         if (spu == dpu) { c.rank = Conversion::Exact; c.qualification = sp != dp; return c; }
-        if (dpu->kind == Type::Void) { c.rank = Conversion::Standard; return c; }
+        if (dpu->kind == Type::Void) { c.rank = Conversion::Standard; c.pointerToVoid = true; return c; }
         if (spu->kind == Type::Class && dpu->kind == Type::Class && spu->decl && dpu->decl && derivesFrom(spu->decl, dpu->decl, 0) && baseSubobjects(spu->decl, dpu->decl) <= 1) { c.rank = Conversion::Standard; c.derivedToBase = true; return c; }
         if (qualificationConvertible(m_types, sp, dp)) { c.rank = Conversion::Exact; c.qualification = true; return c; }
         return c;
@@ -588,6 +589,8 @@ int compareConversions(TypeTable& types, const Conversion& a, const Conversion& 
         if (a.derivedToBase != b.derivedToBase) return a.derivedToBase ? -1 : 1;
         if (a.qualification != b.qualification) return a.qualification ? 1 : -1;
         if (a.qualification && !a.derivedToBase) return compareQualifications(types, a.target, b.target);
+        // the same pointer conversion to void* with different qualifiers added (char* to void* beats char* to const void*)
+        if (a.pointerToVoid && b.pointerToVoid) return compareQualifications(types, a.target, b.target);
     }
     // 13.3.3.2/3: two sequences through the same conversion function are ordered by the standard conversion
     // after it (operator int() to int beats operator int() to double)

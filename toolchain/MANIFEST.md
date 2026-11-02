@@ -38,7 +38,11 @@ Compilers\C++Optimize\src\Type.h, Type.cpp, Mangle.cpp, parser\ParserType.cpp, p
 fix for reference-to-array parameters on the C6747 (`T (&)[N]`, 2026-10-16, as GRIDEd's copy). copy-toolchain.py keeps
 these files rather than copying the tool trees' versions again.
 
-Not copied: tests\, docs\, examples\, demo\, review probes, oracle\, tools\ other than RTS6x's ar6x.cpp, *.dat
+cpp11's `tests\conformance\` is this tree's own, not a copy: the conformance suite and its frozen baseline
+(2026-10-28, its README.md), the measure of the road to strict C++11. copy-toolchain.py only copies, so it
+leaves the folder alone.
+
+Not copied: the tool trees' tests\, docs\, examples\, demo\, review probes, oracle\, tools\ other than RTS6x's ar6x.cpp, *.dat
 (release seals), Makefiles, CMakeLists, .xcodeproj / .xcworkspace, the tools' own .sln and build-vs.cmd /
 check-vs.cmd / generate.py, RTS6x's build.cmd (its steps are Toolchain.targets now), README / CLAUDE.md of the
 tool repositories, .git*, and every build output (build\, x64\, obj\).

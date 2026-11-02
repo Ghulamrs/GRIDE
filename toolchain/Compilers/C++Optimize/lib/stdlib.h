@@ -35,12 +35,19 @@ void free(void *);
 
 void exit(int);
 void abort(void);
+// C99's and C++11's other ways out: a handler run at exit, the quick pair that
+// runs only its own handlers ([support.start.term]), and one that runs none.
+int atexit(void (*)(void));
+int at_quick_exit(void (*)(void));
+void quick_exit(int);
+void _Exit(int);
 // [cstdlib.syn]: a command handed to the host's command processor; its status comes back.
 int system(const char *);
 
 int atoi(const char *);
 char *getenv(const char *);
 long atol(const char *);
+long long atoll(const char *);
 
 // The one that says where it stopped. atol cannot report a failure at all - it
 // gives back zero for "0" and for "banana" alike - so anything reading a
@@ -66,9 +73,32 @@ long double strtold(const char *, char **);
 
 int abs(int);
 long labs(long);
+long long llabs(long long);
+
+// The quotient and the remainder of one division, returned as a structure. The
+// tags are the UCRT's; glibc's and Darwin's structures have none.
+#if defined(_WIN32)
+typedef struct _div_t { int quot; int rem; } div_t;
+typedef struct _ldiv_t { long quot; long rem; } ldiv_t;
+typedef struct _lldiv_t { long long quot; long long rem; } lldiv_t;
+#else
+typedef struct { int quot; int rem; } div_t;
+typedef struct { long quot; long rem; } ldiv_t;
+typedef struct { long long quot; long long rem; } lldiv_t;
+#endif
+ldiv_t ldiv(long, long);
+lldiv_t lldiv(long long, long long);
 
 int rand(void);
 void srand(unsigned int);
+
+// The multibyte conversions, in the current locale - which a program that never
+// calls setlocale leaves "C", where a character is one byte.
+int mblen(const char *, size_t);
+int mbtowc(wchar_t *, const char *, size_t);
+int wctomb(char *, wchar_t);
+size_t mbstowcs(wchar_t *, const char *, size_t);
+size_t wcstombs(char *, const wchar_t *, size_t);
 
 // The two that could not be written here until pointers to functions existed,
 // and a good part of the reason they were wanted. A comparison function is the
@@ -77,6 +107,32 @@ void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 void *bsearch(const void *, const void *, size_t, size_t,
               int (*)(const void *, const void *));
 
+double fabs(double);
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__TMS320C6X__)
+long double fabsl(long double);
+#endif
+
 
 }  // extern "C"
+
+// **`abs` and `div` are C++ overload sets here, not C's two functions** - one
+// per argument type, each answering in that type, as [c.math]/7-9 and cl's own
+// headers give them. C's `abs(int)` above keeps its C linkage, which a C
+// runtime defining it needs, and the C++ overloads sit beside it. `div(int, int)`
+// is a C++ function among them. <cstdlib> names the whole set in `std` with
+// one using-declaration, and <cmath> reaches it through <cstdlib>.
+inline long abs(long v) { return labs(v); }
+inline long long abs(long long v) { return llabs(v); }
+inline float abs(float v) { return (float)fabs(v); }
+inline double abs(double v) { return fabs(v); }
+#if defined(_WIN32) || defined(__APPLE__) || defined(__TMS320C6X__)
+inline long double abs(long double v) { return fabs((double)v); }
+#else
+inline long double abs(long double v) { return fabsl(v); }
+#endif
+
+inline div_t div(int n, int d) { div_t r; r.quot = n / d; r.rem = n % d; return r; }
+inline ldiv_t div(long n, long d) { return ldiv(n, d); }
+inline lldiv_t div(long long n, long long d) { return lldiv(n, d); }
+
 #endif

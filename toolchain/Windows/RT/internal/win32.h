@@ -40,6 +40,11 @@ typedef struct {                        /* WIN32_FIND_DATAW, 592 bytes */
     WCHAR cFileName[260];
     WCHAR cAlternateFileName[14];
 } GRT_FIND_DATA;
+typedef struct {                        /* WIN32_FILE_ATTRIBUTE_DATA */
+    DWORD dwFileAttributes;
+    GRT_FILETIME ftCreationTime, ftLastAccessTime, ftLastWriteTime;
+    DWORD nFileSizeHigh, nFileSizeLow;
+} GRT_FILE_ATTRIBUTE_DATA;
 typedef struct {                        /* BY_HANDLE_FILE_INFORMATION */
     DWORD dwFileAttributes;
     GRT_FILETIME ftCreationTime, ftLastAccessTime, ftLastWriteTime;
@@ -123,7 +128,8 @@ BOOL DeleteFileW(const WCHAR *path);
 BOOL MoveFileExW(const WCHAR *from, const WCHAR *to, DWORD flags);
 DWORD GetLastError(void);
 void SetLastError(DWORD code);
-DWORD GetFileAttributesW(const WCHAR *path);
+/* GetFileExInfoStandard (0): a WIN32_FILE_ATTRIBUTE_DATA, whose first DWORD is the attributes */
+BOOL GetFileAttributesExW(const WCHAR *path, int level, void *information);
 BOOL GetFileInformationByHandle(HANDLE file, GRT_FILE_INFORMATION *information);
 BOOL PeekNamedPipe(HANDLE pipe, void *bytes, DWORD size, DWORD *read, DWORD *available, DWORD *left);
 UINT GetDriveTypeW(const WCHAR *root);
@@ -132,6 +138,27 @@ BOOL FindNextFileW(HANDLE find, GRT_FIND_DATA *found);
 BOOL FindClose(HANDLE find);
 DWORD GetCurrentDirectoryW(DWORD capacity, WCHAR *path);
 DWORD GetFullPathNameW(const WCHAR *path, DWORD capacity, WCHAR *full, WCHAR **name);
+BOOL SetCurrentDirectoryW(const WCHAR *path);
+BOOL SetEnvironmentVariableW(const WCHAR *name, const WCHAR *value);
+BOOL CreateDirectoryW(const WCHAR *path, void *security);
+BOOL RemoveDirectoryW(const WCHAR *path);
+BOOL SetConsoleCtrlHandler(void *routine, BOOL add);
+DWORD GetTempPathW(DWORD capacity, WCHAR *path);
+DWORD GetCurrentProcessId(void);
+#define GRT_CREATE_NEW 1ul
+#define GRT_FILE_FLAG_DELETE_ON_CLOSE 0x04000000ul
+
+/* structured exceptions, for C++'s (win\seh.c); x64 has these in kernel32, so no ntdll import is needed */
+void RaiseException(DWORD code, DWORD flags, DWORD count, const unsigned long long *arguments);
+void RtlUnwindEx(void *targetFrame, void *targetIp, void *record, void *returnValue, void *context, void *history);
+void *RtlPcToFileHeader(void *pc, void **imageBase);
+void *RtlLookupFunctionEntry(unsigned long long pc, unsigned long long *imageBase, void *history);
+void *SetUnhandledExceptionFilter(void *filter);
+/* the runtime's block for each thread: a fiber-local slot, its block freed when the thread ends */
+DWORD FlsAlloc(void (*release)(void *));
+void *FlsGetValue(DWORD slot);
+BOOL FlsSetValue(DWORD slot, void *value);
+#define GRT_FLS_OUT_OF_INDEXES 0xFFFFFFFFul
 
 BOOL CreateProcessW(const WCHAR *program, WCHAR *line, void *processSecurity, void *threadSecurity, BOOL inherit,
                     DWORD flags, void *environment, const WCHAR *directory, GRT_STARTUPINFO *startup,

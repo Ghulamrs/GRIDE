@@ -435,7 +435,7 @@ namespace Gride { namespace UI {
                     else if (version->Length == 0 && line->StartsWith("Version ")) version = line;
                 }
                 int owner = banner->IndexOf(" - ");
-                if (banner->Length > 0 && banner[0] == L'\u00A9' && owner > 0) banner = banner->Substring(owner + 3);
+                if (banner->Length > 0 && banner[0] == L'©' && owner > 0) banner = banner->Substring(owner + 3);
                 return version->Length == 0 ? banner : banner + ", " + version;
             }
             catch (Exception^) { return String::Empty; }

@@ -211,22 +211,27 @@ ExprPtr Parser::lambdaExpression() {
     bool defaultTakesThis = false;
     const Type *capturedThisFrom = nullptr;
     if (peek().is("=") || peek().is("&")) {
-        // `[&]` only where it is the whole list: `[&x]` is one named capture
+        // `[&]` and `[&, ...]` are the default: `[&x]` is one named capture
         // and is read by the loop below.
-        if (peek().is("=") || peekAt(1).is("]")) {
+        if (peek().is("=") || peekAt(1).is("]") || peekAt(1).is(",")) {
             captureAllByValue = peek().is("=");
             captureAllByRef = peek().is("&");
             at_++;
-            if (!peek().is("]"))
-                src_.fail(peek().pos, "naming a capture after a default one is "
-                                      "not supported yet - '[=]' and '[&]' on "
-                                      "their own take everything the body "
-                                      "reads");
+            if (!peek().is("]")) expect(",");
         }
     }
     while (!peek().is("]")) {
         // `[&x]` - this one by reference, whatever the default is.
         bool byRef = consume("&");
+        // [expr.prim.lambda]/8: after `&` each named capture is by copy, after `=` each is by
+        // reference and `this` is not among them - what the default already says is refused.
+        if (captureAllByRef && byRef)
+            src_.fail(peek().pos, "'&' cannot precede a capture when the capture default is '&'");
+        if (captureAllByValue && peek().is("this"))
+            src_.fail(peek().pos, "'this' cannot be explicitly captured when the capture default is '='");
+        if (captureAllByValue && !byRef)
+            src_.fail(peek().pos, "'" + peek().text + "' cannot be captured by copy when the capture "
+                                  "default is '=' - [expr.prim.lambda]/8");
         // `[this]` - the closure holds a pointer to the enclosing object, and
         // an unqualified member name inside the body is reached through it.
         if (peek().is("this")) {
@@ -256,30 +261,40 @@ ExprPtr Parser::lambdaExpression() {
                                   "compiler is C++11: a capture here names "
                                   "something the enclosing function already "
                                   "declared");
-        const Local *have = findLocal(cname);
-        // [expr.prim.lambda]/10: a member of an anonymous union is no variable to capture, clang's words.
-        if (have != nullptr && have->sharesSlot)
-            src_.fail(cpos, "'" + cname + "' in capture list does not name a variable");
-        const Type *fromOuter = nullptr;
-        if (have == nullptr) {
-            // A capture of the lambda around this one, which is a member of
-            // that closure by now rather than a local.
-            if (ExprPtr reach = outerCaptureAccess(cname))
-                fromOuter = reach->type();
-            if (fromOuter == nullptr)
-                src_.fail(cpos, "'" + cname + "' is not a local of the function "
-                                "around this lambda, nor a capture of a lambda "
-                                "around it, so there is nothing here to "
-                                "capture");
+        // [expr.prim.lambda]/23: `[ts...]` captures each parameter of the pack, `ts$0`, `ts$1`...
+        std::vector<std::string> each(1, cname);
+        if (consume("...")) {
+            const auto pk = packs_.find(cname);
+            if (pk == packs_.end())
+                src_.fail(cpos, "'" + cname + "' is not a parameter pack, so there is nothing for '...' to expand");
+            each = pk->second.names;
         }
-        capNames.push_back(cname);
-        // **By reference the closure holds a reference member**, which takes the
-        // reference layout rule: a pointer slot where `sizeof` is the referent's.
-        // By value it holds a copy, and capturing a reference copies its referent.
-        const Type *raw = have != nullptr ? have->type : fromOuter;
-        const Type *base = raw->isReference()
-                         ? raw->referent()->unqualified() : raw->unqualified();
-        capTypes.push_back(byRef ? types_.referenceTo(base) : base);
+        for (const std::string &one : each) {
+            const Local *have = findLocal(one);
+            // [expr.prim.lambda]/10: a member of an anonymous union is no variable to capture, clang's words.
+            if (have != nullptr && have->sharesSlot)
+                src_.fail(cpos, "'" + one + "' in capture list does not name a variable");
+            const Type *fromOuter = nullptr;
+            if (have == nullptr) {
+                // A capture of the lambda around this one, which is a member of
+                // that closure by now rather than a local.
+                if (ExprPtr reach = outerCaptureAccess(one))
+                    fromOuter = reach->type();
+                if (fromOuter == nullptr)
+                    src_.fail(cpos, "'" + cname + "' is not a local of the function "
+                                    "around this lambda, nor a capture of a lambda "
+                                    "around it, so there is nothing here to "
+                                    "capture");
+            }
+            capNames.push_back(one);
+            // **By reference the closure holds a reference member**, which takes the
+            // reference layout rule: a pointer slot where `sizeof` is the referent's.
+            // By value it holds a copy, and capturing a reference copies its referent.
+            const Type *raw = have != nullptr ? have->type : fromOuter;
+            const Type *base = raw->isReference()
+                             ? raw->referent()->unqualified() : raw->unqualified();
+            capTypes.push_back(byRef ? types_.referenceTo(base) : base);
+        }
         if (!peek().is("]")) expect(",");
     }
     at_++;                                    // ']'
