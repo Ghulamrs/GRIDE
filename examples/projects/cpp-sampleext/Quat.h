@@ -38,7 +38,7 @@ public:
 		return CQuat<I>(r, v[0], v[1], v[2]);
 	}
 #ifdef _STD_IO_
-	void print(char *title = "") {
+	void print(const char *title = "") {
 		printf("\n%s\t", title);
 		this->printrow();
 	}

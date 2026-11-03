@@ -28,7 +28,7 @@ protected:
 	double vector[N];
 
 public:
-	CVector<N>(double *v = 0) {
+	CVector<N>(const double *v = 0) {
 		if (!v) memset(vector, 0, N*sizeof(double));
 		else memcpy(vector, v, N*sizeof(double));
 	}
@@ -152,7 +152,7 @@ public:
 
 	double mag2() {
 		double norm = 0.0;
-		for (size_t i = 0; i < N; i++) norm += SQR(vector[i]);
+		for (size_t i = 0; i < N; i++) norm += vector[i] * vector[i];
 		return norm;
 	}
 
@@ -183,7 +183,7 @@ public:
 	}
 
 #ifdef _STD_IO_
-	void print(char *title = "") {
+	void print(const char *title = "") {
 		printf("\n%s ", title);
 		for (size_t i = 0; i < N; i++) printf("\t%13.12lf", this->vector[i]);
 	}
