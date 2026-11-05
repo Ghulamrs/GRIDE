@@ -1,28 +1,41 @@
-// <ios> - what both directions share: the size and position types, the
-// formatting state, the stream state, the open modes, and the manipulators
-// that set the state.
+// <ios> - [iostreams.base]: ios_base's formatting state and flags, basic_ios's stream state, buffer, tie and
+// fill, io_errc, and the manipulators that set the state.
 //
-// **`ios_base` holds the formatting state and `ios` the stream state, and both
-// streams derive from `ios`** - [ios.base], [ios] - so a manipulator is a
-// function of `ios_base &`, as the standard writes it, and `in >> std::hex`
-// reaches the same function `out << std::hex` does. There is no locale and no
-// streambuf: `narrow` and `widen` are the identity of the "C" locale.
+// **Every stream reads and writes through its basic_streambuf** ([stream.buffers]), as the standard has it:
+// the standard streams through a buffer over the C library's FILE, a string stream through basic_stringbuf, and
+// a program's own buffer through itself. One template serves char and wchar_t; `widen` and `narrow` are the
+// stream's locale's ctype facet's, and its numbers are its num_put's and num_get's ([locale.categories]).
 //
-// The constants are `static const int` with their values written in the class,
-// which needs no definition anywhere and gets no symbol - the value is folded
-// in wherever it is read. Their values are this implementation's own, one bit
-// each, as [bitmask.types] asks.
+// The constants are `static const int` with their values written in the class, cl's for iostate; each is one
+// bit, as [bitmask.types] asks.
 #ifndef _CXX1_IOS
 #define _CXX1_IOS
 
 #include <iosfwd>
 #include <stdexcept>
+#include <system_error>
+#include <__locale>
 
 namespace std {
 
-// The count `write` and `getline` take. The standard makes it signed and wide
-// enough for a file offset, which is `long` on every target here.
-typedef long streamsize;
+typedef long long streamsize;
+
+// [iostreams.base]: the one error a stream reports, in a category of its own.
+enum class io_errc { stream = 1 };
+template <> struct is_error_code_enum<io_errc> : true_type {};
+class __cxx1_iostream_category : public error_category {
+public:
+    virtual const char *name() const noexcept { return "iostream"; }
+    virtual string message(int ev) const { return string(ev == 1 ? "iostream stream error" : "unknown error"); }
+};
+inline const error_category &iostream_category() noexcept {
+    static const __cxx1_iostream_category c;
+    return c;
+}
+inline error_code make_error_code(io_errc e) noexcept { return error_code(static_cast<int>(e), iostream_category()); }
+inline error_condition make_error_condition(io_errc e) noexcept {
+    return error_condition(static_cast<int>(e), iostream_category());
+}
 
 class ios_base {
 public:
@@ -46,7 +59,6 @@ public:
     static const fmtflags basefield   = dec | oct | hex;
     static const fmtflags floatfield  = scientific | fixed;
 
-    // [ios::iostate], with cl's values; [ios::openmode] and [ios::seekdir].
     typedef int iostate;
     static const iostate goodbit = 0x0;
     static const iostate eofbit  = 0x1;
@@ -64,40 +76,22 @@ public:
     static const seekdir cur = 1;
     static const seekdir end = 2;
 
-    // [ios::failure]: what a stream throws for a state its exceptions() mask
-    // names. C++11 derives it from system_error; there is no <system_error>
-    // here, so from the runtime_error that system_error derives from.
-    class failure : public runtime_error {
+    // [ios::failure]: a system_error whose code is io_errc::stream by default.
+    class failure : public system_error {
     public:
-        explicit failure(const string &msg) : runtime_error(msg) {}
-        explicit failure(const char *msg) : runtime_error(msg) {}
+        explicit failure(const string &msg, const error_code &ec = io_errc::stream) : system_error(ec, msg) {}
+        explicit failure(const char *msg, const error_code &ec = io_errc::stream) : system_error(ec, msg) {}
     };
 
-    // [ios::Init]: nothing to build - the standard streams are built in every
-    // unit that includes <iostream>.
+    // [ios::Init]: the first one in the program builds the standard streams, the last flushes them; <iostream>
+    // defines the two and puts one in each unit that includes it.
     class Init {
     public:
-        Init() {}
-        ~Init() {}
+        Init();
+        ~Init();
     };
 
-    // [ios.members.static]: the streams here are stdio's own, so synchronised
-    // whatever is asked; what is answered is the setting before the call.
-    static bool sync_with_stdio(bool sync = true) {
-        static bool now = true;
-        bool was = now;
-        now = sync;
-        return was;
-    }
-    // [ios.base.storage]: the next unused index, from 0.
-    static int xalloc() {
-        static int next = 0;
-        return next++;
-    }
-
-    // **[fmtflags.state]: the state a manipulator writes, read back and put
-    // back.** Each setter answers the old value, which is what lets
-    // `os.precision(os.precision(4))` and a save-and-restore work.
+    // [fmtflags.state]
     fmtflags flags() const { return flags_; }
     fmtflags flags(fmtflags f) { fmtflags was = flags_; flags_ = f; return was; }
     fmtflags setf(fmtflags f) { fmtflags was = flags_; flags_ |= f; return was; }
@@ -112,78 +106,199 @@ public:
     streamsize width() const { return width_; }
     streamsize width(streamsize n) { streamsize was = width_; width_ = n; return was; }
 
-    // Public, as the streams' own fields are: <iomanip> writes them directly.
+    // [ios.members.static]: the streams are the C library's own, so synchronised whatever is asked.
+    static bool sync_with_stdio(bool sync = true) {
+        static bool now = true;
+        bool was = now;
+        now = sync;
+        return was;
+    }
+    // [ios.base.storage]
+    static int xalloc() {
+        static int next = 0;
+        return next++;
+    }
+    long &iword(int i) {
+        if (i < 0 || i >= kWords) { static long junk; junk = 0; return junk; }
+        return iwords_[i];
+    }
+    void *&pword(int i) {
+        if (i < 0 || i >= kWords) { static void *junk; junk = 0; return junk; }
+        return pwords_[i];
+    }
+
+    // [ios.base.locales]
+    locale imbue(const locale &loc) {
+        locale was = loc_;
+        loc_ = loc;
+        __cxx1_event(imbue_event);
+        return was;
+    }
+    locale getloc() const { return loc_; }
+
+    // [ios.base.callback]
+    enum event { erase_event, imbue_event, copyfmt_event };
+    typedef void (*event_callback)(event, ios_base &, int);
+    void register_callback(event_callback fn, int index) {
+        if (callbacks_ < kWords) { calls_[callbacks_] = fn; indices_[callbacks_] = index; callbacks_++; }
+    }
+
+    virtual ~ios_base() {
+        for (int k = callbacks_; k-- > 0;) calls_[k](erase_event, *this, indices_[k]);
+    }
+    ios_base(const ios_base &) = delete;
+    ios_base &operator=(const ios_base &) = delete;
+
+protected:
+    ios_base() : flags_(skipws | dec), prec_(6), width_(0), callbacks_(0), iwords_(), pwords_() {}
+    void __cxx1_copyfmt(const ios_base &o) {
+        loc_ = o.loc_;
+        flags_ = o.flags_;
+        prec_ = o.prec_;
+        width_ = o.width_;
+        for (int k = 0; k < kWords; k++) { iwords_[k] = o.iwords_[k]; pwords_[k] = o.pwords_[k]; }
+    }
+    void __cxx1_event(event e) {
+        for (int k = callbacks_; k-- > 0;) calls_[k](e, *this, indices_[k]);
+    }
+    void __cxx1_swap(ios_base &o) {
+        const locale held = loc_;
+        loc_ = o.loc_;
+        o.loc_ = held;
+        std::swap(flags_, o.flags_);
+        std::swap(prec_, o.prec_);
+        std::swap(width_, o.width_);
+    }
+
     fmtflags flags_;
     streamsize prec_;
     streamsize width_;
+    locale loc_;
 
-protected:
-    // [basic.ios.cons]/3's defaults: skipws and dec, precision 6, width 0. A
-    // stream adds to them - `cerr` its unitbuf.
-    explicit constexpr ios_base(fmtflags more = 0) : flags_(skipws | dec | more), prec_(6), width_(0) {}
+private:
+    static const int kWords = 16;
+    int callbacks_;
+    event_callback calls_[kWords];
+    int indices_[kWords];
+    long iwords_[kWords];
+    void *pwords_[kWords];
 };
 
-// [ios]: basic_ios's part - the stream state, the exception mask, the tied
-// stream and the fill.
-class ios : public ios_base {
+// [ios]
+template <class C, class Tr> class basic_ios : public ios_base {
 public:
-    // [iostate.flags]: setting a state the exception mask names throws, with
-    // the message cl's library gives.
+    typedef C char_type;
+    typedef typename Tr::int_type int_type;
+    typedef typename Tr::pos_type pos_type;
+    typedef typename Tr::off_type off_type;
+    typedef Tr traits_type;
+
+    explicit operator bool() const { return !fail(); }
+    bool operator!() const { return fail(); }
     iostate rdstate() const { return state_; }
     void clear(iostate s = goodbit) {
-        state_ = s;
+        state_ = sb_ != 0 ? s : (s | badbit);
         const iostate thrown = state_ & except_;
         if (thrown != 0)
-            throw failure((thrown & badbit) != 0 ? "ios_base::badbit set: iostream stream error"
-                          : (thrown & failbit) != 0 ? "ios_base::failbit set: iostream stream error"
-                          : "ios_base::eofbit set: iostream stream error");
+            throw failure((thrown & badbit) != 0 ? "ios_base::badbit set"
+                          : (thrown & failbit) != 0 ? "ios_base::failbit set" : "ios_base::eofbit set");
     }
     void setstate(iostate s) { clear(state_ | s); }
     bool good() const { return state_ == goodbit; }
     bool eof() const { return (state_ & eofbit) != 0; }
     bool fail() const { return (state_ & (failbit | badbit)) != 0; }
     bool bad() const { return (state_ & badbit) != 0; }
-    // A stream in a condition - `if (out)` and `while (in >> x)`.
-    operator bool() const { return !fail(); }
-    bool operator!() const { return fail(); }
     iostate exceptions() const { return except_; }
     void exceptions(iostate mask) { except_ = mask; clear(state_); }
 
-    // [basic.ios.members]: a stream flushed before every operation on this one.
-    ostream *tie() const { return tie_; }
-    ostream *tie(ostream *s) { ostream *was = tie_; tie_ = s; return was; }
-    char fill() const { return fill_; }
-    char fill(char c) { char was = fill_; fill_ = c; return was; }
-    // Everything but the state: the mask last, so a state it names throws.
-    ios &copyfmt(const ios &from) {
+    explicit basic_ios(basic_streambuf<C, Tr> *sb) { init(sb); }
+    virtual ~basic_ios() {}
+
+    basic_ostream<C, Tr> *tie() const { return tie_; }
+    basic_ostream<C, Tr> *tie(basic_ostream<C, Tr> *s) { basic_ostream<C, Tr> *was = tie_; tie_ = s; return was; }
+    basic_streambuf<C, Tr> *rdbuf() const { return sb_; }
+    basic_streambuf<C, Tr> *rdbuf(basic_streambuf<C, Tr> *sb) {
+        basic_streambuf<C, Tr> *was = sb_;
+        sb_ = sb;
+        clear();
+        return was;
+    }
+    basic_ios &copyfmt(const basic_ios &from) {
         if (this == &from) return *this;
-        flags_ = from.flags_;
-        prec_ = from.prec_;
-        width_ = from.width_;
+        __cxx1_event(erase_event);
+        __cxx1_copyfmt(from);
         fill_ = from.fill_;
         tie_ = from.tie_;
+        __cxx1_event(copyfmt_event);
         exceptions(from.except_);
         return *this;
     }
-    char narrow(char c, char) const { return c; }
-    char widen(char c) const { return c; }
+    char_type fill() const { return fill_; }
+    char_type fill(char_type c) { char_type was = fill_; fill_ = c; return was; }
+    char narrow(char_type c, char dfault) const { return ctype_().narrow(c, dfault); }
+    char_type widen(char c) const { return ctype_().widen(c); }
+    // [basic.ios.members]/8: the stream's locale and its buffer's.
+    locale imbue(const locale &loc) {
+        locale was = ios_base::imbue(loc);
+        if (sb_ != 0) sb_->pubimbue(loc);
+        return was;
+    }
 
-    // Public, as the formatting state is: <iomanip>, <sstream> and <fstream>
-    // write them directly.
-    iostate state_;
-    iostate except_;
-    ostream *tie_;
-    char fill_;
+    basic_ios(const basic_ios &) = delete;
+    basic_ios &operator=(const basic_ios &) = delete;
 
 protected:
-    explicit constexpr ios(fmtflags more = 0, ostream *tie = 0)
-        : ios_base(more), state_(goodbit), except_(goodbit), tie_(tie), fill_(' ') {}
+    basic_ios() : sb_(0), tie_(0), state_(goodbit), except_(goodbit), fill_(char_type(' ')), ct_(0), ctKey_(0) {}
+    void init(basic_streambuf<C, Tr> *sb) {
+        sb_ = sb;
+        tie_ = 0;
+        state_ = sb != 0 ? goodbit : badbit;
+        except_ = goodbit;
+        flags_ = skipws | dec;
+        prec_ = 6;
+        width_ = 0;
+        loc_ = locale();
+        fill_ = widen(' ');
+    }
+    // [basic.ios.members]/17-20: the stream's state taken from another, its buffer left where it was.
+    void move(basic_ios &rhs) {
+        __cxx1_copyfmt(rhs);
+        state_ = rhs.state_;
+        except_ = rhs.except_;
+        fill_ = rhs.fill_;
+        tie_ = rhs.tie_;
+        rhs.tie_ = 0;
+        sb_ = 0;
+    }
+    void move(basic_ios &&rhs) { move(rhs); }
+    void swap(basic_ios &rhs) noexcept {
+        __cxx1_swap(rhs);
+        std::swap(state_, rhs.state_);
+        std::swap(except_, rhs.except_);
+        std::swap(fill_, rhs.fill_);
+        std::swap(tie_, rhs.tie_);
+    }
+    void set_rdbuf(basic_streambuf<C, Tr> *sb) { sb_ = sb; }
+
+private:
+    // The locale's ctype facet, looked up again only when the locale's table is another.
+    const ctype<C> &ctype_() const {
+        if (ctKey_ != loc_.__cxx1_key()) {
+            ct_ = &use_facet<ctype<C> >(loc_);
+            ctKey_ = loc_.__cxx1_key();
+        }
+        return *ct_;
+    }
+
+    basic_streambuf<C, Tr> *sb_;
+    basic_ostream<C, Tr> *tie_;
+    iostate state_;
+    iostate except_;
+    char_type fill_;
+    mutable const ctype<C> *ct_;
+    mutable const void *ctKey_;
 };
 
-// [std.ios.manip], [adjustfield.manip], [basefield.manip], [floatfield.manip]:
-// each sets or clears its flags and answers the stream, so `os << std::left`
-// and `in >> std::hex` are a call of one of these through the stream's
-// `operator<<` or `operator>>` for an `ios_base &(*)(ios_base &)`.
 inline ios_base &boolalpha(ios_base &s)   { s.setf(ios_base::boolalpha); return s; }
 inline ios_base &noboolalpha(ios_base &s) { s.unsetf(ios_base::boolalpha); return s; }
 inline ios_base &showbase(ios_base &s)    { s.setf(ios_base::showbase); return s; }
@@ -198,15 +313,12 @@ inline ios_base &uppercase(ios_base &s)   { s.setf(ios_base::uppercase); return 
 inline ios_base &nouppercase(ios_base &s) { s.unsetf(ios_base::uppercase); return s; }
 inline ios_base &unitbuf(ios_base &s)     { s.setf(ios_base::unitbuf); return s; }
 inline ios_base &nounitbuf(ios_base &s)   { s.unsetf(ios_base::unitbuf); return s; }
-
 inline ios_base &internal(ios_base &s) { s.setf(ios_base::internal, ios_base::adjustfield); return s; }
 inline ios_base &left(ios_base &s)     { s.setf(ios_base::left, ios_base::adjustfield); return s; }
 inline ios_base &right(ios_base &s)    { s.setf(ios_base::right, ios_base::adjustfield); return s; }
-
 inline ios_base &dec(ios_base &s) { s.setf(ios_base::dec, ios_base::basefield); return s; }
 inline ios_base &hex(ios_base &s) { s.setf(ios_base::hex, ios_base::basefield); return s; }
 inline ios_base &oct(ios_base &s) { s.setf(ios_base::oct, ios_base::basefield); return s; }
-
 inline ios_base &fixed(ios_base &s)        { s.setf(ios_base::fixed, ios_base::floatfield); return s; }
 inline ios_base &scientific(ios_base &s)   { s.setf(ios_base::scientific, ios_base::floatfield); return s; }
 inline ios_base &hexfloat(ios_base &s)     { s.setf(ios_base::fixed | ios_base::scientific, ios_base::floatfield); return s; }

@@ -106,8 +106,16 @@ ExprPtr Parser::classTemporary(const Type *cls, std::size_t pos) {
         const Type *ilType = nullptr;
         if (initializerListConstructor(plain, &ilType) != nullptr) {
             Init in = parseInitialiser();
-            args.push_back(initializerListExpr(ilType, in, pos));
-            expect(")");
+            // The list alone, and one the initializer_list takes: otherwise the list is an argument like
+            // any other - `D({1, 2}, alloc)`, `string({"ab"})`.
+            if (peek().is(")") && initializerListFits(ilType, in)) {
+                args.push_back(initializerListExpr(ilType, in, pos));
+                expect(")");
+            } else {
+                args.push_back(bracedPlaceholder(std::move(in)));
+                if (consume(",")) parseArguments(args);
+                else expect(")");
+            }
             builtArgs = true;      // the ')' is consumed above
         }
     }
@@ -423,10 +431,12 @@ ExprPtr Parser::listTemporaryFrom(const Type *to, Init &in, bool copyList, std::
         !(isAggregateClass(plain) && !in.items.empty())) {
         checkNotAbstract(plain, pos, "the temporary '" + plain->describe() + "{...}' would make");
         const Type *ilType = nullptr;
-        if (!in.items.empty() && initializerListConstructor(plain, &ilType) != nullptr) {
+        if (!in.items.empty() && initializerListConstructor(plain, &ilType) != nullptr &&
+            initializerListFits(ilType, in)) {
             std::vector<ExprPtr> args;
             args.push_back(initializerListExpr(ilType, in, pos));
             const Signature ctor = resolveOverload(constructorKey(plain->tag()), args, pos);
+            applyDefaults(ctor, args, pos);
             return constructTemporary(plain, ctor, std::move(args), false, pos);
         }
         if (in.items.empty() || !onlyImplicitConstructors(plain->tag()) ||
@@ -485,7 +495,7 @@ ExprPtr Parser::constructListedElement(const Type *made, Init &clause, ExprPtr a
     std::vector<ExprPtr> args;
     const Type *ilType = nullptr;
     Signature ctor = Signature();
-    if (clause.isList && initializerListConstructor(made, &ilType) != nullptr) {
+    if (clause.isList && initializerListConstructor(made, &ilType) != nullptr && initializerListFits(ilType, clause)) {
         args.push_back(initializerListExpr(ilType, clause, where));
         ctor = resolveOverload(constructorKey(made->tag()), args, where);
     } else if (clause.isList) {
@@ -493,7 +503,10 @@ ExprPtr Parser::constructListedElement(const Type *made, Init &clause, ExprPtr a
     } else {
         args.push_back(std::move(clause.value));
         convertThroughConversionFunction(args, made, false, where);
-        ctor = resolveOverload(constructorKey(made->tag()), args, where);
+        {
+            ConvertingOnly only(*this, true);
+            ctor = resolveOverload(constructorKey(made->tag()), args, where);
+        }
         if (ctor.isExplicit)
             src_.fail(where, "'" + made->describe() + "' is made from this by an 'explicit' "
                              "constructor, and " + what + " is copy-initialised, which may not "
@@ -650,7 +663,8 @@ const Parser::Signature *Parser::convertingConstructor(const Type *to,
     for (std::size_t k = 0; k < set->size(); k++) {
         const Signature &c = functions_[(*set)[k]];
         // Direct-initialisation - a cast - may take an explicit one, [over.match.ctor].
-        if ((c.isExplicit && !directInit) || c.params.size() != 1) continue;
+        // [class.conv.ctor]/1: one argument, the parameters after it defaulted - `basic_string(const C *, const A & = A())`.
+        if ((c.isExplicit && !directInit) || c.params.empty() || leastArguments(c) > 1) continue;
         const Type *want = c.params[0];
         const Type *bare = want->isReference() ? want->pointee()->unqualified()
                                                : want->unqualified();
@@ -678,6 +692,11 @@ ExprPtr Parser::userConversion(const Type *param, ExprPtr &arg, std::size_t pos)
     if (param->isReference() && !param->isRValueReference() && !want->isConst()) return nullptr;
     if (arg->type() == nullptr) return nullptr;
     if (arg->type()->unqualified() == plain) return nullptr;
+    // [dcl.init.ref]/5: a reference binds a derived object directly and asks no constructor - not even a
+    // template's `const Tagged<U> &` at the base's own U, which would come back here for its own argument.
+    if (param->isReference() && arg->type()->unqualified()->isStructOrUnion() &&
+        accessibleBaseOffset(arg->type()->unqualified(), plain) >= 0)
+        return nullptr;
 
     const Signature *ctor = convertingConstructor(plain, *arg, pos);
     // [over.match.copy]/1: A's constructor from a B and B's own conversion function to A are both candidates, the
@@ -724,6 +743,7 @@ ExprPtr Parser::userConversion(const Type *param, ExprPtr &arg, std::size_t pos)
 
     std::vector<ExprPtr> one;
     one.push_back(std::move(arg));
+    applyDefaults(*ctor, one, pos);
     return constructTemporary(plain, *ctor, std::move(one), false, pos);
 }
 
@@ -1331,12 +1351,17 @@ ExprPtr Parser::throwExpression() {
     ExprPtr value = decay(assign());
     checkThrowOperand(*value, tpos);
     if (inNoexceptFunction_ && !inTryBody_ && !inHandlerBody_) {
-        ExprPtr both(new Comma(std::move(value),
-                               runtimeCall("abort", types_.get(Kind::Void), std::vector<ExprPtr>())));
+        ExprPtr both(new Comma(std::move(value), terminateCall()));
         both->setType(types_.get(Kind::Void));
         return both;
     }
     return statementsAsExpression(throwStatement(std::move(value), tpos), tpos);
+}
+
+// [except.spec]/9 names std::terminate, and a handler set for it has to be the one that runs.
+ExprPtr Parser::terminateCall() {
+    return runtimeCall(target_.microsoftNames() ? "terminate" : "_ZSt9terminatev",
+                       types_.get(Kind::Void), std::vector<ExprPtr>());
 }
 
 ExprPtr Parser::rethrowCall() {
@@ -1400,9 +1425,16 @@ StmtPtr Parser::microsoftThrow(ExprPtr value, std::size_t pos) {
         if (cc != nullptr) value->setXvalue();
         else cc = copyConstructorOf(thrown);
     }
-    if (cc != nullptr) {
+    const Type *thrownPtr = types_.pointerTo(thrown);
+    ExprPtr heldAt(Var::local(temp, slot));
+    heldAt->setType(thrown);
+    ExprPtr slotAt(new Unary('&', std::move(heldAt)));
+    slotAt->setType(thrownPtr);
+    // [class.copy]/31: a prvalue of the class is the exception object, built where it will stay.
+    if (cc != nullptr && constructInPlace(*value, thrown, slotAt)) {
+        store = std::move(value);
+    } else if (cc != nullptr) {
         markUsed(cc);
-        const Type *thrownPtr = types_.pointerTo(thrown);
         ExprPtr at(new Unary('&', std::move(held)));
         at->setType(thrownPtr);
         std::vector<ExprPtr> ctorArgs;
@@ -1520,7 +1552,14 @@ StmtPtr Parser::throwStatement(ExprPtr value, std::size_t pos) {
     const Signature *cc = throwOperandMoves(*value) ? moveConstructorOf(thrown) : nullptr;
     if (cc != nullptr) value->setXvalue();
     else cc = copyConstructorOf(thrown);
-    if (cc != nullptr) {
+    ExprPtr heldAt(Var::local(temp, slot));
+    heldAt->setType(voidPtr);
+    ExprPtr objectAt(new Cast(thrownPtr, std::move(heldAt)));
+    objectAt->setType(thrownPtr);
+    // [class.copy]/31: a prvalue of the class is the exception object, built where it will stay.
+    if (cc != nullptr && constructInPlace(*value, thrown, objectAt)) {
+        store = std::move(value);
+    } else if (cc != nullptr) {
         markUsed(cc);
         std::vector<ExprPtr> ctorArgs;
         ctorArgs.push_back(std::move(cast));
@@ -1800,12 +1839,21 @@ ExprPtr Parser::newExpression(std::size_t pos) {
             if (!peek().is(")")) parseArguments(ctorArgs);
             else at_++;
         } else if (!consume(")")) {
-            init = assign();
-            if (peek().is(","))
-                src_.fail(peek().pos, "more than one value in a new-expression "
-                                      "needs a constructor, which is not "
-                                      "supported yet");
-            expect(")");
+            // **`new T(std::forward<A>(a)...)` of a scalar T** - read as call arguments are, so a
+            // pack expands: one value initialises, none value-initialises ([temp.variadic]/7).
+            const std::size_t lpos = peek().pos;
+            std::vector<ExprPtr> values;
+            parseArguments(values);
+            if (values.size() > 1)
+                src_.fail(lpos, "more than one value in a new-expression "
+                                "needs a constructor, which '" + made->describe() +
+                                "' does not have");
+            if (values.size() == 1) {
+                if (isBracedPlaceholder(*values[0]))
+                    src_.fail(lpos, "a braced list in the parentheses of 'new " +
+                                    made->describe() + "(...)' is not supported yet");
+                init = std::move(values[0]);
+            }
         }
     }
     const Type *sizeT = types_.get(target_.sizeType());

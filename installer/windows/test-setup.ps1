@@ -1,7 +1,8 @@
 # test-setup.ps1 - the Setup's health, per user (MSIINSTALLPERUSER=1, no elevation), once for each
 # choice: msiexec /i with IDE=Black, IDE=Grey or IDE=White, then the chosen folder holds GRIDE.exe and
 # the ten programs and the other two folders are absent, the Start menu shortcut and the registry values are there,
-# GRIDE.exe starts and answers and cpp11 runs; for Black, GRIDE's runtime for Windows is in lib\ and a C program
+# GRIDE.exe starts and answers and cpp11 runs; the tree of headers and libraries (docs\Runtime_Design.md 5.3) is
+# there folder by folder; GRIDE's runtime for Windows is in lib\x86_64-windows and a C program
 # built and linked with it alone runs, and the programs need no VC++ runtime DLL; a deleted program comes back
 # with msiexec /fa; msiexec /x takes the folder, the shortcut and the registry values away again.
 #
@@ -84,10 +85,22 @@ foreach ($c in $Choices) {
   # the five layers' Debug variants a Debug link takes (grtstartd ... grtwind)
   $libs = 21
   Check ((Get-ChildItem "$dir\lib" -Recurse -Filter *.lib -ErrorAction SilentlyContinue).Count -eq $libs) "the $libs runtime libraries under lib\"
+  $win = "$dir\lib\x86_64-windows"
   $grt = @("grtstart.lib", "grtcompat.lib", "grtcxx.lib", "grtc.lib", "grtwin.lib", "grtstartd.lib", "grtcompatd.lib", "grtcxxd.lib", "grtcd.lib", "grtwind.lib",
-           "kernel32.lib", "shmrt-x86_64-windows-grt.lib", "shmrt-x86_64-windows-grt-debug.lib" | Where-Object { -not (Test-Path "$dir\lib\$_") })
-  Check ($grt.Count -eq 0) "GRIDE's runtime in lib\: grtstart, grtcompat, grtcxx, grtc, grtwin and their Debug variants, kernel32.lib, the Shalimar runtime over them$(if ($grt) { ' - missing: ' + ($grt -join ', ') })"
-  $list = (& "$dir\link.exe" /LIB /LIST "$dir\lib\grtstart.lib" 2>&1) + (& "$dir\link.exe" /LIB /LIST "$dir\lib\kernel32.lib" 2>&1)
+           "kernel32.lib", "shmrt.lib", "shmrtd.lib", "msvc\shmrt.lib", "msvc\shmrtd.lib" | Where-Object { -not (Test-Path "$win\$_") })
+  Check ($grt.Count -eq 0) "lib\x86_64-windows: GRIDE's runtime (grtstart, grtcompat, grtcxx, grtc, grtwin and their Debug variants, kernel32.lib) and the Shalimar runtime over it and over Microsoft's (msvc\)$(if ($grt) { ' - missing: ' + ($grt -join ', ') })"
+  $c6x = @("rts6x.lib", "rts6xd.lib", "printf6x.lib", "printf6xd.lib", "shmrt6x.lib", "shmrt6xd.lib", "shmrt\Runtime.s", "shmrt-debug\Debug.s" | Where-Object { -not (Test-Path "$dir\lib\tms6747\$_") })
+  Check ($c6x.Count -eq 0) "lib\tms6747: RTS6x, printf6x and the Shalimar runtime, with its assembly in shmrt and shmrt-debug$(if ($c6x) { ' - missing: ' + ($c6x -join ', ') })"
+  # the headers: one C set for c90 and cpp11 (include\c, with sys\), cpp11's C++ headers (include\c++), Windows' and
+  # POSIX's (include\win) - and, for one release, the earlier lib\*.h and include\* an earlier installation's tools read
+  $hc = @(Get-ChildItem "$dir\include\c" -Filter *.h -ErrorAction SilentlyContinue).Count
+  $hs = @(Get-ChildItem "$dir\include\c\sys" -Filter *.h -ErrorAction SilentlyContinue).Count
+  $hx = @(Get-ChildItem "$dir\include\c++" -File -ErrorAction SilentlyContinue).Count
+  $hw = @(Get-ChildItem "$dir\include\win" -Filter *.h -ErrorAction SilentlyContinue).Count
+  Check ($hc -eq 23 -and $hs -eq 2 -and $hx -ge 80 -and $hw -eq 4 -and (Test-Path "$dir\include\c++\cstddef")) "include\c: $hc C headers and sys\: $hs; include\c++: $hx; include\win: $hw"
+  Check ((Test-Path "$dir\lib\stddef.h") -and (Test-Path "$dir\include\cstddef") -and (Test-Path "$dir\include\stddef.h")) "the earlier header folders, for one release: lib\*.h and include\*"
+  Check (@(Get-ChildItem "$dir\share\ccs" -Filter *.tsv -ErrorAction SilentlyContinue).Count -eq 2) "share\ccs: TI's two CCS option tables"
+  $list = (& "$dir\link.exe" /LIB /LIST "$win\grtstart.lib" 2>&1) + (& "$dir\link.exe" /LIB /LIST "$win\kernel32.lib" 2>&1)
   Check (($list -match '^\s+mainCRTStartup$').Count -eq 1 -and ($list -match '^\s+__imp_ExitProcess$').Count -eq 1) "link /LIB /LIST: grtstart.lib defines mainCRTStartup, kernel32.lib imports ExitProcess"
   # a C program built by the installed toolchain and linked with GRIDE's runtime alone: no LIB, no INCLUDE
   $t = Join-Path $logs "grt-$c"; if (Test-Path $t) { Remove-Item $t -Recurse -Force }; New-Item -ItemType Directory $t | Out-Null
@@ -95,7 +108,7 @@ foreach ($c in $Choices) {
   $savedLib = $env:LIB; $savedInc = $env:INCLUDE; $env:LIB = ""; $env:INCLUDE = ""
   & "$dir\c90.exe" -S "$t\hello.c" -o "$t\hello.s" -arch x86_64-windows -O2 -masm=masm -nologo 2>&1 | Out-Null
   & "$dir\masm.exe" -t x64 "$t\hello.s" -o "$t\hello.obj" 2>&1 | Out-Null
-  & "$dir\link.exe" /nologo /subsystem:console "/out:$t\hello.exe" "$t\hello.obj" "$dir\lib\grtstart.lib" "$dir\lib\grtcompat.lib" "$dir\lib\grtcxx.lib" "$dir\lib\grtc.lib" "$dir\lib\grtwin.lib" "$dir\lib\kernel32.lib" 2>&1 | Out-Null
+  & "$dir\link.exe" /nologo /subsystem:console "/out:$t\hello.exe" "$t\hello.obj" "$win\grtstart.lib" "$win\grtcompat.lib" "$win\grtcxx.lib" "$win\grtc.lib" "$win\grtwin.lib" "$win\kernel32.lib" 2>&1 | Out-Null
   $env:LIB = $savedLib; $env:INCLUDE = $savedInc
   $said = if (Test-Path "$t\hello.exe") { & "$t\hello.exe" } else { "" }
   $imports = if (Test-Path "$t\hello.exe") { @(Get-Imports "$t\hello.exe") } else { @() }
@@ -103,6 +116,8 @@ foreach ($c in $Choices) {
   # the programs carry the static VC++ runtime: only GRIDE.exe (C++/CLI) needs the DLLs beside it
   $dynamic = @("c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747", "gride-dbg" | Where-Object { (Test-Path "$dir\$_.exe") -and (@(Get-Imports "$dir\$_.exe") -match '^(?i)(vcruntime|msvcp|api-ms-win-crt)').Count -gt 0 })
   Check ($dynamic.Count -eq 0) "the programs need no VC++ runtime DLL$(if ($dynamic) { ' - these do: ' + ($dynamic -join ', ') })"
+  # the runtime's sources gride-dbg shows on a step into it (docs\Runtime_Design.md 9.3)
+  Check ((Test-Path "$dir\src\runtime\RT\c\fmt\Print.cpp") -and (Test-Path "$dir\src\runtime\RT\win\heap.c") -and (Test-Path "$dir\src\runtime\RTS6x\stdio\Formatter.cpp") -and -not (Test-Path "$dir\src\runtime\RT\tests")) "GRIDE's runtime's sources under src\runtime (RT and RTS6x), without its tests"
   Check (Test-Path "$dir\docs\GRIDE_Help.html") "the shared Help, docs\GRIDE_Help.html"
   Check (Test-Path "$dir\vcruntime140.dll") "the VC++ runtime beside GRIDE.exe"
   foreach ($o in $others) { Check (-not (Test-Path (Join-Path $base $folders[$o]))) "$($folders[$o]) not installed" }

@@ -1,0 +1,17 @@
+// c99.shl - the C99 functions of the hosts' runtimes that are RTS6x's too
+uses fma, copysign, erf, exp2, tgamma, log1p, expm1, fmin, fmax, fdim, nearbyint, rint, logb, ilogb
+uses scalbn, scalbln, remquo, nan, isblank, strcoll, mblen, atoll, lround, llround, lrint, llrint
+
+fun <> = main() {
+  ? fma(2.0, 3.0, 4.0) copysign(3.0, -1.0) erf(0.0) exp2(3.0) tgamma(5.0)
+  ? log1p(0.0) expm1(0.0) fmin(1.0, 2.0) fmax(1.0, 2.0) fdim(5.0, 3.0)
+  ? nearbyint(2.0) rint(3.0) logb(8.0) ilogb(8.0)
+  ? scalbn(1.0, 3) scalbln(1.0, 3)
+  <r, q> : remquo(7.0, 2.0)
+  ? r q
+  ? nan("")
+  ? isblank(32) != 0
+  ? strcoll("a", "b") < 0
+  ? mblen("a", 1)
+  ? atoll("123") lround(2.5) llround(2.5) lrint(2.0) llrint(2.0)
+}

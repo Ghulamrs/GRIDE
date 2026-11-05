@@ -24,11 +24,6 @@ extern "C" void exit(int status)
     rts6x::Termination::exit(status);
 }
 
-extern "C" void _Exit(int status)
-{
-    __rts6x_halt(status);
-}
-
 extern "C" int at_quick_exit(void (*function)(void))
 {
     bool held = __grt_threads != 0;

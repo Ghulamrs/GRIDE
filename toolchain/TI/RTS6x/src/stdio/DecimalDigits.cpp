@@ -6,18 +6,43 @@
 
 namespace rts6x {
 
+namespace {
+
+// t / 10000 and x / 10. cpp11 divides by a constant with div, so on Windows these multiply by the reciprocal:
+// exact for every 32-bit t, and for every x below 43,690.
+inline unsigned byLimbBase(unsigned t)
+{
+#if defined(_WIN32)
+    return (unsigned)(((unsigned long long)t * 3518437209ull) >> 45);
+#else
+    return t / 10000u;
+#endif
+}
+
+inline unsigned byTen(unsigned x)
+{
+#if defined(_WIN32)
+    return (x * 52429u) >> 19;
+#else
+    return x / 10u;
+#endif
+}
+
+}  // namespace
+
 void DecimalDigits::multiply(unsigned *limbs, unsigned &n, unsigned factor)
 {
     // factor at most 390625: 9999 x 390625 plus a carry stays below 2^32.
     unsigned carry = 0;
     for (unsigned i = 0; i < n; i++) {
         unsigned t = limbs[i] * factor + carry;
-        carry = t / LimbBase;
+        carry = byLimbBase(t);
         limbs[i] = t - carry * LimbBase;
     }
     while (carry != 0) {
-        limbs[n++] = carry % LimbBase;
-        carry /= LimbBase;
+        unsigned q = byLimbBase(carry);
+        limbs[n++] = carry - q * LimbBase;
+        carry = q;
     }
 }
 
@@ -44,7 +69,7 @@ DecimalDigits::DecimalDigits(double v) : count_(0), point_(1)
         unsigned r = 0;
         for (int k = 0; k < 4; k++) {
             unsigned cur = r * 65536u + piece[k];
-            piece[k] = cur / LimbBase;
+            piece[k] = byLimbBase(cur);
             r = cur - piece[k] * LimbBase;
         }
         limbs[n++] = r;
@@ -67,7 +92,11 @@ DecimalDigits::DecimalDigits(double v) : count_(0), point_(1)
     char buf[4];
     for (int i = (int)n - 1; i >= 0; i--) {
         unsigned x = limbs[i];
-        for (int k = 3; k >= 0; k--) { buf[k] = (char)('0' + x % 10); x /= 10; }
+        for (int k = 3; k >= 0; k--) {
+            unsigned q = byTen(x);
+            buf[k] = (char)('0' + (x - q * 10));
+            x = q;
+        }
         for (int k = 0; k < 4; k++)
             if (count_ != 0 || buf[k] != '0') digits_[count_++] = buf[k];
     }

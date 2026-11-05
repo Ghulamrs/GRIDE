@@ -1,0 +1,6 @@
+// size.shl - a size below zero is a failure, not a huge size
+uses strncmp
+
+fun <> = main() {
+  ? strncmp("a", "b", -1)
+}

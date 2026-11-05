@@ -26,7 +26,11 @@ StmtPtr Parser::constructObject(const Declared &d, const std::string &symbol,
                                 bool copyInit, bool valueInit) {
     checkNotAbstract(d.type, d.pos, "'" + d.name + "'");
     const std::string key = constructorKey(d.type->tag());
-    const Signature &ctor = resolveOverload(key, args, d.pos);
+    Signature ctor;
+    {
+        ConvertingOnly only(*this, copyInit);
+        ctor = resolveOverload(key, args, d.pos);
+    }
     applyDefaults(ctor, args, d.pos);
 
     // **[dcl.init]/16: copy-initialization may not pick an `explicit` constructor.**
@@ -258,6 +262,10 @@ void Parser::registerDestructor(const std::string &cls, std::size_t pos,
                                     params, false, false, pos, false, cls, false,
                                     access, isVirtual });
     functions_.back().implicit = implicit;
+    if (!implicit) {
+        functions_.back().isNoexcept = pendingNoexcept_;
+        functions_.back().spec = pendingSpec_;
+    }
 
     // **A virtual destructor claims slots where it is declared**, and how many
     // depends on the ABI: Itanium two and adjacent, Microsoft one holding only the
@@ -1139,7 +1147,7 @@ void Parser::releaseGuarded(std::vector<StmtPtr> &steps, const Temporary &t) {
         both.push_back(StmtPtr(new ExprStmt(
             destructorCall(std::move(at), *dtor, 0))));
     }
-    both.push_back(StmtPtr(new ExprStmt(setGuard(t.flag, 0))));
+    both.insert(both.begin(), StmtPtr(new ExprStmt(setGuard(t.flag, 0))));
     ExprPtr live(Var::local("$guard", t.flag));
     live->setType(types_.intType());
     steps.push_back(StmtPtr(new If(std::move(live),
@@ -1195,6 +1203,23 @@ StmtPtr Parser::unwindPad(std::vector<StmtPtr> steps) {
     return StmtPtr(b);
 }
 
+// **A destructor that throws has still ended its object**, [except.ctor]: the region over the end of
+// the block would run it a second time on the way out, and every object built after it, gone by then,
+// once more. Those are destroyed under a guard; what was built before it is still to go.
+void Parser::guardThrowingDestructors(std::vector<StmtPtr> &body, std::size_t blockFrom, std::size_t from) {
+    bool throwing = false;
+    for (std::size_t i = blockFrom; i < from && !throwing; i++) throwing = alive_[i].whenOnce;
+    for (std::size_t i = from; i < alive_.size(); i++) {
+        Alive &a = alive_[i];
+        if (a.owner != nullptr || a.builtSlot >= 0 || a.whenSlot >= 0) continue;
+        throwing = throwing || destructorMayThrow(a.cls);
+        if (!throwing) continue;
+        a.whenSlot = guardFlag();
+        a.whenOnce = true;
+        body.push_back(StmtPtr(new ExprStmt(setGuard(a.whenSlot, 1))));
+    }
+}
+
 void Parser::emitDestructors(std::vector<StmtPtr> &into, std::size_t from,
                              std::size_t pos, int except, std::size_t to) {
     if (to > alive_.size()) to = alive_.size();
@@ -1214,8 +1239,9 @@ void Parser::destroyObject(std::vector<StmtPtr> &into, const Alive &a,
         Alive plain = a;
         plain.whenSlot = -1;
         std::vector<StmtPtr> calls;
+        if (a.whenOnce) calls.push_back(StmtPtr(new ExprStmt(setGuard(a.whenSlot, 0))));
         destroyObject(calls, plain, pos);
-        ExprPtr n(Var::local("$vb", a.whenSlot));
+        ExprPtr n(Var::local(a.whenOnce ? "$guard" : "$vb", a.whenSlot));
         n->setType(types_.intType());
         ExprPtr above(new Num(static_cast<long long>(a.whenAbove)));
         above->setType(types_.intType());
@@ -2542,6 +2568,61 @@ bool Parser::implicitNoexcept(const Type *type, int kind) const {
     return true;
 }
 
+bool Parser::destructorMayThrow(const Type *cls) const {
+    const Signature *dtor = cls == nullptr ? nullptr : destructorOf(cls);
+    if (dtor == nullptr || dtor->isNoexcept) return false;
+    if (dtor->spec.written || dtor->spec.allowsAll) return true;
+    for (const Type::BaseSpec &b : cls->bases())
+        if ((b.direct || b.isVirtual) && destructorMayThrow(b.type->unqualified())) return true;
+    for (const Member &m : cls->members())
+        if (m.declaredIn == nullptr && m.inVirtualBase == nullptr && destructorMayThrow(memberClass(m.type))) return true;
+    return false;
+}
+
+// **[except.ctor]/2: a destructor that throws leaves the object's other subobjects to be destroyed.** Where one
+// of this class's may, each step - `body` where there is one, then each member's and base's destructor - runs
+// under a region that destroys the rest, in a block of its own so that the regions do not chain.
+StmtPtr Parser::destroySubobjects(StmtPtr body, const Type *type, int thisSlot, std::size_t pos) {
+    std::vector<Alive> left;
+    const std::vector<Member> &ms = type->members();
+    for (std::size_t n = ms.size(); type->kind() != Kind::Union && n-- > 0; )
+        if (!memberFromBase(type, ms[n]) && memberHasDestructor(ms[n].type)) {
+            left.push_back(Alive{ "this", thisSlot, type });
+            left.back().owner = type;
+            left.back().member = static_cast<int>(n);
+        }
+    const std::vector<Type::BaseSpec> &bs = type->bases();
+    for (std::size_t n = bs.size(); n-- > 0; )
+        if (bs[n].direct && !bs[n].isVirtual && destructorOf(bs[n].type) != nullptr) {
+            left.push_back(Alive{ "this", thisSlot, type });
+            left.back().owner = type;
+            left.back().base = static_cast<int>(n);
+        }
+    std::vector<StmtPtr> out;
+    for (std::size_t k = 0; k <= left.size(); k++) {
+        std::vector<StmtPtr> step;
+        if (k > 0) destroyObject(step, left[k - 1], pos);
+        else if (body != nullptr) step.push_back(std::move(body));
+        if (step.empty()) continue;
+        if (k == left.size()) {
+            for (StmtPtr &s : step) out.push_back(std::move(s));
+            break;
+        }
+        std::vector<StmtPtr> rest;
+        for (std::size_t j = k; j < left.size(); j++) destroyObject(rest, left[j], pos);
+        Block *b = new Block(std::move(rest));
+        b->setScope(-1);
+        std::vector<StmtPtr> region;
+        region.push_back(cleanupRegion(std::move(step), StmtPtr(b)));
+        Block *alone = new Block(std::move(region));
+        alone->setScope(-1);
+        out.push_back(StmtPtr(alone));
+    }
+    Block *all = new Block(std::move(out));
+    all->setScope(-1);
+    return StmtPtr(all);
+}
+
 bool Parser::memberHasDestructor(const Type *t) const {
     return destructorOf(memberClass(t)) != nullptr;
 }
@@ -2586,6 +2667,39 @@ Parser::initializerListConstructor(const Type *cls, const Type **ilType) {
         }
     }
     return nullptr;
+}
+
+// [temp.deduct.call]/1: `seed_seq s{1, 2, 3}` - a constructor template on initializer_list<T> deduces T from the
+// elements, which must agree, and is then the class's initializer-list constructor.
+const Parser::Signature *Parser::listConstructorTemplate(const Type *cls, const Init &in, const Type **ilType,
+                                                          std::size_t pos) {
+    if (in.items.empty() || memberTemplates_.count(constructorKey(cls->tag())) == 0) return nullptr;
+    const std::map<std::string, TemplateDecl>::const_iterator il = findTemplate("std::initializer_list");
+    if (il == templates_.end() || !il->second.isClass) return nullptr;
+    const Type *elem = nullptr;
+    for (const Init &item : in.items) {
+        if (item.isList || item.value == nullptr || item.value->type() == nullptr) return nullptr;
+        const Type *t = item.value->type();
+        t = decayedType(t->isReference() ? t->referent() : t)->unqualified();
+        if (elem != nullptr && elem != t) return nullptr;
+        elem = t;
+    }
+    instantiateConstructorTemplates(cls, std::vector<const Type *>(1, initializerListOf(elem, pos)), pos);
+    return initializerListConstructor(cls, ilType);
+}
+
+// `std::string{"ab"}` is not initializer_list<char>'s: "ab" is no char, so the constructors take the
+// elements as their arguments - string(const char *) - [over.match.list]/1 and [over.ics.list]/4.
+bool Parser::initializerListFits(const Type *ilType, const Init &in) {
+    const Type *il = ilType->unqualified();
+    if (!il->isSpecialization() || il->templateArgs().empty() || il->templateArgs()[0].type == nullptr) return true;
+    const Type *elem = il->templateArgs()[0].type;
+    for (std::size_t i = 0; i < in.items.size(); i++) {
+        if (in.items[i].isList) continue;
+        const Expr *v = in.items[i].value.get();
+        if (v == nullptr || v->type() == nullptr || rankArgument(*v, elem) == Rank::None) return false;
+    }
+    return true;
 }
 
 // **A brace-init-list becomes a backing array and an initializer_list over
@@ -2664,7 +2778,11 @@ ExprPtr Parser::buildInitializerList(const Type *ilType, Init &in,
     // it, not aggregate-initialised.**
     const Type *plainElem = elem->unqualified();
     const Type *innerIl = nullptr;
-    const Signature *innerCtor = plainElem->isStructOrUnion()
+    // Only where every element is itself braced: `vector<string> v = {"one", "two"}` copy-initialises each
+    // string from its C string ([dcl.init.list]/5), as the branch after this one does.
+    bool everyBraced = true;
+    for (std::size_t i = 0; i < in.items.size(); i++) everyBraced = everyBraced && in.items[i].isList;
+    const Signature *innerCtor = plainElem->isStructOrUnion() && everyBraced
         ? initializerListConstructor(plainElem, &innerIl) : nullptr;
     if (innerCtor != nullptr) {
         markUsed(innerCtor);
@@ -2711,6 +2829,32 @@ ExprPtr Parser::buildInitializerList(const Type *ilType, Init &in,
         for (std::size_t i = 0; i < in.items.size(); i++) {
             // A braced element is copy-list-initialised, [over.match.list]: built in its slot by the
             // constructor its items choose, never an explicit one - no temporary and no copy.
+            // A list of lists: the inner list makes its own array, as this one has, and no constructor.
+            if (in.items[i].isList && isInitializerListType(plainElem)) {
+                ExprPtr inner = initializerListExpr(plainElem, in.items[i], in.items[i].pos);
+                ExprPtr arr = backing();
+                ExprPtr idx(new Num(static_cast<long long>(i)));
+                idx->setType(types_.get(Kind::Int));
+                ExprPtr slot(new Unary('*', arithmetic(BinOp::Add, decay(std::move(arr)), std::move(idx), pos)));
+                slot->setType(plainElem);
+                ExprPtr store(new Assign(std::move(slot), std::move(inner)));
+                store->setType(plainElem);
+                into.push_back(StmtPtr(new ExprStmt(std::move(store))));
+                continue;
+            }
+            // A list of lists: the inner list makes its own array, as this one has, and no constructor.
+            if (in.items[i].isList && isInitializerListType(plainElem)) {
+                ExprPtr inner = initializerListExpr(plainElem, in.items[i], in.items[i].pos);
+                ExprPtr arr = backing();
+                ExprPtr idx(new Num(static_cast<long long>(i)));
+                idx->setType(types_.get(Kind::Int));
+                ExprPtr slot(new Unary('*', arithmetic(BinOp::Add, decay(std::move(arr)), std::move(idx), pos)));
+                slot->setType(plainElem);
+                ExprPtr store(new Assign(std::move(slot), std::move(inner)));
+                store->setType(plainElem);
+                into.push_back(StmtPtr(new ExprStmt(std::move(store))));
+                continue;
+            }
             if (in.items[i].isList) {
                 checkNotAbstract(plainElem, in.items[i].pos, "an element of this initializer_list would make");
                 std::vector<ExprPtr> args;
@@ -3180,6 +3324,7 @@ std::string Parser::vectorDestructor(const Type *cls, std::size_t pos) {
     const Type *sizeT = types_.get(target_.sizeType());
     const Type *idx = types_.intType();
     const FrameSave savedFrame = openFrame();
+    OwnPads own(*this);
     const int baseSlot = allocateFrameSlot(ptr);
     const int countSlot = allocateFrameSlot(sizeT);
     const int indexSlot = allocateFrameSlot(idx);
@@ -3210,7 +3355,20 @@ std::string Parser::vectorDestructor(const Type *cls, std::size_t pos) {
     inner.push_back(StmtPtr(new ExprStmt(destructorCall(std::move(at), *dtor, pos))));
     std::vector<StmtPtr> body;
     body.push_back(StmtPtr(new ExprStmt(std::move(init))));
-    body.push_back(StmtPtr(new While(std::move(cond), StmtPtr(new Block(std::move(inner))))));
+    StmtPtr loop(new While(std::move(cond), StmtPtr(new Block(std::move(inner)))));
+    // [except.ctor]/2: an element whose destructor throws leaves those before it, the first `$i`.
+    if (destructorMayThrow(cls)) {
+        ExprPtr first(Var::local("base", baseSlot));
+        first->setType(ptr);
+        std::vector<StmtPtr> rest;
+        rest.push_back(StmtPtr(new ExprStmt(callVectorLoop(name, cls, std::move(first), index(), pos))));
+        Block *b = new Block(std::move(rest));
+        b->setScope(-1);
+        std::vector<StmtPtr> guarded;
+        guarded.push_back(std::move(loop));
+        loop = cleanupRegion(std::move(guarded), StmtPtr(b));
+    }
+    body.push_back(std::move(loop));
     body.push_back(StmtPtr(new Return(nullptr)));
     current_->functions.push_back(Function(name, types_.get(Kind::Void),
                                            std::move(params),
@@ -3218,6 +3376,7 @@ std::string Parser::vectorDestructor(const Type *cls, std::size_t pos) {
                                            alignTo(frameSize_, 16), true, 0,
                                            false, 0, pos, std::vector<::Local>()));
     current_->functions.back().setSymbol(name);
+    current_->functions.back().setHasLandingPads(own.made());
     closeFrame(savedFrame);
     return name;
 }
@@ -3711,28 +3870,31 @@ void Parser::synthesizeDestructor(std::size_t which) {
 
     const std::vector<Type::BaseSpec> &bs = type->bases();
 
+    OwnPads own(*this);
+    const bool chained = destructorMayThrow(type);
+    if (chained) body.push_back(destroySubobjects(StmtPtr(), type, thisSlot, pos));
+
     // The members, then the bases below - [class.dtor]/8's order. The member
     // half is shared with the destructor the program writes, which is where it
     // was missing.
-    {
+    if (!chained) {
         std::vector<StmtPtr> mine = memberDestructors(cls, type, thisSlot, pos);
         for (std::size_t i = 0; i < mine.size(); i++)
             body.push_back(std::move(mine[i]));
     }
 
-    for (std::size_t n = bs.size(); n-- > 0; ) {
+    for (std::size_t n = bs.size(); !chained && n-- > 0; ) {
         const Type *base = bs[n].type;
         // D1 destroys the virtual bases, after this body has run - the mirror
         // of C1 building them before it. See synthesizeCompleteDtor.
         if (bs[n].isVirtual) continue;
         const Signature *dtor = destructorOf(base);
         if (dtor == nullptr) continue;
-        if (dtor->access != Access::Public)
+        // [class.protected]: a protected base destructor is the derived class's to call - a facet's is.
+        if (dtor->access == Access::Private)
             src_.fail(pos, "'" + cls + "' cannot be destroyed by the destructor "
                            "the compiler would write: the destructor of its "
-                           "base '" + base->tag() + "' is " +
-                           (dtor->access == Access::Private ? "private"
-                                                            : "protected"));
+                           "base '" + base->tag() + "' is private");
         // **Calling one is what asks for a body**, and this is the only synthesiser that built its call by hand and forgot to say so.
         markUsed(dtor);
         // The base-subobject form, D2, which is what a derived class calls -
@@ -3772,6 +3934,7 @@ void Parser::synthesizeDestructor(std::size_t which) {
                                            false, 0, pos, std::vector<::Local>()));
     current_->functions.back().setSymbol(symbol);
     current_->functions.back().setInline(true);
+    current_->functions.back().setHasLandingPads(own.made());
     showMemberAs(current_->functions.back(), type, "~" + localOf(cls));
     // The Microsoft wrapper: `??1` above stops at this class's own part, and
     // `??_D` destroys it and then the virtual bases.
@@ -4167,9 +4330,6 @@ void Parser::declareInheritingCtors(const std::string &tag, const Type *type, st
     if (it == inheritFrom_.end()) return;
     const std::vector<const Type *> bases = it->second;
     for (const Type *base : bases) {
-        if (memberTemplates_.count(constructorKey(base->tag())) != 0)
-            src_.fail(pos, "inheriting '" + base->describe() + "''s constructor template is not "
-                           "supported yet - its specializations would have to be made for the derived class");
         const std::vector<std::size_t> *set = overloadsOf(constructorKey(base->tag()));
         if (set == nullptr) continue;
         const std::vector<std::size_t> from = *set;
@@ -4645,7 +4805,10 @@ void Parser::synthesizeCopy(std::size_t which, bool assigning) {
         if (assigning && moving) cc = moveAssignOf(memberClass(mt));
         if (assigning && cc == nullptr) cc = copyAssignOf(memberClass(mt));
         else if (!assigning) {
-            if (moving) cc = moveConstructorOf(memberClass(mt));
+            // [class.copy]/15: the member is initialised from `static_cast<M &&>(x.m)`, which for a const M
+            // is `const M &&` - the copy constructor's, never the move's: pair<const string, int> moves its
+            // second and copies its first.
+            if (moving && !elem->isConst() && !elem->isVolatile()) cc = moveConstructorOf(memberClass(mt));
             if (cc == nullptr) cc = copyConstructorOf(memberClass(mt));
         }
         if (cc != nullptr) {
@@ -5173,10 +5336,10 @@ void Parser::defineStaticMember(Declared &d, Program &program, bool threadLocal)
     const StaticMemberScope scope(this, owner);
     // [class.static.data]/3: `constexpr P S::k;` defines what the class initialised, already laid down.
     if (inClassConstexprStatics_.count(s->symbol)) {
-        if (!peek().is(";"))
+        if (!peek().is(";") && !peek().is(","))
             src_.fail(d.pos, "'" + d.qualifier + "::" + d.name + "' was initialised inside the class, so "
                              "its definition outside it takes no initialiser");
-        expect(";");
+        if (!peek().is(",")) expect(";");
         return;
     }
     if (s->type->unqualified() != d.type->unqualified() ||
@@ -5202,7 +5365,7 @@ void Parser::defineStaticMember(Declared &d, Program &program, bool threadLocal)
             const std::string helper = target_.microsoftNames()
                 ? atexitHelperName(s->symbol + "@") : std::string();
             dynamicInitialise(m, s->symbol, helper, owner->isSpecialization());
-            expect(";");
+            if (!peek().is(",")) expect(";");
             // Not isConst whatever the member says: the constructor writes it.
             program.globals.push_back(Global{ full, s->symbol, s->type,
                                               std::vector<GlobalPiece>(), false,
@@ -5224,7 +5387,7 @@ void Parser::defineStaticMember(Declared &d, Program &program, bool threadLocal)
         const FunctionState outer = enterInitFunction();
         bindStaticReference(m, s->symbol, pieces, hasInit, &initSink());
         leaveInitFunction(outer);
-        expect(";");
+        if (!peek().is(",")) expect(";");
         program.globals.push_back(Global{ m.name, s->symbol,
                                           types_.pointerTo(s->type->referent()),
                                           std::move(pieces), hasInit, false, false });
@@ -5275,7 +5438,7 @@ void Parser::defineStaticMember(Declared &d, Program &program, bool threadLocal)
         flattenInit(s->type, in, 0, pieces);
         hasInit = true;
     }
-    expect(";");
+    if (!peek().is(",")) expect(";");
 
     program.globals.push_back(Global{ d.qualifier + "::" + d.name, s->symbol,
                                       s->type, std::move(pieces), hasInit, false,
@@ -5640,7 +5803,7 @@ void Parser::declareFunction(const std::string &name, const Type *returns,
             ? plain : namespacePrefix() + plain;
     const std::string &key = qualified;
     checkOperatorDeclarable(key, params, false, pos, internal, returns);
-    const bool cName = cLinkage_ > 0 || key == "main";
+    const bool cName = cLinkage_ > 0 || key == "main" || (microsoftEntry(key) && !internal);
     std::vector<std::size_t> &set = functionIndex_[key];
     const SpecialDef special = takeSpecialDef();
     if (special == SpecialDef::Defaulted)
@@ -5879,6 +6042,7 @@ bool Parser::packParameter(std::vector<const Type *> *types,
         PackBinding pb;
         pb.types = members;
         pb.names = made;
+        pb.functionParameter = true;
         packs_[base] = pb;
     }
     pk->second.names = made;
@@ -5886,19 +6050,29 @@ bool Parser::packParameter(std::vector<const Type *> *types,
 }
 
 // To the ',' or ')' that ends a default argument, counting brackets so that a call or
-// a subscript written inside one keeps its own commas. `<` is not counted: such a
-// default is refused where it is read rather than mis-parsed here.
+// a subscript written inside one keeps its own commas - and a template argument list, whose
+// `<` follows a name that is a template ([temp.names]/3): `n = basic_string<C, Tr, A>::npos`.
 void Parser::skipDefaultArgument() {
     int depth = 0;
+    std::vector<int> angles;   // the bracket depth each open template argument list began at
     for (;;) {
         const Token &t = peek();
         if (t.kind == TokenKind::End)
             src_.fail(t.pos, "this default argument never ends");
-        if (t.is("(") || t.is("[") || t.is("{")) depth++;
-        else if (t.is(")") || t.is("]") || t.is("}")) {
+        if (t.is("<") && at_ > 0 && tokens_[at_ - 1].kind == TokenKind::Ident &&
+            isTemplateName(tokens_[at_ - 1].text, true)) {
+            angles.push_back(depth);
+        } else if (!angles.empty() && angles.back() == depth && (t.is(">") || t.is(">>"))) {
+            angles.pop_back();
+            if (t.is(">>") && !angles.empty() && angles.back() == depth) angles.pop_back();
+        } else if (t.is("(") || t.is("[") || t.is("{")) {
+            depth++;
+        } else if (t.is(")") || t.is("]") || t.is("}")) {
             if (depth == 0) return;         // the ')' closing the parameters
             depth--;
-        } else if (t.is(",") && depth == 0) return;
+        } else if (t.is(",") && depth == 0 && angles.empty()) {
+            return;
+        }
         at_++;
     }
 }
@@ -6230,11 +6404,34 @@ const Type *Parser::functionTypeParameter(const Type *returns) {
     std::vector<const Type *> params;
     bool variadic = false;
     parameterTypes(params, variadic);
-    skipExceptionSpecification();
+    fnPointerSpec_ = skipExceptionSpecification();
     pendingDefaults_.swap(defaults);
     writtenParams_.swap(written);
     writtenFor_.swap(writtenFor);
     return types_.pointerTo(types_.functionType(returns, std::move(params), variadic));
+}
+
+// [dcl.ambig.res]: `int (int)` in a parameter list is an unnamed parameter of function type, where
+// the parentheses could have been a declarator's - a type name after them says which.
+Parser::Declared Parser::parameterDeclarator(const Type *base) {
+    if (peek().is("(")) {
+        at_++;
+        bool list = peek().is(")") || peek().is("...") || atTypeName();
+        // `S (T::*p)()` names a class on its way to a member pointer.
+        int depth = 0;
+        for (std::size_t i = at_; list && i + 1 < tokens_.size(); i++) {
+            const Token &t = tokens_[i];
+            if (t.is("(") || t.is("<")) depth++;
+            else if (t.is(">")) depth--;
+            else if (t.is(">>")) depth -= 2;
+            else if (t.is(")") && depth-- == 0) break;
+            else if (t.is(";") || t.is("{") || t.kind == TokenKind::End) break;
+            else if (depth == 0 && t.is("::") && tokens_[i + 1].is("*")) list = false;
+        }
+        at_--;
+        if (list) return Declared{ std::string(), base, peek().pos, 0, std::string() };
+    }
+    return declarator(base, true);
 }
 
 // **`noexcept`, `throw()` or `throw(T)` written on a function type that is not a function's
@@ -6335,7 +6532,7 @@ void Parser::parameterTypes(std::vector<const Type *> &params, bool &variadic) {
         StorageClass psc;
         Qualifiers pquals;
         const Type *pt = specifiers(&psc, &pquals);
-        Declared pd = declarator(pt, true);
+        Declared pd = parameterDeclarator(pt);
         if (peek().is("(")) pd.type = functionTypeParameter(pd.type);
         refuseThreadLocalHere(pquals.isThreadLocal, pd.pos);
         if (mentionsDeduced(pd.type))

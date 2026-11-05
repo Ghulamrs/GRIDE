@@ -1088,6 +1088,19 @@ namespace Gride { namespace Services {
         // everything the debugger said in this session, for a report
         property StringBuilder^ Said;
 
+        // a .step_filter line without its source-path patterns (those with a \ or /, gride-dbg's for GRIDE's runtime),
+        // for StepIntoRuntime; any other line as it is
+        static String^ WithoutSourceFilters(String^ line)
+        {
+            if (!line->StartsWith(".step_filter")) return line;
+            int open = line->IndexOf('"'), close = line->LastIndexOf('"');
+            if (open < 0 || close <= open) return line;
+            List<String^>^ kept = gcnew List<String^>();
+            for each (String^ p in line->Substring(open + 1, close - open - 1)->Split(';'))
+                if (p->Trim()->Length > 0 && p->IndexOfAny(gcnew array<wchar_t>{ L'\\', L'/' }) < 0) kept->Add(p->Trim());
+            return ".step_filter \"" + String::Join(";", kept) + "\"";
+        }
+
         // RIDE's start: the command, the preamble, the marker and the wait for it; then every breakpoint, then
         // run - to main's first line when F10 / F11 started it (StopAtEntry)
         virtual bool Start(String^ program, Target target, String^ entryFile, int entryLine) override
@@ -1113,7 +1126,7 @@ namespace Gride { namespace Services {
             bool started = onConsole ? proc->StartOnConsole(launch->Command, launch->WorkDir, launch->Environment, why)
                                      : proc->Start(launch->Command, launch->WorkDir, launch->Environment, why);
             if (!started) { Print("the debugger could not be started: " + why); proc = nullptr; return false; }
-            for each (String^ line in session->Preamble) proc->Say(line);
+            for each (String^ line in session->Preamble) proc->Say(StepIntoRuntime ? WithoutSourceFilters(line) : line);
             proc->Say(session->MarkerCommand);
             bool found;
             String^ said = proc->ReadUntil(session->Marker, AskTimeoutMs, found);

@@ -67,7 +67,8 @@ bool isGlvalue(const Expr &e) {
 // `static_cast<T &&>` hands over, and that subtraction is what an rvalue reference
 // is for - it refuses an lvalue, so a move can empty what it is given.
 bool isLvalue(const Expr &e) {
-    return !e.isXvalue() && isGlvalue(e);
+    // A class temporary or `&S::f` dereferences a slot of the frame and is marked a prvalue for it.
+    return !e.isXvalue() && e.declCategory() != Expr::Category::Prvalue && isGlvalue(e);
 }
 
 // A class temporary is a dereference of its slot and carries the prvalue mark, so the mark is
@@ -418,17 +419,19 @@ const Type *Parser::findGlobalTypedef(const std::string &name) const {
 }
 
 const Type *Parser::findTypedef(const std::string &name) const {
+    // A bound template parameter's scope is inside every class and namespace around it ([temp.local]/6), and
+    // no local name may redeclare it - so it comes before the function's own: `function<void()>`'s `R`, made
+    // inside a function with a typedef `R`, is still void.
+    if (boundTypeParams_.count(name) != 0) {
+        auto it = typedefIndex_.find(name);
+        if (it != typedefIndex_.end()) return typedefs_[it->second].type;
+    }
+
     // **A class local to this function is found first, and that is what makes it
     // shadow a global of the same name** - [basic.scope.local], and the reason the
     // local scope is a table of its own rather than an entry in the global one.
     auto local = localTypes_.find(name);
     if (local != localTypes_.end()) return local->second;
-
-    // A bound template parameter's scope is inside every class and namespace around it ([temp.local]/6).
-    if (boundTypeParams_.count(name) != 0) {
-        auto it = typedefIndex_.find(name);
-        if (it != typedefIndex_.end()) return typedefs_[it->second].type;
-    }
     // Unqualified, the classes this is inside come next, then the enclosing namespaces,
     // and only then a global: [basic.lookup.unqual]/1, the nearest declaration wins.
     if (name.find("::") == std::string::npos)
@@ -487,6 +490,12 @@ const Type *Parser::classScopeType(const std::string &name) const {
     // inlineOwner_ is the one thing that knows, so it is asked here.
     if (!inlineOwner_.empty()) {
         auto it = typedefIndex_.find(inlineOwner_);
+        if (it != typedefIndex_.end())
+            if (const Type *t = lookupInClass(typedefs_[it->second].type, name))
+                return t;
+    }
+    if (!signatureOwner_.empty()) {
+        auto it = typedefIndex_.find(signatureOwner_);
         if (it != typedefIndex_.end())
             if (const Type *t = lookupInClass(typedefs_[it->second].type, name))
                 return t;
@@ -606,13 +615,16 @@ bool Parser::atTypeName() const {
         if (peek().is(k)) return true;
     // `::Lexer *p;` declares a p - the leading `::` says where to look and
     // nothing else, so the question is about the name after it.
-    if (peek().is("::") && peekAt(1).kind == TokenKind::Ident)
+    if (peek().is("::") && peekAt(1).kind == TokenKind::Ident) {
+        const std::map<std::string, TemplateDecl>::const_iterator t = findTemplate("::" + peekAt(1).text);
+        if (peekAt(2).is("<") && t != templates_.end() && t->second.isClass && t->second.ns.empty()) return true;
         return findGlobalTypedef(peekAt(1).text) != nullptr;
+    }
     if (peek().kind != TokenKind::Ident) return false;
     if (localHidesType()) return false;
     // `Box<int> b;` declares a variable, so the name has to answer yes here -
     // but only with a `<` after it, since the bare name is not a type.
-    auto tmpl = templates_.find(peek().text);
+    auto tmpl = findTemplate(peek().text);
     if (tmpl != templates_.end() && tmpl->second.isClass && peekAt(1).is("<"))
         return true;
     if (peekAt(1).is("<") && memberClassTemplate(peek().text) != nullptr) return true;
@@ -678,7 +690,7 @@ std::size_t Parser::qualifiedTypeEndPastArgs() const {
 // [stmt.ambig]/1: `T(x).f();` cannot be a declaration - no declarator goes on with `.` or `->`
 // after its `)` - so it is a temporary of T and a member call. True when that is what is here.
 // Where `T(...)` opening the statement closes: the index of its `)`, or 0 where it does not open so.
-std::size_t Parser::temporaryCallEnd() const {
+std::size_t Parser::temporaryCallEnd(std::size_t *open) const {
     if (peek().kind != TokenKind::Ident) return 0;
     std::size_t k = 0;
     if (peekAt(1).is("::")) k = qualifiedTypeEndPastArgs();
@@ -694,6 +706,7 @@ std::size_t Parser::temporaryCallEnd() const {
         }
     } else if (findTypedef(peek().text) != nullptr) k = 1;
     if (k == 0 || !peekAt(k).is("(")) return 0;
+    if (open != nullptr) *open = k;
     int depth = 0;
     for (;; k++) {
         const Token &t = peekAt(k);
@@ -701,6 +714,23 @@ std::size_t Parser::temporaryCallEnd() const {
         if (t.is("(") || t.is("[") || t.is("{")) depth++;
         else if (t.is(")") || t.is("]") || t.is("}")) { if (--depth == 0) return k; }
     }
+}
+
+// [stmt.ambig]/1 again: `T(4);` and `T(a + b);` hold nothing a declarator could be, so they are temporaries.
+bool Parser::atTemporaryOfArguments() const {
+    std::size_t open = 0;
+    const std::size_t close = temporaryCallEnd(&open);
+    if (close <= open + 1) return false;
+    int depth = 0;
+    for (std::size_t i = open + 1; i < close; i++) {
+        const Token &t = peekAt(i);
+        if (t.is("(") || t.is("[") || t.is("{")) depth++;
+        else if (t.is(")") || t.is("]") || t.is("}")) depth--;
+        else if (depth == 0 && t.kind != TokenKind::Ident && !t.is("*") && !t.is("&") && !t.is("&&") &&
+                 !t.is("::") && !t.is("<") && !t.is(">") && !t.is("...") && !t.is("const") && !t.is("volatile"))
+            return true;
+    }
+    return false;
 }
 
 bool Parser::atTemporaryMemberAccess() const {
@@ -717,7 +747,7 @@ bool Parser::atConditionDeclaration() const {
 }
 
 bool Parser::atDeclarationStart() const {
-    if (atTemporaryMemberAccess()) return false;
+    if (atTemporaryMemberAccess() || atTemporaryOfArguments()) return false;
     // **`Counter::total = 1;` is a statement, not a declaration**, though it opens
     // with a name that names a type: a declaration spelled `C::something` needs a
     // nested class, so a class name before '::' always begins an expression here.
@@ -738,6 +768,13 @@ bool Parser::atDeclarationStart() const {
             // could only be a function declaration with no name, which is not a thing.
             const std::size_t after = qualifiedTypeEndPastArgs();
             if (after == 0) return true;
+            // `std::vector<bool>::swap(r0, r1);` goes on past the template-id to a member, and is a
+            // declaration only where a declarator follows that member - as for `Tm<P>::st.a` below.
+            if (peekAt(after).is("::") && peekAt(after + 1).kind == TokenKind::Ident) {
+                const Token &next = peekAt(after + 2);
+                return next.kind == TokenKind::Ident || next.is("*") || next.is("&") || next.is("&&") ||
+                       next.is("::") || next.is("<");
+            }
             return !(peekAt(after).is("(") && peekAt(after + 1).is(")"));
         }
     }
@@ -772,6 +809,9 @@ bool Parser::atDeclarationStart() const {
     // is the temporary and not a declaration of anything.
     if (peek().kind == TokenKind::Ident && peekAt(1).is("(") &&
         peekAt(2).is(")") && findTypedef(peek().text) != nullptr)
+        return false;
+    // And for a type a keyword names: `void();` declares nothing, so it is [expr.type.conv]'s prvalue.
+    if (simpleTypeKeyword() != nullptr && peekAt(1).is("(") && peekAt(2).is(")"))
         return false;
 
     // `constexpr` beside the storage classes, and here rather than in atTypeName:
@@ -872,6 +912,8 @@ Parser::FunctionState Parser::captureFunctionState() const {
     s.atFunctionBody = atFunctionBody_;
     s.alive = alive_;
     s.pendingTemps = pendingTemps_;
+    s.statementTemps = statementTemps_;
+    s.guardSlots = guardSlots_;
     s.bodyCleanupFrom = bodyCleanupFrom_;
     s.functionHasPads = functionHasPads_;
     s.functionHasTry = functionHasTry_;
@@ -884,6 +926,8 @@ Parser::FunctionState Parser::captureFunctionState() const {
     s.pendingNoexcept = pendingNoexcept_;
     s.pendingSpec = pendingSpec_;
     s.inNoexceptFunction = inNoexceptFunction_;
+    s.dtorEndLabel = dtorEndLabel_;
+    s.dtorReturned = dtorReturned_;
     s.replayingInline = replayingInline_;
     s.currentFunctionInline = currentFunctionInline_;
     s.tssSeq = tssSeq_;
@@ -937,6 +981,8 @@ void Parser::restoreFunctionState(const FunctionState &s) {
     atFunctionBody_ = s.atFunctionBody;
     alive_ = s.alive;
     pendingTemps_ = s.pendingTemps;
+    statementTemps_ = s.statementTemps;
+    guardSlots_ = s.guardSlots;
     bodyCleanupFrom_ = s.bodyCleanupFrom;
     functionHasPads_ = s.functionHasPads;
     functionHasTry_ = s.functionHasTry;
@@ -949,6 +995,8 @@ void Parser::restoreFunctionState(const FunctionState &s) {
     pendingNoexcept_ = s.pendingNoexcept;
     pendingSpec_ = s.pendingSpec;
     inNoexceptFunction_ = s.inNoexceptFunction;
+    dtorEndLabel_ = s.dtorEndLabel;
+    dtorReturned_ = s.dtorReturned;
     replayingInline_ = s.replayingInline;
     currentFunctionInline_ = s.currentFunctionInline;
     tssSeq_ = s.tssSeq;
@@ -1003,6 +1051,8 @@ void Parser::clearFunctionState() {
     atFunctionBody_ = false;
     alive_.clear();
     pendingTemps_.clear();
+    statementTemps_.clear();
+    guardSlots_.clear();
     bodyCleanupFrom_ = 0;
     functionHasPads_ = false;
     functionHasTry_ = false;
@@ -1015,6 +1065,7 @@ void Parser::clearFunctionState() {
     pendingNoexcept_ = false;
     pendingSpec_ = DynamicSpec();
     inNoexceptFunction_ = false;
+    dtorEndLabel_.clear();
     currentFunctionInline_ = false;
     tssSeq_ = 0;
     loopDepth_ = 0;
@@ -1043,6 +1094,9 @@ void Parser::replayInlineBodies(std::vector<PendingBody> mine) {
     if (mine.empty()) return;
     // **One capture for the whole nested parse.**
     const FunctionState outer = captureFunctionState();
+    // The packs too: a body read here declaring a parameter `a` drops a function parameter pack `a` of
+    // the function it was asked for from - deque's emplace lost its `a` to allocator_traits::construct's.
+    const std::map<std::string, PackBinding> outerPacks = packs_;
     clearFunctionState();
     // A local class's bodies are replayed inside the function that wrote it, where its name and
     // its neighbours' are the function's local type names (1.27, 2026-10-21, review of 1.25, item 3).
@@ -1050,6 +1104,7 @@ void Parser::replayInlineBodies(std::vector<PendingBody> mine) {
     // A body replayed here was written inside a class body, so every definition it produces is implicitly inline.
     replayingInline_ = true;
     const bool wasFriend = friendDeclaration_;
+    const std::vector<std::string> wasNamespace = namespaceStack_;
 
     // **The outer function comes back on every way out**: a member template instantiated
     // inside a trial may throw from here, and the call that follows still reads its locals.
@@ -1070,7 +1125,9 @@ void Parser::replayInlineBodies(std::vector<PendingBody> mine) {
         const Type *scope = scoped ? findTypedef(mine[i].tag) : nullptr;
         if (scope != nullptr) classStack_.push_back(scope);
         friendDeclaration_ = mine[i].freeFunction;
+        if (mine[i].freeFunction) namespaceStack_ = mine[i].friendNamespace;
         topLevel(*current_);
+        namespaceStack_ = wasNamespace;
         friendDeclaration_ = wasFriend;
         if (scope != nullptr) classStack_.pop_back();
         inlineOwner_.clear();
@@ -1078,12 +1135,15 @@ void Parser::replayInlineBodies(std::vector<PendingBody> mine) {
     }
     } catch (...) {
         friendDeclaration_ = wasFriend;
+        namespaceStack_ = wasNamespace;
         inlineOwner_.clear();
         inlineOwnerName_.clear();
         restoreFunctionState(outer);
+        packs_ = outerPacks;
         throw;
     }
     restoreFunctionState(outer);
+    packs_ = outerPacks;
 }
 
 // **One level of the program's nesting is one level of the parser's**, and the limit is said
@@ -1185,8 +1245,10 @@ int Parser::declare(const std::string &name, const Type *type, std::size_t pos,
     for (std::size_t i = freeSlots_.size(); i-- > 0 && offset == 0;)
         if (freeSlots_[i].stored == storedType && freeSlots_[i].align >= alignAtLeast) { offset = freeSlots_[i].offset; freeSlots_.erase(freeSlots_.begin() + static_cast<long>(i)); }
     if (offset == 0) offset = allocateFrameSlot(type, alignAtLeast);
+    if (type->kind() != Kind::PackExpansion) dropStalePack(name);
     locals_.push_back(Local{ name, offset, type, false, std::string() });
     locals_.back().isParameter = inParams_;
+    locals_.back().noexceptPointer = fnPointerSpec_ == 1;
     locals_.back().serial = ++localSerial_;
     // The debug record describes the storage, which for a reference is the
     // pointer it really is. DWARF has a tag for a reference and this does not
@@ -1197,6 +1259,11 @@ int Parser::declare(const std::string &name, const Type *type, std::size_t pos,
                               currentBlock() });
     fnVars_.back().align = alignAtLeast > objectAlign(stored, target_) ? alignAtLeast : objectAlign(stored, target_);
     return offset;
+}
+
+void Parser::dropStalePack(const std::string &name) {
+    const auto pk = packs_.find(name);
+    if (pk != packs_.end() && pk->second.functionParameter) packs_.erase(pk);
 }
 
 void Parser::declareStaticLocal(const std::string &name, const Type *type,
@@ -1320,13 +1387,21 @@ ExprPtr Parser::defaultPromote(ExprPtr e) {
     return e;
 }
 
+// cl's other entry points: at file scope wmain, WinMain and wWinMain are C names whatever their
+// parameters, as `main` is, since Microsoft's start-up calls them by name and nothing need declare
+// wmain. So each is also one function: cl refuses an overload (C2731), and a member or a function
+// in a namespace, whose key has its qualifier, stays a C++ name. No other target has them.
+bool Parser::microsoftEntry(const std::string &key) const {
+    return target_.microsoftNames() && (key == "wmain" || key == "WinMain" || key == "wWinMain");
+}
+
 // The name the linker is given: `main` keeps its own, extern "C" keeps a name with external
 // linkage as written ([dcl.link]/4 - an internal one is a C++ name there too, `_ZL2sfi`), and
 // everything else is mangled in the target's ABI.
 std::string Parser::functionSymbol(const std::string &name, const Type *returns,
                                    const std::vector<const Type *> &params,
                                    bool variadic, bool internal, std::size_t pos) {
-    if ((cLinkage_ > 0 && !internal) || name == "main") return name;
+    if ((cLinkage_ > 0 && !internal) || name == "main" || (microsoftEntry(name) && !internal)) return name;
     const Type *fn = types_.functionType(returns, params, variadic);
     std::string out, why;
     bool ok = target_.microsoftNames()

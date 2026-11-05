@@ -1,0 +1,8 @@
+; screen.def - the console calls screen.c looks at a console with, which grt itself never makes
+LIBRARY KERNEL32.dll
+EXPORTS
+    GetConsoleScreenBufferInfo
+    ReadConsoleOutputCharacterW
+    WriteConsoleInputW
+    GetConsoleOutputCP
+    GetConsoleCP

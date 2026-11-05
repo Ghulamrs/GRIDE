@@ -318,6 +318,7 @@ namespace Gride
             lines = gcnew List<String^>();
             failedStep = String::Empty;
             optionStore = project->OptionStore();
+            names = NamesOf();
             clSettingsSaid = false; rideHeadersSaid = false; noCrtList = false;
             clangChecked = false; clangMissing = false;
             ownPdb = false; crtLibs = nullptr; crtChosen = String::Empty;
@@ -370,7 +371,8 @@ namespace Gride
             bool ok = true;
             try
             {
-                if (action == BuildAction::Clean || action == BuildAction::Rebuild) ok = Clean();
+                if (action != BuildAction::Clean) ok = NamesKnown();
+                if (ok && (action == BuildAction::Clean || action == BuildAction::Rebuild)) ok = Clean();
                 if (ok && action == BuildAction::CompileFile) ok = DoCompileFile();
                 else if (ok && action != BuildAction::Clean)
                 {
@@ -535,6 +537,7 @@ namespace Gride
         String^ envAssembler;       // what C90_AS ... name (worked out once a build)
         String^ envLinker;
         CompilerOptionStore^ optionStore;   // the project's Compiler Options (RIDE's options.cpp)
+        NamedPaths^ names;                  // what the project's lists, the shared lists and the defines may name
         String^ tiRuntimeDir;       // TI's lib, when the C6747 links against TI's runtime (the link's $(RuntimeDir))
         String^ tiExtraDir;         // the second directory TI's runtime is looked for in (RIDE's tilib)
         bool romModelForTi;         // TI's linker given --rom_model where the project names no model
@@ -759,6 +762,53 @@ namespace Gride
             return sb->ToString()->Trim();
         }
 
+        // the names a project's lists may use (NamedPaths): the .pro's "paths", settings.json's, read afresh for each
+        // build, then GRIDE's own - the project's folder (the workspace's too: GRIDE 2.0 has one project), Config, Arch,
+        // the installation's folders, and each library of toolchain.json under its key, the folder it is found in
+        NamedPaths^ NamesOf()
+        {
+            NamedPaths^ n = gcnew NamedPaths();
+            if (project->Paths != nullptr)
+                for each (KeyValuePair<String^, String^> kv in project->Paths) n->Add(kv.Key, kv.Value);
+            try
+            {
+                String^ file = IdeSettings::SettingsPath();
+                JsonValue^ doc = File::Exists(file) ? JsonParser::ParseFile(file) : nullptr;
+                JsonValue^ named = doc == nullptr ? nullptr : doc->GetObject("paths");
+                if (named != nullptr) for each (String^ k in named->KeyNames) n->Add(k, named->GetString(k, String::Empty));
+            }
+            catch (Exception^) { /* an unreadable file: its other keys say so where they are read */ }
+            String^ root = IdeSettingsPaths::RideRootDir();
+            if (root == nullptr) root = AppDomain::CurrentDomain->BaseDirectory;
+            InstallationEntry^ inst = ToolchainFile::Current->Installation;
+            n->AddFolder("ProjectDir", projectDir);
+            n->AddFolder("WorkspaceDir", projectDir);
+            n->Add("Config", IsDebugConfig(config->Name) ? Str("Debug") : Str("Release"));
+            n->Add("Arch", target->Arch);
+            n->AddFolder("GrideRoot", root);
+            if (!String::IsNullOrWhiteSpace(IdeSettingsPaths::RideIncludeDir)) n->AddFolder("GrideInclude", PathUtil::Resolve(root, IdeSettingsPaths::RideIncludeDir));
+            n->AddFolder("GrideInclude", Path::Combine(root, inst->IncludeDir));
+            if (!String::IsNullOrWhiteSpace(IdeSettingsPaths::RideLibDir)) n->AddFolder("GrideLib", PathUtil::Resolve(root, IdeSettingsPaths::RideLibDir));
+            n->AddFolder("GrideLib", Path::Combine(root, inst->LibDir));
+            for each (LibraryEntry^ l in ToolchainFile::Current->Libraries) n->AddFolder(l->Id, IdeSettingsPaths::FindLibraryDir(l));
+            return n;
+        }
+
+        // every name the lists use is known, or the build stops here, naming it and the entry: a compiler given a
+        // $(NAME) says something far stranger. A CCS or Visual Studio project's $(...) are its own, and stay.
+        bool NamesKnown()
+        {
+            names->Unknown = nullptr;
+            for each (List<String^>^ list in gcnew array<List<String^>^>{ project->IncludePaths, project->Libraries, config->IncludePathsHere, config->LibrariesHere,
+                     config->LibraryDirs, config->Defines, settings->SharedIncludes, settings->SharedLibraries })
+                names->ExpandAll(list);
+            for each (String^ role in gcnew array<String^>{ "cCompiler", "cppCompiler" })
+                CompilerOptionRules::Flags(optionStore, ToolchainFile::Current->ToolByRole(role), IsDebugConfig(config->Name) ? "Debug" : "Release", target->Entry, names);
+            if (names->Unknown == nullptr || project->IsImported) return true;
+            AddMessage("error", String::Format("$({0}) in \"{1}\" is not a known name, or names itself: name it under \"paths\" in the .pro or in settings.json", names->Unknown, names->UnknownIn), project->FilePath, 0);
+            return false;
+        }
+
         // the defines, each after the tool's switch as RIDE's options.cpp writes them (quoted()): one holding a space,
         // a tab or a quote is quoted whole, an inner quote escaped, so a CCS project's "GREETING=hi there" reaches the
         // compiler as one argument (-D"GREETING=hi there"); -DNAME and -DNAME=1 as they are - the Compiler Options' rule
@@ -787,10 +837,11 @@ namespace Gride
             includeDirs->AddRange(config->IncludePathsHere);
             includeDirs->AddRange(settings->SharedIncludes);
             includeDirs->AddRange(IdeSettingsPaths::InstallIncludeDirs(e));
+            includeDirs = names->ExpandAll(includeDirs);
             // the machine's own compiler (cl) reads Visual Studio's INCLUDE: RIDE's header directories would stand in front of it
             if (IsHostCompiler(tool)) KeepInstallHeadersFrom(includeDirs);
             String^ includes = JoinSwitch(tool->IncludeSwitch, includeDirs, true);
-            String^ defines = JoinDefines(tool->DefineSwitch, config->Defines);
+            String^ defines = JoinDefines(tool->DefineSwitch, names->ExpandAll(config->Defines));
             String^ crt = CrtLibraries();
             String^ rt = RuntimePath();
             String^ runtime = rt == nullptr ? String::Empty : rt;
@@ -913,7 +964,7 @@ namespace Gride
             // RIDE's Compiler Options: a compiler listing options takes the project's (the defaults where it set none)
             if (CompilerOptionRules::Governs(e))
             {
-                String^ chosen = CompilerOptionRules::Flags(optionStore, e, debug ? "Debug" : "Release", target->Entry);
+                String^ chosen = CompilerOptionRules::Flags(optionStore, e, debug ? "Debug" : "Release", target->Entry, names);
                 return debug && clangCompiler && NoClang() ? WithoutDashG(chosen) : chosen;
             }
             String^ flags = e->ConfigFlagsFor(debug ? "Debug" : "Release", target->Arch);
@@ -1132,7 +1183,7 @@ namespace Gride
             StringBuilder^ sb = gcnew StringBuilder();
             sb->AppendLine(project->Target)->AppendLine(config->Name)->AppendLine(config->Flags)
               ->AppendLine(config->AsmFlags)
-              ->AppendLine(PathUtil::JoinList(config->Defines))->AppendLine(PathUtil::JoinList(project->IncludePaths))
+              ->AppendLine(PathUtil::JoinList(names->ExpandAll(config->Defines)))->AppendLine(PathUtil::JoinList(names->ExpandAll(project->IncludePaths)))
               ->AppendLine(native ? "the vendor's assembler" : "the project's assembler")
               ->AppendLine(IsDebugConfig(config->Name) && target->CodeView && !NeedsClang() ? "the compilers' own CodeView" : String::Empty);
             array<String^>^ ids = gcnew array<String^>{ ToolIds::CompilerC90, ToolIds::CompilerCpp11, ToolIds::CompilerShalimar,
@@ -1835,7 +1886,7 @@ namespace Gride
             for each (String^ l in named)
             {
                 if (String::IsNullOrWhiteSpace(l)) continue;
-                String^ lp = l->Trim();
+                String^ lp = names->Expand(l->Trim());
                 if (runtime != nullptr && rl != nullptr && (rl->IsAlias(lp) || IsTiRuntimeName(lp))) { lp = runtime; runtimeNamed = true; }
                 else if (lp->IndexOf(L'\\') >= 0 || lp->IndexOf(L'/') >= 0 || File::Exists(Path::Combine(projectDir, lp)))
                     lp = PathUtil::Resolve(projectDir, lp);
@@ -1929,7 +1980,7 @@ namespace Gride
             if (tiExtraDir != nullptr) sb->Append(flag)->Append(PathUtil::Quote(tiExtraDir))->Append(L' ');
             for each (String^ d in config->LibraryDirs)
             {
-                String^ abs = PathUtil::Resolve(projectDir, d);
+                String^ abs = PathUtil::Resolve(projectDir, names->Expand(d));
                 if (!Directory::Exists(abs)) { if (say) Out(String::Format("[library search path not on this machine, left out: {0}]", d)); continue; }
                 sb->Append(flag)->Append(PathUtil::Quote(abs))->Append(L' ');
             }
@@ -1945,7 +1996,7 @@ namespace Gride
             if (shalimarProgram)
             {
                 bool debug = IsDebugConfig(config->Name);
-                // the Shalimar runtime built for the C runtime in force (shmrt-x86_64-windows-grt.lib over GRIDE's)
+                // the Shalimar runtime built for the C runtime in force (lib\x86_64-windows\shmrt.lib over GRIDE's, msvc\shmrt.lib over Microsoft's)
                 LibraryEntry^ shm = String::IsNullOrEmpty(crtChosen) ? ToolchainFile::Current->LibraryByKind(target->Arch, "shalimarRuntime")
                                                                      : ToolchainFile::Current->LibraryByKind(target->Arch, "shalimarRuntime", crtChosen);
                 String^ found = IdeSettingsPaths::FindLibraryFile(shm, debug);
@@ -2052,7 +2103,7 @@ namespace Gride
         }
 
         // a Shalimar program on the C6747 with no packed runtime library: the runtime's assembly (its
-        // variable, else lib\shmrt-tms6747[-debug] under the installation) copied into obj\shmrt and
+        // variable, else lib\tms6747\shmrt[-debug] under the installation) copied into obj\shmrt and
         // assembled there, its objects linked with the program's
         bool AssembleShalimarRuntime(LibraryEntry^ shm, bool debug, List<String^>^ objs)
         {

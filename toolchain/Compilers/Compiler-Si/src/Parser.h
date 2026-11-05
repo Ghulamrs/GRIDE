@@ -76,6 +76,7 @@ private:
 
 
     bool atDeclaration() const;
+    bool atQualifiedCall() const;
     const Type *scalarTypeHere();
 
     ExprPtr parseExpression();

@@ -506,7 +506,7 @@ namespace Gride
         // ---- from toolchain.json (the defaults' values, copied onto a loaded entry by id, not saved)
         property String^ EnvVar;              // the environment variable that names it outright ($C90, $VM6747, $RTS6X ...)
         property List<String^>^ Aliases;      // the other names tried, in order (cc1.exe, shc.exe, ASM6x.exe ...)
-        property String^ InstallDir;          // the installation sub-folder it lives in (bin; lib\rts6x-tms6747 for the runtime)
+        property String^ InstallDir;          // the installation sub-folder it lives in (bin; lib\tms6747 for the runtime)
         property bool OnPath;                 // also looked for on PATH (not RIDE's link, which Microsoft's would be taken for)
         property bool Vcvars;                 // Visual Studio's: looked for in its folders (VendorTools.h), as vcvars64.bat would put them on PATH
         property bool TiCompilerDir;          // TI's: looked for in TI's C6000 compiler directory's bin

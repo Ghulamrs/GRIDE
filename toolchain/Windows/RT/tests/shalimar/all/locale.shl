@@ -1,0 +1,10 @@
+// locale.shl - the null rule: setlocale's null ends the program; "C" is an answer, which comes back as a text
+uses setlocale
+
+fun <> = main() {
+  char s[40]
+  setlocale(0, "C", s)
+  ? s
+  setlocale(0, "gride-no-such-locale", s)
+  ? 2
+}

@@ -1,4 +1,6 @@
-/* start.c - mainCRTStartup, where a console program begins (c90), in grtstart.
+/* start.c - what the four entries share (c90), in grtstart: mainCRTStartup (main.c), wmainCRTStartup (wmain.c),
+ * WinMainCRTStartup (winmain.c) and wWinMainCRTStartup (wwinmain.c), each a member of its own, so that a program pulls
+ * the one link asks for and nothing names the three mains it does not define.
  *
  * Spec: ISO C 5.1.2.2 (main called with argc, argv - argv[argc] a null pointer - and its return given
  * to exit), C++ 3.6.2 (the objects with static storage constructed before main), and the Microsoft
@@ -16,12 +18,10 @@ typedef void (*Initialiser)(void);
 extern CInitialiser __xi_a[], __xi_z[];
 extern Initialiser __xc_a[], __xc_z[];
 
-/* main(argc, argv, envp) under __grt_main_handler (start\mainguard.asm) */
-int __grt_call_main(int argc, char **argv, char **envp);
-
-/* main's language handler, the Microsoft runtime's start-up filter: in the search for a handler (no unwinding flag,
-   0x66, in the record's flags), a structured exception that is a signal goes to the program's handler for it, and
-   the program goes on where it stopped (ExceptionContinueExecution, 0); anything else is searched on (1) */
+/* the language handler of the program's entry (start\entryguard.asm), the Microsoft runtime's start-up filter: in the
+   search for a handler (no unwinding flag, 0x66, in the record's flags), a structured exception that is a signal goes
+   to the program's handler for it, and the program goes on where it stopped (ExceptionContinueExecution, 0); anything
+   else is searched on (1) */
 int __grt_main_handler(void *record, void *frame, void *context, void *dispatcher)
 {
     unsigned long *r = (unsigned long *)record;
@@ -39,16 +39,16 @@ int _fltused = 0x9875;
 extern char _tls_used[];
 char *__grt_tls_directory = _tls_used;
 
-void mainCRTStartup(void)
+/* the arguments come before the initialisers, as in Microsoft's start-up, so a static object can read __argc */
+void __grt_start(int wide)
 {
-    int argc;
-    char **argv;
     CInitialiser *c;
     Initialiser *i;
     __grt_memory_start();
     __grt_clock_start();
     __grt_files_start();
     __grt_streams_start();
+    __grt_arguments(wide);
     for (c = __xi_a; c < __xi_z; c++)
         if (*c && (*c)() != 0) {
             __grt_say("grt: a C initialiser failed\n");
@@ -56,6 +56,4 @@ void mainCRTStartup(void)
         }
     for (i = __xc_a; i < __xc_z; i++)
         if (*i) (*i)();
-    __grt_arguments(&argc, &argv);
-    exit(__grt_call_main(argc, argv, __grt_environment()));
 }

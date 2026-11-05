@@ -26,6 +26,7 @@ extern "C" void __grt_streams_start(void)
     for (int i = 0; i < RTS6X_FTABLE_COUNT; i++) {
         _ftable[i].slot = i;
         __grt_streams[i] = &_ftable[i];
+        if ((__grt_descriptor(i) & GRT_KIND_MASK) == GRT_KIND_OTHER) _ftable[i].fd = grt::NoHandle;
     }
     _ftable[2].flags |= grt::Unbuffered;
 }

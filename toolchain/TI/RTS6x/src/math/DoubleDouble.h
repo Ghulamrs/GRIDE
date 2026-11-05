@@ -58,6 +58,8 @@ public:
     }
     // this / d: three quotient digits, each corrected by the exact remainder; about 2^-100 relative.
     DoubleDouble over(const DoubleDouble &d) const;
+    // this / d for a double d: about 2^-104 relative.
+    DoubleDouble over(double d) const;
 
     double hi, lo;
 

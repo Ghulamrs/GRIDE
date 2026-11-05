@@ -14,6 +14,7 @@ public:
     static bool alnum(int c) { return alpha(c) || digit(c); }
     static bool xdigit(int c) { return digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
     static bool space(int c) { return c == ' ' || (c >= '\t' && c <= '\r'); }
+    static bool blank(int c) { return c == ' ' || c == '\t'; }
     static bool control(int c) { return (c >= 0 && c < 0x20) || c == 0x7F; }
     static bool print(int c) { return c >= 0x20 && c < 0x7F; }
     static bool graph(int c) { return c > 0x20 && c < 0x7F; }

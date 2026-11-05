@@ -120,6 +120,7 @@ public:
     void fileEntry(int n, const std::string &name) override;
     void location(int file, int line, int column) override;
     void predefine(const std::vector<std::string> &names) override;
+    void finishText(std::vector<std::string> &chunks) override;
     void preamble(std::ostream &o) override;
     void postamble(std::ostream &o) override;
     void globl(const std::string &name) override;

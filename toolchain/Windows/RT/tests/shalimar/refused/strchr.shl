@@ -1,0 +1,4 @@
+// refused: 'strchr' returns a pointer into its argument, which Shalimar has no type for
+fun <> = main() {
+  ? c.strchr("abc", 98)
+}

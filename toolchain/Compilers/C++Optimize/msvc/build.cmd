@@ -47,7 +47,8 @@ cl /nologo /std:c++14 /permissive- /EHsc /W4 /WX /O2 ^
    /wd4996 /wd4267 /wd4244 /wd4456 /wd4146 ^
    /I"%HERE%compat" /I"%ROOT%\src" ^
    /D_CRT_SECURE_NO_WARNINGS ^
-   /DCXX1_INCLUDE_DIR="\"%ROOTFWD%/lib\"" ^
+   /DCXX1_INCLUDE_DIR="\"%ROOTFWD%/../../include/c\"" ^
+   /DCXX1_WIN_INCLUDE_DIR="\"%ROOTFWD%/../../include/win\"" ^
    /DCXX1_CXX_INCLUDE_DIR="\"%ROOTFWD%/include\"" ^
    /Fo"%ROOT%\obj-msvc\\" /Fe"%ROOT%\cxx1-msvc.exe" ^
    "%ROOT%\src\*.cpp" "%ROOT%\src\parser\*.cpp" "%ROOT%\src\backend\*.cpp" "%ROOT%\src\optimizer\*.cpp"

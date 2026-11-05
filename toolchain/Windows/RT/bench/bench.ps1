@@ -16,7 +16,7 @@ param([string]$Bin = "", [string]$Libs = "", [int]$Runs = 5, [string[]]$Tests = 
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 if (-not $Bin) { $Bin = (Resolve-Path (Join-Path $here '..\..\..\..\GRIDEd\x64\Release')).Path }
-if (-not $Libs) { $Libs = Join-Path $Bin 'lib' }
+if (-not $Libs) { $Libs = Join-Path $Bin 'lib\x86_64-windows'; if (-not (Test-Path (Join-Path $Libs 'grtc.lib'))) { $Libs = Join-Path $Bin 'lib' } }
 if ($Tests.Count -eq 0) {
     $Tests = @('printf-int', 'printf-float', 'printf-string', 'printf-stdout', 'sscanf-int', 'sscanf-float',
                'fwrite', 'fread', 'fgets', 'putc', 'getc',

@@ -1,34 +1,88 @@
-// <iostream> - the three streams every program starts with.
+// <iostream> - [iostream.objects]: cin, cout, cerr, clog and their wide twins.
 //
-// **They are objects at file scope, built by the constructor that names the
-// standard stream each one writes or reads** - before anything declared after
-// this header in the same unit, which is everything that could use them. The
-// `FILE *` is resolved at the point of use. See the comment at the top of
-// <ostream>.
-//
-// **`static`, so each translation unit gets its own.** A header-only library
-// has no other choice: an `extern` object would need a definition in some
-// object file, and there is none to put it in, and an `inline` variable is
-// C++17. The functions moved to `inline` on 2026-09-19; these cannot follow.
-// The observable difference is nil for a program compiled as one unit, and
-// for one compiled as several it is a `width`/`precision` per unit.
+// **One object each for the whole program**, as [iostream.objects]/2 has them, with no library to define them
+// in: their storage is a static data member of a class template, which every translation unit may define and
+// the linker keeps once. [iostream.objects]/2 also has them made before any static of a unit that includes this
+// header: that is ios_base::Init's work, one Init object here per unit, ordered before the unit's own statics,
+// the first of them in the program building the streams in that storage and the last flushing them.
+// Each stream's buffer is a basic_filebuf over the C library's stdin, stdout or stderr that leaves the FILE
+// open; cerr and wcerr are unitbuf, and cin, cerr and their wide twins are tied to cout and wcout.
 #ifndef _CXX1_IOSTREAM
 #define _CXX1_IOSTREAM
 
+#include <cstdio>
+#include <fstream>
 #include <istream>
+#include <new>
 #include <ostream>
 
 namespace std {
 
-// The number says which standard stream to resolve to: 1 is stdout (and
-// stdin), 2 is stderr. [narrow.stream.objects]/2-4: cin and cerr are tied to
-// cout, which is flushed before either is used; cerr is unit-buffered - it
-// flushes after every output operation - and clog, on the same file, is neither.
-static ostream cout(1);
-static ostream cerr(2, ios_base::unitbuf, &cout);
-static ostream clog(2);
+template <class C> struct __cxx1_std_streams {
+    struct out_stream : basic_ostream<C> {
+        basic_filebuf<C> buf;
+        out_stream(FILE *f, bool unit) : basic_ostream<C>(&buf) {
+            buf.__cxx1_attach(f, ios_base::out);
+            if (unit) this->setf(ios_base::unitbuf);
+        }
+    };
+    struct in_stream : basic_istream<C> {
+        basic_filebuf<C> buf;
+        explicit in_stream(FILE *f) : basic_istream<C>(&buf) { buf.__cxx1_attach(f, ios_base::in); }
+    };
+    template <class S> struct slot {
+        alignas(S) unsigned char bytes[sizeof(S)];
+        S &get() { return *reinterpret_cast<S *>(bytes); }
+    };
+    static slot<out_stream> cout_, cerr_, clog_;
+    static slot<in_stream> cin_;
 
-static istream cin(1, &cout);
+    static void make() {
+        ::new (static_cast<void *>(cout_.bytes)) out_stream(stdout, false);
+        ::new (static_cast<void *>(cerr_.bytes)) out_stream(stderr, true);
+        ::new (static_cast<void *>(clog_.bytes)) out_stream(stderr, false);
+        ::new (static_cast<void *>(cin_.bytes)) in_stream(stdin);
+        cin_.get().tie(&cout_.get());
+        cerr_.get().tie(&cout_.get());
+    }
+    static void flush() {
+        cout_.get().flush();
+        cerr_.get().flush();
+        clog_.get().flush();
+    }
+};
+template <class C> typename __cxx1_std_streams<C>::template slot<typename __cxx1_std_streams<C>::out_stream> __cxx1_std_streams<C>::cout_;
+template <class C> typename __cxx1_std_streams<C>::template slot<typename __cxx1_std_streams<C>::out_stream> __cxx1_std_streams<C>::cerr_;
+template <class C> typename __cxx1_std_streams<C>::template slot<typename __cxx1_std_streams<C>::out_stream> __cxx1_std_streams<C>::clog_;
+template <class C> typename __cxx1_std_streams<C>::template slot<typename __cxx1_std_streams<C>::in_stream> __cxx1_std_streams<C>::cin_;
+
+// The count of Init objects alive in the program, one per including unit: a template's static, so one.
+template <class T> struct __cxx1_init_count { static int n; };
+template <class T> int __cxx1_init_count<T>::n = 0;
+
+inline ios_base::Init::Init() {
+    if (__cxx1_init_count<void>::n++ == 0) {
+        __cxx1_std_streams<char>::make();
+        __cxx1_std_streams<wchar_t>::make();
+    }
+}
+inline ios_base::Init::~Init() {
+    if (--__cxx1_init_count<void>::n == 0) {
+        __cxx1_std_streams<char>::flush();
+        __cxx1_std_streams<wchar_t>::flush();
+    }
+}
+
+static ios_base::Init __cxx1_ioinit;
+
+static basic_istream<char> &cin = __cxx1_std_streams<char>::cin_.get();
+static basic_ostream<char> &cout = __cxx1_std_streams<char>::cout_.get();
+static basic_ostream<char> &cerr = __cxx1_std_streams<char>::cerr_.get();
+static basic_ostream<char> &clog = __cxx1_std_streams<char>::clog_.get();
+static basic_istream<wchar_t> &wcin = __cxx1_std_streams<wchar_t>::cin_.get();
+static basic_ostream<wchar_t> &wcout = __cxx1_std_streams<wchar_t>::cout_.get();
+static basic_ostream<wchar_t> &wcerr = __cxx1_std_streams<wchar_t>::cerr_.get();
+static basic_ostream<wchar_t> &wclog = __cxx1_std_streams<wchar_t>::clog_.get();
 
 }  // namespace std
 

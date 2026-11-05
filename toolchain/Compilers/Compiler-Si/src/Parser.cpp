@@ -269,6 +269,13 @@ StmtPtr Parser::parseStatementBody() {
     if (at(Tok::Return)) return parseReturn();
     if (atOperator("<") && looksLikeMultiAssignHeader(index_)) return parseMultiAssign();
 
+    if (atQualifiedCall()) {
+        const int line = current().line;
+        ExprPtr call = parsePrimary();
+        if (failed_) return nullptr;
+        return StmtPtr(new CallStmt(std::move(call), line));
+    }
+
     if (at(Tok::Identifier)) {
         Tok next = peek(1).kind;
 
@@ -309,6 +316,13 @@ StmtPtr Parser::parseStatementBody() {
     }
     failUnexpected();
     return nullptr;
+}
+
+// `c.remove(...)`, the runtime's function whatever the program has named (docs\Runtime_Design.md 14.3). An array
+// named c keeps .row, .col and .dim(n): the runtime has no function of those names, and only .dim takes parentheses.
+bool Parser::atQualifiedCall() const {
+    return at(Tok::Identifier) && current().text == "c" && peek(1).kind == Tok::Dot &&
+           peek(2).kind == Tok::Identifier && peek(2).text != "dim" && peek(3).kind == Tok::ParensOpen;
 }
 
 bool Parser::atDeclaration() const {
@@ -473,7 +487,7 @@ StmtPtr Parser::parseMultiAssign() {
     advance();
     advance();
 
-    if (!at(Tok::Identifier) || peek(1).kind != Tok::ParensOpen) {
+    if (!atQualifiedCall() && (!at(Tok::Identifier) || peek(1).kind != Tok::ParensOpen)) {
         failUnexpected();
         return nullptr;
     }
@@ -754,10 +768,13 @@ ExprPtr Parser::parsePrimary() {
         return parsePostfix(ExprPtr(new Convert(std::move(inner), target)));
     }
     if (at(Tok::Identifier)) {
+        const bool qualified = atQualifiedCall();
+        if (qualified) { advance(); advance(); }
         const Token &t = advance();
         if (at(Tok::ParensOpen)) {
             const Token paren = advance();
             std::unique_ptr<Call> call(new Call(t.text, t.line));
+            if (qualified) call->qualify();
             while (!at(Tok::ParensClose)) {
                 ExprPtr argument = parseExpression();
                 if (failed_) return nullptr;

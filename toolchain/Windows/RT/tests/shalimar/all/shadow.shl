@@ -1,0 +1,11 @@
+// shadow.shl - a program's own function shadows the runtime's; c.name reaches the runtime's all the same
+uses strlen
+
+fun <int> = strlen(s[]: char) {
+  return 99
+}
+
+fun <> = main() {
+  ? strlen("abc")
+  ? c.strlen("abc")
+}

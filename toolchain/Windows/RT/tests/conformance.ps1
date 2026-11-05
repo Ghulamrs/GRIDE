@@ -12,7 +12,7 @@ param([string]$Filter = "", [string]$Levels = "-O0,-O2", [string]$Bin = "", [str
       [int]$CompileSecs = 60, [int]$RunSecs = 20)
 $ErrorActionPreference = 'Stop'
 if (-not $Bin) { $Bin = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..\GRIDEd\x64\Release')).Path }
-if (-not $Libs) { $Libs = Join-Path $Bin 'lib' }
+if (-not $Libs) { $Libs = Join-Path $Bin 'lib\x86_64-windows'; if (-not (Test-Path (Join-Path $Libs 'grtc.lib'))) { $Libs = Join-Path $Bin 'lib' } }
 $suite = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\Compilers\C++Optimize\tests\conformance')).Path
 $Out = Join-Path $env:TEMP 'grt-conformance'
 if (Test-Path $Out) { Remove-Item $Out -Recurse -Force }

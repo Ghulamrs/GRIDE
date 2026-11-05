@@ -42,7 +42,7 @@ bool ensureBuffer(FILE *f)
 int flush(FILE *f)
 {
     if (!(f->flags & Pending)) return 0;
-    size_t n = (size_t)(f->pos - f->buf);
+    size_t n = bytesBetween(f->buf, f->pos);
     f->pos = f->bufend = f->buf;
     if (n != 0 && __grt_write_raw(f->fd, (const char *)f->buf, (unsigned)n) < 0) {
         f->flags |= Stream::Failed;
@@ -63,7 +63,7 @@ int put(FILE *f, const char *s, unsigned count)
 {
     valid(f);
     int info = __grt_descriptor(f->fd);
-    if (info < 0 || !(f->flags & Stream::Writable)) {
+    if ((info < 0 && f->fd != NoHandle) || !(f->flags & Stream::Writable)) {
         f->flags |= Stream::Failed;
         return -1;
     }
@@ -88,7 +88,7 @@ int put(FILE *f, const char *s, unsigned count)
     if (!text) {
         // Runs of whole buffers, the buffer empty, go straight to Windows and the rest is kept, as the Microsoft
         // runtime's fwrite does.
-        size_t size = (size_t)(f->buff_stop - f->buf);
+        size_t size = bytesBetween(f->buf, f->buff_stop);
         if (f->pos == f->buf && count >= size) {
             size_t whole = count - count % size;
             if (__grt_write_raw(f->fd, s, (unsigned)whole) < 0) {
@@ -99,7 +99,7 @@ int put(FILE *f, const char *s, unsigned count)
         }
         while (s < end) {
             if (f->pos == f->buff_stop && flush(f) != 0) return -1;
-            size_t room = (size_t)(f->buff_stop - f->pos), n = (size_t)(end - s);
+            size_t room = bytesBetween(f->pos, f->buff_stop), n = bytesBetween(s, end);
             if (n > room) n = room;
             memcpy(f->pos, s, n);
             f->pos += n;
@@ -108,15 +108,15 @@ int put(FILE *f, const char *s, unsigned count)
         return (int)count;
     }
     while (s < end) {
-        if (f->buff_stop - f->pos < 2 && flush(f) != 0) return -1;
-        size_t room = (size_t)(f->buff_stop - f->pos), left = (size_t)(end - s);
+        if (bytesBetween(f->pos, f->buff_stop) < 2 && flush(f) != 0) return -1;
+        size_t room = bytesBetween(f->pos, f->buff_stop), left = bytesBetween(s, end);
         size_t look = left < room ? left : room;
         const char *lf = (const char *)memchr(s, '\n', look);
-        size_t run = lf ? (size_t)(lf - s) : look;
+        size_t run = lf ? bytesBetween(s, lf) : look;
         memcpy(f->pos, s, run);
         f->pos += run;
         s += run;
-        if (lf && f->buff_stop - f->pos >= 2) {
+        if (lf && bytesBetween(f->pos, f->buff_stop) >= 2) {
             f->pos[0] = '\r';
             f->pos[1] = '\n';
             f->pos += 2;
@@ -124,6 +124,12 @@ int put(FILE *f, const char *s, unsigned count)
         }
     }
     return (int)count;
+}
+
+int putCall(FILE *f, const char *s, unsigned count)
+{
+    int n = put(f, s, count);
+    return n < 0 && f == &_ftable[2] ? (int)count : n;
 }
 
 int putLocked(int c, FILE *f)

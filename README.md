@@ -13,11 +13,12 @@ GRIDE in three outlooks - three IDEs for RIDE's toolchain, 3 in 1 - sharing one 
 
 This folder is a working copy of the local bare repository `My Documents\GIT Test\GRIDE` (no remote). GRIDEx2,
 the two-outlook model, is that repository's tag `gridex2-1.1.0`; `My Documents\GRIDEx2` and the old folders
-`My Documents\GRIDEd` and `My Documents\GRIDE` stay as they were then. Build one of the three solutions at a time:
+`My Documents\GRIDEd` and `My Documents\GRIDE` stay as they were then. `GRIDE3.sln` builds everything once, the
+Setup last (Installers, below). Build one solution at a time:
 their tool projects share the intermediate folders under `toolchain\` (situation W7 below).
 
 **One project format, one settings file.** The three read and write one `.pro` format, White's (RIDE's): Black and
-Grey read its `groups`, `include`, `libraries`, `arch` and `build`, and each outlook writes back the keys only another
+Grey read its `groups`, `include`, `libraries`, `paths`, `arch` and `build`, and each outlook writes back the keys only another
 keeps. Their settings are one file, `%APPDATA%\GRIDE\settings.json`, whose keys name GRIDE, never RIDE
 (`GrideRoot`, `grideRoot`, keySet `gride`, the `GRIDE_*` variables); each outlook takes in its file from before
 (Black's `gride.settings.json`, White's `%USERPROFILE%\GRIDE 1.0\settings.json`) the first time, and leaves the
@@ -45,14 +46,27 @@ Projects extension, no WiX, no Inno Setup, no NuGet package. It is a C++ Utility
 `build-setup.ps1` (Windows Installer's own `msi.dll` and `makecab`) and then `validate-msi.ps1` (the Windows SDK's ICE
 suite, where the SDK is installed) directly, never through `cmd.exe`:
 
-- **The final Setup:** open `installer\windows\Setup.sln` and Build (`Release | x64`, its one configuration), or
-  `MSBuild.exe installer\windows\Setup.sln /p:Configuration=Release /p:Platform=x64`. It builds the three solutions in
-  `Release | x64` one after another, each in an MSBuild of its own (W7), then the package.
-- **From an outlook's solution:** `GRIDEd\GRIDE.sln`, `GRIDE 2.0\GRIDE.sln` and `GRIDE 1.0\GRIDE.sln` list *Setup*
-  too, after GRIDE and not built with the solution; Build on it (in `Release | x64`) makes the package from the three
-  Release builds already there. In Debug it refuses, naming Release.
+- **The final Setup:** open `GRIDE3.sln` beside this file and Build Solution in `Release | x64`, or
+  `MSBuild.exe GRIDE3.sln /p:Configuration=Release /p:Platform=x64`. It builds the toolchain once, the three outlooks
+  and then the package (the section below). `Debug | x64` builds all but the package.
+- **Not in an outlook's solution:** `GRIDEd\GRIDE.sln`, `GRIDE 2.0\GRIDE.sln` and `GRIDE 1.0\GRIDE.sln` build their
+  outlook and the toolchain only (Setup was taken out of them on 2026-11-03). To package the three Release builds
+  already there without building them again:
+  `MSBuild.exe installer\windows\Setup.vcxproj /p:Configuration=Release /p:Platform=x64`. In Debug it refuses, naming
+  Release. `installer\windows\Setup.sln`, which built the three solutions one after another and so the toolchain three
+  times, gave way to `GRIDE3.sln` on 2026-11-05.
 - Properties: `SetupVersion` (1.5.0), `CertThumbprint` or `PfxFile` (signing, as `build-setup.ps1`'s), `ValidateSetup`
-  (`false` skips the ICE run), `BuildOutlooks` (`true` builds the three solutions first from any solution).
+  (`false` skips the ICE run).
+
+### GRIDE3.sln: one build of everything
+
+`GRIDE3.sln` holds every project once: the three `GRIDE` projects (solution folders *Black*, *Grey*, *White*), the 14
+projects of `toolchain\` (*Compilers*, *TI*, *Windows*), `ToolchainBeside` and `Setup`. They build in that order: the
+toolchain once into `x64\<Config>\` beside `GRIDE3.sln`, each outlook into its own `GRIDEd\x64\<Config>`,
+`GRIDE 2.0\x64\<Config>` and `GRIDE 1.0\x64\<Config>`, then `ToolchainBeside`
+(`toolchain\msbuild\ToolchainBeside.vcxproj`) copies the one toolchain beside each `GRIDE.exe`, where the outlook finds
+its tools, and `Setup` packages those three folders. The outlooks' own solutions stay as they were, for working on one
+outlook; don't build one while `GRIDE3.sln` builds (W7).
 
 `test-setup.ps1` (it installs and removes each outlook per user) is not run by the build. The scripts run on their
 own as before: `installer\windows\build-setup.ps1 [-Version 1.5.0] [-CertThumbprint <sha1> | -PfxFile <file.pfx>]`,
@@ -72,7 +86,7 @@ made unless the Status column says so.
 | `GRIDE.exe` (Release) | .NET Framework 4.8, and the VC++ 2015-2022 runtime: `VCRUNTIME140.dll` (both IDEs) and `MSVCP140.dll` (GRIDEd), which the installer ships beside the exe |
 | The eleven tools (Release) | Windows only (static CRT, no other DLL) |
 | Building for TMS320C6747 | nothing more: c90 / cpp11 / shalimar, asm6x, lnk6x, rts6x, sim6747 and vm6747 are all the toolchain's own |
-| Building for Windows | nothing more with GRIDE's own runtime (`lib\grtstart.lib`, `grtcompat.lib`, `grtcxx.lib`, `grtc.lib`, `grtwin.lib` and its `kernel32.lib`, the default where there is no Visual Studio; docs\Runtime_Design.md): the program needs `kernel32.dll` alone, and a Debug build's PDB comes from GRIDE's `masm` and `link`. Microsoft's CRT, chosen under Tools > Options or taken automatically for a build with cl's objects, needs Visual Studio's MSVC libraries (`libcmt`, `libvcruntime`, `legacy_stdio_definitions`) and the Windows SDK's (`libucrt`, `kernel32`) |
+| Building for Windows | nothing more with GRIDE's own runtime (`lib\grtstart.lib`, `grtcompat.lib`, `grtcxx.lib`, `grtc.lib`, `grtwin.lib` and its `kernel32.lib`, the default where there is no Visual Studio; docs\Runtime_Design.md): the program needs `kernel32.dll` alone, and a Debug build's PDB comes from GRIDE's `masm` and `link`. Microsoft's CRT, chosen under Tools > Options or taken automatically for a build with cl's objects, needs Visual Studio's MSVC libraries (`libcmt`, `libvcruntime`, `libcpmt`, `legacy_stdio_definitions`) and the Windows SDK's (`libucrt`, `kernel32`) |
 | Debugging Windows programs | nothing more: `gride-dbg` over Windows' own `dbghelp.dll`; `cdb` (the Windows SDK's *Debugging Tools for Windows*) where it is chosen |
 
 The TMS320C6747 target therefore keeps working on any Windows machine with the Release build, and since GRIDE's
@@ -93,7 +107,7 @@ own runtime (2026-10-23) so does the Windows target; only Microsoft's CRT, when 
 | W5 | Copying `x64\Release` to a machine without the VC++ runtime | `GRIDE.exe` does not start (`VCRUNTIME140.dll`, `MSVCP140.dll`) | The VC++ 2015-2022 Redistributable (x64), or the runtime DLLs beside `GRIDE.exe` as the installer does | the redistributable | documented |
 | W6 | A tool's environment variable is set (`C90`, `CPP11`, `SHALIMAR`, `C2S`, `ASM6X`, `VM6747`, `SIM6747`, `GRIDE_CDB` ...) | It names the program outright, before the tool beside `GRIDE.exe`, so an older tool (say a RIDE 5.17 cpp11 without the `T (&)[N]` fix) runs instead of the solution's own. RIDE's installer sets none of them; a user or a script may | Tools > Check Toolchain already shows where each tool came from; add a warning when a variable points away from `x64\<Config>` | `toolchain.json`'s `lookup` order; the Check Toolchain dialog of each IDE | open |
 | W7 | Two of the three solutions building at once - or a Rebuild of one after another | The tool projects keep their objects in `$(ProjectDir)build\<Config>\obj\` inside the shared `toolchain\`, so two builds write the same files. Seen on 2026-10-16: a Rebuild of GRIDE 2.0 right after one of GRIDEd deleted GRIDEd's ten programs from `GRIDEd\x64\Release` (the Clean step follows the shared build logs); a plain Build of GRIDEd put them back | Intermediate folders under each solution: `$(SolutionDir)x64\$(Configuration)\toolchain-obj\$(ProjectName)\`, and the same for `Toolchain.targets`' runtime steps | every tool `.vcxproj` under `toolchain\`, `toolchain\msbuild\Toolchain.targets`; the old folders' copies too | open (build one at a time) |
-| W8 | GRIDEx2 cloned to another folder or machine | Both solutions load their test harnesses by absolute path from `GIT Test\cpp\sandbox\out\gride-review\...`, a folder git ignores: the projects do not load, and the harness sources are in no repository | Move the harnesses into GRIDEx2 (`tests\`) with relative paths | `RidePortHarness`, `GrideHarness`, `GridePortHarness` and their run scripts | open |
+| W8 | GRIDEx2 cloned to another folder or machine | Both solutions load their test harnesses by absolute path from `GIT Test\cpp\sandbox\out\gride-review\...`, a folder git ignores: the projects do not load, and the harness sources are in no repository | Move the harnesses into GRIDEx2 (`tests\`) with relative paths | `RidePortHarness`, `GrideHarness`, `GridePortHarness` and their run scripts | open; since 2026-11-03 no solution lists them, so every solution loads from a clone - the harnesses themselves are still outside |
 | W9 | The RIDE-port scripts | `ride-port\build.ps1` and `tests\run-ide.ps1` still start `GRIDEd\bin\x64\<Config>\GRIDE.exe`, which R15 no longer builds, and know only the old folders | Point them at `x64\<Config>` and accept a GRIDEx2 path | the scripts in `GIT Test\cpp\sandbox\out\gride-review\ride-port` | open |
 | W10 | `cmd.exe` blocked by policy (it is on the machine GRIDEx3 was made on: `DisableCMD` = 1 under `HKCU\Software\Policies\Microsoft\Windows\System`; cmd answers "The command prompt has been disabled by your administrator" and waits for a key) | Nothing in the three solutions' builds uses it, and no outlook's build or run of a program does: White's core ran every build, `vswhere`, vcvars64.bat and `--version` through cmd until GRIDEx3, and now starts each program itself (`src\process.cpp`, `runCaptured` in `src\compile.cpp`), takes Visual Studio's folders from its installation (`importMsvcEnvironment` in `src\toolchain.cpp`) and finds a bare program name on `PATH`, so a Debug build's `link.exe` is Microsoft's and not RIDE's beside GRIDE.exe. What still needs cmd: a *setup script* (vcvars) under Tools > Options in Black and Grey; Black's Terminal pane, Tools > Command Prompt and its run in an external console; Grey's run in a new console window (kept, for machines where cmd is allowed); and `cpp11 -c` / c90 without `-S`, which shell out through `std::system` - GRIDE's own pipeline uses `-S` and runs each step itself | Keep the `-S` pipeline; leave setup scripts empty | none | documented; White done 2026-10-19 |
 | W11 | The pinned MSVC version (`visualStudio.msvcVersion`) is not installed | GRIDE takes the newest and says so | - | `toolchain.json` | done |

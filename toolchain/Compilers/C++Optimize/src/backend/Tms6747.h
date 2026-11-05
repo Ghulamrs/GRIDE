@@ -46,6 +46,8 @@ public:
     std::unique_ptr<CodeGen> codegen(std::ostream &sink, Syntax) const override;
     // -g writes cl6x's `.dwpsn` before each statement: the source position vm6747 and sim6747 stop on.
     bool emitsLineTable(Syntax) const override { return true; }
+    // The C6747 runs one program and no threads, so this implementation of C++11 for it is freestanding.
+    bool hosted() const override { return false; }
 private:
     Tms6747Target target_;
 };

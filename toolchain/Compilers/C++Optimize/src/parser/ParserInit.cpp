@@ -81,6 +81,32 @@ bool Parser::initialiserNames(const std::string &name) const {
     }
 }
 
+// A string literal's code units as its element type has them: bytes for char, UTF-16 units for char16_t, code
+// points for char32_t and wchar_t - [lex.string]/8-10, the text being UTF-8.
+static std::vector<long long> literalUnits(const StrLit *s) {
+    std::vector<long long> units;
+    const std::string &text = s->text();
+    const Kind k = s->type()->pointee()->kind();
+    if (k == Kind::Char || k == Kind::SChar || k == Kind::UChar) {
+        for (unsigned char ch : text) units.push_back(ch);
+        return units;
+    }
+    for (std::size_t i = 0; i < text.size();) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        const int extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+        long long cp = extra == 0 ? c : c & (0x3F >> extra);
+        i++;
+        for (int n = 0; n < extra && i < text.size(); n++, i++) cp = (cp << 6) | (static_cast<unsigned char>(text[i]) & 0x3F);
+        if (k == Kind::Char16 && cp >= 0x10000) {
+            units.push_back(0xD800 + ((cp - 0x10000) >> 10));
+            units.push_back(0xDC00 + ((cp - 0x10000) & 0x3FF));
+        } else {
+            units.push_back(cp);
+        }
+    }
+    return units;
+}
+
 const StrLit *Parser::stringInitialiser(const Init &given, const Type *type) {
     // **[dcl.init.string]/1: "optionally enclosed in braces"** - `char s[] = {"ab"};` is the string,
     // and was read as a list of chars whose first was a pointer (R14).
@@ -140,7 +166,7 @@ void Parser::skipInit(const Type *type, InitCursor &c) {
 
 long long Parser::inferredLength(const Init &in, const Type *element, std::size_t pos) {
     if (const StrLit *s = stringInitialiser(in, types_.arrayOf(element, 1)))
-        return static_cast<long long>(s->text().size()) + 1;
+        return static_cast<long long>(literalUnits(s).size()) + 1;
     if (!in.isList)
         src_.fail(pos, "an array with no length needs a braced initialiser to "
                        "count, or a string to measure");
@@ -203,9 +229,11 @@ bool Parser::isAggregateClass(const Type *t) const {
         return false;
     for (const Member &m : t->members())
         if (m.declaredIn == nullptr && m.access != Access::Public) return false;
+    // [dcl.init.aggr]/1: no user-provided constructor, and one defaulted or deleted where it is first
+    // declared is not user-provided ([dcl.fct.def.default]/4) - `atomic_flag f = ATOMIC_FLAG_INIT;`.
     if (const std::vector<std::size_t> *set = overloadsOf(constructorKey(t->tag())))
         for (std::size_t i : *set)
-            if (!functions_[i].implicit) return false;
+            if (!functions_[i].implicit && !functions_[i].deleted) return false;
     return true;
 }
 
@@ -344,14 +372,11 @@ void Parser::emitString(const std::string &name, std::vector<InitStep> &path,
                         const Type *type, const StrLit *s, std::size_t pos,
                         std::vector<StmtPtr> &out) {
     long long len = type->length();
-    const std::string &text = s->text();
+    const std::vector<long long> units = literalUnits(s);
     requireStringFits(type, s, pos);
     for (long long i = 0; i < len; i++) {
         path.push_back(InitStep{ nullptr, i });
-        long long ch = i < static_cast<long long>(text.size())
-                ? static_cast<long long>(static_cast<unsigned char>(
-                      text[static_cast<std::size_t>(i)]))
-                : 0L;
+        long long ch = i < static_cast<long long>(units.size()) ? units[static_cast<std::size_t>(i)] : 0L;
         ExprPtr c(new Num(ch));
         c->setType(types_.intType());
         initStore(name, path, std::move(c), pos, out);
@@ -525,7 +550,7 @@ StmtPtr Parser::listInitialiseMember(const std::string &cls, const Type *type, c
         }
         std::vector<ExprPtr> args;
         const Type *ilType = nullptr;
-        if (!in.items.empty() && initializerListConstructor(t, &ilType) != nullptr)
+        if (!in.items.empty() && initializerListConstructor(t, &ilType) != nullptr && initializerListFits(ilType, in))
             args.push_back(buildInitializerList(ilType, in, pos, out));
         else
             listConstructor(t, in, args, false, pos);
@@ -886,14 +911,12 @@ void Parser::flattenFill(const Type *type, InitCursor &c, int base,
     }
     if (const StrLit *s = stringInitialiser(item, type)) {
         c.at++;
-        const std::string &text = s->text();
+        const std::vector<long long> units = literalUnits(s);
         requireStringFits(type, s, item.pos);
 
         int w = type->pointee()->size(target_);
-        for (std::size_t i = 0; i < text.size(); i++)
-            out.push_back(GlobalPiece{ base + static_cast<int>(i) * w, w,
-                                       static_cast<long long>(
-                                           static_cast<unsigned char>(text[i])), std::string() });
+        for (std::size_t i = 0; i < units.size(); i++)
+            out.push_back(GlobalPiece{ base + static_cast<int>(i) * w, w, units[i], std::string() });
         return;
     }
     if (type->isArray() || type->isStructOrUnion()) {
@@ -938,13 +961,11 @@ void Parser::flattenInit(const Type *type, Init &in, int base,
     // way a global says it: no pieces at all, which `segmentFor` reads as .bss.
     if (in.isList && in.items.empty()) return;
     if (const StrLit *s = stringInitialiser(in, type)) {
-        const std::string &text = s->text();
+        const std::vector<long long> units = literalUnits(s);
         requireStringFits(type, s, in.pos);
         int w = type->pointee()->size(target_);
-        for (std::size_t i = 0; i < text.size(); i++)
-            out.push_back(GlobalPiece{ base + static_cast<int>(i) * w, w,
-                                       static_cast<long long>(
-                                           static_cast<unsigned char>(text[i])), std::string() });
+        for (std::size_t i = 0; i < units.size(); i++)
+            out.push_back(GlobalPiece{ base + static_cast<int>(i) * w, w, units[i], std::string() });
         return;
     }
 
@@ -1177,10 +1198,15 @@ Parser::CtorInit Parser::readConstructorInitialiser(const Declared &d) {
             ci.copyInit = true;
             ci.listInit = true;
         } else if (ilCtor != nullptr) {
-            consume("=");
+            const bool copyList = consume("=");
             Init in = parseInitialiser();
-            args.push_back(buildInitializerList(ilType, in, d.pos, ci.ilSetup));
-            ci.copyInit = true;
+            if (initializerListFits(ilType, in)) {
+                args.push_back(buildInitializerList(ilType, in, d.pos, ci.ilSetup));
+                ci.copyInit = true;
+            } else {
+                listConstructor(d.type->unqualified(), in, args, copyList, d.pos);
+                ci.copyInit = copyList;
+            }
             ci.listInit = true;
         } else if (hasMemberInitialiser(d.type->tag()) &&
                    onlyImplicitConstructors(d.type->tag())) {
@@ -1194,15 +1220,32 @@ Parser::CtorInit Parser::readConstructorInitialiser(const Declared &d) {
         } else {
             const bool copyList = consume("=");
             Init in = parseInitialiser();
-            listConstructor(d.type->unqualified(), in, args, copyList, d.pos);
-            ci.copyInit = copyList;
+            if (listConstructorTemplate(d.type->unqualified(), in, &ilType, d.pos) != nullptr &&
+                initializerListFits(ilType, in)) {
+                args.push_back(buildInitializerList(ilType, in, d.pos, ci.ilSetup));
+                ci.copyInit = true;
+            } else {
+                listConstructor(d.type->unqualified(), in, args, copyList, d.pos);
+                ci.copyInit = copyList;
+            }
             ci.listInit = true;
         }
     }
     // **A braced list written as the argument**, `Row r({1, 2})`: [dcl.init]/16
     // and [over.match.list] reach the initializer_list constructor. Built here,
     // where the target type is known - parseArguments cannot build one alone.
+    // Only where the list is the one argument: `D v({1, 2}, alloc)` goes on to the general road below.
+    bool onlyList = false;
     if (!ci.listInit && peek().is("(") && peekAt(1).is("{")) {
+        int depth = 0;
+        for (std::size_t k = 1;; k++) {
+            const Token &t = peekAt(k);
+            if (t.kind == TokenKind::End) break;
+            if (t.is("{")) depth++;
+            else if (t.is("}") && --depth == 0) { onlyList = peekAt(k + 1).is(")"); break; }
+        }
+    }
+    if (onlyList) {
         const Type *ilType = nullptr;
         if (initializerListConstructor(d.type->unqualified(), &ilType)
                 != nullptr) {

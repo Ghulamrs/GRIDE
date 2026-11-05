@@ -42,6 +42,7 @@ public:
     void codeView(const std::string &gnu);
 
     void predefine(const std::vector<std::string> &names) override;
+    void finishText(std::vector<std::string> &chunks) override;
     void preamble(std::ostream &sink) override;
     void postamble(std::ostream &sink) override;
 

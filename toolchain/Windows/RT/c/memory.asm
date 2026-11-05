@@ -166,6 +166,45 @@ over64:
     sub r9, rcx
     cmp r9, r8
     jb large
+    ; with AVX, 32 bytes a move from both ends; rcx and rdx are free to move, rax holding the result
+    cmp DWORD PTR __grt_avx, 0
+    je sse64
+    cmp r8, 128
+    ja avx256
+    DB 0C5h, 0FEh, 06Fh, 002h                       ; vmovdqu ymm0, YMMWORD PTR [rdx]
+    DB 0C5h, 0FEh, 06Fh, 04Ah, 020h                 ; vmovdqu ymm1, YMMWORD PTR [rdx+32]
+    lea rdx, [rdx+r8-64]
+    DB 0C5h, 0FEh, 06Fh, 012h                       ; vmovdqu ymm2, YMMWORD PTR [rdx]
+    DB 0C5h, 0FEh, 06Fh, 05Ah, 020h                 ; vmovdqu ymm3, YMMWORD PTR [rdx+32]
+    DB 0C5h, 0FEh, 07Fh, 001h                       ; vmovdqu YMMWORD PTR [rcx], ymm0
+    DB 0C5h, 0FEh, 07Fh, 049h, 020h                 ; vmovdqu YMMWORD PTR [rcx+32], ymm1
+    lea rcx, [rcx+r8-64]
+    DB 0C5h, 0FEh, 07Fh, 011h                       ; vmovdqu YMMWORD PTR [rcx], ymm2
+    DB 0C5h, 0FEh, 07Fh, 059h, 020h                 ; vmovdqu YMMWORD PTR [rcx+32], ymm3
+    DB 0C5h, 0F8h, 077h                             ; vzeroupper
+    ret
+avx256:
+    DB 0C5h, 0FEh, 06Fh, 002h                       ; vmovdqu ymm0, YMMWORD PTR [rdx]
+    DB 0C5h, 0FEh, 06Fh, 04Ah, 020h                 ; vmovdqu ymm1, YMMWORD PTR [rdx+32]
+    DB 0C5h, 0FEh, 06Fh, 052h, 040h                 ; vmovdqu ymm2, YMMWORD PTR [rdx+64]
+    DB 0C5h, 0FEh, 06Fh, 05Ah, 060h                 ; vmovdqu ymm3, YMMWORD PTR [rdx+96]
+    DB 0C5h, 0FEh, 07Fh, 001h                       ; vmovdqu YMMWORD PTR [rcx], ymm0
+    DB 0C5h, 0FEh, 07Fh, 049h, 020h                 ; vmovdqu YMMWORD PTR [rcx+32], ymm1
+    DB 0C5h, 0FEh, 07Fh, 051h, 040h                 ; vmovdqu YMMWORD PTR [rcx+64], ymm2
+    DB 0C5h, 0FEh, 07Fh, 059h, 060h                 ; vmovdqu YMMWORD PTR [rcx+96], ymm3
+    lea rdx, [rdx+r8-128]
+    lea rcx, [rcx+r8-128]
+    DB 0C5h, 0FEh, 06Fh, 002h                       ; vmovdqu ymm0, YMMWORD PTR [rdx]
+    DB 0C5h, 0FEh, 06Fh, 04Ah, 020h                 ; vmovdqu ymm1, YMMWORD PTR [rdx+32]
+    DB 0C5h, 0FEh, 06Fh, 052h, 040h                 ; vmovdqu ymm2, YMMWORD PTR [rdx+64]
+    DB 0C5h, 0FEh, 06Fh, 05Ah, 060h                 ; vmovdqu ymm3, YMMWORD PTR [rdx+96]
+    DB 0C5h, 0FEh, 07Fh, 001h                       ; vmovdqu YMMWORD PTR [rcx], ymm0
+    DB 0C5h, 0FEh, 07Fh, 049h, 020h                 ; vmovdqu YMMWORD PTR [rcx+32], ymm1
+    DB 0C5h, 0FEh, 07Fh, 051h, 040h                 ; vmovdqu YMMWORD PTR [rcx+64], ymm2
+    DB 0C5h, 0FEh, 07Fh, 059h, 060h                 ; vmovdqu YMMWORD PTR [rcx+96], ymm3
+    DB 0C5h, 0F8h, 077h                             ; vzeroupper
+    ret
+sse64:
     movdqu xmm0, XMMWORD PTR [rdx]
     movdqu xmm1, XMMWORD PTR [rdx+16]
     movdqu xmm2, XMMWORD PTR [rdx+32]

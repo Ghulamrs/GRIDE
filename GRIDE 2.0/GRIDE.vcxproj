@@ -62,6 +62,14 @@
   </ImportGroup>
   <PropertyGroup>
     <TargetName>GRIDE</TargetName>
+    <!-- Visual Studio's own up-to-date check knows the program's inputs only, so it would skip the project - and the
+         Help and toolchain.json copied after it - once GRIDE.exe is built; a change there must reach this folder, which
+         the Setup packages -->
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+    <!-- GRIDE3.sln builds the three outlooks, each into its own folder: where GRIDE.sln puts this one, and its
+         objects apart from it, as Visual Studio does only for a solution beside the project -->
+    <OutDir Condition="'$(SolutionName)'=='GRIDE3'">$(ProjectDir)$(Platform)\$(Configuration)\</OutDir>
+    <IntDir Condition="'$(SolutionName)'=='GRIDE3'">$(ProjectDir)GRIDE\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -183,7 +191,8 @@
     <ItemGroup>
       <CcsDefinitionFiles Include="$(ProjectDir)lib\ccs\*.tsv" />
     </ItemGroup>
-    <Copy SourceFiles="@(CcsDefinitionFiles)" DestinationFolder="$(OutDir)lib\ccs" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CcsDefinitionFiles)" DestinationFolder="$(OutDir)share\ccs" SkipUnchangedFiles="true" />
+    <RemoveDir Directories="$(OutDir)lib\ccs" />
   </Target>
   <!-- Help: GRIDEx3's docs\, which the three outlooks share - GRIDE_Help.html, RIDE's manual and its chapter pages,
        the Shalimar reference and the toolchain file's format - in docs beside the exe, where Help looks -->

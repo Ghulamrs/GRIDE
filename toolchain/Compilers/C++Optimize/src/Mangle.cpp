@@ -474,6 +474,13 @@ public:
                 }
             }
             for (std::size_t i = 0; a.expandsParam < 0 && i < a.pack.size(); i++) {
+                if (!a.packIsValue && a.pack[i]->isTemplateName()) {
+                    TemplateArg one;
+                    one.isTemplate = true;
+                    one.type = a.pack[i];
+                    templateArgument(one);
+                    continue;
+                }
                 if (!a.packIsValue) { type(a.pack[i]); continue; }
                 TemplateArg one;
                 one.isType = false;
@@ -1282,6 +1289,7 @@ public:
             for (std::size_t i = 0; i < a.pack.size(); i++) {
                 TemplateArg one;
                 one.type = a.pack[i];
+                one.isTemplate = !a.packIsValue && a.pack[i]->isTemplateName();
                 if (a.packIsValue) { one.isType = false; one.value = a.packValues[i]; }
                 templateArgument(one);
             }
@@ -1633,42 +1641,54 @@ std::string vtableSymbol(const std::string &tag, bool microsoft) {
     return "_ZTV" + itaniumClassNameString(tag);   // the St abbreviation included
 }
 
+// A class named by its tag in a vbtable or vbase-destructor name: its scopes innermost first, each ended by
+// '@'. A template-id's tag - `basic_istream<char,struct char_traits<char>>` - is split only outside its
+// brackets, and what no MASM name can hold is written `$` and two hex digits: the class's tables and
+// destructor have the one name in every unit, and only this compiler's code names them.
+static std::string msTagComponents(const std::string &tag) {
+    std::vector<std::string> parts(1);
+    int depth = 0;
+    for (std::size_t i = 0; i < tag.size(); i++) {
+        const char c = tag[i];
+        if (c == '<') depth++;
+        else if (c == '>') depth--;
+        if (depth == 0 && c == ':' && i + 1 < tag.size() && tag[i + 1] == ':') {
+            parts.push_back(std::string());
+            i++;
+            continue;
+        }
+        const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+        if (plain) { parts.back() += c; continue; }
+        static const char hex[] = "0123456789ABCDEF";
+        parts.back() += '$';
+        parts.back() += hex[(static_cast<unsigned char>(c) >> 4) & 15];
+        parts.back() += hex[static_cast<unsigned char>(c) & 15];
+    }
+    std::string out;
+    for (std::size_t i = parts.size(); i-- > 0; ) { out += parts[i]; out += '@'; }
+    return out;
+}
+
 // **A class's type_info and the string beside it, which are one encoding under
 // two prefixes.**
 std::string vbtableSymbol(const std::string &tag) {
-    const std::vector<std::string> parts = scopeComponents(tag);
-    std::string out = "??_8";
-    for (std::size_t i = parts.size(); i-- > 0; ) { out += parts[i]; out += '@'; }
-    return out + "@7B@";
+    return "??_8" + msTagComponents(tag) + "@7B@";
 }
 
 // **The one a class with more than one vbptr gets**, named for the base whose
 // subobject holds that pointer: `??_8Dia@@7BD1@@@`. cl names it after the
 // *direct* base and not after the class that introduced the pointer.
 std::string vbtableSymbol(const std::string &tag, const std::string &base, const std::string &via) {
-    const std::vector<std::string> parts = scopeComponents(tag);
-    std::string out = "??_8";
-    for (std::size_t i = parts.size(); i-- > 0; ) { out += parts[i]; out += '@'; }
-    out += "@7B";
-    const std::vector<std::string> bp = scopeComponents(base);
-    for (std::size_t i = bp.size(); i-- > 0; ) { out += bp[i]; out += '@'; }
-    out += "@";
+    std::string out = "??_8" + msTagComponents(tag) + "@7B" + msTagComponents(base) + "@";
     // **And the path, where the base names more than one subobject** - cl's `??_8G@@7BR@@F@@@`,
     // R as F holds it.
-    if (!via.empty()) {
-        const std::vector<std::string> vp = scopeComponents(via);
-        for (std::size_t i = vp.size(); i-- > 0; ) { out += vp[i]; out += '@'; }
-        out += "@";
-    }
+    if (!via.empty()) out += msTagComponents(via) + "@";
     return out + "@";
 }
 
 // **The vbase destructor, which only the Microsoft ABI has.**
 std::string vbaseDestructorSymbol(const std::string &tag) {
-    const std::vector<std::string> parts = scopeComponents(tag);
-    std::string out = "??_D";
-    for (std::size_t i = parts.size(); i-- > 0; ) { out += parts[i]; out += '@'; }
-    return out + "@QEAAXXZ";
+    return "??_D" + msTagComponents(tag) + "@QEAAXXZ";
 }
 
 std::string itaniumClassNameString(const std::string &tag) {

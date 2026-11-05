@@ -109,8 +109,11 @@ public:
     const std::vector<std::string>& libraries() const { return libraries_; }
     void setIncludes(const std::vector<std::string>& dirs) { includes_ = dirs; }
     void setLibraries(const std::vector<std::string>& files) { libraries_ = files; }
-    std::vector<std::string> absoluteIncludes() const;
-    std::vector<std::string> absoluteLibraries() const;
+    // names: what the entries may use (path.h); none leaves them as they are written.
+    std::vector<std::string> absoluteIncludes(const path::Names* names = 0) const;
+    std::vector<std::string> absoluteLibraries(const path::Names* names = 0) const;
+    // The .pro's "paths", NAME and value, which its lists use as $(NAME); kept in the file as it is.
+    const std::vector<std::pair<std::string, std::string> >& paths() const { return paths_; }
 
     // The file to open with the project, relative to the root: what the file
     // says, else the one that defines main, else the first there is. Empty
@@ -189,6 +192,7 @@ private:
     // installation's settings.json answers and nothing is written.
     bool indentSaid_ = false;
     options::Store options_;
+    std::vector<std::pair<std::string, std::string> > paths_;
     // **The file as it was read** (2026-10-20): the .pro is the one format of the three outlooks, and
     // what Black and Grey keep in it beside White's keys (their configurations, language ...) is
     // written back as read.

@@ -57,7 +57,7 @@ void Driver::usage() const {
         "                     is: SHALIMAR_TI names its C6000 compiler directory,\n"
         "                     SHALIMAR_TILIB one holding rts6740_elf_eh.lib)\n"
         "  --runtime=<path>   the runtime archive to link against; for tms6747 the\n"
-        "                     directory of its assembly, lib/shmrt-tms6747\n"
+        "                     directory of its assembly, lib/tms6747/shmrt\n"
         "  --with=<path>      a library holding what 'uses' declared;\n"
         "                     repeatable, linked in the order given\n"
         "  --no-search        do not look in the other files beside this one\n"
@@ -330,20 +330,30 @@ std::string Driver::defaultRuntimeObject(const std::string &targetName) const {
     const char *extension = ".a";
 #endif
     // The C6000 runtime is not an archive but a directory of the assembly
-    // cpp11 wrote for it, lib/shmrt-tms6747, which asm6x assembles with the
+    // cpp11 wrote for it, lib/tms6747/shmrt, which asm6x assembles with the
     // program.
     if (targetName == "tms6747") extension = "";
-    const std::string leaf =
-        "/shmrt-" + targetName + (debug_ ? "-debug" : "") + extension;
     const std::string here = programDirectory(program_);
 
+    // GRIDE's tree on Windows (docs\Runtime_Design.md 5.3): lib/x86_64-windows/msvc/shmrt[d].lib, the build over
+    // Microsoft's CRT, and lib/tms6747/shmrt[-debug]; then an earlier installation's lib/shmrt-<target>[-debug].
+    std::string tree;
+    if (targetName == "x86_64-windows") tree = std::string("/x86_64-windows/msvc/shmrt") + (debug_ ? "d" : "") + extension;
+    else if (targetName == "tms6747") tree = std::string("/tms6747/shmrt") + (debug_ ? "-debug" : "");
+    if (!tree.empty()) {
+        if (exists(here + "/lib" + tree)) return here + "/lib" + tree;
+        if (exists(here + "/../lib" + tree)) return here + "/../lib" + tree;
+    }
+
+    const std::string leaf =
+        "/shmrt-" + targetName + (debug_ ? "-debug" : "") + extension;
     const std::string beside = here + "/lib" + leaf;
     if (exists(beside)) return beside;
 
     const std::string installed = here + "/../lib" + leaf;
     if (exists(installed)) return installed;
 
-    return beside;
+    return tree.empty() ? beside : here + "/lib" + tree;
 }
 
 // **A file name with `*` or `?` in it, expanded here**, as cl does: cmd hands the pattern through as
@@ -570,6 +580,7 @@ int Driver::run(const std::vector<std::string> &arguments) {
     }
 
     Checker checker(diagnostics);
+    if (targetName_ == "tms6747") checker.forC6747();
     const bool sound = checker.check(*program);
     {
         std::string text;
@@ -704,13 +715,14 @@ int Driver::run(const std::vector<std::string> &arguments) {
     std::string command;
     // -g on the link line too: on a Mac that is what makes clang run dsymutil, so the debug
     // information outlives the object the driver assembled and discarded.
-    const std::string gnuDebug = debugInfo_ ? " -g" : "";
+    // (linkDebug, not gnuDebug: that name is the bool above, which this branch shares the function with)
+    const std::string linkDebug = debugInfo_ ? " -g" : "";
     if (objectOnly_) {
-        command = "c++" + gnuDebug + " -c -o " + shellQuote(named ? output_ : output_ + ".o") + " " +
+        command = "c++" + linkDebug + " -c -o " + shellQuote(named ? output_ : output_ + ".o") + " " +
                   shellQuote(assemblyPath);
     } else {
         // **-lm, named rather than relied upon:** a borrowed `sin` is a direct call to libm, which older glibc does not link without it - docs/FOREIGN.md.
-        command = "c++" + gnuDebug + " -o " + shellQuote(output_) + " " + shellQuote(assemblyPath);
+        command = "c++" + linkDebug + " -o " + shellQuote(output_) + " " + shellQuote(assemblyPath);
         // Before the runtime, because a library may call into it and a linker
         // reads left to right.
         for (std::size_t i = 0; i < libraries_.size(); ++i)
@@ -830,7 +842,7 @@ int Driver::finishTi(const std::string &assemblyPath, bool named) {
     std::vector<std::string> runtime = assemblyFilesIn(runtimeObject_);
     if (runtime.empty()) {
         std::cerr << program::kName << ": no C6000 runtime at " << runtimeObject_
-                  << " - a directory of the assembly cpp11 wrote for it, lib/shmrt-tms6747;"
+                  << " - a directory of the assembly cpp11 wrote for it, lib/tms6747/shmrt;"
                      " --runtime= names it\n";
         std::remove(objectPath.c_str());
         return 2;

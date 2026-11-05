@@ -213,7 +213,7 @@ public:
 
     // Display contents
 #ifdef _STD_IO_
-    void print(const char *title = "") {
+    void print(char *title = "") {
         printf("\n%s\n", title);
         for (size_t i = 0; i < M; i++) (*this)[i].printrow();
     }

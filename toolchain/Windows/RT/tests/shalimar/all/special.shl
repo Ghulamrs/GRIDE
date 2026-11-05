@@ -1,0 +1,11 @@
+// special.shl - the rest of C99's functions that c99.shl does not call
+uses asinh, acosh, atanh, erfc, lgamma, nextafter, remainder
+
+fun <> = main() {
+  ? asinh(1.0) acosh(2.0) atanh(0.5)
+  ? erfc(0.5) lgamma(10.0)
+  ? remainder(7.0, 2.0) remainder(5.5, 2.0)
+  ? nextafter(1.0, 2.0) > 1.0
+  ? nextafter(1.0, 0.0) < 1.0
+  ? nextafter(1.0, 1.0) = 1.0
+}

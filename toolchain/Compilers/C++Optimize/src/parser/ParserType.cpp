@@ -641,7 +641,19 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                 src_.fail(peek().pos, "explicit instantiation in a class is not "
                                       "supported yet");
             templateParameters(mt.params);
-            refuseAfterPack(mt.params);
+            // [temp.param]/11: a member function template's pack may be followed by a parameter with a default -
+            // `template <class U, class... V, class = enable_if<...>>`; a member class template's by none (below).
+            {
+                bool after = false, defaulted = true;
+                for (const TemplateParam &q : mt.params) {
+                    if (after && q.defBegin == 0 && !q.isPack) defaulted = false;
+                    after = after || q.isPack;
+                }
+                if (!defaulted) refuseAfterPack(mt.params);
+            }
+            // `template <class R> constexpr explicit duration(const R &)` is read as `explicit constexpr`, as a
+            // member that is no template is below.
+            if (peek().is("constexpr") && peekAt(1).is("explicit")) std::swap(tokens_[at_], tokens_[at_ + 1]);
             mt.afterParams = at_;
             mt.pos = peek().pos;
             // **A friend template** - [temp.friend]/1 (R12): `template <class U> friend class H;`
@@ -801,6 +813,8 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             mt.memberAccess = access;
             mt.ownerTag = tag;
             mt.ownerType = nullptr;    // filled at instantiation from the tag
+            // Its signature names its namespace's types from a call anywhere: `Q(Tag2, A)` in N, called from main.
+            mt.ns = namespacePrefix();
             // A member of a class template: capture the class's own parameters
             // and this instantiation's binding, so both layers bind at replay.
             mt.classParams = instantiatingParams_;
@@ -1013,6 +1027,11 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             if (fsc != StorageNone)
                 src_.fail(fpos, "a friend declaration takes no storage class - "
                                 "the function it names is somebody else's");
+            // [class.friend]/3: `friend T;` befriends the class T names, and does nothing where it names none.
+            if (consume(";")) {
+                if (fbase->unqualified()->isStructOrUnion()) friendClasses_[tag].push_back(fbase->unqualified()->tag());
+                continue;
+            }
             Declared fd = declarator(fbase);
             // `friend int B::peek(const A &) const;` - [class.friend]/4: a member of a class declared
             // before, found by its parameters and cv as a definition outside B would find it.
@@ -1056,6 +1075,7 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             std::vector<const Type *> fparams;
             bool fvariadic = false;
             parameterTypes(fparams, fvariadic);
+            pendingNoexcept_ = exceptionSpecification();
             if (peek().is("const"))
                 src_.fail(peek().pos, "'const' here would say the function has "
                                       "a 'this' to leave alone, and a friend "
@@ -1074,6 +1094,9 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                 PendingBody held{ tag, friendStart, std::string(), fd.name,
                                   signatureAddedUnder(fd.name, fsigAt) };
                 held.freeFunction = true;
+                held.friendNamespace = namespaceStack_;
+                // In a namespace the signature went under the namespace's key, not the bare name.
+                if (held.which == PendingBody::npos() && functions_.size() > fsigAt) held.which = fsigAt;
                 pendingBodies_.push_back(held);
             }
             // **The grant is to this function, not to its name.** Recording
@@ -1250,6 +1273,7 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             }
 
             Declared d = declarator(base);
+            if (fnPointerSpec_ == 1) noexceptPointers_.insert(tag + "::" + d.name);
 
             // A reference member has to be bound when the object is made, so it is
             // refused by name rather than laid out as a pointer. **Only where it is a
@@ -2423,6 +2447,10 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
         peekAt(1).is("<")) {
         const TemplateDecl decl = findTemplate(peek().text)->second;
         if (!decl.isClass) refuseTemplateId();
+        if (!templateReachable(decl, peek().text))
+            src_.fail(peek().pos, "'" + peek().text + "' is a template of the namespace '" + decl.ns.substr(0, decl.ns.size() - 2) +
+                                  "', and nothing brings it here - [basic.lookup.unqual]; write '" + decl.ns + peek().text +
+                                  "', or a using-declaration");
         const std::size_t tpos = peek().pos;
         at_++;
         const Type *cls = instantiateClass(decl, tpos);
@@ -2430,7 +2458,13 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
         return memberTypeWalk(cls);
     }
 
-    if (peek().is("decltype")) return decltypeSpecifier();
+    // `decltype(d)::period` - [dcl.type.simple]/4's specifier as a nested-name-specifier, its member type.
+    if (peek().is("decltype")) {
+        const Type *t = decltypeSpecifier();
+        if (peek().is("::") && peekAt(1).kind == TokenKind::Ident && t->unqualified()->isStructOrUnion())
+            return memberTypeWalk(t->unqualified());
+        return t;
+    }
     if (peek().is("__underlying_type")) return underlyingTypeSpecifier();
 
     if (peek().is("struct")) { at_++; return structOrUnionSpecifier(Kind::Struct); }
@@ -2466,7 +2500,7 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
                 } else {
                     scope = scope != nullptr && scope->isStructOrUnion() ? lookupInClass(scope, piece) : nullptr;
                 }
-                if (m != nullptr || (peekAt(k + 2).is("<") && isClassTemplate(q))) {
+                if (m != nullptr || (peekAt(k + 2).is("<") && isClassTemplate(q) && templateQualifiedBy(q))) {
                     member = m;
                     tmpl = q;
                     tmplConsumed = k + 2;
@@ -2509,6 +2543,13 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
     // when a member, a local or a namespace has taken the name it wants - `::Lexer *lexer;` inside
     // a `cc::Parser` that also knows a `Lexer`.
     if (peek().is("::") && peekAt(1).kind == TokenKind::Ident) {
+        const std::map<std::string, TemplateDecl>::const_iterator named = findTemplate("::" + peekAt(1).text);
+        if (peekAt(2).is("<") && named != templates_.end() && named->second.isClass && named->second.ns.empty()) {
+            const TemplateDecl decl = named->second;
+            const std::size_t tpos = peekAt(1).pos;
+            at_ += 2;
+            return memberTypeWalk(instantiateClass(decl, tpos));
+        }
         if (const Type *t = findGlobalTypedef(peekAt(1).text)) {
             at_ += 2;
             return memberTypeWalk(t);
@@ -3169,7 +3210,25 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
         // inside the parentheses points at something, so what follows them is a parameter
         // list, not an array bound. The class may be nested: `(Nest::In::*m)` (A20).
         std::size_t q = 0;
-        while (peekAt(q).kind == TokenKind::Ident && peekAt(q + 1).is("::")) q += 2;
+        while (peekAt(q).kind == TokenKind::Ident) {
+            std::size_t r = q + 1;
+            // `int (Box<int>::*f)()`: a template-id's arguments are passed over to its `::`.
+            if (peekAt(r).is("<")) {
+                int angle = 0;
+                for (; at_ + r < tokens_.size(); r++) {
+                    const Token &t = peekAt(r);
+                    if (t.is("<")) angle++;
+                    else if (t.is(">")) angle--;
+                    else if (t.is(">>")) angle -= 2;
+                    else if (t.is(";") || t.is("{") || t.kind == TokenKind::End) break;
+                    if (angle <= 0) break;
+                }
+                if (angle != 0) break;
+                r++;
+            }
+            if (!peekAt(r).is("::")) break;
+            q = r + 1;
+        }
         const bool wrapsMemberPointer = q > 0 && peekAt(q).is("*");
         // `int (&f)(int)` likewise: a reference to a function, its parameter list outside.
         bool wrapsAPointer = peek().is("*") || peek().is("&") || peek().is("&&") ||
@@ -3261,9 +3320,15 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
                     src_.fail(peek().pos, "'" + cls->tag() + "' is a type here, "
                                           "and a declaration needs a name after "
                                           "it");
-                at_++;
-                qualifier = cls->tag();
-                name = declaredName("a member name");
+                if (peekAt(1).is("*")) {
+                    // `int Box<int>::*p`: the loop below reads `::*` after the class's own name.
+                    qualifier.clear();
+                    name = cls->tag();
+                } else {
+                    at_++;
+                    qualifier = cls->tag();
+                    name = declaredName("a member name");
+                }
             }
         }
     }
@@ -3326,6 +3391,20 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
         bool destructor = consume("~");
         name = declaredName("a member name after '::'");
         if (destructor) name = "~" + name;
+        // `int n::B2<int>::*p`: a namespace's class template with its arguments, then `::*` after the class.
+        if (!destructor && peek().is("<")) {
+            auto tmpl = findTemplate(qualifier + "::" + name);
+            if (tmpl != templates_.end() && tmpl->second.isClass) {
+                const std::size_t back = at_;
+                const Type *cls = instantiateClass(tmpl->second, pos);
+                if (peek().is("::") && peekAt(1).is("*")) {
+                    qualifier.clear();
+                    name = cls->tag();
+                } else {
+                    at_ = back;
+                }
+            }
+        }
     }
     // `int b::f()` inside `namespace a`: the qualifier's first name is found innermost first, `a::b`.
     if (!qualifier.empty() && !namespaces_.count(qualifier)) {

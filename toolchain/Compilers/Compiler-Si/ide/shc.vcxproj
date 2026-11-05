@@ -72,7 +72,6 @@
     <ClCompile Include="..\src\Check.cpp" />
     <ClCompile Include="..\src\Resolve.cpp" />
     <ClCompile Include="..\src\Builtin.cpp" />
-    <ClCompile Include="..\runtime\Shortest.cpp" />
     <ClCompile Include="..\src\CodeGen.cpp" />
     <ClCompile Include="..\src\Target.cpp" />
     <ClCompile Include="..\src\backend\Emitter.cpp" />
@@ -91,6 +90,7 @@
   <ItemGroup>
     <ClInclude Include="..\src\Ast.h" />
     <ClInclude Include="..\src\Builtin.h" />
+    <None Include="..\src\Library.inc" />
     <ClInclude Include="..\src\Check.h" />
     <ClInclude Include="..\src\CodeGen.h" />
     <ClInclude Include="..\src\Diag.h" />
@@ -115,15 +115,17 @@
     <ClInclude Include="..\src\backend\X86_64Coff.h" />
     <ClInclude Include="..\src\backend\X86_64Linux.h" />
     <ClInclude Include="..\src\backend\X86_64Windows.h" />
+    <ClInclude Include="..\runtime\Borrow.h" />
     <ClInclude Include="..\runtime\Debug.h" />
     <ClInclude Include="..\runtime\Internal.h" />
-    <ClInclude Include="..\runtime\Shortest.h" />
     <ClInclude Include="..\runtime\shmrt.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <!-- The Shalimar runtime beside shalimar.exe, as the post-build event built it, as MSBuild steps (nothing through
-       cmd.exe; ..\..\..\msbuild\Toolchain.targets): the Windows libraries with Visual Studio's cl and lib, and the
-       C6747 runtime as assembly with the solution's own cpp11 (built first), which rts6x packs into shmrt6x[d].lib. -->
+       cmd.exe; ..\..\..\msbuild\Toolchain.targets): the Windows libraries over Microsoft's CRT with Visual Studio's cl
+       and lib (lib\x86_64-windows\msvc\shmrt[d].lib), and the C6747 runtime as assembly with the solution's own cpp11
+       (built first; lib\tms6747\shmrt and shmrt-debug), which rts6x packs into shmrt6x[d].lib. The layout is
+       docs\Runtime_Design.md 5.3's; grt's project builds the Windows libraries over GRIDE's runtime. -->
   <Import Project="..\..\..\msbuild\Toolchain.targets" />
   <PropertyGroup>
     <!-- Visual Studio's own up-to-date check knows shalimar.exe's inputs only, so it would skip the project - and
@@ -132,32 +134,48 @@
     <ShmRuntimeDir>$(ProjectDir)..\runtime\</ShmRuntimeDir>
     <ShmCl>/nologo /std:c++14 /W4 /WX /EHsc /permissive- /O2 /D_CRT_SECURE_NO_WARNINGS</ShmCl>
     <ShmCpp11>$(OutDir)cpp11.exe</ShmCpp11>
+    <ShmWinDir>$(OutDir)lib\x86_64-windows\msvc\</ShmWinDir>
+    <!-- RTS6x's shortest formatting (docs\Runtime_Design.md 14.4), which the build over Microsoft's CRT carries itself -->
+    <ShmShortest>$(ProjectDir)..\..\..\TI\RTS6x\src\stdio\_gride_shortest_double.cpp</ShmShortest>
+    <Shm6xDir>$(OutDir)lib\tms6747\</Shm6xDir>
   </PropertyGroup>
   <ItemGroup>
-    <ShmRuntime Include="Shortest;Failure;Numbers;Array;Console;Runtime" />
-    <ShmRuntimeDebug Include="Shortest;Failure;Numbers;Array;Console;Runtime;Debug" />
-    <ShmRuntimeSource Include="$(ProjectDir)..\runtime\*.cpp;$(ProjectDir)..\runtime\*.h" />
+    <ShmWrapper Include="$(ShmRuntimeDir)wrappers\*.cpp" />
+    <ShmRuntime Include="Failure;Numbers;Array;Console;Runtime;Borrow;@(ShmWrapper->'wrappers\%(Filename)')" />
+    <ShmRuntimeDebug Include="@(ShmRuntime);Debug" />
+    <!-- Library.inc: a wrapper the catalogue dropped changes no file that is left; its row is how the runtimes hear -->
+    <ShmRuntimeSource Include="$(ProjectDir)..\runtime\*.cpp;$(ProjectDir)..\runtime\*.h;@(ShmWrapper);$(ProjectDir)..\src\Library.inc;$(ShmShortest)" />
   </ItemGroup>
+  <!-- Library.inc, shalimar's library built-ins, and the runtime's wrappers for them, from the runtime's catalogue
+       (docs\Runtime_Design.md 14.3) -->
+  <Target Name="ShalimarLibraryTable" BeforeTargets="ClCompile">
+    <ShalimarLibrary Catalogue="$(ProjectDir)..\..\..\Windows\RT\catalogue.json" Table="$(ProjectDir)..\src\Library.inc" Wrappers="$(ShmRuntimeDir)wrappers" />
+  </Target>
   <Target Name="ShalimarRuntimes" AfterTargets="Build"
           Inputs="@(ShmRuntimeSource);$(ShmCpp11)"
-          Outputs="$(OutDir)lib\shmrt-x86_64-windows.lib;$(OutDir)lib\shmrt-x86_64-windows-debug.lib;$(OutDir)lib\shmrt-tms6747\Runtime.s;$(OutDir)lib\shmrt-tms6747-debug\Debug.s">
-    <MakeDir Directories="$(OutDir)lib;$(IntDir)rt;$(IntDir)rtd;$(OutDir)lib\shmrt-tms6747;$(OutDir)lib\shmrt-tms6747-debug" />
+          Outputs="$(ShmWinDir)shmrt.lib;$(ShmWinDir)shmrtd.lib;$(Shm6xDir)shmrt\Runtime.s;$(Shm6xDir)shmrt-debug\Debug.s">
+    <!-- the C6747's assembly folders whole again: rts6x packs every .s in them -->
+    <RemoveDir Directories="$(Shm6xDir)shmrt;$(Shm6xDir)shmrt-debug" />
+    <MakeDir Directories="$(ShmWinDir);$(IntDir)rt;$(IntDir)rtd;$(Shm6xDir)shmrt;$(Shm6xDir)shmrt-debug" />
+    <!-- an earlier build's runtimes in the layout before stage 3, so that nothing finds them there -->
+    <RemoveDir Directories="$(OutDir)lib\shmrt-tms6747;$(OutDir)lib\shmrt-tms6747-debug" />
+    <Delete Files="$(OutDir)lib\shmrt-x86_64-windows.lib;$(OutDir)lib\shmrt-x86_64-windows-debug.lib" />
     <RunTool Exe="$(ToolchainCl)" WorkingDirectory="$(IntDir)rt" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
-             Arguments="$(ShmCl) /MT /Fo&quot;$(IntDir)rt\\&quot; /c @(ShmRuntime->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ')" />
+             Arguments="$(ShmCl) /MT /Fo&quot;$(IntDir)rt\\&quot; /c @(ShmRuntime->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ') &quot;$(ShmShortest)&quot;" />
     <RunTool Exe="$(ToolchainLib)" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
-             Arguments="/nologo /out:&quot;$(OutDir)lib\shmrt-x86_64-windows.lib&quot; @(ShmRuntime->'&quot;$(IntDir)rt\%(Identity).obj&quot;', ' ')" />
+             Arguments="/nologo /out:&quot;$(ShmWinDir)shmrt.lib&quot; @(ShmRuntime->'&quot;$(IntDir)rt\%(Filename).obj&quot;', ' ') &quot;$(IntDir)rt\_gride_shortest_double.obj&quot;" />
     <RunTool Exe="$(ToolchainCl)" WorkingDirectory="$(IntDir)rtd" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
-             Arguments="$(ShmCl) /MTd /DSHM_DEBUG=1 /Fo&quot;$(IntDir)rtd\\&quot; /c @(ShmRuntimeDebug->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ')" />
+             Arguments="$(ShmCl) /MTd /DSHM_DEBUG=1 /Fo&quot;$(IntDir)rtd\\&quot; /c @(ShmRuntimeDebug->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ') &quot;$(ShmShortest)&quot;" />
     <RunTool Exe="$(ToolchainLib)" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
-             Arguments="/nologo /out:&quot;$(OutDir)lib\shmrt-x86_64-windows-debug.lib&quot; @(ShmRuntimeDebug->'&quot;$(IntDir)rtd\%(Identity).obj&quot;', ' ')" />
+             Arguments="/nologo /out:&quot;$(ShmWinDir)shmrtd.lib&quot; @(ShmRuntimeDebug->'&quot;$(IntDir)rtd\%(Filename).obj&quot;', ' ') &quot;$(IntDir)rtd\_gride_shortest_double.obj&quot;" />
     <Error Condition="!Exists('$(ShmCpp11)')" Text="shc.vcxproj: no cpp11.exe in $(OutDir) - the C6000 runtime is its output; cpp11 is built first in the solution" />
     <RunTool Exe="$(ShmCpp11)" Quiet="true"
-             Arguments="-S -arch tms6747 -nologo -O2 &quot;$(ShmRuntimeDir)%(ShmRuntime.Identity).cpp&quot; -o &quot;$(OutDir)lib\shmrt-tms6747\%(ShmRuntime.Identity).s&quot;" />
+             Arguments="-S -arch tms6747 -nologo -O2 &quot;$(ShmRuntimeDir)%(ShmRuntime.Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt\%(ShmRuntime.Filename).s&quot;" />
     <RunTool Exe="$(ShmCpp11)" Quiet="true"
-             Arguments="-S -arch tms6747 -nologo -O0 -DSHM_DEBUG=1 &quot;$(ShmRuntimeDir)%(ShmRuntimeDebug.Identity).cpp&quot; -o &quot;$(OutDir)lib\shmrt-tms6747-debug\%(ShmRuntimeDebug.Identity).s&quot;" />
+             Arguments="-S -arch tms6747 -nologo -O0 -DSHM_DEBUG=1 &quot;$(ShmRuntimeDir)%(ShmRuntimeDebug.Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt-debug\%(ShmRuntimeDebug.Filename).s&quot;" />
   </Target>
   <Target Name="ShalimarRuntimesClean" AfterTargets="Clean">
-    <RemoveDir Directories="$(IntDir)rt;$(IntDir)rtd;$(OutDir)lib\shmrt-tms6747;$(OutDir)lib\shmrt-tms6747-debug" />
-    <Delete Files="$(OutDir)lib\shmrt-x86_64-windows.lib;$(OutDir)lib\shmrt-x86_64-windows-debug.lib" />
+    <RemoveDir Directories="$(IntDir)rt;$(IntDir)rtd;$(Shm6xDir)shmrt;$(Shm6xDir)shmrt-debug" />
+    <Delete Files="$(ShmWinDir)shmrt.lib;$(ShmWinDir)shmrtd.lib" />
   </Target>
 </Project>

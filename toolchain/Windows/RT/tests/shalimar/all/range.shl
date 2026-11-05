@@ -1,0 +1,8 @@
+// range.shl - a result past int's range is a failure, and the value is in the message
+uses llround
+
+fun <> = main() {
+  ? llround(1000.0)
+  ? llround(1000000000000000.0)
+  ? 2
+}

@@ -73,9 +73,12 @@ const std::size_t kThreadFrom = 4;
 #ifndef CXX1_INCLUDE_DIR
 #define CXX1_INCLUDE_DIR ""
 #endif
+#ifndef CXX1_WIN_INCLUDE_DIR
+#define CXX1_WIN_INCLUDE_DIR ""
+#endif
 // **The C++ headers are a second directory, not more files in the first.**
-// `include/` holds `<cstddef>` and `<vector>`; `lib/` holds the C headers
-// those wrap, and a program may reach either.
+// `include/c++` holds `<cstddef>` and `<vector>`; `include/c` holds the C
+// headers those wrap, the set c90 reads too, and a program may reach either.
 #ifndef CXX1_CXX_INCLUDE_DIR
 #define CXX1_CXX_INCLUDE_DIR ""
 #endif
@@ -125,11 +128,19 @@ void Driver::standardIncludeDirectories(const std::string &argv0) {
         return;
     }
 
-    // Beside the binary or one directory up. include/ is this compiler's when it
-    // holds `cstddef`, a name only this library spells; the C headers <cstddef>
-    // reaches are there too (an installation) or in lib/ (a checkout, or c90's).
+    // Beside the binary or one directory up: include/c++, include/c and
+    // include/win (docs\Runtime_Design.md 5.3). Then an earlier layout, where
+    // include/ is this compiler's when it holds `cstddef`, a name only this
+    // library spells, and the C headers <cstddef> reaches are there too or in lib/.
     const std::string here = programDirectory(argv0);
     const std::string candidates[2] = { here, here + "/.." };
+    for (const std::string &at : candidates) {
+        if (!directoryHas(at + "/include/c++", "cstddef") || !directoryHas(at + "/include/c", "stddef.h")) continue;
+        searchPath_.push_back(at + "/include/c++");
+        searchPath_.push_back(at + "/include/c");
+        searchPath_.push_back(at + "/include/win");
+        return;
+    }
     for (const std::string &at : candidates) {
         const std::string cxxDir = at + "/include";
         const std::string cDir = at + "/lib";
@@ -143,6 +154,7 @@ void Driver::standardIncludeDirectories(const std::string &argv0) {
     if (CXX1_CXX_INCLUDE_DIR[0] != '\0')
         searchPath_.push_back(CXX1_CXX_INCLUDE_DIR);
     if (CXX1_INCLUDE_DIR[0] != '\0') searchPath_.push_back(CXX1_INCLUDE_DIR);
+    if (CXX1_WIN_INCLUDE_DIR[0] != '\0') searchPath_.push_back(CXX1_WIN_INCLUDE_DIR);
 }
 
 void Driver::usage(char *file) {
@@ -173,7 +185,7 @@ void Driver::usage(char *file) {
         "         --no_compress writes every instruction in 32 bits\n"
         "       -rts= picks the tms6747 run-time library: a directory holding\n"
         "         RTS6x's rts6x.lib (or the .lib itself), or 'ti' for TI's\n"
-        "         rts6740. Unsaid: RTS6x from RTS6X or lib/rts6x-tms6747\n"
+        "         rts6740. Unsaid: RTS6x from RTS6X or lib/tms6747\n"
         "         beside this program - as RIDE links - unless CPP11_TI or\n"
         "         CPP11_TILIB names TI's; TI's otherwise; the link says which\n"
         "       -masm picks the assembly syntax for x86_64-windows: 'masm' is\n"
@@ -769,14 +781,16 @@ bool Driver::linkTi() {
     const char *tilib = std::getenv(program::env("TILIB").c_str());
     const bool tiNamed = (ti != nullptr && ti[0] != '\0') || (tilib != nullptr && tilib[0] != '\0');
     // **RTS6x, the project's own runtime, as RIDE links it** (review D9): -rts= names it or asks for TI's;
-    // else RTS6X, or lib/rts6x-tms6747 beside this program, unless CPP11_TI or CPP11_TILIB names TI's.
+    // else RTS6X, or lib/tms6747 beside this program (lib/rts6x-tms6747 in an earlier installation), unless CPP11_TI
+    // or CPP11_TILIB names TI's.
     std::string ours, rts;
     if (rtsChoice_ != "ti") {
         std::string want = rtsChoice_;
         const char *env = std::getenv("RTS6X");
         if (want.empty() && !tiNamed && env != nullptr && env[0] != '\0') want = env;
         if (want.empty() && !tiNamed) {
-            const std::string beside = besideProgram(program_, ("lib" + sep + "rts6x-tms6747" + sep + "rts6x.lib").c_str());
+            std::string beside = besideProgram(program_, ("lib" + sep + "tms6747" + sep + "rts6x.lib").c_str());
+            if (beside.empty()) beside = besideProgram(program_, ("lib" + sep + "rts6x-tms6747" + sep + "rts6x.lib").c_str());
             if (!beside.empty()) want = beside.substr(0, beside.size() - std::strlen("rts6x.lib") - 1);
         }
         if (!want.empty()) {

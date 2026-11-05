@@ -18,4 +18,13 @@ DoubleDouble DoubleDouble::over(const DoubleDouble &d) const
     return q.plus(r.hi * reciprocal);
 }
 
+// A double divisor: the quotient of the high parts, corrected once by the exact remainder.
+DoubleDouble DoubleDouble::over(double d) const
+{
+    double q = hi / d;
+    DoubleDouble p = product(q, d);
+    double r = ((hi - p.hi) - p.lo + lo) / d;
+    return quickSum(q, r);
+}
+
 }  // namespace rts6x

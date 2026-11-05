@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   rts6x - the C6747 runtime libraries, built with the solution's own cpp11 and asm6x, packed by ar6x:
-    lib\rts6x-tms6747\rts6x.lib, printf6x.lib     (-O2 -DNDEBUG=1)
-    lib\rts6x-tms6747\rts6xd.lib, printf6xd.lib   (-O0 -g -D_DEBUG=1)
-    lib\rts6x-tms6747\shmrt6x.lib, shmrt6xd.lib   (the Shalimar runtime's C6747 assembly that shalimar's build wrote)
-  beside the programs in $(OutDir). Both variants are built in either configuration, as RTS6x's build.cmd builds
-  them. The steps are MSBuild tasks (..\..\msbuild\Toolchain.targets): nothing runs through cmd.exe. Built after
+    lib\tms6747\rts6x.lib, printf6x.lib     (-O2 -DNDEBUG=1)
+    lib\tms6747\rts6xd.lib, printf6xd.lib   (-O0 -g -D_DEBUG=1)
+    lib\tms6747\shmrt6x.lib, shmrt6xd.lib   (the Shalimar runtime's C6747 assembly that shalimar's build wrote,
+                                            lib\tms6747\shmrt and shmrt-debug)
+  beside the programs in $(OutDir), the layout of docs\Runtime_Design.md 5.3. Both variants are built in either
+  configuration, as RTS6x's build.cmd builds them. The steps are MSBuild tasks (..\..\msbuild\Toolchain.targets): nothing runs through cmd.exe. Built after
   cpp11, asm6x and shalimar (the solution's dependencies).
 -->
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
@@ -39,7 +40,7 @@
     <Rts6xCpp11>$(OutDir)cpp11.exe</Rts6xCpp11>
     <Rts6xAsm6x>$(OutDir)asm6x.exe</Rts6xAsm6x>
     <Rts6xAr6x>$(ProjectDir)tools\ar6x\build\$(Configuration)\ar6x.exe</Rts6xAr6x>
-    <Rts6xLibDir>$(OutDir)lib\rts6x-tms6747\</Rts6xLibDir>
+    <Rts6xLibDir>$(OutDir)lib\tms6747\</Rts6xLibDir>
   </PropertyGroup>
   <ItemGroup>
     <None Include="printf6x.members" />
@@ -52,20 +53,22 @@
   </ItemGroup>
 
   <Target Name="Rts6xLibraries" AfterTargets="Build"
-          Inputs="@(Rts6xInput);$(Rts6xCpp11);$(Rts6xAsm6x);$(Rts6xAr6x);$(OutDir)lib\shmrt-tms6747\Runtime.s;$(OutDir)lib\shmrt-tms6747-debug\Runtime.s"
+          Inputs="@(Rts6xInput);$(Rts6xCpp11);$(Rts6xAsm6x);$(Rts6xAr6x);$(Rts6xLibDir)shmrt\Runtime.s;$(Rts6xLibDir)shmrt-debug\Runtime.s"
           Outputs="$(Rts6xLibDir)rts6x.lib;$(Rts6xLibDir)rts6xd.lib;$(Rts6xLibDir)printf6x.lib;$(Rts6xLibDir)printf6xd.lib;$(Rts6xLibDir)shmrt6x.lib;$(Rts6xLibDir)shmrt6xd.lib">
     <Error Condition="!Exists('$(Rts6xCpp11)')" Text="rts6x: no cpp11.exe in $(OutDir) - cpp11 is built first in the solution" />
     <Error Condition="!Exists('$(Rts6xAsm6x)')" Text="rts6x: no asm6x.exe in $(OutDir) - asm6x is built first in the solution" />
-    <Error Condition="!Exists('$(OutDir)lib\shmrt-tms6747')" Text="rts6x: no lib\shmrt-tms6747 in $(OutDir) - shalimar's build writes it, and is built first in the solution" />
+    <Error Condition="!Exists('$(Rts6xLibDir)shmrt')" Text="rts6x: no lib\tms6747\shmrt in $(OutDir) - shalimar's build writes it, and is built first in the solution" />
     <Error Condition="!Exists('$(Rts6xAr6x)')" Text="rts6x: no ar6x.exe at $(Rts6xAr6x) - the ar6x project (tools\ar6x) is built first in the solution" />
-    <Rts6xVariant Cpp11="$(Rts6xCpp11)" Asm6x="$(Rts6xAsm6x)" Ar6x="$(Rts6xAr6x)" SourceRoot="$(ProjectDir)" ObjDir="$(IntDir)obj"
+    <Rts6xVariant Jobs="$(ToolchainJobs)" Cpp11="$(Rts6xCpp11)" Asm6x="$(Rts6xAsm6x)" Ar6x="$(Rts6xAr6x)" SourceRoot="$(ProjectDir)" ObjDir="$(IntDir)obj"
                   Flags="-O2 -DNDEBUG=1" Members="$(ProjectDir)printf6x.members"
                   Library="$(Rts6xLibDir)rts6x.lib" PrintfLibrary="$(Rts6xLibDir)printf6x.lib" />
-    <Rts6xVariant Cpp11="$(Rts6xCpp11)" Asm6x="$(Rts6xAsm6x)" Ar6x="$(Rts6xAr6x)" SourceRoot="$(ProjectDir)" ObjDir="$(IntDir)objd"
+    <Rts6xVariant Jobs="$(ToolchainJobs)" Cpp11="$(Rts6xCpp11)" Asm6x="$(Rts6xAsm6x)" Ar6x="$(Rts6xAr6x)" SourceRoot="$(ProjectDir)" ObjDir="$(IntDir)objd"
                   Flags="-O0 -g -D_DEBUG=1" Members="$(ProjectDir)printf6x.members"
                   Library="$(Rts6xLibDir)rts6xd.lib" PrintfLibrary="$(Rts6xLibDir)printf6xd.lib" />
-    <PackObjects Asm6x="$(Rts6xAsm6x)" Ar6x="$(Rts6xAr6x)" AssemblyDir="$(OutDir)lib\shmrt-tms6747" ObjDir="$(IntDir)shmrt6x" Library="$(Rts6xLibDir)shmrt6x.lib" />
-    <PackObjects Asm6x="$(Rts6xAsm6x)" Ar6x="$(Rts6xAr6x)" AssemblyDir="$(OutDir)lib\shmrt-tms6747-debug" ObjDir="$(IntDir)shmrt6xd" Library="$(Rts6xLibDir)shmrt6xd.lib" />
+    <PackObjects Asm6x="$(Rts6xAsm6x)" Ar6x="$(Rts6xAr6x)" AssemblyDir="$(Rts6xLibDir)shmrt" ObjDir="$(IntDir)shmrt6x" Library="$(Rts6xLibDir)shmrt6x.lib" />
+    <PackObjects Asm6x="$(Rts6xAsm6x)" Ar6x="$(Rts6xAr6x)" AssemblyDir="$(Rts6xLibDir)shmrt-debug" ObjDir="$(IntDir)shmrt6xd" Library="$(Rts6xLibDir)shmrt6xd.lib" />
+    <!-- an earlier build's libraries in the layout before stage 3, so that nothing finds them there -->
+    <RemoveDir Directories="$(OutDir)lib\rts6x-tms6747" />
   </Target>
 
   <Target Name="Rts6xClean" AfterTargets="Clean">

@@ -1,19 +1,18 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <!--
-  Setup.vcxproj - GRIDE's Windows Setup, GRIDE-Setup-<version>.msi, as a project of the solutions (as RIDE's
-  Installer.vdproj was of RIDE.sln). A Utility project, so Visual Studio loads it with the C++ workload alone: no
-  Installer Projects extension, no WiX, no Inno Setup, no NuGet package. Its build runs build-setup.ps1, which writes
-  the package through Windows Installer's own automation API (msi.dll) and makecab, both part of Windows, then
-  validate-msi.ps1 (the Windows SDK's ICE suite, where the SDK is installed). Every program is started directly,
-  never through cmd.exe.
+  Setup.vcxproj - GRIDE's Windows Setup, GRIDE-Setup-<version>.msi, the last project of GRIDE3.sln. A Utility
+  project, so Visual Studio loads it with the C++ workload alone: no Installer Projects extension, no WiX, no Inno
+  Setup, no NuGet package. Its build runs build-setup.ps1, which writes the package through Windows Installer's own
+  automation API (msi.dll) and makecab, both part of Windows, then validate-msi.ps1 (the Windows SDK's ICE suite,
+  where the SDK is installed). Every program is started directly, never through cmd.exe.
 
-  In GRIDEd\GRIDE.sln, GRIDE 2.0\GRIDE.sln and GRIDE 1.0\GRIDE.sln it is listed but not built with the solution
-  (Build > Build Setup, or Build on the project, makes the package from the three Release builds already there).
-  Built from installer\windows\Setup.sln - the final Setup - it first builds the three solutions in Release | x64,
-  one after another (they share the toolchain's build folders), then the package. From the command line:
+  It is in none of the outlooks' solutions (GRIDEd\GRIDE.sln, GRIDE 2.0\GRIDE.sln, GRIDE 1.0\GRIDE.sln, since
+  2026-11-03). GRIDE3.sln builds the toolchain once, the three outlooks and then this package, in Release | x64;
+  a package is made when something in the three Release folders, the examples or these scripts is newer than it.
+  Built alone it makes the package from the three Release builds already there. From the command line:
 
-    MSBuild.exe installer\windows\Setup.sln /p:Configuration=Release /p:Platform=x64
-    MSBuild.exe installer\windows\Setup.vcxproj /p:Configuration=Release /p:Platform=x64 [/p:BuildOutlooks=true]
+    MSBuild.exe GRIDE3.sln /p:Configuration=Release /p:Platform=x64
+    MSBuild.exe installer\windows\Setup.vcxproj /p:Configuration=Release /p:Platform=x64
                 [/p:SetupVersion=1.5.0] [/p:CertThumbprint=<sha1> | /p:PfxFile=<file.pfx>] [/p:ValidateSetup=false]
 
   The package goes to installer\dist; test-setup.ps1 installs and removes it per user (it is not run by the build).
@@ -48,10 +47,9 @@
     <IntDir>$(SetupDist)\obj\$(Configuration)\</IntDir>
     <SetupVersion Condition="'$(SetupVersion)'==''">1.5.0</SetupVersion>
     <SetupMsi>$(SetupDist)\GRIDE-Setup-$(SetupVersion).msi</SetupMsi>
-    <!-- the final Setup (Setup.sln) builds the three outlooks first; inside an outlook's solution, that solution
-         has just been built and the other two are taken as they are -->
-    <BuildOutlooks Condition="'$(BuildOutlooks)'=='' And '$(SolutionFileName)'=='Setup.sln'">true</BuildOutlooks>
-    <BuildOutlooks Condition="'$(BuildOutlooks)'==''">false</BuildOutlooks>
+    <!-- Visual Studio's own up-to-date check knows nothing of the three builds, so it would skip the package once
+         one is made; MakeSetup's Inputs and Outputs decide instead -->
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
     <SdkMsiBin>$(MSBuildProgramFiles32)\Windows Kits\10\bin\10.0.26100.0\x86</SdkMsiBin>
     <ValidateSetup Condition="'$(ValidateSetup)'=='' And Exists('$(SdkMsiBin)\MsiInfo.exe')">true</ValidateSetup>
     <ValidateSetup Condition="'$(ValidateSetup)'==''">false</ValidateSetup>
@@ -64,11 +62,6 @@
     <None Include="Msi-Com.ps1" />
     <None Include="validate-msi.ps1" />
     <None Include="test-setup.ps1" />
-  </ItemGroup>
-  <ItemGroup>
-    <Outlook Include="$(GrideRoot)\GRIDEd\GRIDE.sln" />
-    <Outlook Include="$(GrideRoot)\GRIDE 2.0\GRIDE.sln" />
-    <Outlook Include="$(GrideRoot)\GRIDE 1.0\GRIDE.sln" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 
@@ -109,13 +102,15 @@
     <Error Text="Setup: GRIDE's Setup is made from the three Release builds - choose Release | x64 and build Setup again" />
   </Target>
 
-  <!-- the three solutions in Release | x64, one after another, each in an MSBuild of its own: no property of this
-       build (the solution's folder above all, which every tool's output folder is made from) reaches theirs -->
-  <Target Name="BuildOutlooks" BeforeTargets="MakeSetup" Condition="'$(Configuration)'=='Release' And '$(BuildOutlooks)'=='true'">
-    <RunLive Exe="$(MSBuildBinPath)\MSBuild.exe" Arguments="&quot;%(Outlook.FullPath)&quot; /t:Build /p:Configuration=Release /p:Platform=x64 /m /nr:false /nologo /v:minimal" WorkingDirectory="%(Outlook.RootDir)%(Outlook.Directory)" />
+  <!-- what a package is made from, gathered as the build reaches it: the outlooks' folders are empty before then -->
+  <Target Name="SetupInputs" BeforeTargets="MakeSetup" Condition="'$(Configuration)'=='Release'">
+    <ItemGroup>
+      <SetupInput Include="$(GrideRoot)\GRIDEd\x64\Release\**\*;$(GrideRoot)\GRIDE 2.0\x64\Release\**\*;$(GrideRoot)\GRIDE 1.0\x64\Release\**\*" />
+      <SetupInput Include="$(GrideRoot)\examples\**\*;$(MSBuildThisFileDirectory)*.ps1" />
+    </ItemGroup>
   </Target>
 
-  <Target Name="MakeSetup" AfterTargets="Build" Condition="'$(Configuration)'=='Release'">
+  <Target Name="MakeSetup" AfterTargets="Build" Condition="'$(Configuration)'=='Release'" Inputs="@(SetupInput)" Outputs="$(SetupMsi)">
     <PropertyGroup>
       <SetupSign Condition="'$(CertThumbprint)'!=''"> -CertThumbprint $(CertThumbprint)</SetupSign>
       <SetupSign Condition="'$(PfxFile)'!=''"> -PfxFile &quot;$(PfxFile)&quot;</SetupSign>

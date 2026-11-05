@@ -167,11 +167,13 @@ bool Undecorator::number(long long &v)
 
 void Undecorator::templateArguments(Text &out)
 {
-    // a template's arguments have back-references of their own
+    // a template's arguments have back-references of their own, the template's name (out, so far) the first:
+    // ?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@ names std by 2
     Text *savedNames[10], *savedTypes[10];
     int nNames = names_, nTypes = types_;
     for (int i = 0; i < 10; i++) { savedNames[i] = name_[i]; savedTypes[i] = type_[i]; }
     names_ = types_ = 0;
+    remember(name_, names_, out);
     out.add('<');
     bool first = true;
     while (!bad_ && *p_ && *p_ != '@') {

@@ -57,6 +57,9 @@ public:
     virtual bool optimizesAroundVolatile() const { return false; }
 
     virtual const char *const *identityMacros() const = 0;
+    // [intro.compliance]/7: a freestanding implementation is one with no operating system to run on; it
+    // provides [compliance]'s headers and __STDC_HOSTED__ is 0.
+    virtual bool hosted() const { return true; }
 };
 
 std::vector<std::pair<std::string, std::string> > predefinedMacros(const Backend &b);

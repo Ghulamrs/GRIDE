@@ -365,6 +365,23 @@ bool directoryOf(const std::string& step, std::string& dir) {
 }
 #endif
 
+// A step that failed: the command it was given, beneath what it said, as Black shows it - which arguments the
+// program saw. Not for one that could not be started (its caller says so) or that was stopped.
+void showFailed(const std::string& step, int status, std::string& output, LineSink sink, void* context) {
+    if (status <= 0 || status == kStoppedStatus) return;
+    const std::string exe = step.empty() ? std::string() : step[0] == '"' ? step.substr(1, step.find('"', 1) - 1)
+                                                                          : step.substr(0, step.find(' '));
+    std::string name = path::filename(exe);
+    const size_t dot = name.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) name.resize(dot);
+    if (!output.empty() && output[output.size() - 1] != '\n') output += "\n";
+    const std::string said[2] = { "[" + name + " returned " + std::to_string(status) + " - its command line:]", "> " + step };
+    for (size_t i = 0; i < 2; ++i) {
+        output += said[i] + "\n";
+        if (sink) sink(context, said[i]);
+    }
+}
+
 }
 
 int runCaptured(const std::string& command, std::string& output,
@@ -387,11 +404,13 @@ int runCaptured(const std::string& command, std::string& output,
             continue;
         }
         status = runOne(steps[i], directory, output, sink, context);
-        if (status != 0) return status;
+        if (status != 0) { showFailed(steps[i], status, output, sink, context); return status; }
     }
     return status;
 #else
-    return runOne(command, std::string(), output, sink, context);
+    const int status = runOne(command, std::string(), output, sink, context);
+    showFailed(command, status, output, sink, context);
+    return status;
 #endif
 }
 
@@ -546,10 +565,20 @@ Built withNativeFallback(Built first, const std::string& arch, LineSink sink, vo
 
 }
 
+// A list naming what nothing knows (path.h) is said once, before any tool runs: the compiler would say something stranger.
+template <typename Result>
+static bool refusedNames(const Toolchain& tool, Result& result, LineSink sink, void* context) {
+    if (tool.namesRefused.empty()) return false;
+    result.output = tool.namesRefused + "\n";
+    if (sink) sink(context, tool.namesRefused);
+    return true;
+}
+
 Build build(const Toolchain& tool, ToolchainKind kind, const std::string& sourcePath,
             Language lang, const std::string& arch, Configuration config,
             LineSink sink, void* context) {
     Build result;
+    if (refusedNames(tool, result, sink, context)) return result;
 
     if (!prepareFor(kind, config, arch)) {
         result.output = "no Visual Studio found - cl, ml64 and link cannot be run; name its vcvars64.bat under Tools\n";
@@ -783,6 +812,7 @@ Built buildProgramOnce(const Toolchain& tool, ToolchainKind kind, const std::str
                        Language lang, const std::string& arch, Configuration config,
                        LineSink sink, void* context) {
     Built result;
+    if (refusedNames(tool, result, sink, context)) return result;
 
     if (!prepareFor(kind, config, arch)) {
         result.output = "no Visual Studio found - cl, ml64 and link cannot be run; name its vcvars64.bat under Tools\n";
@@ -855,7 +885,12 @@ Built buildProgram(const Toolchain& tool, ToolchainKind kind, const std::string&
 
 namespace {
 
-std::string q(const std::string& s) { return "\"" + s + "\""; }
+// in quotes, a folder's final backslashes doubled, as the C runtime splits a command line: -i "lib\" would end
+// in \", a quote of the text, and run on into the next argument
+std::string q(const std::string& s) {
+    const size_t last = s.find_last_not_of('\\');
+    return "\"" + s + std::string(last == std::string::npos ? s.size() : s.size() - 1 - last, '\\') + "\"";
+}
 
 bool copyText(const std::string& from, const std::string& to) {
     std::FILE* in = std::fopen(from.c_str(), "rb");
@@ -969,7 +1004,7 @@ void makeTiProgram(Built& result, const Toolchain& tool, const std::string& prog
     std::string ti = rts6x ? std::string() : settings::ti();
     const std::string made = "[" + std::to_string(objects.size()) + " TI objects made] no .out: ";
     if (!rts6x && ti.empty()) {
-        fail(made + "a tms6747 build links against RTS6x in lib/rts6x-tms6747 beside " + product::kName +
+        fail(made + "a tms6747 build links against RTS6x in lib/tms6747 beside " + product::kName +
              ", or TI's runtime when its compiler directory is named under Tools, and neither is here");
         return;
     }
@@ -1050,6 +1085,8 @@ void makeTiProgram(Built& result, const Toolchain& tool, const std::string& prog
         // Shalimar's runtime before the C runtime it calls into, so lnk6x finds what it needs after it.
         if (shmPacked) link += " -l " + shmLib;
         link += " -l " + rts;
+        // The project's own, as Black and Grey link them; the shared lists are for host links (the bridge's toolFrom).
+        for (size_t i = 0; i < tool.libraries.size(); ++i) link += " -l " + q(tool.libraries[i]);
     }
     link += " -o " + q(out);
     tell("$ lnk6x " + std::to_string(objects.size()) + " objects, " + (shmPacked ? shmLib + ", " : std::string()) + rts +
@@ -1109,6 +1146,7 @@ Built buildTargetOnce(const Toolchain& tool, ToolchainKind kind,
                       const std::string& arch, Configuration config,
                       const std::string& program, LineSink sink, void* context) {
     Built result;
+    if (refusedNames(tool, result, sink, context)) return result;
 
     if (sources.empty()) {
         result.output = "nothing to build\n";
@@ -1183,6 +1221,7 @@ Built buildPartsOnce(const Toolchain& tool, const std::vector<Part>& parts,
                      const std::string& arch, Configuration config,
                      const std::string& program, LineSink sink, void* context) {
     Built result;
+    if (refusedNames(tool, result, sink, context)) return result;
 
     if (parts.empty()) {
         result.output = "nothing to build\n";
@@ -1309,7 +1348,7 @@ Built linkParts(const Toolchain& tool, const std::vector<Part>& parts, const std
         crt = chosen.libraries;
         // the Shalimar runtime built for that C runtime, the session's (-debug) where shalimar was given --debug
         if (shalimar) {
-            const bool session = configFlags(ToolShc, config, arch).find("--debug") != std::string::npos;
+            const bool session = configFlags(tool, ToolShc, config, arch).find("--debug") != std::string::npos;
             const std::string shm = windowsShalimarRuntime(tool, chosen.crt, session);
             if (path::exists(shm)) {
                 made.push_back(shm);
@@ -1430,7 +1469,7 @@ std::string simulationMissing(const std::string& program) {
     const std::string out = tiProgramOf(program);
     if (!path::exists(out))
         return "no " + path::filename(out) + ": a tms6747 build links one only with asm6x and lnk6x beside " +
-               product::kName + " and a runtime - RTS6x in lib/rts6x-tms6747 beside it, or TI's named under Tools";
+               product::kName + " and a runtime - RTS6x in lib/tms6747 beside it, or TI's named under Tools";
     return std::string();
 }
 

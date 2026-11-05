@@ -1,0 +1,941 @@
+-- not asked: the ANSI code page, a byte the wide character of its value
+ctype C all C
+fopen write 1 errno 0
+windows has the ANSI name 1
+fopen read 1 errno 0 gives ansi
+
+name: ce b1 ce b2 ce b3 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+name: e6 97 a5 e6 9c ac e8 aa 9e 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+name: f0 9f 98 80 2d 73 6d 69 6c 65 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+mkdir 0
+windows has it 1
+chdir 0
+fopen write 1 errno 0
+fopen write 1 errno 0
+getcwd ends: e6 96 87 e4 bb b6 e5 a4 b9
+findfirst 1
+found: ce b1 ce b2 ce b3 2e 74 78 74
+found: f0 9f 98 80 2d 73 6d 69 6c 65 2e 74 78 74
+chdir back 0
+rmdir 0
+windows has it 0
+MB_CUR_MAX 1
+sample: 61
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 0061 errno 0
+ mbrtowc 1: 1 0061 errno 0
+ mbrlen 1: 1 errno 0
+sample: c3 bc
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00c3 errno 0
+ mbrtowc 2: 1 00c3 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00c3 errno 0
+ mbrtowc 1: 1 00c3 errno 0
+ mbrlen 1: 1 errno 0
+sample: e6 97 a5
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00e6 errno 0
+ mbrtowc 3: 1 00e6 errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00e6 errno 0
+ mbrtowc 2: 1 00e6 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00e6 errno 0
+ mbrtowc 1: 1 00e6 errno 0
+ mbrlen 1: 1 errno 0
+sample: f0 9f 98 80
+ mblen 4: 1 errno 0
+ mbtowc 4: 1 00f0 errno 0
+ mbrtowc 4: 1 00f0 errno 0
+ mbrlen 4: 1 errno 0
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00f0 errno 0
+ mbrtowc 3: 1 00f0 errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00f0 errno 0
+ mbrtowc 2: 1 00f0 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00f0 errno 0
+ mbrtowc 1: 1 00f0 errno 0
+ mbrlen 1: 1 errno 0
+sample: c3
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00c3 errno 0
+ mbrtowc 1: 1 00c3 errno 0
+ mbrlen 1: 1 errno 0
+sample: e6 97
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00e6 errno 0
+ mbrtowc 2: 1 00e6 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00e6 errno 0
+ mbrtowc 1: 1 00e6 errno 0
+ mbrlen 1: 1 errno 0
+sample: f0 9f 98
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00f0 errno 0
+ mbrtowc 3: 1 00f0 errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00f0 errno 0
+ mbrtowc 2: 1 00f0 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00f0 errno 0
+ mbrtowc 1: 1 00f0 errno 0
+ mbrlen 1: 1 errno 0
+sample: 80
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 0080 errno 0
+ mbrtowc 1: 1 0080 errno 0
+ mbrlen 1: 1 errno 0
+sample: ff
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00ff errno 0
+ mbrtowc 1: 1 00ff errno 0
+ mbrlen 1: 1 errno 0
+sample: c0 80
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00c0 errno 0
+ mbrtowc 2: 1 00c0 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00c0 errno 0
+ mbrtowc 1: 1 00c0 errno 0
+ mbrlen 1: 1 errno 0
+sample: ed a0 80
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00ed errno 0
+ mbrtowc 3: 1 00ed errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00ed errno 0
+ mbrtowc 2: 1 00ed errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00ed errno 0
+ mbrtowc 1: 1 00ed errno 0
+ mbrlen 1: 1 errno 0
+sample: f4 90 80 80
+ mblen 4: 1 errno 0
+ mbtowc 4: 1 00f4 errno 0
+ mbrtowc 4: 1 00f4 errno 0
+ mbrlen 4: 1 errno 0
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00f4 errno 0
+ mbrtowc 3: 1 00f4 errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00f4 errno 0
+ mbrtowc 2: 1 00f4 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00f4 errno 0
+ mbrtowc 1: 1 00f4 errno 0
+ mbrlen 1: 1 errno 0
+sample:
+ mblen 1: 0 errno 0
+ mbtowc 1: 0 0000 errno 0
+ mbrtowc 1: 0 0000 errno 0
+ mbrlen 1: 0 errno 0
+wide 0041
+ wctomb 1 errno 0: 41
+ wcrtomb 1 errno 0: 41
+wide 007f
+ wctomb 1 errno 0: 7f
+ wcrtomb 1 errno 0: 7f
+wide 0080
+ wctomb 1 errno 0: 80
+ wcrtomb 1 errno 0: 80
+wide 00fc
+ wctomb 1 errno 0: fc
+ wcrtomb 1 errno 0: fc
+wide 00ff
+ wctomb 1 errno 0: ff
+ wcrtomb 1 errno 0: ff
+wide 0100
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide 07ff
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide 0800
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide 65e5
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide d83d
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide de00
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide fffd
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide ffff
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+btowc 0: 0
+btowc 65: 65
+btowc 127: 127
+btowc 128: 128
+btowc 195: 195
+btowc 255: 255
+btowc -1: 65535
+wctob 0: 0
+wctob 41: 65
+wctob 7f: 127
+wctob 80: -128
+wctob fc: -4
+wctob ff: -1
+wctob 65e5: -1
+wctob ffff: -1
+mbstowcs count 11 errno 0
+mbstowcs 0: 0 errno 0: 7777 7777 7777 7777 7777 7777 7777 7777
+mbstowcs 1: 1 errno 0: 0061 7777 7777 7777 7777 7777 7777 7777
+mbstowcs 2: 2 errno 0: 0061 00c3 7777 7777 7777 7777 7777 7777
+mbstowcs 3: 3 errno 0: 0061 00c3 00bc 7777 7777 7777 7777 7777
+mbstowcs 4: 4 errno 0: 0061 00c3 00bc 00e6 7777 7777 7777 7777
+mbstowcs 5: 5 errno 0: 0061 00c3 00bc 00e6 0097 7777 7777 7777
+mbstowcs 6: 6 errno 0: 0061 00c3 00bc 00e6 0097 00a5 7777 7777
+mbstowcs 7: 7 errno 0: 0061 00c3 00bc 00e6 0097 00a5 00f0 7777
+mbstowcs 8: 8 errno 0: 0061 00c3 00bc 00e6 0097 00a5 00f0 009f
+mbstowcs bad 2 errno 0
+wcstombs count -1 errno 42
+wcstombs 0: 0 errno 0: 77 77 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 1: 1 errno 0: 61 77 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 2: 2 errno 0: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 3: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 4: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 5: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 6: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 7: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 8: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 9: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 10: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 11: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 12: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 13: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs lone low -1 errno 42
+wcstombs lone high -1 errno 42
+mbsrtowcs 0: 0 errno 0 from 0: 7777 7777 7777 7777 7777 7777 7777 7777
+mbsrtowcs 1: 1 errno 0 from 1: 0061 7777 7777 7777 7777 7777 7777 7777
+mbsrtowcs 2: 2 errno 0 from 2: 0061 00c3 7777 7777 7777 7777 7777 7777
+mbsrtowcs 3: 3 errno 0 from 3: 0061 00c3 00bc 7777 7777 7777 7777 7777
+mbsrtowcs 4: 4 errno 0 from 4: 0061 00c3 00bc 00e6 7777 7777 7777 7777
+mbsrtowcs 5: 5 errno 0 from 5: 0061 00c3 00bc 00e6 0097 7777 7777 7777
+mbsrtowcs 6: 6 errno 0 from 6: 0061 00c3 00bc 00e6 0097 00a5 7777 7777
+mbsrtowcs 7: 7 errno 0 from 7: 0061 00c3 00bc 00e6 0097 00a5 00f0 7777
+mbsrtowcs 8: 8 errno 0 from 8: 0061 00c3 00bc 00e6 0097 00a5 00f0 009f
+mbsrtowcs bad 3 errno 0 from null
+wcsrtombs 0: 0 errno 0 from 0: 77 77 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 1: 1 errno 0 from 1: 61 77 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 2: 2 errno 0 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 3: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 4: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 5: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 6: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 7: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 8: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 9: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 10: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 11: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 12: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 13: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs lone -1 errno 42 from 1
+%ls -1 errno 42:
+%12ls -1 errno 42:
+%-12ls -1 errno 42:
+%.3ls -1 errno 42:
+%.4ls -1 errno 42:
+%S -1 errno 42:
+%lc 3 errno 0: 5b fc 5d
+%lc 2 errno 42: 5b 5d
+%5lc 2 errno 42: 5b 5d
+%-5lc 7 errno 0: 5b fc 20 20 20 20 5d
+%lc surrogate 2 errno 42
+%C 3 errno 0: 5b fc 5d
+%ls low first -1 errno 42:
+%ls high ends -1 errno 42:
+%ls high then -1 errno 42:
+%s 4 errno 0: 5b c3 bc 5d
+fputwc 00fc errno 0
+fputwc ffff errno 42
+fputwc ffff errno 42
+fputws -1 errno 42
+fwprintf 9 errno 0
+fwprintf pair 3 errno 0
+wide.out: fc 61 fc 61 fc 3f 0d 0a 7c 3f 7c 35 0d 0a 3f 3f 0d 0a
+-- asked for UTF-8
+setlocale 1 errno 0
+name: ce b1 ce b2 ce b3 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+name: e6 97 a5 e6 9c ac e8 aa 9e 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+name: f0 9f 98 80 2d 73 6d 69 6c 65 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+mkdir 0
+windows has it 1
+chdir 0
+fopen write 1 errno 0
+fopen write 1 errno 0
+getcwd ends: e6 96 87 e4 bb b6 e5 a4 b9
+findfirst 1
+found: ce b1 ce b2 ce b3 2e 74 78 74
+found: f0 9f 98 80 2d 73 6d 69 6c 65 2e 74 78 74
+chdir back 0
+rmdir 0
+windows has it 0
+MB_CUR_MAX 4
+sample: 61
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 0061 errno 0
+ mbrtowc 1: 1 0061 errno 0
+ mbrlen 1: 1 errno 0
+sample: c3 bc
+ mblen 2: 2 errno 0
+ mbtowc 2: 2 00fc errno 0
+ mbrtowc 2: 2 00fc errno 0
+ mbrlen 2: 2 errno 0
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0 then 1 00fc errno 0
+ mbrlen 1: -2 errno 0
+sample: e6 97 a5
+ mblen 3: 3 errno 0
+ mbtowc 3: 3 65e5 errno 0
+ mbrtowc 3: 3 65e5 errno 0
+ mbrlen 3: 3 errno 0
+ mblen 2: -1 errno 0
+ mbtowc 2: -1 7777 errno 0
+ mbrtowc 2: -2 0000 errno 0 then 1 65e5 errno 0
+ mbrlen 2: -2 errno 0
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0 then 2 65e5 errno 0
+ mbrlen 1: -2 errno 0
+sample: f0 9f 98 80
+ mblen 4: 4 errno 0
+ mbtowc 4: 4 fffd errno 0
+ mbrtowc 4: 4 fffd errno 0
+ mbrlen 4: 4 errno 0
+ mblen 3: -1 errno 0
+ mbtowc 3: -1 7777 errno 0
+ mbrtowc 3: -2 0000 errno 0 then 1 fffd errno 0
+ mbrlen 3: -2 errno 0
+ mblen 2: -1 errno 0
+ mbtowc 2: -1 7777 errno 0
+ mbrtowc 2: -2 0000 errno 0 then 2 fffd errno 0
+ mbrlen 2: -2 errno 0
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0 then 3 fffd errno 0
+ mbrlen 1: -2 errno 0
+sample: c3
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0
+ mbrlen 1: -2 errno 0
+sample: e6 97
+ mblen 2: -1 errno 0
+ mbtowc 2: -1 7777 errno 0
+ mbrtowc 2: -2 0000 errno 0
+ mbrlen 2: -2 errno 0
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0 then -2 0000 errno 0
+ mbrlen 1: -2 errno 0
+sample: f0 9f 98
+ mblen 3: -1 errno 0
+ mbtowc 3: -1 7777 errno 0
+ mbrtowc 3: -2 0000 errno 0
+ mbrlen 3: -2 errno 0
+ mblen 2: -1 errno 0
+ mbtowc 2: -1 7777 errno 0
+ mbrtowc 2: -2 0000 errno 0 then -2 0000 errno 0
+ mbrlen 2: -2 errno 0
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0 then -2 0000 errno 0
+ mbrlen 1: -2 errno 0
+sample: 80
+ mblen 1: -1 errno 42
+ mbtowc 1: -1 7777 errno 42
+ mbrtowc 1: -1 0000 errno 42
+ mbrlen 1: -1 errno 42
+sample: ff
+ mblen 1: -1 errno 42
+ mbtowc 1: -1 7777 errno 42
+ mbrtowc 1: -1 0000 errno 42
+ mbrlen 1: -1 errno 42
+sample: c0 80
+ mblen 2: -1 errno 42
+ mbtowc 2: -1 7777 errno 42
+ mbrtowc 2: -1 0000 errno 42
+ mbrlen 2: -1 errno 42
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0 then -1 0000 errno 42
+ mbrlen 1: -2 errno 0
+sample: ed a0 80
+ mblen 3: -1 errno 42
+ mbtowc 3: -1 7777 errno 42
+ mbrtowc 3: -1 0000 errno 42
+ mbrlen 3: -1 errno 42
+ mblen 2: -1 errno 0
+ mbtowc 2: -1 7777 errno 0
+ mbrtowc 2: -2 0000 errno 0 then -1 0000 errno 42
+ mbrlen 2: -2 errno 0
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0 then -1 0000 errno 42
+ mbrlen 1: -2 errno 0
+sample: f4 90 80 80
+ mblen 4: -1 errno 42
+ mbtowc 4: -1 7777 errno 42
+ mbrtowc 4: -1 0000 errno 42
+ mbrlen 4: -1 errno 42
+ mblen 3: -1 errno 0
+ mbtowc 3: -1 7777 errno 0
+ mbrtowc 3: -2 0000 errno 0 then -1 0000 errno 42
+ mbrlen 3: -2 errno 0
+ mblen 2: -1 errno 0
+ mbtowc 2: -1 7777 errno 0
+ mbrtowc 2: -2 0000 errno 0 then -1 0000 errno 42
+ mbrlen 2: -2 errno 0
+ mblen 1: -1 errno 0
+ mbtowc 1: -1 7777 errno 0
+ mbrtowc 1: -2 0000 errno 0 then -1 0000 errno 42
+ mbrlen 1: -2 errno 0
+sample:
+ mblen 1: 0 errno 0
+ mbtowc 1: 0 0000 errno 0
+ mbrtowc 1: 0 0000 errno 0
+ mbrlen 1: 0 errno 0
+wide 0041
+ wctomb 1 errno 0: 41
+ wcrtomb 1 errno 0: 41
+wide 007f
+ wctomb 1 errno 0: 7f
+ wcrtomb 1 errno 0: 7f
+wide 0080
+ wctomb 2 errno 0: c2 80
+ wcrtomb 2 errno 0: c2 80
+wide 00fc
+ wctomb 2 errno 0: c3 bc
+ wcrtomb 2 errno 0: c3 bc
+wide 00ff
+ wctomb 2 errno 0: c3 bf
+ wcrtomb 2 errno 0: c3 bf
+wide 0100
+ wctomb 2 errno 0: c4 80
+ wcrtomb 2 errno 0: c4 80
+wide 07ff
+ wctomb 2 errno 0: df bf
+ wcrtomb 2 errno 0: df bf
+wide 0800
+ wctomb 3 errno 0: e0 a0 80
+ wcrtomb 3 errno 0: e0 a0 80
+wide 65e5
+ wctomb 3 errno 0: e6 97 a5
+ wcrtomb 3 errno 0: e6 97 a5
+wide d83d
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide de00
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide fffd
+ wctomb 3 errno 0: ef bf bd
+ wcrtomb 3 errno 0: ef bf bd
+wide ffff
+ wctomb 3 errno 0: ef bf bf
+ wcrtomb 3 errno 0: ef bf bf
+btowc 0: 0
+btowc 65: 65
+btowc 127: 127
+btowc 128: 65535
+btowc 195: 65535
+btowc 255: 65535
+btowc -1: 65535
+wctob 0: 0
+wctob 41: 65
+wctob 7f: 127
+wctob 80: -1
+wctob fc: -1
+wctob ff: -1
+wctob 65e5: -1
+wctob ffff: -1
+mbstowcs count 6 errno 0
+mbstowcs 0: 0 errno 0: 7777 7777 7777 7777 7777 7777 7777 7777
+mbstowcs 1: 1 errno 0: 0061 7777 7777 7777 7777 7777 7777 7777
+mbstowcs 2: 2 errno 0: 0061 00fc 7777 7777 7777 7777 7777 7777
+mbstowcs 3: 3 errno 0: 0061 00fc 65e5 7777 7777 7777 7777 7777
+mbstowcs 4: 3 errno 0: 0061 00fc 65e5 7777 7777 7777 7777 7777
+mbstowcs 5: 5 errno 0: 0061 00fc 65e5 d83d de00 7777 7777 7777
+mbstowcs 6: 6 errno 0: 0061 00fc 65e5 d83d de00 007a 7777 7777
+mbstowcs 7: 6 errno 0: 0061 00fc 65e5 d83d de00 007a 0000 7777
+mbstowcs 8: 6 errno 0: 0061 00fc 65e5 d83d de00 007a 0000 7777
+mbstowcs bad -1 errno 42
+wcstombs count 11 errno 0
+wcstombs 0: 0 errno 0: 77 77 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 1: 1 errno 0: 61 77 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 2: 1 errno 0: 61 77 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 3: 3 errno 0: 61 c3 bc 77 77 77 77 77 77 77 77 77 77
+wcstombs 4: 3 errno 0: 61 c3 bc 77 77 77 77 77 77 77 77 77 77
+wcstombs 5: 3 errno 0: 61 c3 bc 77 77 77 77 77 77 77 77 77 77
+wcstombs 6: 6 errno 0: 61 c3 bc e6 97 a5 77 77 77 77 77 77 77
+wcstombs 7: 6 errno 0: 61 c3 bc e6 97 a5 77 77 77 77 77 77 77
+wcstombs 8: 6 errno 0: 61 c3 bc e6 97 a5 77 77 77 77 77 77 77
+wcstombs 9: 6 errno 0: 61 c3 bc e6 97 a5 77 77 77 77 77 77 77
+wcstombs 10: 10 errno 0: 61 c3 bc e6 97 a5 f0 9f 98 80 77 77 77
+wcstombs 11: 11 errno 0: 61 c3 bc e6 97 a5 f0 9f 98 80 7a 77 77
+wcstombs 12: 11 errno 0: 61 c3 bc e6 97 a5 f0 9f 98 80 7a 00 77
+wcstombs 13: 11 errno 0: 61 c3 bc e6 97 a5 f0 9f 98 80 7a 00 77
+wcstombs lone low -1 errno 42
+wcstombs lone high -1 errno 42
+mbsrtowcs 0: 0 errno 0 from 0: 7777 7777 7777 7777 7777 7777 7777 7777
+mbsrtowcs 1: 1 errno 0 from 1: 0061 7777 7777 7777 7777 7777 7777 7777
+mbsrtowcs 2: 2 errno 0 from 3: 0061 00fc 7777 7777 7777 7777 7777 7777
+mbsrtowcs 3: 3 errno 0 from 6: 0061 00fc 65e5 7777 7777 7777 7777 7777
+mbsrtowcs 4: 3 errno 0 from 6: 0061 00fc 65e5 7777 7777 7777 7777 7777
+mbsrtowcs 5: 5 errno 0 from 10: 0061 00fc 65e5 d83d de00 7777 7777 7777
+mbsrtowcs 6: 6 errno 0 from 11: 0061 00fc 65e5 d83d de00 007a 7777 7777
+mbsrtowcs 7: 6 errno 0 from -1: 0061 00fc 65e5 d83d de00 007a 0000 7777
+mbsrtowcs 8: 6 errno 0 from -1: 0061 00fc 65e5 d83d de00 007a 0000 7777
+mbsrtowcs bad -1 errno 42 from set
+wcsrtombs 0: 0 errno 0 from 0: 77 77 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 1: 1 errno 0 from 1: 61 77 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 2: 1 errno 0 from 1: 61 77 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 3: 3 errno 0 from 2: 61 c3 bc 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 4: 3 errno 0 from 2: 61 c3 bc 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 5: 3 errno 0 from 2: 61 c3 bc 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 6: 6 errno 0 from 3: 61 c3 bc e6 97 a5 77 77 77 77 77 77 77
+wcsrtombs 7: 6 errno 0 from 3: 61 c3 bc e6 97 a5 77 77 77 77 77 77 77
+wcsrtombs 8: 6 errno 0 from 3: 61 c3 bc e6 97 a5 77 77 77 77 77 77 77
+wcsrtombs 9: 6 errno 0 from 3: 61 c3 bc e6 97 a5 77 77 77 77 77 77 77
+wcsrtombs 10: 10 errno 0 from 5: 61 c3 bc e6 97 a5 f0 9f 98 80 77 77 77
+wcsrtombs 11: 11 errno 0 from 6: 61 c3 bc e6 97 a5 f0 9f 98 80 7a 77 77
+wcsrtombs 12: 11 errno 0 from -1: 61 c3 bc e6 97 a5 f0 9f 98 80 7a 00 77
+wcsrtombs 13: 11 errno 0 from -1: 61 c3 bc e6 97 a5 f0 9f 98 80 7a 00 77
+wcsrtombs lone -1 errno 42 from 1
+%ls 12 errno 0: 5b 61 c3 bc e6 97 a5 f0 9f 98 80 5d
+%12ls 19 errno 0: 5b 20 20 20 20 20 20 20 61 c3 bc e6 97 a5 f0 9f 98 80 5d
+%-12ls 19 errno 0: 5b 61 c3 bc e6 97 a5 f0 9f 98 80 20 20 20 20 20 20 20 5d
+%.3ls 8 errno 0: 5b 61 c3 bc e6 97 a5 5d
+%.4ls 8 errno 0: 5b 61 c3 bc e6 97 a5 5d
+%S 12 errno 0: 5b 61 c3 bc e6 97 a5 f0 9f 98 80 5d
+%lc 4 errno 0: 5b c3 bc 5d
+%lc 5 errno 0: 5b e6 97 a5 5d
+%5lc 7 errno 0: 5b 20 20 e6 97 a5 5d
+%-5lc 7 errno 0: 5b c3 bc 20 20 20 5d
+%lc surrogate 2 errno 42
+%C 4 errno 0: 5b c3 bc 5d
+%ls low first -1 errno 42:
+%ls high ends 3 errno 0: 5b 61 5d
+%ls high then -1 errno 42:
+%s 4 errno 0: 5b c3 bc 5d
+fputwc 00fc errno 0
+fputwc 65e5 errno 0
+fputwc d83d errno 42
+fputws 0 errno 0
+fwprintf 9 errno 0
+fwprintf pair 3 errno 0
+wide.out: c3 bc e6 97 a5 61 c3 bc e6 97 a5 0d 0a 61 c3 bc e6 97 a5 0d 0a 7c e6 97 a5 7c 35 0d 0a 0d 0a
+not text: 62 61 64 ff 2e 74 78 74
+fopen 0 errno 42
+access -1 errno 42
+mkdir -1 errno 42
+not text: 62 61 64 c3
+fopen 0 errno 42
+access -1 errno 42
+mkdir -1 errno 42
+raw: GrÃ¼ÃŸe, Î±Î²Î³, æ—¥æœ¬èªž
+-- every spelling
+.UTF-8 1 MB_CUR_MAX 4
+.UTF8 1 MB_CUR_MAX 4
+.utf8 1 MB_CUR_MAX 4
+.utf-8 1 MB_CUR_MAX 4
+.Utf-8 1 MB_CUR_MAX 4
+.65001 1 MB_CUR_MAX 4
+-- given back
+C MB_CUR_MAX 1
+restored 1 MB_CUR_MAX 4
+-- not known
+bogus 0 MB_CUR_MAX 4
+C.UTF-8 0 MB_CUR_MAX 4
+-- back to C
+setlocale 1
+ctype C all C
+fopen write 1 errno 0
+windows has the ANSI name 1
+fopen read 1 errno 0 gives ansi
+
+name: ce b1 ce b2 ce b3 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+name: e6 97 a5 e6 9c ac e8 aa 9e 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+name: f0 9f 98 80 2d 73 6d 69 6c 65 2e 74 78 74
+fopen write 1 errno 0
+windows has it 1
+fopen read 1 errno 0 gives contents
+
+stat 0 errno 0 size 10
+access 0
+rename 0 errno 0
+windows has it 0, and the new name 1
+remove 0 errno 0
+windows has the new name 0
+mkdir 0
+windows has it 1
+chdir 0
+fopen write 1 errno 0
+fopen write 1 errno 0
+getcwd ends: e6 96 87 e4 bb b6 e5 a4 b9
+findfirst 1
+found: ce b1 ce b2 ce b3 2e 74 78 74
+found: f0 9f 98 80 2d 73 6d 69 6c 65 2e 74 78 74
+chdir back 0
+rmdir 0
+windows has it 0
+MB_CUR_MAX 1
+sample: 61
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 0061 errno 0
+ mbrtowc 1: 1 0061 errno 0
+ mbrlen 1: 1 errno 0
+sample: c3 bc
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00c3 errno 0
+ mbrtowc 2: 1 00c3 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00c3 errno 0
+ mbrtowc 1: 1 00c3 errno 0
+ mbrlen 1: 1 errno 0
+sample: e6 97 a5
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00e6 errno 0
+ mbrtowc 3: 1 00e6 errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00e6 errno 0
+ mbrtowc 2: 1 00e6 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00e6 errno 0
+ mbrtowc 1: 1 00e6 errno 0
+ mbrlen 1: 1 errno 0
+sample: f0 9f 98 80
+ mblen 4: 1 errno 0
+ mbtowc 4: 1 00f0 errno 0
+ mbrtowc 4: 1 00f0 errno 0
+ mbrlen 4: 1 errno 0
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00f0 errno 0
+ mbrtowc 3: 1 00f0 errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00f0 errno 0
+ mbrtowc 2: 1 00f0 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00f0 errno 0
+ mbrtowc 1: 1 00f0 errno 0
+ mbrlen 1: 1 errno 0
+sample: c3
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00c3 errno 0
+ mbrtowc 1: 1 00c3 errno 0
+ mbrlen 1: 1 errno 0
+sample: e6 97
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00e6 errno 0
+ mbrtowc 2: 1 00e6 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00e6 errno 0
+ mbrtowc 1: 1 00e6 errno 0
+ mbrlen 1: 1 errno 0
+sample: f0 9f 98
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00f0 errno 0
+ mbrtowc 3: 1 00f0 errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00f0 errno 0
+ mbrtowc 2: 1 00f0 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00f0 errno 0
+ mbrtowc 1: 1 00f0 errno 0
+ mbrlen 1: 1 errno 0
+sample: 80
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 0080 errno 0
+ mbrtowc 1: 1 0080 errno 0
+ mbrlen 1: 1 errno 0
+sample: ff
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00ff errno 0
+ mbrtowc 1: 1 00ff errno 0
+ mbrlen 1: 1 errno 0
+sample: c0 80
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00c0 errno 0
+ mbrtowc 2: 1 00c0 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00c0 errno 0
+ mbrtowc 1: 1 00c0 errno 0
+ mbrlen 1: 1 errno 0
+sample: ed a0 80
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00ed errno 0
+ mbrtowc 3: 1 00ed errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00ed errno 0
+ mbrtowc 2: 1 00ed errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00ed errno 0
+ mbrtowc 1: 1 00ed errno 0
+ mbrlen 1: 1 errno 0
+sample: f4 90 80 80
+ mblen 4: 1 errno 0
+ mbtowc 4: 1 00f4 errno 0
+ mbrtowc 4: 1 00f4 errno 0
+ mbrlen 4: 1 errno 0
+ mblen 3: 1 errno 0
+ mbtowc 3: 1 00f4 errno 0
+ mbrtowc 3: 1 00f4 errno 0
+ mbrlen 3: 1 errno 0
+ mblen 2: 1 errno 0
+ mbtowc 2: 1 00f4 errno 0
+ mbrtowc 2: 1 00f4 errno 0
+ mbrlen 2: 1 errno 0
+ mblen 1: 1 errno 0
+ mbtowc 1: 1 00f4 errno 0
+ mbrtowc 1: 1 00f4 errno 0
+ mbrlen 1: 1 errno 0
+sample:
+ mblen 1: 0 errno 0
+ mbtowc 1: 0 0000 errno 0
+ mbrtowc 1: 0 0000 errno 0
+ mbrlen 1: 0 errno 0
+wide 0041
+ wctomb 1 errno 0: 41
+ wcrtomb 1 errno 0: 41
+wide 007f
+ wctomb 1 errno 0: 7f
+ wcrtomb 1 errno 0: 7f
+wide 0080
+ wctomb 1 errno 0: 80
+ wcrtomb 1 errno 0: 80
+wide 00fc
+ wctomb 1 errno 0: fc
+ wcrtomb 1 errno 0: fc
+wide 00ff
+ wctomb 1 errno 0: ff
+ wcrtomb 1 errno 0: ff
+wide 0100
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide 07ff
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide 0800
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide 65e5
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide d83d
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide de00
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide fffd
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+wide ffff
+ wctomb -1 errno 42:
+ wcrtomb -1 errno 42:
+btowc 0: 0
+btowc 65: 65
+btowc 127: 127
+btowc 128: 128
+btowc 195: 195
+btowc 255: 255
+btowc -1: 65535
+wctob 0: 0
+wctob 41: 65
+wctob 7f: 127
+wctob 80: -128
+wctob fc: -4
+wctob ff: -1
+wctob 65e5: -1
+wctob ffff: -1
+mbstowcs count 11 errno 0
+mbstowcs 0: 0 errno 0: 7777 7777 7777 7777 7777 7777 7777 7777
+mbstowcs 1: 1 errno 0: 0061 7777 7777 7777 7777 7777 7777 7777
+mbstowcs 2: 2 errno 0: 0061 00c3 7777 7777 7777 7777 7777 7777
+mbstowcs 3: 3 errno 0: 0061 00c3 00bc 7777 7777 7777 7777 7777
+mbstowcs 4: 4 errno 0: 0061 00c3 00bc 00e6 7777 7777 7777 7777
+mbstowcs 5: 5 errno 0: 0061 00c3 00bc 00e6 0097 7777 7777 7777
+mbstowcs 6: 6 errno 0: 0061 00c3 00bc 00e6 0097 00a5 7777 7777
+mbstowcs 7: 7 errno 0: 0061 00c3 00bc 00e6 0097 00a5 00f0 7777
+mbstowcs 8: 8 errno 0: 0061 00c3 00bc 00e6 0097 00a5 00f0 009f
+mbstowcs bad 2 errno 0
+wcstombs count -1 errno 42
+wcstombs 0: 0 errno 0: 77 77 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 1: 1 errno 0: 61 77 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 2: 2 errno 0: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 3: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 4: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 5: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 6: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 7: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 8: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 9: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 10: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 11: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 12: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs 13: -1 errno 42: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcstombs lone low -1 errno 42
+wcstombs lone high -1 errno 42
+mbsrtowcs 0: 0 errno 0 from 0: 7777 7777 7777 7777 7777 7777 7777 7777
+mbsrtowcs 1: 1 errno 0 from 1: 0061 7777 7777 7777 7777 7777 7777 7777
+mbsrtowcs 2: 2 errno 0 from 2: 0061 00c3 7777 7777 7777 7777 7777 7777
+mbsrtowcs 3: 3 errno 0 from 3: 0061 00c3 00bc 7777 7777 7777 7777 7777
+mbsrtowcs 4: 4 errno 0 from 4: 0061 00c3 00bc 00e6 7777 7777 7777 7777
+mbsrtowcs 5: 5 errno 0 from 5: 0061 00c3 00bc 00e6 0097 7777 7777 7777
+mbsrtowcs 6: 6 errno 0 from 6: 0061 00c3 00bc 00e6 0097 00a5 7777 7777
+mbsrtowcs 7: 7 errno 0 from 7: 0061 00c3 00bc 00e6 0097 00a5 00f0 7777
+mbsrtowcs 8: 8 errno 0 from 8: 0061 00c3 00bc 00e6 0097 00a5 00f0 009f
+mbsrtowcs bad 3 errno 0 from null
+wcsrtombs 0: 0 errno 0 from 0: 77 77 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 1: 1 errno 0 from 1: 61 77 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 2: 2 errno 0 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 3: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 4: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 5: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 6: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 7: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 8: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 9: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 10: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 11: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 12: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs 13: -1 errno 42 from 2: 61 fc 77 77 77 77 77 77 77 77 77 77 77
+wcsrtombs lone -1 errno 42 from 1
+%ls -1 errno 42:
+%12ls -1 errno 42:
+%-12ls -1 errno 42:
+%.3ls -1 errno 42:
+%.4ls -1 errno 42:
+%S -1 errno 42:
+%lc 3 errno 0: 5b fc 5d
+%lc 2 errno 42: 5b 5d
+%5lc 2 errno 42: 5b 5d
+%-5lc 7 errno 0: 5b fc 20 20 20 20 5d
+%lc surrogate 2 errno 42
+%C 3 errno 0: 5b fc 5d
+%ls low first -1 errno 42:
+%ls high ends -1 errno 42:
+%ls high then -1 errno 42:
+%s 4 errno 0: 5b c3 bc 5d
+fputwc 00fc errno 0
+fputwc ffff errno 42
+fputwc ffff errno 42
+fputws -1 errno 42
+fwprintf 9 errno 0
+fwprintf pair 3 errno 0
+wide.out: fc 61 fc 61 fc 3f 0d 0a 7c 3f 7c 35 0d 0a 3f 3f 0d 0a
+exit 0

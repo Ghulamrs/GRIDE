@@ -42,6 +42,9 @@ class Checker : public NodeVisitor {
 public:
     explicit Checker(Diagnostics &diagnostics) : diag_(diagnostics) {}
 
+    // Which built-ins exist is the target runtime's: the C6747's has fewer than the hosts' (docs\Runtime_Design.md 14.5).
+    void forC6747() { c6747_ = true; }
+
     bool check(Program &program);
 
     void visit(IntLit &node) override;
@@ -71,6 +74,7 @@ public:
     void visit(Continue &node) override;
 
 private:
+    bool c6747_ = false;
     Diagnostics &diag_;
     Program *program_ = nullptr;
     int line_ = 0;

@@ -1,0 +1,4 @@
+// refused: 'nothing' is not a library function this compiler knows
+fun <> = main() {
+  ? c.nothing(1)
+}

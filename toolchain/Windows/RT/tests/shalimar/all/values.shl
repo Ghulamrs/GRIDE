@@ -1,0 +1,47 @@
+// values.shl - the shapes of docs\Runtime_Design.md 14.3 on every way: by value, text in, a checked result, a
+// text back, two outputs. What C leaves to each library - isalpha's nonzero, strcmp's magnitude - is asked as a sign.
+uses sqrt, hypot, trunc, round, abs, fabs
+uses ldexp, isalpha, isdigit, toupper, tolower
+uses strlen, strcmp, strncmp, strspn, strcspn
+uses atoi, atof, atol, labs
+uses strerror, getenv
+uses frexp, modf, difftime, time, clock, rand, srand
+uses putchar, puts
+
+fun <> = main() {
+  ? sqrt(16.0) hypot(3.0, 4.0) trunc(-2.7) round(2.5) abs(-3) abs(-3.5) fabs(-3.5)
+  ? ldexp(1.5, 3)
+  ? isalpha(65) != 0
+  ? isalpha(49) != 0
+  ? isdigit(49) != 0
+  ? toupper(97) tolower(65)
+  ? strlen("hello") strlen("") strlen("ab" + "cd")
+  ? strcmp("a", "b") < 0
+  ? strcmp("b", "a") > 0
+  ? strcmp("a", "a") = 0
+  ? strncmp("abc", "abd", 2) = 0
+  ? strspn("aabc", "a") strcspn("aabc", "c")
+  ? atoi("42") atof("2.5") atol("-7") labs(-9)
+  char s[40]
+  strerror(2, s)
+  ? s
+  char small[5]
+  strerror(2, small)
+  ? small
+  getenv("GRIDE_NO_SUCH_NAME", s)
+  ? strlen(s)
+  <m, x> : frexp(8.0)
+  ? m x
+  <part, whole> : modf(2.75)
+  ? part whole
+  ? difftime(5, 3)
+  ? time() > 1000000
+  ? clock() >= 0
+  srand(7)
+  int first : rand()
+  srand(7)
+  ? rand() = first
+  putchar(72)
+  putchar(10)
+  puts("written by puts")
+}

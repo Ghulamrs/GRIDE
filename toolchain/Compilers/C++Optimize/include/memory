@@ -66,10 +66,18 @@ void __cxx1_destroy_at(T *p) {
 }
 
 // [pointer.traits]
+template <class P, class U> char __cxx1_ptr_rebind_test(typename P::template rebind<U> *) { return 0; }
+template <class P, class U> long __cxx1_ptr_rebind_test(...) { return 0; }
+template <class P, class U, bool = sizeof(std::__cxx1_ptr_rebind_test<P, U>(0)) == 1> struct __cxx1_ptr_rebind {};
+template <class P, class U> struct __cxx1_ptr_rebind<P, U, true> { typedef typename P::template rebind<U> type; };
+template <template <class, class...> class P, class T, class... Args, class U>
+struct __cxx1_ptr_rebind<P<T, Args...>, U, false> { typedef P<U, Args...> type; };
+
 template <class Ptr> struct pointer_traits {
     typedef Ptr pointer;
     typedef typename Ptr::element_type element_type;
     typedef std::ptrdiff_t difference_type;
+    template <class U> using rebind = typename __cxx1_ptr_rebind<Ptr, U>::type;
     static pointer pointer_to(element_type &r) { return Ptr::pointer_to(r); }
 };
 
@@ -81,75 +89,10 @@ template <class T> struct pointer_traits<T *> {
     typedef T *pointer;
     typedef T element_type;
     typedef std::ptrdiff_t difference_type;
+    template <class U> using rebind = U *;
     static T *pointer_to(typename __cxx1_pointer_to_arg<T>::type r) noexcept { return std::addressof(r); }
 };
 
-// [allocator.tag], [allocator.uses]
-struct allocator_arg_t {};
-constexpr allocator_arg_t allocator_arg = allocator_arg_t();
-
-template <class T> char __cxx1_allocator_type_test(typename T::allocator_type *) { return 0; }
-template <class T> long __cxx1_allocator_type_test(...) { return 0; }
-template <class To> char __cxx1_converts_test(To) { return 0; }
-template <class To> long __cxx1_converts_test(...) { return 0; }
-template <class From, class To> struct __cxx1_converts {
-    static const bool value = sizeof(std::__cxx1_converts_test<To>(std::declval<From>())) == 1;
-};
-
-template <class T> struct __cxx1_has_allocator_type {
-    static const bool value = sizeof(std::__cxx1_allocator_type_test<T>(0)) == 1;
-};
-
-template <class T, class Alloc, bool = __cxx1_has_allocator_type<T>::value>
-struct __cxx1_uses_allocator : integral_constant<bool, false> {};
-template <class T, class Alloc>
-struct __cxx1_uses_allocator<T, Alloc, true>
-    : integral_constant<bool, __cxx1_converts<Alloc, typename T::allocator_type>::value> {};
-
-template <class T, class Alloc> struct uses_allocator : __cxx1_uses_allocator<T, Alloc> {};
-
-// [allocator.traits]: what an allocator says of itself, and the defaults for what it leaves out.
-#define _CXX1_ALLOC_MEMBER(NAME, DEFAULT)                                                        \
-template <class A> char __cxx1_alloc_##NAME##_test(typename A::NAME *) { return 0; }            \
-template <class A> long __cxx1_alloc_##NAME##_test(...) { return 0; }                           \
-template <class A> struct __cxx1_alloc_has_##NAME {                                             \
-    static const bool value = sizeof(std::__cxx1_alloc_##NAME##_test<A>(0)) == 1;               \
-};                                                                                              \
-template <class A, bool = __cxx1_alloc_has_##NAME<A>::value> struct __cxx1_alloc_##NAME {       \
-    typedef DEFAULT type;                                                                       \
-};                                                                                              \
-template <class A> struct __cxx1_alloc_##NAME<A, true> { typedef typename A::NAME type; };
-
-_CXX1_ALLOC_MEMBER(pointer, typename A::value_type *)
-_CXX1_ALLOC_MEMBER(const_pointer, const typename A::value_type *)
-_CXX1_ALLOC_MEMBER(difference_type, std::ptrdiff_t)
-_CXX1_ALLOC_MEMBER(size_type, std::size_t)
-
-#undef _CXX1_ALLOC_MEMBER
-
-template <class Alloc> struct allocator_traits {
-    typedef Alloc allocator_type;
-    typedef typename Alloc::value_type value_type;
-    typedef typename __cxx1_alloc_pointer<Alloc>::type pointer;
-    typedef typename __cxx1_alloc_const_pointer<Alloc>::type const_pointer;
-    typedef void *void_pointer;
-    typedef const void *const_void_pointer;
-    typedef typename __cxx1_alloc_difference_type<Alloc>::type difference_type;
-    typedef typename __cxx1_alloc_size_type<Alloc>::type size_type;
-    typedef integral_constant<bool, false> propagate_on_container_copy_assignment;
-    typedef integral_constant<bool, false> propagate_on_container_move_assignment;
-    typedef integral_constant<bool, false> propagate_on_container_swap;
-
-    static pointer allocate(Alloc &a, size_type n) { return a.allocate(n); }
-    static pointer allocate(Alloc &a, size_type n, const_void_pointer) { return a.allocate(n); }
-    static void deallocate(Alloc &a, pointer p, size_type n) { a.deallocate(p, n); }
-    template <class T, class... Args> static void construct(Alloc &, T *p, Args &&... args) {
-        std::__cxx1_construct_args(p, std::forward<Args>(args)...);
-    }
-    template <class T> static void destroy(Alloc &, T *p) { p->~T(); }
-    static size_type max_size(const Alloc &a) { return a.max_size(); }
-    static Alloc select_on_container_copy_construction(const Alloc &a) { return a; }
-};
 
 // [specialized.algorithms]: what was built is destroyed again if a constructor throws.
 template <class In, class For>

@@ -1,0 +1,12 @@
+// qualified.shl - c.name needs no uses, in an expression, as a statement and in a multi-assignment; an array c
+// keeps its dimensions
+fun <> = main() {
+  ? c.sqrt(9.0)
+  ? c.atoi("12") + 1
+  c.puts("a statement")
+  char s[40]
+  c.strerror(13, s)
+  ? s
+  <m, x> : c.frexp(0.5)
+  ? m x
+}

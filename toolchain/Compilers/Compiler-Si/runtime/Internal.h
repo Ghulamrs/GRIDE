@@ -1,10 +1,13 @@
 
 #pragma once
 
-#include "Shortest.h"
 #include "shmrt.h"
 
 #include <cstddef>
+
+// RTS6x's, GRIDE's extension (docs\Runtime_Design.md 14.4): the shortest text that reads back as the double. Declared
+// here as well, since the build over Microsoft's CRT reads Microsoft's <stdio.h>.
+extern "C" int _gride_shortest_double(char *out, size_t size, double v);
 
 namespace shm {
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Emitter.h"
+#include "../Builtin.h"
 
 #include <set>
 
@@ -11,11 +12,11 @@ namespace shalimar {
 // emulator run all three and the runtime sit beside a Shalimar program. The register conventions are in VM6747/TMS6747.md, "The shalimar backend's header".
 class Tms6747Emitter : public Emitter {
 public:
-    // A borrowed C99 name as TI's runtime spells it; the emulator answers to both.
+    // A borrowed library name as the C6747's runtime spells it (the catalogue's tms6747 link name: TI's
+    // __c6xabi_trunc for trunc); the emulator answers to both.
     std::string symbol(const std::string &name) const override {
-        if (name == "trunc") return "__c6xabi_trunc";
-        if (name == "round") return "__c6xabi_nround";
-        return name;
+        const char *c6x = c6747Symbol(name);
+        return c6x ? c6x : name;
     }
 
     void beginModule(const std::string &sourceName) override;

@@ -9,6 +9,8 @@ EXPORTS
     GetStdHandle
     GetFileType
     GetConsoleMode
+    WriteConsoleW
+    ReadConsoleW
     WriteFile
     ReadFile
     CreateFileW
@@ -52,6 +54,9 @@ EXPORTS
     VirtualFree
     ; grt: the command line, the environment, text in the ANSI code page
     GetCommandLineW
+    GetCommandLineA
+    GetStartupInfoW
+    GetModuleFileNameW
     GetEnvironmentStringsW
     FreeEnvironmentStringsW
     WideCharToMultiByte
@@ -84,6 +89,11 @@ EXPORTS
     FlsSetValue
     ; grt: the end
     ExitProcess
+    ; grt: wctype's classes past 255 (win\chartype.c), and rand_s's generator, advapi32's, loaded when first wanted
+    ; (win\random.c), so that a program still imports KERNEL32.dll alone
+    GetStringTypeW
+    LoadLibraryW
+    GetProcAddress
     ; the compilers' <windows.h> (cpp11's lib\windows.h): threads, waits, locks, the clock
     WaitForMultipleObjects
     GetSystemInfo
@@ -95,3 +105,11 @@ EXPORTS
     EnterCriticalSection
     LeaveCriticalSection
     DeleteCriticalSection
+    ; the compilers' <chrono> and <system_error> (cpp11 1.53): system_clock's time, an error code's message
+    GetSystemTimePreciseAsFileTime
+    FormatMessageA
+    ; the compilers' <mutex>, <condition_variable> and <thread> (cpp11 1.54's __threads)
+    TryAcquireSRWLockExclusive
+    WakeConditionVariable
+    SwitchToThread
+    GetActiveProcessorCount

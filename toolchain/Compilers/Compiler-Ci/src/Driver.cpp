@@ -50,6 +50,9 @@ const std::size_t kThreadFrom = 4;
 #ifndef CC1_INCLUDE_DIR
 #define CC1_INCLUDE_DIR ""
 #endif
+#ifndef CC1_WIN_INCLUDE_DIR
+#define CC1_WIN_INCLUDE_DIR ""
+#endif
 
 namespace {
 
@@ -87,14 +90,22 @@ bool directoryHas(const std::string &dir, const char *name) {
 
 }
 
-// **Where the standard headers are, asked in the order a release wants:** $C90_LIB, then lib/
-// beside the binary or one directory up - the installed layout, bin/c90.exe and lib/ - and
-// last the directory compiled in, which names the checkout this was built from and outlives nothing that moves.
+// **Where the standard headers are, asked in the order a release wants:** $C90_LIB, then
+// include/c and include/win beside the binary or one directory up - the C headers c90 shares with
+// cpp11 - then the lib/ an earlier installation has there, and last the directories compiled in,
+// which name the checkout this was built from and outlive nothing that moves.
 void Driver::standardIncludeDirectory(const std::string &argv0) {
     const char *env = std::getenv(program::env("LIB").c_str());
     if (env != nullptr && env[0] != '\0') { searchPath_.push_back(env); return; }
 
     const std::string here = programDirectory(argv0);
+    const std::string shared[2] = { here + "/include", here + "/../include" };
+    for (const std::string &dir : shared) {
+        if (!directoryHas(dir + "/c", "stddef.h")) continue;
+        searchPath_.push_back(dir + "/c");
+        searchPath_.push_back(dir + "/win");
+        return;
+    }
     const std::string candidates[2] = { here + "/lib", here + "/../lib" };
     for (const std::string &dir : candidates) {
         if (!directoryHas(dir, "stddef.h")) continue;
@@ -103,6 +114,7 @@ void Driver::standardIncludeDirectory(const std::string &argv0) {
     }
 
     if (CC1_INCLUDE_DIR[0] != '\0') searchPath_.push_back(CC1_INCLUDE_DIR);
+    if (CC1_WIN_INCLUDE_DIR[0] != '\0') searchPath_.push_back(CC1_WIN_INCLUDE_DIR);
 }
 
 // **1.1 is the first version this compiler has had a number for**, numbered with the group rather than on its own - see CLAUDE.md.

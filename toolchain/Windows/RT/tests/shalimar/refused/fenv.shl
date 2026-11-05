@@ -1,0 +1,6 @@
+// refused tms6747: 'fegetround' is not in the C6747's runtime
+uses fegetround
+
+fun <> = main() {
+  ? fegetround()
+}

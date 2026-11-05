@@ -162,7 +162,10 @@ namespace Gride
         // the flags a compiler is given for a configuration and target, in the order the tool's options list
         // them: a check's flagOn / flagOff, a choice's flag unless it is the silent one, a text's flagEach per
         // entry (Argument); an option that does not apply to the target writes nothing
-        static String^ Flags(CompilerOptionStore^ store, ToolEntry^ tool, String^ config, TargetEntry^ target)
+        static String^ Flags(CompilerOptionStore^ store, ToolEntry^ tool, String^ config, TargetEntry^ target) { return Flags(store, tool, config, target, nullptr); }
+
+        // names: what a define or an undefine may use (NamedPaths); null leaves them as they are written
+        static String^ Flags(CompilerOptionStore^ store, ToolEntry^ tool, String^ config, TargetEntry^ target, NamedPaths^ names)
         {
             if (store == nullptr || tool == nullptr) return String::Empty;
             List<String^>^ out = gcnew List<String^>();
@@ -185,7 +188,7 @@ namespace Gride
                 else if (o->FlagEach->Length > 0 && Available(id, target, why))
                 {
                     for each (String^ item in CompilerOptionStore::Entries(value))
-                        out->Add(o->FlagEach->Replace("$(Item)", Argument(item)));
+                        out->Add(o->FlagEach->Replace("$(Item)", Argument(names == nullptr ? item : names->Expand(item))));
                 }
             }
             return String::Join(" ", out);

@@ -33,7 +33,7 @@ public:
     void visit(Binary &n) override { walk(n.left()); walk(n.right()); }
 
     void visit(Call &n) override {
-        found.push_back(n.callee());
+        if (!n.qualified()) found.push_back(n.callee());
         for (ExprPtr &e : n.arguments()) walk(e);
     }
 

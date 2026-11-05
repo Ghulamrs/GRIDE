@@ -286,12 +286,15 @@ namespace Gride { namespace Services {
         // target carries no line table
         static String^ ConfigFlags(RideTool t, bool debug, Target target) { return ConfigFlags(t, debug, target, nullptr); }
 
-        static String^ ConfigFlags(RideTool t, bool debug, Target target, CompilerOptionStore^ store)
+        static String^ ConfigFlags(RideTool t, bool debug, Target target, CompilerOptionStore^ store) { return ConfigFlags(t, debug, target, store, nullptr); }
+
+        // names: what a define or an undefine may use (NamedPaths); null leaves them as they are written
+        static String^ ConfigFlags(RideTool t, bool debug, Target target, CompilerOptionStore^ store, NamedPaths^ names)
         {
             ToolDefinition^ d = Definition(t);
             if (d == nullptr) return String::Empty;
             if (d->Options->Count > 0 && Defs()->CompilerOptions->Count > 0)
-                return OptionFlags(store == nullptr ? gcnew CompilerOptionStore() : store, d, debug ? "Debug" : "Release", target);
+                return OptionFlags(store == nullptr ? gcnew CompilerOptionStore() : store, d, debug ? "Debug" : "Release", target, names);
             String^ flags = d->ConfigFlagsFor(debug ? "Debug" : "Release", Arch(target));
             if (debug && !EmitsDebugInfo(t, target))
             {
@@ -328,7 +331,9 @@ namespace Gride { namespace Services {
         // the tool's options list them: a check's flagOn / flagOff, a choice's flag unless it is the
         // silent one, a text list's flagEach per entry (quoted when it holds a space or a quote), an option
         // that does not apply to the target writing nothing
-        static String^ OptionFlags(CompilerOptionStore^ store, ToolDefinition^ tool, String^ config, Target target)
+        static String^ OptionFlags(CompilerOptionStore^ store, ToolDefinition^ tool, String^ config, Target target) { return OptionFlags(store, tool, config, target, nullptr); }
+
+        static String^ OptionFlags(CompilerOptionStore^ store, ToolDefinition^ tool, String^ config, Target target, NamedPaths^ names)
         {
             StringBuilder^ sb = gcnew StringBuilder();
             if (store == nullptr || tool == nullptr) return String::Empty;
@@ -351,7 +356,7 @@ namespace Gride { namespace Services {
                 else if (o->FlagEach->Length > 0 && OptionAvailable(id, target, why))
                 {
                     for each (String^ item in CompilerOptionStore::Entries(value))
-                        Append(sb, o->FlagEach->Replace("$(Item)", MacroExpander::QuoteEntry(item)));
+                        Append(sb, o->FlagEach->Replace("$(Item)", MacroExpander::QuoteEntry(names == nullptr ? item : names->Expand(item))));
                 }
             }
             return sb->ToString();
@@ -482,7 +487,8 @@ namespace Gride { namespace Services {
         }
 
         // the installation's header directories a compiler is given after the project's (installIncludeDirs:
-        // lib for c90, include for cpp11), the settings' own names standing in for the installation's
+        // include\c and include\win for c90, include\c++ before them for cpp11; an earlier installation's lib and
+        // include), the settings' own names standing in for lib and include
         static List<String^>^ InstallIncludeDirs(RideTool t, String^ rideRoot, String^ namedInclude, String^ namedLib)
         {
             List<String^>^ r = gcnew List<String^>();
@@ -494,6 +500,7 @@ namespace Gride { namespace Services {
                 String^ dir = nullptr;
                 if (String::Compare(which, inst->LibDir, true) == 0 || String::Compare(which, "lib", true) == 0) dir = InstallDir(rideRoot, inst->LibDir, namedLib);
                 else if (String::Compare(which, inst->IncludeDir, true) == 0 || String::Compare(which, "include", true) == 0) dir = InstallDir(rideRoot, inst->IncludeDir, namedInclude);
+                else dir = InstallDir(rideRoot, which, nullptr);
                 if (dir != nullptr && !r->Contains(dir)) r->Add(dir);
             }
             return r;
@@ -716,7 +723,7 @@ namespace Gride { namespace Services {
             return nullptr;
         }
 
-        // the C runtime's directory of the emulated target (RTS6x): $RTS6X, else lib\rts6x-tms6747 with rts6x.lib in it
+        // the C runtime's directory of the emulated target (RTS6x): $RTS6X, else lib\tms6747 with rts6x.lib in it
         static String^ FindRuntimeDir(String^ toolDir, String^ rideRoot)
         {
             TargetDefinition^ t = EmulatedTarget();
@@ -830,7 +837,7 @@ namespace Gride { namespace Services {
                 LibraryDefinition^ rts = td == nullptr ? nullptr : Defs()->Library(td->Runtime);
                 return "no " + Path::GetFileName(out) + ": a " + (td == nullptr ? "tms6747" : td->Arch) + " build links one only with " +
                        ToolName(td, "assembler") + " and " + ToolName(td, "linker") + " beside GRIDE and a runtime - " +
-                       (rts == nullptr ? "RTS6x" : rts->Name) + " in " + (rts == nullptr ? "lib/rts6x-tms6747" : rts->Directory->Replace(L'\\', L'/')) +
+                       (rts == nullptr ? "RTS6x" : rts->Name) + " in " + (rts == nullptr ? "lib/tms6747" : rts->Directory->Replace(L'\\', L'/')) +
                        " beside it, or TI's named under Tools";
             }
             return String::Empty;
@@ -930,7 +937,7 @@ namespace Gride { namespace Services {
         {
             return HostShalimarRuntime(target, debug, toolDir, rideRoot, String::Empty);
         }
-        // the one built for that C runtime ("grt" / "msvc": shmrt-x86_64-windows-grt.lib against GRIDE's)
+        // the one built for that C runtime ("grt" / "msvc": lib\x86_64-windows\shmrt.lib against GRIDE's)
         static String^ HostShalimarRuntime(Target target, bool debug, String^ toolDir, String^ rideRoot, String^ crt)
         {
             LibraryDefinition^ lib = Defs()->LibraryByKind(Arch(target), "shalimarRuntime", crt);

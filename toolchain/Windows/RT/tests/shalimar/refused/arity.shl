@@ -1,0 +1,6 @@
+// refused: 'strlen' takes 1, got 2
+uses strlen
+
+fun <> = main() {
+  ? strlen("a", "b")
+}

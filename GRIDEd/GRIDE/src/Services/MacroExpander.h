@@ -34,7 +34,10 @@ namespace Gride { namespace Services {
             return Regex::Replace(r, "  +", " ")->Trim();
         }
 
-        // "-I" + list -> -I"a" -I"b"
+        // "-I" + list -> -I"a" -I"b", each item quoted as the C runtime splits it (Quoted): a folder ending in a
+        // backslash, -I"inc\", would otherwise end in \" - a quote of the text, not the closing one - and run on into
+        // the next items, whose spaces then split them into stray arguments (cpp11: "-o names a single output, but 3
+        // inputs were given")
         static String^ JoinFlags(String^ flag, IEnumerable<String^>^ items)
         {
             StringBuilder^ sb = gcnew StringBuilder();
@@ -43,10 +46,7 @@ namespace Gride { namespace Services {
             {
                 if (String::IsNullOrEmpty(s)) continue;
                 if (sb->Length > 0) sb->Append(L' ');
-                sb->Append(flag);
-                sb->Append(L'"');
-                sb->Append(s);
-                sb->Append(L'"');
+                sb->Append(flag)->Append(Quoted(s));
             }
             return sb->ToString();
         }
@@ -67,11 +67,17 @@ namespace Gride { namespace Services {
         }
 
         // a define (any one entry of a list) as one argument: as it is, unless it holds a space, a tab or a quote -
-        // then in quotes, a quote inside escaped as \" and the backslashes in front of a quote, or of the closing
-        // one, doubled, as the C runtime splits a command line: MSG="hi there" -> "MSG=\"hi there\""
+        // then Quoted: MSG="hi there" -> "MSG=\"hi there\""
         static String^ QuoteEntry(String^ s)
         {
             if (s->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) < 0) return s;
+            return Quoted(s);
+        }
+
+        // s in quotes as one argument, as the C runtime splits a command line: a quote inside escaped as \", and the
+        // backslashes in front of a quote, or of the closing one, doubled - C:\inc\ -> "C:\inc\\"
+        static String^ Quoted(String^ s)
+        {
             StringBuilder^ sb = gcnew StringBuilder("\"");
             int slashes = 0;
             for each (wchar_t c in s)

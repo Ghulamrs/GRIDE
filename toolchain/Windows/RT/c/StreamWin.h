@@ -36,6 +36,9 @@ enum StreamFlag {
     Claimed = 0x2000        // the flags alone: the slot is taken by an open still under way
 };
 enum { BufferSize = 4096, StreamDescriptor = 0x40000000, CtrlZ = 0x1A };
+// A standard stream's descriptor when the program started without that handle (a windows program outside a console),
+// the Microsoft runtime's _NO_CONSOLE_FILENO, which _fileno gives back. It buffers as any stream and every write fails.
+enum { NoHandle = -2 };
 // A null FILE *: the Microsoft runtime's invalid-parameter check, which in a Release build ends the
 // program by the fast fail (exit code 0xC0000409) instead of a fault on the null pointer.
 inline void valid(const FILE *f) { if (!f) __grt_fail_fast(); }
@@ -47,6 +50,9 @@ void unlock(FILE *f, bool held);
 extern void *streamsLock;
 
 bool ensureBuffer(FILE *f);
+// One whole call's output. The Microsoft runtime writes stderr's from a temporary buffer when the call ends, its answer
+// already settled, so a write that fails sets the error indicator and the call still answers its count.
+int putCall(FILE *f, const char *s, unsigned count);
 // The bytes waiting in the buffer written; 0, or EOF with the error indicator set.
 int flush(FILE *f);
 // count bytes to the stream, translated when its descriptor is text; count, or -1 with the error indicator set.

@@ -287,6 +287,34 @@ static std::string where(DWORD64 a)
 
 struct Line { std::string file; DWORD number = 0; DWORD disp = 0; DWORD64 address = 0; bool ok = false; };
 
+static bool fileThere(const std::string& f) { return !f.empty() && GetFileAttributesA(f.c_str()) != INVALID_FILE_ATTRIBUTES; }
+
+// The source-path map (docs\Runtime_Design.md 9.3): GRIDE's runtime's PDB names the build machine's sources, under
+// ...\toolchain\Windows\RT\ and ...\toolchain\TI\RTS6x\src\. Where that file is not here, the copy Setup installs
+// under src\runtime\RT\ or src\runtime\RTS6x\ beside gride-dbg is taken, when it is there.
+static std::string installedSource(const std::string& file)
+{
+    static const char* const built[] = { "\\toolchain\\Windows\\RT\\", "\\toolchain\\TI\\RTS6x\\src\\" };
+    static const char* const installed[] = { "src\\runtime\\RT\\", "src\\runtime\\RTS6x\\" };
+    std::string lower = file;
+    for (char& c : lower) c = c == '/' ? '\\' : static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    for (int i = 0; i < 2; i++) {
+        std::string b = built[i];
+        for (char& c : b) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+        size_t at = lower.find(b);
+        if (at == std::string::npos) continue;
+        char self[MAX_PATH];
+        DWORD n = GetModuleFileNameA(nullptr, self, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH) return file;
+        std::string dir(self, n);
+        dir = dir.substr(0, dir.find_last_of('\\') + 1);
+        std::string there = dir + installed[i] + file.substr(at + b.size());
+        for (char& c : there) if (c == '/') c = '\\';
+        return fileThere(there) ? there : file;
+    }
+    return file;
+}
+
 static Line lineAt(DWORD64 a)
 {
     Line l;
@@ -295,13 +323,12 @@ static Line lineAt(DWORD64 a)
     line.SizeOfStruct = sizeof line;
     if (!SymGetLineFromAddr64(process, a, &l.disp, &line)) return l;
     l.file = line.FileName;
+    if (!fileThere(l.file)) l.file = installedSource(l.file);
     l.number = line.LineNumber;
     l.address = line.Address;
     l.ok = l.number != 0 && l.number < 0xf00000;      // 0xfeefee and friends: hidden lines
     return l;
 }
-
-static bool fileThere(const std::string& f) { return !f.empty() && GetFileAttributesA(f.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
 // ---- the step filter (cdb's .step_filter): module!name patterns with *, and source-path patterns -------
 // A pattern with a \ or / is matched against the path of the code's source file instead: GRIDE's runtime is

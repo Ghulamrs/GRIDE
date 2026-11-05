@@ -16,6 +16,8 @@ public:
     static int evaluate(const DoubleDouble &z, DoubleDouble &m);
     // m * 2^k as a double-double, both parts normal: for |k| below about 950.
     static DoubleDouble scaled(const DoubleDouble &m, int k);
+    // e^z = m 2^k, k set and m returned, for |z.hi| <= 746 + 512 ln 2: past 700, 512 ln 2 is taken out first.
+    static DoubleDouble extended(DoubleDouble z, int &k);
 
 private:
     // 2^(j/128) = powerTop_[j] + powerRest_[j], the top of 26 bits.

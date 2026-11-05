@@ -228,11 +228,12 @@ namespace Gride
         }
 
         // A trailing backslash would escape the closing quote ("C:\\inc\\" -> C:\\inc\"),
-        // so it is doubled, which Windows command-line parsing turns back into one.
+        // so the trailing ones are doubled, which Windows command-line parsing turns back into one each.
         static String^ Quote(String^ s)
         {
             if (s == nullptr) return "\"\"";
-            if (s->EndsWith("\\")) s = String::Concat(s, "\\");
+            int trailing = s->Length - s->TrimEnd(L'\\')->Length;
+            if (trailing > 0) s = String::Concat(s, gcnew String(L'\\', trailing));
             return String::Concat("\"", s, "\"");
         }
 
@@ -375,6 +376,73 @@ namespace Gride
             for each (String^ a in args)
                 q->Add(a->Length == 0 || a->IndexOfAny(gcnew array<wchar_t>{ L' ', L'\t', L'"' }) >= 0 ? QuoteArgument(a) : a);
             return String::Join(" ", q->ToArray());
+        }
+    };
+
+    // ---------------------------------------------------------------- Named paths
+    // The names a project's lists, Tools > Options' lists and the defines may use: $(NAME), from the .pro's "paths",
+    // settings.json's "paths", then GRIDE's own (BuildEngine::NamesOf), a name in a value filled in too, and %VAR%
+    // after them. Names match without regard to case, and the first added stands.
+    public ref class NamedPaths
+    {
+    public:
+        NamedPaths() { names = gcnew Dictionary<String^, String^>(StringComparer::OrdinalIgnoreCase); }
+
+        void Add(String^ name, String^ value)
+        {
+            if (!String::IsNullOrWhiteSpace(name) && value != nullptr && !names->ContainsKey(name)) names[name] = value;
+        }
+
+        // a folder: its value ends in a backslash, so $(NAME)file reads as it does in Visual Studio
+        void AddFolder(String^ name, String^ dir)
+        {
+            if (!String::IsNullOrEmpty(dir)) Add(name, dir->EndsWith("\\") ? dir : String::Concat(dir, "\\"));
+        }
+
+        // the first name nothing knows and the entry it is in; null while every one was known
+        property String^ Unknown;
+        property String^ UnknownIn;
+
+        String^ Expand(String^ text)
+        {
+            if (String::IsNullOrEmpty(text)) return text;
+            return Environment::ExpandEnvironmentVariables(Fill(text, text, 0));
+        }
+
+        List<String^>^ ExpandAll(IEnumerable<String^>^ list)
+        {
+            List<String^>^ r = gcnew List<String^>();
+            if (list != nullptr) for each (String^ s in list) r->Add(Expand(s));
+            return r;
+        }
+
+    private:
+        literal int MaxDepth = 8;       // a value naming a name, and so on: deeper than this, it names itself
+        Dictionary<String^, String^>^ names;
+
+        String^ Fill(String^ text, String^ entry, int depth)
+        {
+            int at = text->IndexOf("$(");
+            if (at < 0) return text;
+            StringBuilder^ sb = gcnew StringBuilder();
+            int from = 0;
+            while (at >= 0)
+            {
+                int end = text->IndexOf(L')', at + 2);
+                if (end < 0) break;
+                String^ value;
+                sb->Append(text, from, at - from);
+                if (depth < MaxDepth && names->TryGetValue(text->Substring(at + 2, end - at - 2), value))
+                    sb->Append(Fill(value, entry, depth + 1));
+                else
+                {
+                    if (Unknown == nullptr) { Unknown = text->Substring(at + 2, end - at - 2); UnknownIn = entry; }
+                    sb->Append(text, at, end + 1 - at);
+                }
+                from = end + 1;
+                at = text->IndexOf("$(", from);
+            }
+            return sb->Append(text, from, text->Length - from)->ToString();
         }
     };
 

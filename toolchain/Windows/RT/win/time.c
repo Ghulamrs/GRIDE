@@ -127,14 +127,14 @@ long long __grt_file_time(unsigned long low, unsigned long high)
     return __grt_from_local(fields, -1);
 }
 
-static char zone_names[2][64];
+static char zone_names[2][96];
 
 const char *__grt_zone_name(int isdst)
 {
     GRT_TIME_ZONE_INFORMATION zone;
     int k = isdst > 0;
     if (GetTimeZoneInformation(&zone) == GRT_TIME_ZONE_ID_INVALID) return "";
-    if (!WideCharToMultiByte(GRT_CP_ACP, 0, k ? zone.DaylightName : zone.StandardName, -1, zone_names[k], 64, 0, 0))
+    if (!WideCharToMultiByte(GRT_CP_NARROW, 0, k ? zone.DaylightName : zone.StandardName, -1, zone_names[k], 96, 0, 0))
         zone_names[k][0] = 0;
     return zone_names[k];
 }

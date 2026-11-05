@@ -692,7 +692,7 @@ namespace Gride { namespace UI {
             Section("The toolchain's installation");
             ride = gcnew PathField(true, true); ride->Value = e->RideRoot; Row("Installation root or bin", ride);
             Label^ rideNote = gcnew Label();
-            rideNote->Text = "Where c90, cpp11, shalimar, masm, link, asm6x, lnk6x, vm6747, sim6747 and lib\\rts6x-tms6747 are looked for when a "
+            rideNote->Text = "Where c90, cpp11, shalimar, masm, link, asm6x, lnk6x, vm6747, sim6747 and lib\\tms6747 are looked for when a "
                              "toolchain names a tool without a folder. Empty: a RIDE installation under %ProgramFiles%\\RIDE\\bin, else beside GRIDE.exe, then PATH.";
             rideNote->AutoSize = true; rideNote->Tag = "muted"; rideNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, rideNote);
@@ -792,6 +792,13 @@ namespace Gride { namespace UI {
                             "Either named stands in for the other where that one is not there; the Output pane says which.";
             winNote->AutoSize = true; winNote->Tag = "muted"; winNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, winNote);
+            stepIntoRuntime = Check("Step into GRIDE's runtime", env->StepIntoRuntime);
+            Row(String::Empty, stepIntoRuntime);
+            Label^ stepNote = gcnew Label();
+            stepNote->Text = "Off: gride-dbg steps over the code of GRIDE's runtime, as over Microsoft's CRT, and still stops in a callback it calls (a qsort comparison, an atexit function). "
+                             "On: a step into printf stops in printf's own source, installed under src\\runtime.";
+            stepNote->AutoSize = true; stepNote->Tag = "muted"; stepNote->MaximumSize = SD::Size(520, 0);
+            Row(String::Empty, stepNote);
             runtime = gcnew ComboBox();
             runtime->DropDownStyle = ComboBoxStyle::DropDownList;
             runtime->Items->AddRange(gcnew array<Object^>{ "automatic", "GRIDE's runtime", "Microsoft's CRT" });   // settings.json's auto, grt, msvc
@@ -799,9 +806,9 @@ namespace Gride { namespace UI {
             runtime->SelectedIndex = now == "grt" ? 1 : now == "msvc" ? 2 : 0;
             Row("Windows C runtime", runtime);
             Label^ rtNote = gcnew Label();
-            rtNote->Text = "GRIDE's runtime: lib\\grtstart, grtcompat, grtcxx, grtc and grtwin.lib and GRIDE's own kernel32.lib - a program needs no Visual Studio and no Windows SDK to link, "
+            rtNote->Text = "GRIDE's runtime: lib\\x86_64-windows\\grtstart, grtcompat, grtcxx, grtc and grtwin.lib and GRIDE's own kernel32.lib - a program needs no Visual Studio and no Windows SDK to link, "
                            "and kernel32.dll alone to run. Microsoft's CRT: Visual Studio's libcmt and the SDK's UCRT, found through LIB. "
-                           "Automatic: Microsoft's only where Visual Studio is found and the build has cl's objects. GRIDE_WINDOWS_RUNTIME=grt / msvc in the environment at start wins.";
+                           "Automatic: Microsoft's only where Visual Studio is found and the build has cl's objects or links a library naming Microsoft's runtime by /DEFAULTLIB. GRIDE_WINDOWS_RUNTIME=grt / msvc in the environment at start wins.";
             rtNote->AutoSize = true; rtNote->Tag = "muted"; rtNote->MaximumSize = SD::Size(520, 0);
             Row(String::Empty, rtNote);
             include->UpdateStatus(); lib->UpdateStatus(); vcvars->UpdateStatus(); ti->UpdateStatus(); tilib->UpdateStatus();
@@ -818,6 +825,7 @@ namespace Gride { namespace UI {
             env->DefaultCompiler = safe_cast<String^>(compiler->SelectedItem);
             env->C6747Debugger = safe_cast<String^>(c6747->SelectedItem);
             env->WindowsDebugger = safe_cast<String^>(windows->SelectedItem);
+            env->StepIntoRuntime = stepIntoRuntime->Checked;
             env->WindowsRuntime = runtime->SelectedIndex == 1 ? "grt" : runtime->SelectedIndex == 2 ? "msvc" : "auto";
         }
     private:
@@ -825,6 +833,7 @@ namespace Gride { namespace UI {
         PathField^ include; PathField^ lib; PathField^ vcvars; PathField^ ti; PathField^ tilib;
         TextBox^ includes; TextBox^ libraries;
         ComboBox^ compiler; ComboBox^ c6747; ComboBox^ windows; ComboBox^ runtime;
+        CheckBox^ stepIntoRuntime;
     };
 
     // ---- Projects > Compiler Options: RIDE's installation-level store (settings.json options) -----------

@@ -49,6 +49,8 @@ std::string definitionsDir() {
     std::string program = path::programDirectory();
     if (program.empty()) return std::string();
     const std::string tried[] = {
+        path::join(path::join(program, "share"), "ccs"),
+        path::join(path::join(path::parent(program), "share"), "ccs"),
         path::join(path::join(program, "lib"), "ccs"),
         path::join(path::join(path::parent(program), "lib"), "ccs"),
         path::join(path::join(path::join(program, "docs"), "ccs-reference"), "ti-option-definitions"),
@@ -85,7 +87,7 @@ bool OptionDefs::load(const std::string& version, std::string& why) {
     file_.clear();
     std::string dir = definitionsDir();
     if (dir.empty()) {
-        why = "TI's option definitions are not here - lib/ccs beside the program, or docs/ccs-reference/ti-option-definitions";
+        why = "TI's option definitions are not here - share/ccs beside the program, or docs/ccs-reference/ti-option-definitions";
         return false;
     }
     long major = std::strtol(version.c_str(), 0, 10);

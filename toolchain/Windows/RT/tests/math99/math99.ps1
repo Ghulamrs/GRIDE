@@ -16,7 +16,7 @@ param([string]$Opt = '-O2', [string]$Bin = "", [string]$Libs = "")
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 if (-not $Bin) { $Bin = (Resolve-Path (Join-Path $here '..\..\..\..\..\GRIDEd\x64\Release')).Path }
-if (-not $Libs) { $Libs = Join-Path $Bin 'lib' }
+if (-not $Libs) { $Libs = Join-Path $Bin 'lib\x86_64-windows'; if (-not (Test-Path (Join-Path $Libs 'grtc.lib'))) { $Libs = Join-Path $Bin 'lib' } }
 $work = Join-Path $env:TEMP 'gride-math99'
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
 New-Item -ItemType Directory $work | Out-Null

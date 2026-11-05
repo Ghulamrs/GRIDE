@@ -24,7 +24,7 @@
 
 Options::Options()
     : entry(), optref(true), optref_said(false), opticf(true), opticf_said(false), nodefaultlib(false), fixed(false), dynamicbase(true),
-      timestamp(0), have_timestamp(false), subsystem(3),
+      timestamp(0), have_timestamp(false), subsystem(0),
       image_base(0x140000000ull), section_align(0x1000), file_align(0x200),
       stack_reserve(0x100000), stack_commit(0x1000), heap_reserve(0x100000), heap_commit(0x1000),
       debug(false), verbose(false) {}
@@ -517,15 +517,23 @@ bool Link::read_inputs()
     for (size_t i = 0; i < ins.size(); i++)
         if (!ins[i].is_archive && !take_module(w, ins[i].mod, err)) return false;
 
-    /*  The entry point. Without /entry: link.exe asks for the CRT's, by the subsystem and by
-     *  which main the objects defined: mainCRTStartup for a console program with main,
-     *  wmainCRTStartup for one with wmain, WinMainCRTStartup / wWinMainCRTStartup for a
-     *  windows one. Asked for before the archives are searched, so the CRT's start-up
-     *  member is pulled with everything it needs. */
-    if (opt.entry.empty()) {
-        bool wide = w.defined.find("wmain") != w.defined.end() || w.defined.find("wWinMain") != w.defined.end();
-        opt.entry = opt.subsystem == 2 ? (wide ? "wWinMainCRTStartup" : "WinMainCRTStartup")
-                                       : (wide ? "wmainCRTStartup" : "mainCRTStartup");
+    /*  The subsystem and the entry point, both by which mains the objects defined, as link.exe
+     *  picks them (measured on every set of the four names; a main in a library does not
+     *  count). Without /subsystem: windows for a WinMain or wWinMain with no main or wmain
+     *  beside it, else console; link.exe refuses a link that defines none of them, and here
+     *  a library may still bring one. Without /entry: the CRT's start-up for the subsystem,
+     *  the narrow name's unless only the wide name is defined: mainCRTStartup, or
+     *  wmainCRTStartup for wmain with no main; WinMainCRTStartup, or wWinMainCRTStartup for
+     *  wWinMain with no WinMain. Asked for before the archives are searched, so the CRT's
+     *  start-up member is pulled with everything it needs. */
+    {
+        const bool console_main = w.defined.count("main") != 0, wide_main = w.defined.count("wmain") != 0;
+        const bool win_main = w.defined.count("WinMain") != 0, wide_win_main = w.defined.count("wWinMain") != 0;
+        if (opt.subsystem == 0)
+            opt.subsystem = !console_main && !wide_main && (win_main || wide_win_main) ? 2 : 3;
+        if (opt.entry.empty())
+            opt.entry = opt.subsystem == 2 ? (wide_win_main && !win_main ? "wWinMainCRTStartup" : "WinMainCRTStartup")
+                                           : (wide_main && !console_main ? "wmainCRTStartup" : "mainCRTStartup");
     }
     /*  The linker's own references, which are also what keeps a COMDAT alive with nothing
      *  else pointing at it: the entry, every /include:, and _load_config_used - asked for by

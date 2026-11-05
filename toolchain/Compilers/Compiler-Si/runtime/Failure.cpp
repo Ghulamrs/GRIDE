@@ -74,3 +74,5 @@ extern "C" void shm_globals_ready(int32_t slot, const char *name) {
 extern "C" void shm_name_file(int32_t unit, const char *name) {
     shm::Position::shared().name(unit, name);
 }
+
+extern "C" void shm_fail(const char *message) { shm::fail(message ? message : ""); }

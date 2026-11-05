@@ -1,0 +1,8 @@
+// remove.shl - the nonzero rule: the failure's message, its line, and no more of the program
+uses remove
+
+fun <> = main() {
+  ? 1
+  remove("gride-no-such-file")
+  ? 2
+}

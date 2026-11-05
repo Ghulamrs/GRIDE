@@ -1,0 +1,11 @@
+// input.shl - the end of input is getchar's answer, not a failure; perror writes errno's words
+uses getchar, perror
+
+fun <> = main() {
+  int n : 0
+  while getchar() >= 0 {
+    n : n + 1
+  }
+  ? "the end of input"
+  perror("gride")
+}

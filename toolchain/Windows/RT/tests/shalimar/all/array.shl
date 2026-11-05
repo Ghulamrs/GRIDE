@@ -1,0 +1,6 @@
+// array.shl - an array named c beside the runtime's functions
+fun <> = main() {
+  int c[3][4]
+  ? c.row c.col c.dim(0) c.dim(1)
+  ? c.pow(2.0, 10.0)
+}

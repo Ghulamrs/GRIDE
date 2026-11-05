@@ -129,6 +129,15 @@ void Parser::befriendClass(const std::string &owner, bool keyed) {
     if (keyed) at_++;
     const std::string name = expectIdent("the class to befriend");
     std::string key = name;
+    // [class.friend]/3: `friend class valarray<T>;` - one specialization, named by its template-id.
+    if (peek().is("<") && isClassTemplate(name)) {
+        at_--;
+        StorageClass sc;
+        const Type *t = specifiers(&sc);
+        friendClasses_[owner].push_back(t->unqualified()->tag());
+        expect(";");
+        return;
+    }
     if (const Type *t = findTypedef(name)) key = t->unqualified()->tag();
     else if (!namespaceStack_.empty()) key = namespacePrefix() + name;
     friendClasses_[owner].push_back(key);
@@ -223,6 +232,7 @@ bool Parser::exceptionSpecification() {
             const long long value = constantExpression("a constant in 'noexcept('");
             expect(")");
             noexc = value != 0;
+            pendingSpec_.allowsAll = !noexc;
         }
     } else if (peek().is("throw") && peekAt(1).is("(")) {
         const std::size_t at = peek().pos;
@@ -504,6 +514,27 @@ bool Parser::fold(const Expr &e, long long *out, std::size_t pos) const {
         long long l, r;
         const Type *lt = b->lhs().type();
         const Type *rt = b->rhs().type();
+        // [expr.log.and]/1, [expr.log.or]/1: a left operand that decides leaves the right one unevaluated, so it
+        // need not be constant - `B >= 0 && A <= INTMAX_MAX - B` for a negative B.
+        if (b->op() == BinOp::LAnd || b->op() == BinOp::LOr) {
+            bool sides[2];
+            const Expr *operands[2] = { &b->lhs(), &b->rhs() };
+            for (int k = 0; k < 2; k++) {
+                const Type *ot = operands[k]->type();
+                if (ot != nullptr && ot->isFloating()) {
+                    long double d = 0;
+                    if (!foldFloating(*operands[k], &d)) return false;
+                    sides[k] = d != 0;
+                } else {
+                    long long v;
+                    if (!fold(*operands[k], &v, pos)) return false;
+                    sides[k] = v != 0;
+                }
+                if (k == 0 && sides[0] == (b->op() == BinOp::LOr)) { *out = sides[0]; return true; }
+            }
+            *out = sides[1];
+            return true;
+        }
         if ((lt != nullptr && lt->isFloating()) ||
             (rt != nullptr && rt->isFloating())) {
             long double dl = 0, dr = 0;
@@ -608,8 +639,17 @@ const Expr *Parser::singleReturnValue(const Stmt &body) const {
     for (;;) {
         const Block *b = dynamic_cast<const Block *>(at);
         if (b == nullptr) break;
-        if (b->body().size() != 1) return nullptr;
-        at = b->body()[0].get();
+        // [dcl.constexpr]/3: typedefs, static_asserts, using-declarations and null statements may stand beside
+        // the return - each leaves an empty block marked declarative.
+        const Stmt *only = nullptr;
+        for (const StmtPtr &s : b->body()) {
+            const Block *nothing = dynamic_cast<const Block *>(s.get());
+            if (nothing != nullptr && nothing->declarative()) continue;
+            if (only != nullptr) return nullptr;
+            only = s.get();
+        }
+        if (only == nullptr) return nullptr;
+        at = only;
     }
     const Return *r = dynamic_cast<const Return *>(at);
     if (r == nullptr || !r->hasValue()) return nullptr;
@@ -906,9 +946,9 @@ bool Parser::instantiateForConstant(const std::string &symbol) const {
         // the function being read put aside, and not made a second time there.
         if (!specializations_[i].isClass) {
             if (specializations_[i].emitted || specializations_[i].explicitly ||
-                specializations_[i].symbol != symbol || templates_.count(specializations_[i].name) == 0)
+                specializations_[i].symbol != symbol || templates_.count(specializations_[i].templateKey) == 0)
                 continue;
-            const TemplateDecl decl = templates_.find(specializations_[i].name)->second;
+            const TemplateDecl decl = templates_.find(specializations_[i].templateKey)->second;
             // Only a constexpr one: any other is made at the end of the file, where the names its
             // body looks up at the point of instantiation are all declared.
             bool isConstexpr = false;
@@ -980,10 +1020,15 @@ bool Parser::instantiateForConstant(const std::string &symbol) const {
             self.instantiationOf_.clear();
             self.instantiationDisplay_.clear();
             const bool wasInline = replayingInline_;
+            const bool wasMemberInst = memberTemplateInst_, wasMemberBody = memberTemplateBody_;
+            self.memberTemplateInst_ = false;
+            self.memberTemplateBody_ = false;
             const std::size_t resume = at_;
             self.replayInlineBodies(std::vector<PendingBody>(1, body));
             self.at_ = resume;
             self.replayingInline_ = wasInline;
+            self.memberTemplateInst_ = wasMemberInst;
+            self.memberTemplateBody_ = wasMemberBody;
             self.instantiationKey_ = wasKey;
             self.instantiationOf_ = wasOf;
             self.instantiationDisplay_ = wasDisplay;

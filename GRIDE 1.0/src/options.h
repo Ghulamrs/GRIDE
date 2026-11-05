@@ -57,7 +57,9 @@ bool available(const std::string& id, const std::string& arch, std::string& why)
 
 // The flags a compiler is given for a configuration and target, from a store: what configFlags
 // answers for c90, cpp11 and shalimar. MSVC and the host's c++ are not the dialog's.
-std::string flags(const Store& store, ToolchainKind kind, Configuration config, const std::string& arch);
+// names: what a define or an undefine may use (path.h); none leaves them as they are written.
+std::string flags(const Store& store, ToolchainKind kind, Configuration config, const std::string& arch,
+                  const path::Names* names = 0);
 // The environment a compile runs under, NAME=value pairs: CPP11_DECLINES where it is asked for.
 std::map<std::string, std::string> environment(const Store& store, Configuration config);
 

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "path.h"
 #include "syntax.h"
 
 namespace editor {
@@ -26,7 +27,9 @@ enum Configuration {
 
 const char* configName(Configuration config);
 
-std::string configFlags(ToolchainKind kind, Configuration config,
+struct Toolchain;
+
+std::string configFlags(const Toolchain& tool, ToolchainKind kind, Configuration config,
                         const std::string& arch);
 
 bool optimises(ToolchainKind kind);
@@ -103,6 +106,10 @@ struct Toolchain {
     // after the objects.
     std::vector<std::string> includes;
     std::vector<std::string> libraries;
+    // What the lists above and the defines may name (path.h), and the sentence that stops a build
+    // when one names what nothing knows; a CCS project's $(...) are its own, and stay.
+    path::Names names;
+    std::string namesRefused;
     // A CCS project's link, for tms6747; given nowhere else.
     TiLink tiLink;
     // A single file's tms6747 build links its .out as well, for a Run or a Verify (R5); a project's always does.
@@ -120,8 +127,8 @@ struct Toolchain {
 std::string includeFlags(const Toolchain& tool, ToolchainKind kind);
 // The project's libraries, spelled for the link.
 std::string libraryArguments(const Toolchain& tool);
-// The Shalimar runtime built for a Windows C runtime (WindowsCrt::crt), by its full path: shmrt-x86_64-windows-grt.lib
-// over GRIDE's (grtDirectory), shmrt-x86_64-windows.lib over Microsoft's (lib beside shalimar); -debug for the session's.
+// The Shalimar runtime built for a Windows C runtime (WindowsCrt::crt), by its full path: shmrt.lib over GRIDE's
+// (grtDirectory), lib\x86_64-windows\msvc\shmrt.lib beside shalimar over Microsoft's; shmrtd.lib for the session's.
 std::string windowsShalimarRuntime(const Toolchain& tool, const std::string& crt, bool debugRuntime);
 
 ToolchainKind resolve(const Toolchain& tool, Language lang);
@@ -163,7 +170,7 @@ std::string simulateCommand(const std::string& out);
 std::string sessionCommand(const std::string& program);
 // The directory of runtime assembly a Shalimar program needs on the emulator.
 std::string shalimarRuntimeDir(Configuration config = ConfigRelease);
-// RTS6x, the project's own C6747 runtime: lib/rts6x-tms6747 beside the editor, holding rts6x.lib (or $RTS6X).
+// RTS6x, the project's own C6747 runtime: lib/tms6747 beside the editor, holding rts6x.lib (or $RTS6X).
 std::string rts6xRuntimeDir();
 // Where a project's program goes for the emulated target: <program>.vm, a directory of assembly, the Windows .exe dropped.
 std::string emulatedProgram(const std::string& program);

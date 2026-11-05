@@ -512,6 +512,8 @@ std::vector<std::string> installedList(const char* key) {
     for (size_t i = 0; i < list.size(); ++i) {
         std::string said = list.at(i).text("");
         if (said.empty()) continue;
+        // A name or a variable first is whole once it is filled in (path.h).
+        if (said[0] == '$' || said[0] == '%') { out.push_back(said); continue; }
         bool rooted = said[0] == '/' || said[0] == '\\' || (said.size() > 1 && said[1] == ':');
         out.push_back(rooted ? path::absolute(said) : path::absolute(path::join(base, said)));
     }
@@ -530,6 +532,16 @@ bool rememberList(const char* key, const std::vector<std::string>& items) {
 
 std::vector<std::string> includes() { return installedList("includes"); }
 std::vector<std::string> libraries() { return installedList("libraries"); }
+
+std::vector<std::pair<std::string, std::string> > namedPaths() {
+    std::vector<std::pair<std::string, std::string> > out;
+    Json root = readInstall();
+    const Json& named = root.get("paths");
+    for (size_t i = 0; named.is(Json::Object) && i < named.size(); ++i)
+        out.push_back(std::make_pair(named.keyAt(i), named.valueAt(i).text("")));
+    return out;
+}
+
 bool rememberIncludes(const std::vector<std::string>& dirs) { return rememberList("includes", dirs); }
 bool rememberLibraries(const std::vector<std::string>& files) { return rememberList("libraries", files); }
 

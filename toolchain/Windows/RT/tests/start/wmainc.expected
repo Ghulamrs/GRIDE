@@ -1,0 +1,214 @@
+line [prog a b c]
+mode args, show -1
+argc 4, __argc 4, __wargv argv, __argv null
+argv [prog]
+argv [a]
+argv [b]
+argv [c]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog]
+mode args, show -1
+argc 1, __argc 1, __wargv argv, __argv null
+argv [prog]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line []
+mode args, show -1
+argc 1, __argc 1, __wargv argv, __argv null
+argv the program's path
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line ["quoted prog" one]
+mode args, show -1
+argc 2, __argc 2, __wargv argv, __argv null
+argv [quoted prog]
+argv [one]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line ["half"way prog<9>next]
+mode args, show -1
+argc 3, __argc 3, __wargv argv, __argv null
+argv [halfway]
+argv [prog]
+argv [next]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [   leading spaces]
+mode args, show -1
+argc 3, __argc 3, __wargv argv, __argv null
+argv []
+argv [leading]
+argv [spaces]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog<9><9>tabs  "t<9>q"  ]
+mode args, show -1
+argc 3, __argc 3, __wargv argv, __argv null
+argv [prog]
+argv [tabs]
+argv [t<9>q]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog a\b a\\b "c d" e\"f "g\\" h\\\"i "j""k" "" l"m n"o]
+mode args, show -1
+argc 10, __argc 10, __wargv argv, __argv null
+argv [prog]
+argv [a\b]
+argv [a\\b]
+argv [c d]
+argv [e"f]
+argv [g\]
+argv [h\"i]
+argv [j"k]
+argv []
+argv [lm no]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog <1> <2> <3> "x <1> y"]
+mode args, show -1
+argc 5, __argc 5, __wargv argv, __argv null
+argv [prog]
+argv [<263a>]
+argv [<e9>]
+argv [<d83d><de00>]
+argv [x <263a> y]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]
+mode args, show -1
+argc 21, __argc 21, __wargv argv, __argv null
+argv [prog]
+argv [1]
+argv [2]
+argv [3]
+argv [4]
+argv [5]
+argv [6]
+argv [7]
+argv [8]
+argv [9]
+argv [10]
+argv [11]
+argv [12]
+argv [13]
+argv [14]
+argv [15]
+argv [16]
+argv [17]
+argv [18]
+argv [19]
+argv [20]
+argv[argc] null
+envp [GRT_ENTRY=args]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog]
+mode fall, show -1
+argc 1, __argc 1, __wargv argv, __argv null
+argv [prog]
+argv[argc] null
+envp [GRT_ENTRY=fall]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 0
+
+line [prog]
+mode exit, show -1
+argc 1, __argc 1, __wargv argv, __argv null
+argv [prog]
+argv[argc] null
+envp [GRT_ENTRY=exit]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+left in the buffer for exit
+atexit
+exit 9
+
+line [prog]
+mode fault, show -1
+argc 1, __argc 1, __wargv argv, __argv null
+argv [prog]
+argv[argc] null
+envp [GRT_ENTRY=fault]
+envp [Zed=last]
+envp [alpha=<e9><263a>]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+signal 11
+exit 11
+
+line [prog]
+mode quiet, show -1
+descriptors -2 -2 -2, file 3
+printf 11 errno 9
+fflush -1 errno 9 error 1
+fprintf 11 errno 9 error 1
+fputs 0 errno 9 error 1
+fputc -1 errno 9 error 1
+getchar -1 errno 9 eof 0 error 1
+exit 5
+
+exit 0

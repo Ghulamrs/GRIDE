@@ -9,13 +9,24 @@
 // **Whether the operand ahead mentions a parameter of the pattern being read**, scanning to the
 // first `,` `>` `>>` (with `angle`) or unbalanced `)` at depth 0: clang's "instantiation-dependent".
 bool Parser::dependentAhead(bool angle) const {
+    // A template-id's own `<...>` is inside the operand: `is_base_of<C, T>::value` is one argument, not two.
+    int ids = 0;
     for (std::size_t k = 0, depth = 0; peekAt(k).kind != TokenKind::End; k++) {
         const Token &t = peekAt(k);
+        if (t.is("<") && k > 0 && peekAt(k - 1).kind == TokenKind::Ident && isTemplateName(peekAt(k - 1).text)) {
+            ids++;
+            continue;
+        }
+        if (ids > 0 && (t.is(">") || t.is(">>"))) {
+            ids -= t.is(">>") ? 2 : 1;
+            if (ids < 0) { if (angle && depth == 0) return false; ids = 0; }
+            continue;
+        }
         if (t.is("(") || t.is("[") || t.is("{")) depth++;
         else if (t.is(")") || t.is("]") || t.is("}")) {
             if (depth == 0) return false;
             depth--;
-        } else if (depth == 0 && (t.is(";") || (angle && (t.is(",") || t.is(">") || t.is(">>")))))
+        } else if (depth == 0 && ids == 0 && (t.is(";") || (angle && (t.is(",") || t.is(">") || t.is(">>")))))
             return false;
         else if (t.kind == TokenKind::Ident) {
             if (k > 0 && (peekAt(k - 1).is(".") || peekAt(k - 1).is("->"))) continue;
@@ -321,6 +332,32 @@ const DepExpr *Parser::depPrimary(bool angle) {
                 }
                 if (peekAt(j + 1).is("::") && peekAt(j + 2).kind == TokenKind::Ident && !peekAt(j + 3).is("(") &&
                     !peekAt(j + 3).is("<") && !peekAt(j + 3).is("::")) {
+                    // Arguments naming only parameters already bound to types - `R<T>::value` in a member
+                    // template of complex<double> - make a real class, whose member is a constant.
+                    bool concrete = true;
+                    for (std::size_t m = k + 2; m < j && concrete; m++) {
+                        const Token &a = peekAt(m);
+                        if (a.kind != TokenKind::Ident) continue;
+                        if (nonTypePatternParams_.count(a.text) != 0 || packs_.count(a.text) != 0) concrete = false;
+                        else if (const Type *bt = findTypedef(a.text)) concrete = !dependentType(bt);
+                    }
+                    if (concrete) {
+                        struct Pattern {
+                            bool &f; bool was;
+                            ~Pattern() { f = was; }
+                        } pattern{ patternOnly_, patternOnly_ };
+                        patternOnly_ = false;
+                        Discarded held(this);
+                        Unevaluated unevaluated(this);
+                        ExprPtr v = primary(current_);
+                        long long value = 0;
+                        if (v->type() == nullptr || !v->type()->isInteger() || !fold(*v, &value, pos))
+                            depRefuse(pos, "the member '" + peekAt(0).text + "' of a class template's specialization");
+                        n.op = DepExpr::Literal;
+                        n.type = v->type()->unqualified();
+                        n.value = value;
+                        return depNode(n);
+                    }
                     const bool wasPattern = patternOnly_;
                     patternOnly_ = true;
                     StorageClass sc;

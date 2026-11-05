@@ -54,7 +54,8 @@ char trigraph(char c) {
     }
 }
 
-const int kMaxIncludeDepth = 32;
+// Annex B's guideline for nested #include.
+const int kMaxIncludeDepth = 256;
 
 const char kSeparators[] = "/\\";
 

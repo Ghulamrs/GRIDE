@@ -4,7 +4,7 @@
 # sees names only GRIDE and the outlooks (the user's rules of 2026-10-16 and 2026-10-19): the screens,
 # the folders GRIDE\Black, GRIDE\Grey and GRIDE\White, the Start menu, Programs and Features. Written
 # through Windows Installer's own automation API (msi.dll) and makecab: no WiX, no Inno Setup, no NuGet,
-# no Installer Projects extension. Setup.vcxproj (in the three solutions and installer\windows\Setup.sln)
+# no Installer Projects extension. Setup.vcxproj (the last project of GRIDE3.sln)
 # runs this script as its build. Adapted from GRIDE-Installer's build-msi.ps1 (one IDE, dummy tools).
 #
 #   build-setup.ps1 [-Version 1.5.0] [-OutDir <GRIDEx3\installer\dist>]
@@ -19,7 +19,7 @@
 # signed and Windows shows the Setup as from an unknown publisher (Programs and Features still says
 # G. R. Akhtar, from the Manufacturer property).
 #
-# Input: each solution's Release build, as Visual Studio's Build Solution leaves it - GRIDEd\x64\Release,
+# Input: GRIDE3.sln's Release build, as Visual Studio's Build Solution leaves it - GRIDEd\x64\Release,
 # GRIDE 2.0\x64\Release and GRIDE 1.0\x64\Release (GRIDE.exe, the ten programs, docs\, include\, lib\, and
 # toolchain.json for Black and Grey, settings.json for White) - and GRIDEx3\examples, the one examples folder
 # all three install as <outlook>\examples: projects\ (cppparse, built with cpp11; the C, C++ and Shalimar
@@ -27,7 +27,7 @@
 # Build the three first (one at a time: they share the toolchain's build folders). Left out: .pdb, .ilk,
 # .metagen. Added: Visual Studio 2022's VC++ runtime DLLs beside GRIDE.exe (app-local, as Microsoft
 # allows for Microsoft.VC143.CRT), so a machine without the VC++ Redistributable runs it - GRIDE.exe is
-# C++/CLI and the one program that loads them; the tools carry the static runtime. Each outlook's lib\ holds
+# C++/CLI and the one program that loads them; the tools carry the static runtime. Each outlook's lib\x86_64-windows holds
 # GRIDE's runtime for Windows (grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib, kernel32.lib, the Shalimar runtime over them), so its programs link with no
 # Visual Studio and no Windows SDK on the machine, and gride-dbg, GRIDE's Windows debugger, sits beside GRIDE.exe.
 #
@@ -123,13 +123,14 @@ $skip = [regex]'\.(pdb|ilk|metagen|iobj|ipdb|exp)$'
 Say "[1/5] Stage: $stage"
 foreach ($ide in $ides) {
     $rel = Join-Path $root "$($ide.Source)\x64\Release"
-    if (-not (Test-Path "$rel\GRIDE.exe")) { throw "$rel has no GRIDE.exe - build $($ide.Source)\GRIDE.sln in Release | x64 first" }
+    if (-not (Test-Path "$rel\GRIDE.exe")) { throw "$rel has no GRIDE.exe - build GRIDE3.sln in Release | x64 first" }
     foreach ($t in "c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747", "gride-dbg") {
-        if (-not (Test-Path "$rel\$t.exe")) { throw "$rel has no $t.exe - the solution builds all eleven tools and gride-dbg" }
+        if (-not (Test-Path "$rel\$t.exe")) { throw "$rel has no $t.exe - GRIDE3.sln builds all eleven tools and gride-dbg" }
     }
-    # the three link Windows programs with GRIDE's own runtime (toolchain\Windows\RT, the grt project): packed with lib\
-    foreach ($l in "grtstart.lib", "grtcompat.lib", "grtcxx.lib", "grtc.lib", "grtwin.lib", "kernel32.lib", "shmrt-x86_64-windows-grt.lib", "shmrt-x86_64-windows-grt-debug.lib") {
-        if (-not (Test-Path "$rel\lib\$l")) { throw "$rel has no lib\$l - the grt project of $($ide.Source)\GRIDE.sln writes it" }
+    # the three link Windows programs with GRIDE's own runtime (toolchain\Windows\RT, the grt project): packed with
+    # lib\x86_64-windows, the tree of docs\Runtime_Design.md 5.3
+    foreach ($l in "grtstart.lib", "grtcompat.lib", "grtcxx.lib", "grtc.lib", "grtwin.lib", "kernel32.lib", "shmrt.lib", "shmrtd.lib") {
+        if (-not (Test-Path "$rel\lib\x86_64-windows\$l")) { throw "$rel has no lib\x86_64-windows\$l - the grt project of GRIDE3.sln writes it" }
     }
     $dest = Join-Path $stage $ide.Folder
     New-Item -ItemType Directory -Force $dest | Out-Null
@@ -147,6 +148,18 @@ foreach ($ide in $ides) {
         $to = Join-Path $dest ("examples\" + $_.FullName.Substring($ex.Length + 1))
         New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
         Copy-Item -LiteralPath $_.FullName -Destination $to
+    }
+    # GRIDE's runtime's sources, where gride-dbg finds what the runtime's PDB names on the build machine (a step into
+    # it, docs\Runtime_Design.md 9.3): src\runtime\RT and src\runtime\RTS6x, without tests, benchmarks or build output
+    $srcSkip = [regex]'[\\/](tests|bench|build|tools|x64|obj)[\\/]'
+    $srcKeep = [regex]'\.(c|cpp|h|asm|inc)$'
+    foreach ($s in @(@{ From = "toolchain\Windows\RT"; To = "src\runtime\RT" }, @{ From = "toolchain\TI\RTS6x\src"; To = "src\runtime\RTS6x" })) {
+        $from = Join-Path $root $s.From
+        Get-ChildItem -LiteralPath $from -Recurse -File | Where-Object { $srcKeep.IsMatch($_.Name) -and -not $srcSkip.IsMatch($_.FullName.Substring($from.Length)) } | ForEach-Object {
+            $to = Join-Path $dest ($s.To + "\" + $_.FullName.Substring($from.Length + 1))
+            New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $to
+        }
     }
     $n = (Get-ChildItem -LiteralPath $dest -Recurse -File).Count
     Say ("  {0,-10} {1,-10} {2,4} files, {3:N1} MB" -f $ide.Feature, $ide.Folder, $n, ((Get-ChildItem -LiteralPath $dest -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))

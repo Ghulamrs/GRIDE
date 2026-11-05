@@ -1690,14 +1690,17 @@ int IrGen::conditional(cxx::Expr* e, bool byAddr)
     int slot = newLocal("tmp.cond", byAddr ? m_semaTypes.pointer(ct) : ct, false);
     LValue lv; lv.kind = LValue::Local; lv.local = slot; lv.type = byAddr ? m_semaTypes.pointer(ct) : ct;
     int tb = m_out->newBlock("cond.true"), fb = m_out->newBlock("cond.false"), join = m_out->newBlock("cond.join");
-    condition(e->kids[0], tb, fb);
-    // table model: a temporary built by one arm gets its region at the join, guarded by its flag (openDeferredRegions)
+    // table model: a temporary built by one arm, or by an operand of the condition after its first branch, gets its
+    // region at the join, guarded by its flag (openDeferredRegions); the condition's temporaries live to the end of
+    // the enclosing full expression, as the arms' do
     const size_t flaggedAtStart = m_flagged.size();
+    condition(e->kids[0], tb, fb, false);
     if (m_tableEh) ++m_deferRegions;
     for (int k = 0; k < 2; ++k) {
         m_block = k == 0 ? tb : fb;
         cxx::Expr* arm = e->kids[static_cast<size_t>(k + 1)];
         size_t tempsBefore = m_temps.size();
+        const size_t flaggedAtArm = m_flagged.size();   // the arm closes the regions of its own temporaries alone: the condition's stay open across both arms
         int v;
         if (byAddr && isClassType(ct) && m_semaTypes.unqualified(m_semaTypes.unref(exprType(arm))) != ct) {
             // an operand of another type (a string literal for a std::string result): converted into a temporary
@@ -1720,10 +1723,10 @@ int IrGen::conditional(cxx::Expr* e, bool byAddr)
             }
         } else v = convert(value(arm), exprType(arm), ct, line);
         store(lv, v, lv.type, line);
-        // a temporary the result refers to survives to the end of the full expression, guarded by its
-        // flag because only one arm runs; scalar arms destroy their temporaries here
-        if (byAddr) for (size_t i = tempsBefore; i < m_temps.size(); ++i) m_temps[i].guarded = true;
-        else endFullExpr(line, tempsBefore);
+        // the arm's temporaries survive to the end of the full expression (12.2/3), guarded by their flags because
+        // only one arm runs
+        for (size_t i = tempsBefore; i < m_temps.size(); ++i) m_temps[i].guarded = true;
+        if (m_tableEh) suspendRegions(flaggedAtArm, line, false);
         br(join, line);
     }
     m_block = join;
@@ -1731,28 +1734,74 @@ int IrGen::conditional(cxx::Expr* e, bool byAddr)
     return load(lv, lv.type, line);
 }
 
-void IrGen::condition(cxx::Expr* e, int trueBlock, int falseBlock)
+// a condition, branching to trueBlock or falseBlock: && and || branch between their operands, ! swaps the targets.
+// Its temporaries live to the end of the full expression (12.2/3): a statement's condition (fullExpr) ends there, so
+// a condition of one operand destroys them before its branch, and one of several destroys those left in one exit
+// block that both targets are reached through (the branch outcome kept in a bool meanwhile; an operand after the
+// first branch runs on one path only, so its temporaries are flagged, as an arm's of ?:); the condition of ?: and
+// of the value of && or || leaves them to the enclosing full expression
+void IrGen::condition(cxx::Expr* e, int trueBlock, int falseBlock, bool fullExpr)
 {
-    if (e->kind == cxx::Expr::Paren) { condition(e->kids[0], trueBlock, falseBlock); return; }
-    if (e->kind == cxx::Expr::Binary && e->text == "&&" && !e->semaSym) {
-        int mid = m_out->newBlock("and.rhs");
-        condition(e->kids[0], mid, falseBlock);
+    const size_t tempsBefore = m_temps.size();
+    const int startBlock = m_block;
+    const size_t firstBlock = m_out->blocks.size();
+    const int deferBefore = m_deferRegions;
+    conditionTree(e, trueBlock, falseBlock, fullExpr, fullExpr, deferBefore);
+    if (m_deferRegions > deferBefore) --m_deferRegions;
+    if (!fullExpr || m_temps.size() == tempsBefore) return;
+    const int line = e->loc.line;
+    const sema::Type* b = m_semaTypes.basic(sema::Type::Bool);
+    const int slot = newLocal("tmp.cond", b, false);
+    LValue lv; lv.kind = LValue::Local; lv.local = slot; lv.type = b;
+    const int onTrue = m_out->newBlock("cond.true"), onFalse = m_out->newBlock("cond.false"), exit = m_out->newBlock("cond.exit");
+    redirectBranches(startBlock, firstBlock, trueBlock, onTrue);
+    redirectBranches(startBlock, firstBlock, falseBlock, onFalse);
+    m_block = onTrue; store(lv, constant(1, b, line), b, line); br(exit, line);
+    m_block = onFalse; store(lv, constant(0, b, line), b, line); br(exit, line);
+    m_block = exit;
+    endFullExpr(line, tempsBefore);
+    condbr(load(lv, b, line), trueBlock, falseBlock, line);
+}
+
+// fullExpr: a statement's condition; last: the operand is that whole condition, whose full expression ends before its
+// branch; an operand after the first branch closes the regions of its temporaries before its own branch
+void IrGen::conditionTree(cxx::Expr* e, int trueBlock, int falseBlock, bool fullExpr, bool last, int deferBefore)
+{
+    if (e->kind == cxx::Expr::Paren) { conditionTree(e->kids[0], trueBlock, falseBlock, fullExpr, last, deferBefore); return; }
+    const bool isAnd = e->kind == cxx::Expr::Binary && e->text == "&&" && !e->semaSym;
+    const bool isOr = e->kind == cxx::Expr::Binary && e->text == "||" && !e->semaSym;
+    if (isAnd || isOr) {
+        int mid = m_out->newBlock(isAnd ? "and.rhs" : "or.rhs");
+        conditionTree(e->kids[0], isAnd ? mid : trueBlock, isAnd ? falseBlock : mid, fullExpr, false, deferBefore);
         m_block = mid;
-        condition(e->kids[1], trueBlock, falseBlock);
+        // the second operand runs on one path only: its temporaries are flagged and destroyed under their flags
+        const size_t tempsAtBranch = m_temps.size();
+        if (m_tableEh && m_deferRegions == deferBefore) ++m_deferRegions;
+        conditionTree(e->kids[1], trueBlock, falseBlock, fullExpr, false, deferBefore);
+        for (size_t i = tempsAtBranch; i < m_temps.size(); ++i) m_temps[i].guarded = true;
         return;
     }
-    if (e->kind == cxx::Expr::Binary && e->text == "||" && !e->semaSym) {
-        int mid = m_out->newBlock("or.rhs");
-        condition(e->kids[0], trueBlock, mid);
-        m_block = mid;
-        condition(e->kids[1], trueBlock, falseBlock);
-        return;
-    }
-    if (e->kind == cxx::Expr::Unary && e->text == "!" && !e->semaSym) { condition(e->kids[0], falseBlock, trueBlock); return; }
+    if (e->kind == cxx::Expr::Unary && e->text == "!" && !e->semaSym) { conditionTree(e->kids[0], falseBlock, trueBlock, fullExpr, last, deferBefore); return; }
     size_t tempsBefore = m_temps.size();
+    const size_t flaggedBefore = m_flagged.size();
     int v = toBool(value(e), exprType(e), e->loc.line);
-    endFullExpr(e->loc.line, tempsBefore);   // temporaries of this operand die before the branch
+    if (last) endFullExpr(e->loc.line, tempsBefore);
+    else if (m_tableEh && m_deferRegions > deferBefore) suspendRegions(flaggedBefore, e->loc.line, !fullExpr);
     condbr(v, trueBlock, falseBlock, e->loc.line);
+}
+
+// the branches to 'from' in the blocks made since firstBlock, and in the one the code started in, go to 'to'
+void IrGen::redirectBranches(int startBlock, size_t firstBlock, int from, int to)
+{
+    for (size_t b = 0; b < m_out->blocks.size(); ++b) {
+        if (b < firstBlock && static_cast<int>(b) != startBlock) continue;
+        std::vector<IrInst>& insts = m_out->blocks[b].insts;
+        for (size_t i = 0; i < insts.size(); ++i) {
+            if (insts[i].op != IrInst::Br && insts[i].op != IrInst::CondBr) continue;
+            for (size_t a = 0; a < insts[i].args.size(); ++a)
+                if (insts[i].args[a].kind == IrOperand::Block && insts[i].args[a].id == from) insts[i].args[a].id = to;
+        }
+    }
 }
 
 int IrGen::argument(cxx::Expr* a, const sema::Type* pt, int line)
@@ -2355,15 +2404,18 @@ int IrGen::registerCleanup(int slot, const sema::Type* t, bool viaPointer, int m
     m_flagged.push_back(c);
     if (mode == 0) m_cleanups.push_back(c);
     else if (mode == 1) m_temps.push_back(c);
-    if (m_tableEh && m_deferRegions == 0) openRegion(c.index, line);
+    // table model: a region at once, a flagged object's too (its arm or operand closes it before the join, suspendRegions,
+    // and the join reopens it under its flag): the unwinding order follows the nesting of the regions meanwhile
+    if (m_tableEh) openRegion(c.index, line, false);
     return c.index;
 }
 
-// table model: the cleanup's own try region; its landing pad destroys the object (a flagged one only when the flag is
-// set) while the exception stays in flight (std::uncaught_exception() is true, and the runtime calls terminate when
+// table model: the cleanup's own try region; its landing pad destroys the object (under its flag when the region was
+// opened at a join, where the object may not have been built: guarded) while the exception stays in flight
+// (std::uncaught_exception() is true, and the runtime calls terminate when
 // the destructor lets an exception out: cppparse_unwind_enter marks the frame), then lets it go on: to the pad of the
 // region around, the next object alive, or to the caller
-void IrGen::openRegion(int k, int line)
+void IrGen::openRegion(int k, int line, bool guarded)
 {
     const int region = m_tryCount++;
     m_flagged[static_cast<size_t>(k)].region = region;
@@ -2376,7 +2428,8 @@ void IrGen::openRegion(int k, int line)
     br(cont, line);
     m_block = cont;
     m_tryStack.push_back(-2 - k);
-    m_pads.push_back(std::make_pair(pad, k));   // filled by finishFunction, once the cleanup's details are complete
+    Pad pd; pd.block = pad; pd.entry = k; pd.guarded = guarded;
+    m_pads.push_back(pd);   // filled by finishFunction, once the cleanup's details are complete
     m_out->hasTry = true;
 }
 
@@ -2388,10 +2441,11 @@ int IrGen::cleanupAddress(const Cleanup& c, int line)
 }
 
 // the destructor of a cleanup that is one direct call of it with the object's address (no flag to test, nothing to
-// free, no array remainder, no guard to reset, no this adjustment), as destroy would call it: 0 for any other
-Symbol* IrGen::plainDestructor(const Cleanup& c)
+// free, no array remainder, no guard to reset, no this adjustment, no flagged objects to destroy first), as destroy
+// would call it: 0 for any other
+Symbol* IrGen::plainDestructor(const Cleanup& c, bool guarded)
 {
-    if (c.flag >= 0 || c.freeKind || c.restIndex >= 0 || !c.abortGuard.empty()) return 0;
+    if (guarded || c.freeKind || c.restIndex >= 0 || !c.abortGuard.empty() || !c.newer.empty()) return 0;
     if (c.type->kind != sema::Type::Class || !c.type->decl || !needsDtor(c.type)) return 0;
     Symbol* dtor = findSpecial(c.type->decl, '~');
     if (!dtor) return 0;
@@ -2399,16 +2453,21 @@ Symbol* IrGen::plainDestructor(const Cleanup& c)
     return dtor->thisAdjust == 0 ? dtor : 0;
 }
 
-// the landing pads of the object regions: the object is destroyed (a flagged one when its flag is set) while the
-// exception stays in flight, between cppparse_unwind_enter and leave, then the exception goes on; a pad whose cleanup
-// is one destructor call makes the three calls one, cppparse_unwind_destroy(object, destructor), which does not return
+// the landing pads of the object regions: the object is destroyed (a flagged one when its flag is set), after the flagged
+// objects built under its region that are still alive, newest first, while the exception stays in flight, between
+// cppparse_unwind_enter and leave, then the exception goes on; a pad whose cleanup is one destructor call makes the
+// three calls one, cppparse_unwind_destroy(object, destructor), which does not return
 void IrGen::emitPads(int line)
 {
     for (size_t p = 0; p < m_pads.size(); ++p) {
-        const Cleanup c = m_flagged[static_cast<size_t>(m_pads[p].second)];
-        m_block = m_pads[p].first;
-        if (Symbol* dtor = plainDestructor(c)) {
+        const Cleanup c = m_flagged[static_cast<size_t>(m_pads[p].entry)];
+        const bool guarded = m_pads[p].guarded;
+        m_block = m_pads[p].block;
+        if (Symbol* dtor = plainDestructor(c, guarded)) {
             need(dtor);
+            // a flagged object (its region opened at creation, so the pad needs no test): the flag goes to 0 first, as
+            // runCleanup does, so that a handler walking the flags does not destroy it again
+            if (c.flag >= 0) { LValue fl; fl.kind = LValue::Local; fl.local = c.flag; fl.type = m_semaTypes.basic(sema::Type::Bool); store(fl, constant(0, fl.type, line), fl.type, line); }
             const int addr = cleanupAddress(c, line);
             IrInst fa = make(IrInst::AddrGlobal, 0, line);
             fa.type = m_types.function(oldType(m_semaTypes.basic(sema::Type::Void)));
@@ -2423,7 +2482,8 @@ void IrGen::emitPads(int line)
         }
         ++m_inPad;
         { IrInst u = make(IrInst::Call, m_semaTypes.basic(sema::Type::Void), line); u.sub = "cppparse_unwind_enter"; emit(u); }
-        runCleanup(c, c.flag >= 0, line);
+        for (size_t i = c.newer.size(); i > 0; --i) runCleanup(m_flagged[static_cast<size_t>(c.newer[i - 1])], true, line);
+        runCleanup(c, guarded, line);
         { IrInst u = make(IrInst::Call, m_semaTypes.basic(sema::Type::Void), line); u.sub = "cppparse_unwind_leave"; emit(u); }
         --m_inPad;
         emit(make(IrInst::Throw, m_semaTypes.basic(sema::Type::Void), line));
@@ -2495,7 +2555,7 @@ void IrGen::retireEntries(const std::vector<int>& ks, bool destroy, int line)
     if (left > 0) unsupported(line, "an object's lifetime region is not above the regions to leave (--compile6)");
     for (size_t i = suspended.size(); i > 0; --i) {
         if (terminated()) m_tryStack.push_back(-2 - suspended[i - 1]);
-        else openRegion(suspended[i - 1], line);
+        else openRegion(suspended[i - 1], line, m_flagged[static_cast<size_t>(suspended[i - 1])].flag >= 0);
     }
 }
 
@@ -2568,17 +2628,34 @@ void IrGen::openScope()
     m_scopeTry.push_back(m_tryStack.size());
 }
 
-// table model: the cleanups registered on one path only since m_flagged[from] (an arm of ?:, the virtual bases a
-// constructor builds when it is the most derived one) get their regions here, at the join, guarded by their flags.
-// Inside an arm of an outer conditional nothing opens: the outer join does, so that every path reaches a join with
-// the same regions open (a region opened at an inner join exists on that arm's path alone, and the tryends that
-// close it at the end of the full expression would then pop other regions on the other arm's path: such a function
-// kept the setjmp frames, X86 computeRegions)
+// table model: the cleanups registered on one path only since m_flagged[from] (an arm of ?:, an operand of && or ||
+// after the first, the virtual bases a constructor builds when it is the most derived one) get their regions again
+// here, at the join, guarded by their flags
 void IrGen::openDeferredRegions(size_t from, int line)
 {
-    if (m_deferRegions > 0) return;
     for (size_t k = from; k < m_flagged.size(); ++k)
-        if (m_flagged[k].region == -1 && m_flagged[k].flag >= 0) openRegion(static_cast<int>(k), line);
+        if (m_flagged[k].region == -1 && m_flagged[k].flag >= 0) openRegion(static_cast<int>(k), line, true);
+}
+
+// table model: the regions of the flagged cleanups registered since m_flagged[from] are closed without destroying the
+// objects (region -1: deferred again, reopened at the join by openDeferredRegions, or destroyed under their flags at
+// the end of the full expression): an arm of ?: and an operand of && or || after the first end so, and every path
+// then reaches the join or the branch's targets with the same regions open (a region kept open on one path alone
+// would leave the function to the setjmp frames, X86 computeRegions). noteBelow: the object stays alive without a
+// region until the enclosing join or the end of the full expression, where an exception must destroy it before the
+// objects whose regions are open: it goes on their lists (Cleanup::newer)
+void IrGen::suspendRegions(size_t from, int line, bool noteBelow)
+{
+    while (!m_tryStack.empty() && objectEntry(m_tryStack.back())) {
+        const int k = entryIndex(m_tryStack.back());
+        if (static_cast<size_t>(k) < from || m_flagged[static_cast<size_t>(k)].flag < 0) break;
+        if (!terminated()) { IrInst te = make(IrInst::TryEnd, 0, line); te.extra = m_flagged[static_cast<size_t>(k)].region; emit(te); }
+        m_tryStack.pop_back();
+        m_flagged[static_cast<size_t>(k)].region = -1;
+        if (noteBelow)
+            for (size_t i = 0; i < m_tryStack.size(); ++i)
+                if (objectEntry(m_tryStack[i])) m_flagged[static_cast<size_t>(entryIndex(m_tryStack[i]))].newer.push_back(k);
+    }
 }
 
 IrGen::JumpState IrGen::jumpState(int block, int line) const
@@ -3270,7 +3347,7 @@ int IrGen::value(cxx::Expr* e)
             int slot = newLocal("tmp.logic", m_semaTypes.basic(sema::Type::Bool), false);
             LValue lv; lv.kind = LValue::Local; lv.local = slot; lv.type = m_semaTypes.basic(sema::Type::Bool);
             int tb = m_out->newBlock("logic.true"), fb = m_out->newBlock("logic.false"), join = m_out->newBlock("logic.join");
-            condition(e, tb, fb);
+            condition(e, tb, fb, false);
             m_block = tb; store(lv, constant(1, lv.type, line), lv.type, line); br(join, line);
             m_block = fb; store(lv, constant(0, lv.type, line), lv.type, line); br(join, line);
             m_block = join;
@@ -3844,7 +3921,7 @@ void IrGen::localDecl(cxx::Decl* d)
                     store(afl, on, b, line);
                 }
                 m_flagged.push_back(ac);
-                if (m_tableEh) openRegion(ac.index, line);   // the region is opened and left inside this block: the join after it sees no change
+                if (m_tableEh) openRegion(ac.index, line, false);   // the region is opened and left inside this block: the join after it sees no change
                 LValue lv; lv.kind = LValue::Global; lv.global = gname; lv.type = m_semaTypes.unref(var->type);
                 initObject(lv, var->type, var, id, line);
                 endFullExpr(line);
@@ -4935,7 +5012,7 @@ void IrGen::constructorInit(Symbol* fn, cxx::Decl* def)
         if (cls->bases[b].cls && !cls->bases[b].isVirtual) { parts.push_back(std::make_pair(cls->bases[b].cls, cls->bases[b].offset)); virtualPart.push_back(false); }
     // bases named in the initializer list, in declaration order of the bases
     for (size_t p = 0; p < parts.size(); ++p) {
-        if (p == firstNonVirtual && joinBlock >= 0) { br(joinBlock, line); m_block = joinBlock; if (m_tableEh) { --m_deferRegions; openDeferredRegions(vbFlagged, line); } }
+        if (p == firstNonVirtual && joinBlock >= 0) { if (m_tableEh) suspendRegions(vbFlagged, line, false); br(joinBlock, line); m_block = joinBlock; if (m_tableEh) { --m_deferRegions; openDeferredRegions(vbFlagged, line); } }
         Symbol* base = parts[p].first;
         const int boff = parts[p].second;
         cxx::MemInit* mi = 0;
@@ -4965,7 +5042,7 @@ void IrGen::constructorInit(Symbol* fn, cxx::Decl* def)
             m_flagged[static_cast<size_t>(registerCleanup(part, base->type, true, 2, line))].baseSubobject = true;
         }
     }
-    if (parts.size() == firstNonVirtual && joinBlock >= 0) { br(joinBlock, line); m_block = joinBlock; if (m_tableEh) { --m_deferRegions; openDeferredRegions(vbFlagged, line); } }
+    if (parts.size() == firstNonVirtual && joinBlock >= 0) { if (m_tableEh) suspendRegions(vbFlagged, line, false); br(joinBlock, line); m_block = joinBlock; if (m_tableEh) { --m_deferRegions; openDeferredRegions(vbFlagged, line); } }
     storeVptr(cls, self, line);
     // members in declaration order
     for (size_t f = 0; f < cls->fields.size(); ++f) {

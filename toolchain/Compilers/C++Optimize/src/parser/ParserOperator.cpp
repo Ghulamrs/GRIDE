@@ -437,6 +437,17 @@ ExprPtr Parser::shift() {
         else if (consume(">>")) op = BinOp::Shr;
         else return n;
 
+        if (n->type() != nullptr && n->type()->unqualified()->isStructOrUnion() &&
+            atBareFunctionArgument(false, true)) {
+            ExprPtr rhs;
+            {
+                OverloadTarget waits(*this, nullptr, true);
+                rhs = add();
+            }
+            const Type *left = n->type();
+            n = shiftOf(op, std::move(n), shiftedFunction(left, op, std::move(rhs)), pos);
+            continue;
+        }
         n = shiftOf(op, std::move(n), add(), pos);
     }
 }
@@ -640,7 +651,19 @@ void Parser::requireAssignable(const Expr &e, std::size_t pos, const char *what)
 }
 
 ExprPtr Parser::compound(BinOp op, ExprPtr target, ExprPtr value, std::size_t pos) {
-    requireAssignable(*target, pos, "the left of a compound assignment");
+    // **A class's `@=` is a call on the object, which may be a prvalue** - [over.match.oper]/2:
+    // `bitset(*this) <<= n` is the temporary's operator<<=, reached through its address as `=` reaches one.
+    // Only the built-in operator wants an lvalue.
+    if (!target->type()->unqualified()->isStructOrUnion()) {
+        requireAssignable(*target, pos, "the left of a compound assignment");
+    } else if (!isGlvalue(*target) && !target->type()->isConst()) {
+        const Type *t = target->type();
+        ExprPtr addr(new Unary('&', std::move(target)));
+        addr->setType(types_.pointerTo(t));
+        target.reset(new Unary('*', std::move(addr)));
+        target->setType(t);
+        target->setDeclCategory(Expr::Category::Prvalue);
+    }
     const Type *to = target->type();
 
     // **`a += b` is not `a = a + b` when a is a class.** The rewrite below is
@@ -662,7 +685,7 @@ ExprPtr Parser::compound(BinOp op, ExprPtr target, ExprPtr value, std::size_t po
             std::vector<ExprPtr> args;
             args.push_back(std::move(target));
             args.push_back(std::move(value));
-            const Signature &sig = resolveOverload(name, args, pos);
+            const Signature &sig = resolveChosenOperator(name, args, pos);
             return completeCall(name, sig.symbol, nullptr, sig.returns,
                                 sig.params, sig.variadic, pos, std::move(args),
                                 !sig.owner.empty());
@@ -768,7 +791,7 @@ ExprPtr Parser::incDec(ExprPtr target, bool increment, bool prefix, std::size_t 
             std::vector<ExprPtr> args;
             args.push_back(std::move(target));
             if (!prefix) args.push_back(std::move(dummy));
-            const Signature &sig = resolveOverload(name, args, pos);
+            const Signature &sig = resolveChosenOperator(name, args, pos);
             applyDefaults(sig, args, pos);
             return completeCall(name, sig.symbol, nullptr, sig.returns,
                                 sig.params, sig.variadic, pos, std::move(args),
@@ -991,10 +1014,10 @@ ExprPtr Parser::conditional() {
     }
 
     if (ta->isArithmetic() && tb->isArithmetic()) {
-        // [expr.cond]/6: two arms of one enumeration give that enumeration, not its promotion.
-        const bool oneEnum = ta->unqualified() == tb->unqualified() &&
-                             ta->unqualified()->isEnumeration();
-        result = oneEnum ? ta->unqualified() : usualArithmetic(ta, tb);
+        // [expr.cond]/6: two arms of one type give that type - a char and a character literal a char, an
+        // enumeration that enumeration - and only two types the usual arithmetic conversions.
+        const bool oneType = ta->unqualified() == tb->unqualified();
+        result = oneType ? ta->unqualified() : usualArithmetic(ta, tb);
         a = convert(std::move(a), result);
         b = convert(std::move(b), result);
     } else if (ta->unqualified()->isStructOrUnion() ||
@@ -1135,8 +1158,19 @@ ExprPtr Parser::assign() {
     std::size_t pos = peek().pos;
     at_++;
 
-    // [over.match.oper]/2: `=` on a class object is its operator=, which an xvalue calls as an lvalue does.
-    if (!(n->type()->unqualified()->isStructOrUnion() && isGlvalue(*n) && !n->type()->isConst()))
+    // A class prvalue - `mk(x) = 5`, `std::tie(a, b) = t` - is assigned as any member function is called on it,
+    // [over.match.oper]/2: through its address, as memberCallWith takes one, and marked a prvalue as a slot is.
+    if (n->type()->unqualified()->isStructOrUnion() && !isGlvalue(*n) && !n->type()->isConst()) {
+        const Type *t = n->type();
+        ExprPtr addr(new Unary('&', std::move(n)));
+        addr->setType(types_.pointerTo(t));
+        n.reset(new Unary('*', std::move(addr)));
+        n->setType(t);
+        n->setDeclCategory(Expr::Category::Prvalue);
+    }
+    // [over.match.oper]/2: `=` on a class object is its operator=, which an xvalue calls as an lvalue does,
+    // and a const one when it is a const member - `std::ignore`'s; a const class is refused below otherwise.
+    if (!(n->type()->unqualified()->isStructOrUnion() && isGlvalue(*n)))
         requireAssignable(*n, pos, "the left of '='");
 
     const Type *to = n->type();
@@ -1170,6 +1204,7 @@ ExprPtr Parser::assign() {
                               std::move(args));
     }
 
+    if (to->unqualified()->isStructOrUnion() && to->isConst()) requireAssignable(*n, pos, "the left of '='");
     // The implicit copy assignment takes its operand through a converting constructor, [over.ics.user].
     if (to->unqualified()->isStructOrUnion() && value->type() != nullptr &&
         value->type()->unqualified() != to->unqualified() &&

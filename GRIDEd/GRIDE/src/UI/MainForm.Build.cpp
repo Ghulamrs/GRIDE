@@ -532,6 +532,7 @@ namespace Gride { namespace UI {
         // back as the console echoes it, among the program's lines
         if (debugger->TakesInput && !runner->IsRunning) { output->EchoInput = false; output->ShowInput(true, false); }
         debugger->StopAtEntry = atEntry;
+        debugger->StepIntoRuntime = settings->Env->StepIntoRuntime;
         debugger->Start(program, CurrentTarget(), file, line);
     }
 

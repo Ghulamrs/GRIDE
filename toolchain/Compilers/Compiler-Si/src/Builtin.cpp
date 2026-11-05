@@ -1,51 +1,29 @@
 #include "Builtin.h"
 
+#include "Ast.h"
+
 #include <cmath>
 #include <cstring>
+#include <map>
 
 namespace shalimar {
 namespace {
 
-// **The symbol each one calls.** Where it is a C library name - `sin`, `fabs` - shc emits a call
-// straight to it and the linker resolves it from libm, with nothing added to the runtime archive.
-// Five are NOT library calls and must not become them - abs_int traps on INT_MIN, max/min propagate NaN, and C has no integer max or min: docs/FOREIGN.md.
+// **The symbol each one calls.** The library's rows come from the runtime's catalogue (Library.inc, written by
+// the build from toolchain\Windows\RT\catalogue.json, docs\Runtime_Design.md 14.3): a C library name - `sin`, `fabs` -
+// shc calls straight, and shm_c_<name> where the signature is not Shalimar's (runtime\wrappers\, from the same
+// catalogue). The rest are Shalimar's own and are NOT library calls - max/min propagate NaN, C has no integer max
+// or min, abs's int answer traps on INT_MIN: docs/FOREIGN.md.
 const Builtin table[] = {
-    {"abs",   1, Builtin::Shape::IntOrReal, "fabs", "shm_fn_abs_int"},
-    {"sqrt",  1, Builtin::Shape::Real,      "sqrt",     nullptr},
-    {"log",   1, Builtin::Shape::Real,      "log",      nullptr},
-    {"exp",   1, Builtin::Shape::Real,      "exp",      nullptr},
-    {"hypot", 2, Builtin::Shape::Real,      "hypot",    nullptr},
-    {"sin",   1, Builtin::Shape::Real,      "sin",      nullptr},
-    {"cos",   1, Builtin::Shape::Real,      "cos",      nullptr},
-    {"tan",   1, Builtin::Shape::Real,      "tan",      nullptr},
-    {"asin",  1, Builtin::Shape::Real,      "asin",     nullptr},
-    {"acos",  1, Builtin::Shape::Real,      "acos",     nullptr},
-    {"atan",  1, Builtin::Shape::Real,      "atan",     nullptr},
-    {"atan2", 2, Builtin::Shape::Real,      "atan2",    nullptr},
-    {"pow",   2, Builtin::Shape::Real,      "pow",      nullptr},
-    {"round", 1, Builtin::Shape::Real,      "round",    nullptr},
-    {"ceil",  1, Builtin::Shape::Real,      "ceil",     nullptr},
-    {"floor", 1, Builtin::Shape::Real,      "floor",    nullptr},
-
-    {"trunc", 1, Builtin::Shape::Real,      "trunc",    nullptr},
-
-    // Added 2026-08-26, and each one is a row and nothing else: the symbol is libm's, so there is
-    // no wrapper to write and the archive does not grow. C99 rather than C89 - log2, cbrt and the
-    // hyperbolics postdate the standard Compiler-C targets - but this is a call into the platform's libm, not a C program, and all three of ours have them.
-    {"fmod",  2, Builtin::Shape::Real,      "fmod",     nullptr},
-    {"sinh",  1, Builtin::Shape::Real,      "sinh",     nullptr},
-    {"cosh",  1, Builtin::Shape::Real,      "cosh",     nullptr},
-    {"tanh",  1, Builtin::Shape::Real,      "tanh",     nullptr},
-    {"log10", 1, Builtin::Shape::Real,      "log10",    nullptr},
-    {"log2",  1, Builtin::Shape::Real,      "log2",     nullptr},
-    {"cbrt",  1, Builtin::Shape::Real,      "cbrt",     nullptr},
-    {"max",   2, Builtin::Shape::IntOrReal, "shm_fn_max_real", "shm_fn_max_int"},
-    {"min",   2, Builtin::Shape::IntOrReal, "shm_fn_min_real", "shm_fn_min_int"},
-
-    {"len",   1, Builtin::Shape::Length,    nullptr,           nullptr}
+#include "Library.inc"
+    {"max",   2, Builtin::Shape::IntOrReal, "shm_fn_max_real", "shm_fn_max_int", nullptr, nullptr, nullptr},
+    {"min",   2, Builtin::Shape::IntOrReal, "shm_fn_min_real", "shm_fn_min_int", nullptr, nullptr, nullptr},
+    {"len",   1, Builtin::Shape::Length,    nullptr,           nullptr,          nullptr, nullptr, nullptr}
 };
 
 const int count = static_cast<int>(sizeof table / sizeof table[0]);
+// The rows before Shalimar's own three.
+const int libraryCount = count - 3;
 
 }
 
@@ -57,24 +35,24 @@ struct Unborrowable { const char *name; const char *why; };
 const Unborrowable kUnborrowable[] = {
     {"memset",  "takes a pointer, which Shalimar has no type for"},
     {"memcpy",  "takes a pointer, which Shalimar has no type for"},
-    {"strlen",  "takes a pointer, which Shalimar has no type for"},
-    {"strcpy",  "takes a pointer, which Shalimar has no type for"},
-    {"strcmp",  "takes a pointer, which Shalimar has no type for"},
+    {"strcpy",  "writes through a pointer, which Shalimar has no type for"},
+    {"strcat",  "writes through a pointer, which Shalimar has no type for"},
+    {"strchr",  "returns a pointer into its argument, which Shalimar has no type for"},
+    {"strstr",  "returns a pointer into its argument, which Shalimar has no type for"},
     {"malloc",  "returns a pointer, which Shalimar has no type for"},
     {"free",    "takes a pointer, which Shalimar has no type for"},
     {"fopen",   "returns a pointer, which Shalimar has no type for"},
     {"qsort",   "takes a function pointer, which Shalimar has no type for"},
     {"printf",  "takes a variable number of arguments, which Shalimar has no form for"},
     {"scanf",   "takes a variable number of arguments, which Shalimar has no form for"},
-    {"modf",    "writes through a pointer; a two-output 'fun' is the Shalimar shape for it"},
-    {"frexp",   "writes through a pointer; a two-output 'fun' is the Shalimar shape for it"},
 };
 }
 
-const char *whyNotBorrowable(const std::string &name) {
+std::string notBorrowable(const std::string &name) {
     for (std::size_t i = 0; i < sizeof kUnborrowable / sizeof kUnborrowable[0]; ++i)
-        if (name == kUnborrowable[i].name) return kUnborrowable[i].why;
-    return nullptr;
+        if (name == kUnborrowable[i].name) return "'" + name + "' " + kUnborrowable[i].why;
+    if (findBuiltin(name) >= 0) return "'" + name + "' is Shalimar's own, not the runtime's";
+    return "'" + name + "' is not a library function this compiler knows";
 }
 
 int findBuiltin(const std::string &name) {
@@ -84,7 +62,46 @@ int findBuiltin(const std::string &name) {
     return -1;
 }
 
+int findLibrary(const std::string &name) {
+    const int which = findBuiltin(name);
+    return which < libraryCount ? which : -1;
+}
+
 const Builtin &builtin(int index) { return table[index]; }
+
+namespace {
+const Type *typeOfLetter(char letter) {
+    if (letter == 'r') return Type::realType();
+    if (letter == 'i') return Type::intType();
+    return Type::arrayOf(Type::charType());
+}
+}
+
+const Prototype &libraryPrototype(int index) {
+    static std::map<int, Prototype> made;
+    std::map<int, Prototype>::iterator found = made.find(index);
+    if (found != made.end()) return found->second;
+
+    const Builtin &fn = table[index];
+    Prototype proto(fn.realSymbol, 0);
+    proto.isForeign = true;
+    for (const char *letter = fn.outputs; *letter; ++letter) proto.outputs.push_back(typeOfLetter(*letter));
+    for (const char *letter = fn.inputs; *letter; ++letter) {
+        Param parameter;
+        parameter.type = typeOfLetter(*letter);
+        proto.inputs.push_back(parameter);
+    }
+    return made[index] = proto;
+}
+
+const char *c6747Symbol(const std::string &cName) {
+    for (int i = 0; i < count; ++i) {
+        if (table[i].realSymbol && table[i].c6xSymbol && cName == table[i].realSymbol &&
+            std::strcmp(table[i].realSymbol, table[i].c6xSymbol) != 0)
+            return table[i].c6xSymbol;
+    }
+    return nullptr;
+}
 int builtinCount() { return count; }
 
 bool isConstant(const std::string &name) { return name == "pi" || name == "e"; }

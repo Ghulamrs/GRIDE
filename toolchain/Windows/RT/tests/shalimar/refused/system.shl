@@ -1,0 +1,6 @@
+// refused tms6747: 'system' is not in the C6747's runtime
+uses system
+
+fun <> = main() {
+  ? system("")
+}

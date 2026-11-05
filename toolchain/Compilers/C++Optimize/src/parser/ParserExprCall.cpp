@@ -258,6 +258,9 @@ void Parser::pickOverloadArguments(const std::string &key, std::vector<ExprPtr> 
         std::string pickedSymbol;
         const Type *param = nullptr;
         bool differ = false;
+        // Each candidate's parameter here and the ranks of the written arguments it was given.
+        std::vector<const Type *> targets;
+        std::vector<std::vector<Rank> > ranks;
         for (std::size_t k = 0; k < callee->size(); k++) {
             const Signature &f = functions_[(*callee)[k]];
             if (f.variadic ? args.size() < leastArguments(f)
@@ -285,6 +288,29 @@ void Parser::pickOverloadArguments(const std::string &key, std::vector<ExprPtr> 
             picked = one;
             pickedSymbol = one->symbol;
             param = target;
+            targets.push_back(target);
+            ranks.push_back(std::vector<Rank>());
+            const Signature &g = functions_[(*callee)[k]];
+            for (std::size_t j = 0; j < args.size() && j < g.params.size(); j++)
+                ranks.back().push_back(j != i && overloadArgOf(*args[j]) == nullptr && !isBracedPlaceholder(*args[j])
+                                           ? rankArgument(*args[j], g.params[j]) : Rank::Identity);
+        }
+        // [over.match.best]: each candidate takes its own function here, and the other arguments decide.
+        for (std::size_t c = 0; differ && c < ranks.size(); c++) {
+            bool beatsAll = true;
+            for (std::size_t d = 0; d < ranks.size() && beatsAll; d++) {
+                if (d == c) continue;
+                bool better = false, worse = false;
+                for (std::size_t j = 0; j < ranks[c].size() && j < ranks[d].size(); j++) {
+                    if (ranks[c][j] < ranks[d][j]) better = true;
+                    if (ranks[c][j] > ranks[d][j]) worse = true;
+                }
+                beatsAll = better && !worse;
+            }
+            if (beatsAll) {
+                param = targets[c];
+                differ = false;
+            }
         }
         const std::string head = "'" + oa->key + "' names " + std::to_string(oa->set.size()) +
                                  " functions, and ";
@@ -323,7 +349,28 @@ ExprPtr Parser::finishCall(const std::string &name, const std::string &symbol,
 // The caller's half of passing a class by value - a temporary, the copy run into
 // it, its address handed over, all one expression - and below it the end of a full
 // expression, where those temporaries are destroyed in the reverse of their order.
-void Parser::flushTemporaries(std::vector<StmtPtr> &into) {
+// [except.ctor]/1: the object an initialiser built is complete when its temporaries go, and is destroyed
+// if the destructor of one of them throws.
+void Parser::flushOverObject(std::vector<StmtPtr> &into, const Alive &made, std::size_t pos) {
+    bool throwing = false;
+    for (const Temporary &t : pendingTemps_) throwing = throwing || destructorMayThrow(t.type);
+    if (!throwing || destructorOf(made.cls) == nullptr) {
+        flushTemporaries(into, true);
+        return;
+    }
+    std::vector<StmtPtr> ending, rest;
+    flushTemporaries(ending, true);
+    destroyObject(rest, made, pos);
+    Block *b = new Block(std::move(rest));
+    b->setScope(-1);
+    std::vector<StmtPtr> region;
+    region.push_back(cleanupRegion(std::move(ending), StmtPtr(b)));
+    Block *alone = new Block(std::move(region));
+    alone->setScope(-1);
+    into.push_back(StmtPtr(alone));
+}
+
+void Parser::flushTemporaries(std::vector<StmtPtr> &into, bool inBlock) {
     if (pendingTemps_.empty()) return;
     std::vector<Temporary> mine;
     mine.swap(pendingTemps_);
@@ -336,10 +383,12 @@ void Parser::flushTemporaries(std::vector<StmtPtr> &into) {
             ExprPtr live(Var::local("$guard", mine[k].flag));
             live->setType(types_.intType());
             std::vector<StmtPtr> both;
-            both.push_back(std::move(call));
             both.push_back(StmtPtr(new ExprStmt(setGuard(mine[k].flag, 0))));
+            both.push_back(std::move(call));
             call.reset(new If(std::move(live),
                               StmtPtr(new Block(std::move(both))), StmtPtr()));
+            // A later temporary's destructor may throw over it: the block's region destroys what is left.
+            if (inBlock) statementTemps_.push_back(mine[k]);
         }
         into.push_back(std::move(call));
     }
@@ -378,6 +427,27 @@ ExprPtr Parser::temporaryAddress(const Temporary &t) {
 
 // **Take one temporary off the pending list**, because something else has
 // become responsible for it.
+bool Parser::callsNoexceptPointer(const Expr &callee) const {
+    const Expr *e = &callee;
+    for (;;) {
+        if (const Cast *c = dynamic_cast<const Cast *>(e)) { e = &c->value(); continue; }
+        if (const Unary *u = dynamic_cast<const Unary *>(e))
+            if (u->op() == '*') { e = &u->operand(); continue; }
+        break;
+    }
+    if (const MemberAccess *m = dynamic_cast<const MemberAccess *>(e)) {
+        const Type *cls = m->object().type() != nullptr ? m->object().type()->unqualified() : nullptr;
+        const Member *f = cls != nullptr && cls->isStructOrUnion() ? cls->findMember(m->name()) : nullptr;
+        if (f == nullptr) return false;
+        const Type *owner = f->declaredIn != nullptr ? f->declaredIn->unqualified() : cls;
+        return noexceptPointers_.count(owner->tag() + "::" + m->name()) != 0;
+    }
+    const Var *v = dynamic_cast<const Var *>(e);
+    if (v == nullptr) return false;
+    if (const Local *l = findLocal(v->name())) return l->noexceptPointer;
+    return noexceptPointers_.count(v->name()) != 0;
+}
+
 int Parser::guardFlag() {
     const int slot = allocateFrameSlot(types_.intType());
     guardSlots_.push_back(slot);
@@ -515,7 +585,11 @@ ExprPtr Parser::endFullExpression(ExprPtr e) {
         // same block does not destroy what this statement already has - and
         // ask it first, for the same reason `flushTemporaries` does.
         if (mine[k].flag != 0) {
-            ExprPtr clear(new Comma(std::move(gone), setGuard(mine[k].flag, 0)));
+            ExprPtr cleared(new Comma(setGuard(mine[k].flag, 0), std::move(gone)));
+            cleared->setType(types_.get(Kind::Void));
+            ExprPtr nought(new Num(0LL));
+            nought->setType(types_.intType());
+            ExprPtr clear(new Comma(std::move(cleared), std::move(nought)));
             clear->setType(types_.intType());
             ExprPtr live(Var::local("$guard", mine[k].flag));
             live->setType(types_.intType());
@@ -735,6 +809,9 @@ ExprPtr Parser::completeCall(const std::string &name, const std::string &symbol,
             src_.fail(pos, "'main' cannot be called - [basic.start.main]/3 forbids using it within the program");
         mainUses_.push_back(pos);
     }
+    // **A member class of a class template returned by the call is instantiated here** - [expr.call]/11 wants a
+    // class prvalue complete, and `bits[3] = true` then finds bitset<N>::reference's operator=.
+    if (returns != nullptr) realizeMemberClass(returns->isReference() ? returns->referent() : returns, true);
     // **cl's hidden most-derived flag, added here and nowhere else.**
     if (vbInit >= 0 && !msVbaseCtors_.empty() &&
         msVbaseCtors_.count(symbol) != 0) {
@@ -758,7 +835,7 @@ ExprPtr Parser::completeCall(const std::string &name, const std::string &symbol,
                            "' is not supported yet on this road - name the type, 'T{...}'");
 
     // **A call through a pointer promises nothing.**
-    if (callee != nullptr) mayThrow_++;
+    if (callee != nullptr && !callsNoexceptPointer(*callee)) mayThrow_++;
 
     // Temporaries this call makes for its by-value class arguments, and which this call therefore has to destroy once it returns.
     std::vector<Temporary> destroy;

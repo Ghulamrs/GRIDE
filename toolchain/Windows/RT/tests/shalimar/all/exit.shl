@@ -1,0 +1,8 @@
+// exit.shl - exit's status is the program's
+uses exit
+
+fun <> = main() {
+  ? 1
+  exit(3)
+  ? 2
+}

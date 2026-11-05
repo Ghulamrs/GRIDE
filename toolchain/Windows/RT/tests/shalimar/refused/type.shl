@@ -1,0 +1,6 @@
+// refused: Argument 1 of 'strlen' must be
+uses strlen
+
+fun <> = main() {
+  ? strlen(3)
+}

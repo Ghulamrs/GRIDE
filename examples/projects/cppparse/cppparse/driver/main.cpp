@@ -67,7 +67,8 @@ using namespace cppparse;
 
 namespace {
 
-const char* const kUsageLine = "cppparse - C++98 project reader and report generator\n\nusage: cppparse [options] <input>...\n";
+const char* const kVersion = "6.0";   // the release: --version prints it, crc32.txt at the repository root lists the files of it
+const char* const kUsageLine = "cppparse 6.0 - C++98 project reader and report generator\n\nusage: cppparse [options] <input>...\n";
 
 // no input, or an unknown option: the usage line and where the options are, as cl and gcc answer; -h has the full text
 void shortUsage()
@@ -82,6 +83,7 @@ void usage()
         "  <input>          .sln | .vcxproj | .vcproj | folder | header/source files\n"
         "\n"
         "options:\n"
+        "  --version        print the release (6.0) and exit\n"
         "  -o <dir>         output directory (default: next to the first input)\n"
         "  -n <name>        base name of the output files (default: input name)\n"
         "  --no-follow      do not parse #include'd files that are not part of the input\n"
@@ -282,6 +284,7 @@ int cppparseMain(int argc, char* argv[])
     for (size_t i = 0; i < args.size(); ++i) {
         std::string a = args[i];
         if (a == "-h" || a == "--help" || a == "/?") { usage(); return 0; }
+        if (a == "--version") { std::cout << "cppparse " << kVersion << "\n"; return 0; }
         else if (a == "-j" && i + 1 < args.size()) { threads = atoi(args[++i].c_str()); threadsGiven = true; }
         else if (a.size() > 2 && a[0] == '-' && a[1] == 'j' && isdigit(static_cast<unsigned char>(a[2]))) { threads = atoi(a.c_str() + 2); threadsGiven = true; }
         else if (a == "-o" && i + 1 < args.size()) outDir = args[++i];

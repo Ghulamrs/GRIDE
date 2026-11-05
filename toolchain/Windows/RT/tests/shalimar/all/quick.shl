@@ -1,0 +1,7 @@
+// quick.shl - _Exit's status is the program's, and it ends there
+uses _Exit
+
+fun <> = main() {
+  _Exit(3)
+  ? 2
+}

@@ -100,6 +100,9 @@ namespace Gride { namespace Services {
         // F10 / F11 started the session: Start stops at main's first line, as Visual Studio does (F5 runs on
         // to a breakpoint or the end)
         property bool StopAtEntry;
+        // Tools > Options "Step into GRIDE's runtime": F11 may stop in the runtime's own sources, which the session's
+        // step filter otherwise passes over as Microsoft's CRT is passed over
+        property bool StepIntoRuntime;
         virtual void Stop() abstract;
         virtual void Continue() abstract;
         virtual void BreakAll() abstract;
@@ -197,6 +200,7 @@ namespace Gride { namespace Services {
             watches = gcnew List<DebugWatch^>();
             currentFrame = 0; exitStatus = 0; exited = false;
             StopAtEntry = false;
+            StepIntoRuntime = false;
         }
 
         DebugState state;

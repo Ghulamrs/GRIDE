@@ -378,11 +378,16 @@ public:
     // resume - so a throw out of it is [except.terminate]'s, not a new one.
     void setUnwindCleanup() { unwindCleanup_ = true; }
     bool unwindCleanup() const { return unwindCleanup_; }
+    // What a typedef, static_assert, using or null statement leaves: [dcl.constexpr]/3 lets these stand
+    // beside a constexpr function's return.
+    void setDeclarative() { declarative_ = true; }
+    bool declarative() const { return declarative_; }
     void accept(Visitor &v) const override { v.visit(*this); }
 private:
     std::vector<StmtPtr> body_;
     int scope_ = -1;
     bool unwindCleanup_ = false;
+    bool declarative_ = false;
 };
 
 class If final : public Stmt {

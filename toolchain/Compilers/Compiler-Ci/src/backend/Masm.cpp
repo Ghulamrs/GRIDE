@@ -67,6 +67,14 @@ bool isReservedInMasm(const std::string &name) {
     return false;
 }
 
+std::string lowered(const std::string &name) {
+    std::string lower;
+    for (char c : name) lower += static_cast<char>(std::tolower(c));
+    return lower;
+}
+
+// `div` is written as an instruction too and given up all the same: the instruction is then its
+// bytes - see finishText.
 bool canUnreserve(const std::string &name) {
     static const char *const kNeverEmitted[] = {
         "fabs","fadd","fchs","fcos","fdiv","fild","finit","fist","fld","fmul",
@@ -74,11 +82,28 @@ bool canUnreserve(const std::string &name) {
         "fsub","ftst","fwait","fxam","fxch",
         nullptr,
     };
-    std::string lower;
-    for (char c : name) lower += static_cast<char>(std::tolower(c));
+    const std::string lower = lowered(name);
+    if (lower == "div") return true;
     for (const char *const *p = kNeverEmitted; *p != nullptr; ++p)
         if (lower == *p) return true;
     return false;
+}
+
+int registerNumber(const std::string &r, int *bits) {
+    static const char *const k64[] = { "rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi" };
+    static const char *const k32[] = { "eax","ecx","edx","ebx","esp","ebp","esi","edi" };
+    for (int i = 0; i < 8; i++) {
+        if (r == k64[i]) { *bits = 64; return i; }
+        if (r == k32[i]) { *bits = 32; return i; }
+    }
+    if (r.size() < 2 || r[0] != 'r' || !std::isdigit(static_cast<unsigned char>(r[1]))) return -1;
+    std::size_t k = 1;
+    int n = 0;
+    while (k < r.size() && std::isdigit(static_cast<unsigned char>(r[k]))) n = n * 10 + (r[k++] - '0');
+    if (n < 8 || n > 15) return -1;
+    if (k == r.size()) { *bits = 64; return n; }
+    if (r.substr(k) == "d") { *bits = 32; return n; }
+    return -1;
 }
 
 const char *ptrFor(int bytes) {
@@ -536,6 +561,45 @@ void MasmSpelling::items(const char *dir, const std::vector<std::string> &it) {
 
 void MasmSpelling::predefine(const std::vector<std::string> &names) {
     for (const std::string &n : names) defined_.insert(n);
+}
+
+// **`div` named a symbol is no instruction in this file**, as in cpp11's backend: NOKEYWORD gives the
+// word up for the whole file, so every `div reg` the code generator wrote becomes its bytes - F7 /6 on
+// the register, REX.W for a 64-bit one and REX.B for r8-r15 - and keeps the text as a comment.
+void MasmSpelling::finishText(std::vector<std::string> &chunks) {
+    bool given = false;
+    for (const std::string &u : unreserved_)
+        if (lowered(u) == "div") given = true;
+    if (!given) return;
+
+    for (std::string &text : chunks) {
+        std::string out;
+        std::size_t at = 0;
+        while (at < text.size()) {
+            std::size_t nl = text.find('\n', at);
+            const std::size_t end = nl == std::string::npos ? text.size() : nl + 1;
+            const std::string line = text.substr(at, end - at);
+            at = end;
+            if (line.compare(0, 6, "  div ") != 0) { out += line; continue; }
+            std::string reg = line.substr(6);
+            while (!reg.empty() && (reg.back() == '\n' || reg.back() == '\r' || reg.back() == ' ')) reg.pop_back();
+            int bits = 0;
+            const int n = registerNumber(reg, &bits);
+            if (n < 0)
+                give_up(line, "'div' names a symbol in this file, so its instruction is written as "
+                              "bytes, and these bytes are for a 64- or 32-bit register only");
+            char bytes[64];
+            const int rex = (bits == 64 ? 0x48 : 0x40) | (n >= 8 ? 1 : 0);
+            const int modrm = 0xC0 | (6 << 3) | (n & 7);
+            if (rex != 0x40) std::snprintf(bytes, sizeof bytes, "  DB 0%02XH, 0F7H, 0%02XH", rex, modrm);
+            else             std::snprintf(bytes, sizeof bytes, "  DB 0F7H, 0%02XH", modrm);
+            out += bytes;
+            out += "  ; div ";
+            out += reg;
+            out += '\n';
+        }
+        text.swap(out);
+    }
 }
 
 void MasmSpelling::preamble(std::ostream &sink) {

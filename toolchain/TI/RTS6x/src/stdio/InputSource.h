@@ -10,8 +10,17 @@ namespace rts6x {
 
 class InputSource {
 public:
+#if defined(_WIN32)
+    explicit InputSource(const char *s) : text_(s), stream_(0), count_(0), failed_(false), wide_(0), wideStream_(false) {}
+    explicit InputSource(FILE *f) : text_(0), stream_(f), count_(0), failed_(false), wide_(0), wideStream_(false) {}
+    // grt: the wscanf family's sources, a wide string (swscanf) or a stream read a wide character at a time
+    // (fwscanf, through grt's __grt_get_wide and __grt_unget_wide); a character is its code unit's value
+    explicit InputSource(const wchar_t *s) : text_(0), stream_(0), count_(0), failed_(false), wide_(s), wideStream_(false) {}
+    InputSource(FILE *f, bool wide) : text_(0), stream_(f), count_(0), failed_(false), wide_(0), wideStream_(wide) {}
+#else
     explicit InputSource(const char *s) : text_(s), stream_(0), count_(0), failed_(false) {}
     explicit InputSource(FILE *f) : text_(0), stream_(f), count_(0), failed_(false) {}
+#endif
 
     // The next character as an unsigned char, or EOF at the end of the input or on a read error.
     int get();
@@ -28,6 +37,10 @@ private:
     FILE *stream_;
     int count_;
     bool failed_;
+#if defined(_WIN32)
+    const wchar_t *wide_;
+    bool wideStream_;
+#endif
 };
 
 }  // namespace rts6x

@@ -44,27 +44,22 @@ public:
     typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
 
     set() {}
-    explicit set(const Compare &c) : tree_(c) {}
-    set(const Compare &c, const Alloc &) : tree_(c) {}
-    explicit set(const Alloc &) {}
+    explicit set(const Compare &c, const Alloc &a = Alloc()) : tree_(c, a) {}
+    explicit set(const Alloc &a) : tree_(Compare(), a) {}
     template <class It>
-    set(It first, It last) { insert(first, last); }
-    template <class It>
-    set(It first, It last, const Compare &c) : tree_(c) { insert(first, last); }
-    template <class It>
-    set(It first, It last, const Compare &c, const Alloc &) : tree_(c) { insert(first, last); }
-    set(std::initializer_list<T> list) { insert(list); }
-    set(std::initializer_list<T> list, const Compare &c) : tree_(c) { insert(list); }
-    set(std::initializer_list<T> list, const Compare &c, const Alloc &) : tree_(c) { insert(list); }
+    set(It first, It last, const Compare &c = Compare(), const Alloc &a = Alloc()) : tree_(c, a) { insert(first, last); }
+    set(std::initializer_list<T> list, const Compare &c = Compare(), const Alloc &a = Alloc()) : tree_(c, a) { insert(list); }
     set(const set &o) : tree_(o.tree_) {}
-    set(set &&o) : tree_(o.tree_.compare()) { tree_.swap(o.tree_); }
+    set(const set &o, const Alloc &a) : tree_(o.tree_, a) {}
+    set(set &&o) : tree_(std::move(o.tree_)) {}
+    set(set &&o, const Alloc &a) : tree_(std::move(o.tree_), a) {}
     set &operator=(const set &o) {
         tree_ = o.tree_;
         return *this;
     }
 
     set &operator=(set &&o) {
-        if (this != &o) { tree_.clear(); tree_.swap(o.tree_); }
+        tree_ = std::move(o.tree_);
         return *this;
     }
     set &operator=(std::initializer_list<T> list) {
@@ -72,10 +67,10 @@ public:
         insert(list);
         return *this;
     }
-    allocator_type get_allocator() const { return allocator_type(); }
+    allocator_type get_allocator() const noexcept { return tree_.allocator(); }
 
     size_type size() const { return tree_.size(); }
-    size_type max_size() const { return (size_type)-1 / sizeof(__tree_node<T>); }
+    size_type max_size() const { return tree_.max_size(); }
     bool empty() const { return tree_.empty(); }
     void clear() { tree_.clear(); }
     void swap(set &other) { tree_.swap(other.tree_); }
@@ -106,15 +101,25 @@ public:
         __tree_link *n = tree_.insertUnique(v, &made);
         return std::pair<iterator, bool>(iterator(n, tree_.end().link()), made);
     }
+    std::pair<iterator, bool> insert(T &&v) {
+        bool made;
+        __tree_link *n = tree_.insertUnique(std::move(v), &made);
+        return std::pair<iterator, bool>(iterator(n, tree_.end().link()), made);
+    }
     // A hint is where to start looking; the answer is where the element is.
     iterator insert(const_iterator, const T &v) { return insert(v).first; }
+    iterator insert(const_iterator, T &&v) { return insert(std::move(v)).first; }
     template <class It>
     void insert(It first, It last) { for (; first != last; ++first) insert(*first); }
     void insert(std::initializer_list<T> list) { insert(list.begin(), list.end()); }
     template <class... Args>
-    std::pair<iterator, bool> emplace(Args &&... args) { return insert(T(std::forward<Args>(args)...)); }
+    std::pair<iterator, bool> emplace(Args &&... args) {
+        bool made;
+        __tree_link *n = tree_.emplaceUnique(&made, std::forward<Args>(args)...);
+        return std::pair<iterator, bool>(iterator(n, tree_.end().link()), made);
+    }
     template <class... Args>
-    iterator emplace_hint(const_iterator, Args &&... args) { return insert(T(std::forward<Args>(args)...)).first; }
+    iterator emplace_hint(const_iterator, Args &&... args) { return emplace(std::forward<Args>(args)...).first; }
 
     size_type erase(const T &v) {
         __tree_link *n = tree_.findLink(v);
@@ -134,7 +139,7 @@ public:
     }
 
 private:
-    __tree<T, __set_key<T>, Compare> tree_;
+    __tree<T, __set_key<T>, Compare, Alloc> tree_;
 };
 
 // [multiset.overview]
@@ -158,27 +163,22 @@ public:
     typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
 
     multiset() {}
-    explicit multiset(const Compare &c) : tree_(c) {}
-    multiset(const Compare &c, const Alloc &) : tree_(c) {}
-    explicit multiset(const Alloc &) {}
+    explicit multiset(const Compare &c, const Alloc &a = Alloc()) : tree_(c, a) {}
+    explicit multiset(const Alloc &a) : tree_(Compare(), a) {}
     template <class It>
-    multiset(It first, It last) { insert(first, last); }
-    template <class It>
-    multiset(It first, It last, const Compare &c) : tree_(c) { insert(first, last); }
-    template <class It>
-    multiset(It first, It last, const Compare &c, const Alloc &) : tree_(c) { insert(first, last); }
-    multiset(std::initializer_list<T> list) { insert(list); }
-    multiset(std::initializer_list<T> list, const Compare &c) : tree_(c) { insert(list); }
-    multiset(std::initializer_list<T> list, const Compare &c, const Alloc &) : tree_(c) { insert(list); }
+    multiset(It first, It last, const Compare &c = Compare(), const Alloc &a = Alloc()) : tree_(c, a) { insert(first, last); }
+    multiset(std::initializer_list<T> list, const Compare &c = Compare(), const Alloc &a = Alloc()) : tree_(c, a) { insert(list); }
     multiset(const multiset &o) : tree_(o.tree_) {}
-    multiset(multiset &&o) : tree_(o.tree_.compare()) { tree_.swap(o.tree_); }
+    multiset(const multiset &o, const Alloc &a) : tree_(o.tree_, a) {}
+    multiset(multiset &&o) : tree_(std::move(o.tree_)) {}
+    multiset(multiset &&o, const Alloc &a) : tree_(std::move(o.tree_), a) {}
     multiset &operator=(const multiset &o) {
         tree_ = o.tree_;
         return *this;
     }
 
     multiset &operator=(multiset &&o) {
-        if (this != &o) { tree_.clear(); tree_.swap(o.tree_); }
+        tree_ = std::move(o.tree_);
         return *this;
     }
     multiset &operator=(std::initializer_list<T> list) {
@@ -186,10 +186,10 @@ public:
         insert(list);
         return *this;
     }
-    allocator_type get_allocator() const { return allocator_type(); }
+    allocator_type get_allocator() const noexcept { return tree_.allocator(); }
 
     size_type size() const { return tree_.size(); }
-    size_type max_size() const { return (size_type)-1 / sizeof(__tree_node<T>); }
+    size_type max_size() const { return tree_.max_size(); }
     bool empty() const { return tree_.empty(); }
     void clear() { tree_.clear(); }
     void swap(multiset &other) { tree_.swap(other.tree_); }
@@ -215,14 +215,16 @@ public:
     }
 
     iterator insert(const T &v) { return iterator(tree_.insertEqual(v), tree_.end().link()); }
+    iterator insert(T &&v) { return iterator(tree_.insertEqual(std::move(v)), tree_.end().link()); }
     iterator insert(const_iterator, const T &v) { return insert(v); }
+    iterator insert(const_iterator, T &&v) { return insert(std::move(v)); }
     template <class It>
     void insert(It first, It last) { for (; first != last; ++first) insert(*first); }
     void insert(std::initializer_list<T> list) { insert(list.begin(), list.end()); }
     template <class... Args>
-    iterator emplace(Args &&... args) { return insert(T(std::forward<Args>(args)...)); }
+    iterator emplace(Args &&... args) { return iterator(tree_.emplaceEqual(std::forward<Args>(args)...), tree_.end().link()); }
     template <class... Args>
-    iterator emplace_hint(const_iterator, Args &&... args) { return insert(T(std::forward<Args>(args)...)); }
+    iterator emplace_hint(const_iterator, Args &&... args) { return emplace(std::forward<Args>(args)...); }
 
     size_type erase(const T &v) {
         size_type n = 0;
@@ -245,7 +247,7 @@ public:
     }
 
 private:
-    __tree<T, __set_key<T>, Compare> tree_;
+    __tree<T, __set_key<T>, Compare, Alloc> tree_;
 };
 
 template <class T, class C, class A>

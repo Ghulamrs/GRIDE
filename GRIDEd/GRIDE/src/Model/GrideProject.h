@@ -159,6 +159,8 @@ namespace Gride { namespace Model {
             FolderToolchains = gcnew Dictionary<String^, String^>(StringComparer::OrdinalIgnoreCase);
             Includes = gcnew List<String^>();
             Libraries = gcnew List<String^>();
+            Paths = gcnew Dictionary<String^, String^>();
+            Names = nullptr;
             BuildGroups = nullptr;
             TargetName = String::Empty;
             Kind = "gride";
@@ -204,6 +206,10 @@ namespace Gride { namespace Model {
         // folder) and the program's name ("build" "target"; empty: the project's)
         property List<String^>^ Includes;
         property List<String^>^ Libraries;
+        // the .pro's "paths": NAME -> value, which its lists use as $(NAME); kept in the file as it is
+        property Dictionary<String^, String^>^ Paths;
+        // the names in force for the build in progress, Paths first (BuildEngine::NamesOf); null before one
+        property NamedPaths^ Names;
         property List<String^>^ BuildGroups;
         property String^ TargetName;
 
@@ -253,7 +259,7 @@ namespace Gride { namespace Model {
         }
 
         // ---- paths ------------------------------------------------------------
-        String^ ToAbsolute(String^ rel) { return PathUtil::MakeAbsolute(ProjectDir, rel); }
+        String^ ToAbsolute(String^ rel) { return PathUtil::MakeAbsolute(ProjectDir, Names == nullptr ? rel : Names->Expand(rel)); }
         String^ ToRelative(String^ abs) { return PathUtil::MakeRelative(ProjectDir, abs); }
 
         // every file of the project as an absolute path
@@ -452,6 +458,8 @@ namespace Gride { namespace Model {
             p->Lang = j->Has("language") ? LanguageInfo::Parse(j->GetString("language", "C90")) : LanguageOfFiles(p->Folders);
             p->Includes = j->GetStringList("include");
             p->Libraries = j->GetStringList("libraries");
+            JsonValue^ named = j->GetObject("paths");
+            if (named != nullptr) for each (String^ k in named->KeyNames) p->Paths[k] = named->GetString(k, String::Empty);
 
             JsonValue^ cfgs = j->GetObject("configurations");
             if (cfgs != nullptr)

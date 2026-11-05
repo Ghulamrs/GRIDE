@@ -14,7 +14,7 @@ std::string fixed(double v, int places) {
     if (std::isfinite(v) && v < 1e15 && v > -1e15) {
         std::snprintf(text, sizeof text, "%.*f", places, v);
     } else {
-        Shortest::write(text, sizeof text, v);
+        _gride_shortest_double(text, sizeof text, v);
     }
     return text;
 }

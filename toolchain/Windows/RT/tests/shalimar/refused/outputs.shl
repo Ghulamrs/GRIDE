@@ -1,0 +1,6 @@
+// refused: 'strlen' returns 1, not 2
+uses strlen
+
+fun <> = main() {
+  <a, b> : strlen("x")
+}

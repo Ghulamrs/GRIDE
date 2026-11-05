@@ -75,9 +75,14 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)obj\$(Platform)\$(Configuration)\</IntDir>
+    <!-- beside GRIDE.sln, from whichever solution: GRIDE3.sln builds the three outlooks, each into its own folder -->
+    <OutDir>$(ProjectDir)..\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\obj\$(Platform)\$(Configuration)\</IntDir>
     <TargetName>GRIDE</TargetName>
+    <!-- Visual Studio's own up-to-date check knows the program's inputs only, so it would skip the project - and the
+         Help and toolchain.json copied after it - once GRIDE.exe is built; a change there must reach this folder, which
+         the Setup packages -->
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -224,6 +229,7 @@
       <GrideDocs Include="$(ProjectDir)..\..\docs\*.html;$(ProjectDir)..\..\docs\*.md" />
     </ItemGroup>
     <Copy SourceFiles="@(GrideDocs)" DestinationFolder="$(OutDir)docs" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(ProjectDir)lib\ccs\options-ccs74-C6000_8.2.tsv;$(ProjectDir)lib\ccs\options-ccs55-C6000_7.4.tsv" DestinationFolder="$(OutDir)lib\ccs" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ProjectDir)lib\ccs\options-ccs74-C6000_8.2.tsv;$(ProjectDir)lib\ccs\options-ccs55-C6000_7.4.tsv" DestinationFolder="$(OutDir)share\ccs" SkipUnchangedFiles="true" />
+    <RemoveDir Directories="$(OutDir)lib\ccs" />
   </Target>
 </Project>

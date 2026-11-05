@@ -106,6 +106,8 @@ std::string defaultCompiler();
 // installation's settings.json, each relative to the file unless absolute.
 std::vector<std::string> includes();
 std::vector<std::string> libraries();
+// The names those lists, a project's and the defines may use: "paths" in the same file, NAME and value (path.h).
+std::vector<std::pair<std::string, std::string> > namedPaths();
 bool rememberIncludes(const std::vector<std::string>& dirs);
 bool rememberLibraries(const std::vector<std::string>& files);
 bool rememberDefaultCompiler(const std::string& word);

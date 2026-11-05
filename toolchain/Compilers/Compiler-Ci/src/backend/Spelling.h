@@ -119,6 +119,7 @@ public:
     virtual void location(int, int, int) {}
 
     virtual void predefine(const std::vector<std::string> &) {}
+    virtual void finishText(std::vector<std::string> &) {}
     virtual void preamble(std::ostream &) {}
     virtual void postamble(std::ostream &) {}
 

@@ -140,6 +140,16 @@ inline void __cxx1_advance(It &it, D n) {
     std::__cxx1_advance(it, n, typename iterator_traits<It>::iterator_category());
 }
 
+// [iterator.basic]
+template <class Category, class T, class Distance = std::ptrdiff_t, class Pointer = T *, class Reference = T &>
+struct iterator {
+    typedef T value_type;
+    typedef Distance difference_type;
+    typedef Pointer pointer;
+    typedef Reference reference;
+    typedef Category iterator_category;
+};
+
 }  // namespace std
 
 #endif

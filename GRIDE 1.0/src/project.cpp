@@ -179,15 +179,17 @@ std::string Project::fileToOpen() const {
     return std::string();
 }
 
-std::vector<std::string> Project::absoluteIncludes() const {
+std::vector<std::string> Project::absoluteIncludes(const path::Names* names) const {
     std::vector<std::string> out;
-    for (size_t i = 0; i < includes_.size(); ++i) out.push_back(path::absolute(absolute(includes_[i])));
+    for (size_t i = 0; i < includes_.size(); ++i)
+        out.push_back(path::absolute(absolute(names ? names->expand(includes_[i]) : includes_[i])));
     return out;
 }
 
-std::vector<std::string> Project::absoluteLibraries() const {
+std::vector<std::string> Project::absoluteLibraries(const path::Names* names) const {
     std::vector<std::string> out;
-    for (size_t i = 0; i < libraries_.size(); ++i) out.push_back(path::absolute(absolute(libraries_[i])));
+    for (size_t i = 0; i < libraries_.size(); ++i)
+        out.push_back(path::absolute(absolute(names ? names->expand(libraries_[i]) : libraries_[i])));
     return out;
 }
 
@@ -350,6 +352,11 @@ bool Project::load(const std::string& dir, std::string& error) {
     emulateOnly_ = root.get("emulateOnly").boolean(false);
     options_.fromJson(root.get("options"));
     options::setActive(&options_);
+
+    paths_.clear();
+    const Json& named = root.get("paths");
+    for (size_t i = 0; named.is(Json::Object) && i < named.size(); ++i)
+        paths_.push_back(std::make_pair(named.keyAt(i), named.valueAt(i).text("")));
 
     libraries_.clear();
     const Json& libraries = root.get("libraries");

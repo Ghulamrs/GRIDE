@@ -36,7 +36,13 @@ std::string tempDir() {
 #endif
 }
 
-std::string quote(const std::string& s) { return "\"" + s + "\""; }
+// in quotes, the final backslashes doubled, as the C runtime splits a command line: a folder ending in one,
+// -I"inc\", would end in \" - a quote of the text, not the closing one - and run on into the next arguments,
+// whose spaces then split them (cpp11: "-o names a single output, but 3 inputs were given")
+std::string quote(const std::string& s) {
+    const size_t last = s.find_last_not_of('\\');
+    return "\"" + s + std::string(last == std::string::npos ? s.size() : s.size() - 1 - last, '\\') + "\"";
+}
 
 std::string languageFlag(ToolchainKind kind, Language lang) {
     if (kind != ToolCxx) return std::string();
@@ -45,9 +51,7 @@ std::string languageFlag(ToolchainKind kind, Language lang) {
 
 
 std::string quoteDirectory(const std::string& s) {
-    std::string path = s;
-    if (!path.empty() && path[path.size() - 1] == kSep) path += kSep;
-    return quote(path);
+    return quote(s);   // a final backslash doubled by quote, so that it does not escape the quote
 }
 
 #ifdef _WIN32
@@ -397,17 +401,22 @@ std::string emulatedProgram(const std::string& program) {
     return name + ".vm";
 }
 
-// The Shalimar runtime for the C6000: a directory of the .s cpp11 wrote from it, beside the editor in lib/ -
-// shmrt-tms6747 at -O2, and for a Debug build shmrt-tms6747-debug at -O0 with SHM_DEBUG where it is there.
+// The Shalimar runtime for the C6000: a directory of the .s cpp11 wrote from it, beside the editor in lib/tms6747 -
+// shmrt at -O2, and for a Debug build shmrt-debug at -O0 with SHM_DEBUG where it is there (lib/shmrt-tms6747[-debug]
+// in an earlier installation).
 std::string shalimarRuntimeDir(Configuration config) {
     const char* fromEnv = std::getenv(config == ConfigDebug ? "SHMRT6747D" : "SHMRT6747");
     if (fromEnv && *fromEnv) return fromEnv;
     // A directory, which besideProgram does not answer for: it names files.
     std::string where = path::programDirectory();
     if (where.empty()) return std::string();
-    std::string dir = path::join(path::join(where, "lib"), "shmrt-tms6747");
-    if (config == ConfigDebug && path::isDirectory(dir + "-debug")) return dir + "-debug";
-    return path::isDirectory(dir) ? dir : std::string();
+    const std::string dirs[] = { path::join(path::join(path::join(where, "lib"), "tms6747"), "shmrt"),
+                                 path::join(path::join(where, "lib"), "shmrt-tms6747") };
+    for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; ++i) {
+        if (config == ConfigDebug && path::isDirectory(dirs[i] + "-debug")) return dirs[i] + "-debug";
+        if (path::isDirectory(dirs[i])) return dirs[i];
+    }
+    return std::string();
 }
 
 // RTS6x for a TI program: the directory beside the editor whose rts6x.lib lnk6x links against
@@ -416,8 +425,10 @@ std::string rts6xRuntimeDir() {
     const char* fromEnv = std::getenv("RTS6X");
     std::string dir;
     if (fromEnv && *fromEnv) dir = fromEnv;
-    else if (!path::programDirectory().empty())
-        dir = path::join(path::join(path::programDirectory(), "lib"), "rts6x-tms6747");
+    else if (!path::programDirectory().empty()) {
+        dir = path::join(path::join(path::programDirectory(), "lib"), "tms6747");
+        if (!path::exists(path::join(dir, "rts6x.lib"))) dir = path::join(path::join(path::programDirectory(), "lib"), "rts6x-tms6747");
+    }
     return !dir.empty() && path::exists(path::join(dir, "rts6x.lib")) ? dir : std::string();
 }
 
@@ -527,14 +538,14 @@ std::string lineTableNote(ToolchainKind kind, const std::string& arch, Configura
            "debugger shows no lines";
 }
 
-std::string configFlags(ToolchainKind kind, Configuration config,
+std::string configFlags(const Toolchain& tool, ToolchainKind kind, Configuration config,
                         const std::string& arch) {
 
     // **c90, cpp11 and shalimar take what Compiler Options set** (options.h), whose defaults are
     // the flags this function wrote before the dialog: -O2 -DNDEBUG=1 or -g -D_DEBUG=1, and --debug
     // for shalimar off the emulator, where the runtime beside it is the release one.
     if (kind == ToolShc || kind == ToolCc1 || kind == ToolCxx1) {
-        std::string flags = options::flags(options::active(), kind, config, arch);
+        std::string flags = options::flags(options::active(), kind, config, arch, &tool.names);
         // -g is CodeView here, which a compiler without its own carries only through clang: not without clang
         if (wantsClang(kind, arch, config) && !clangAvailable()) {
             std::string kept;
@@ -747,7 +758,7 @@ Recipe targetRecipe(const Toolchain& tool, ToolchainKind kind,
         std::string crt = (config == ConfigDebug) ? " /MTd" : " /MT";
 
         recipe.command = quote(programOf(tool, kind)) + " /nologo /diagnostics:column" +
-                         forLanguage + crt + configFlags(kind, config, arch) + includeFlags(tool, kind) +
+                         forLanguage + crt + configFlags(tool, kind, config, arch) + includeFlags(tool, kind) +
                          (config == ConfigDebug ? " /Fd" + quote(pdb) : std::string()) +
                          " /Fe" + quote(program) +
                          " /Fo" + quoteDirectory(objects + kSep) + named + libraryArguments(tool) +
@@ -771,7 +782,7 @@ Recipe targetRecipe(const Toolchain& tool, ToolchainKind kind,
         std::string with;
         for (size_t i = 0; i < tool.libraries.size(); ++i) with += " --with=" + quote(tool.libraries[i]);
         recipe.command = quote(programOf(tool, kind)) + named + " -o " + quote(program) +
-                         configFlags(kind, config, arch) + with;
+                         configFlags(tool, kind, config, arch) + with;
         return recipe;
     }
 
@@ -790,21 +801,21 @@ Recipe targetRecipe(const Toolchain& tool, ToolchainKind kind,
             std::string stem = path::filename(emulatedProgram(program));
             stem.resize(stem.size() - 3);
             recipe.command = quote(programOf(tool, kind)) + named + " -S" + archFlag(kind, arch) + " -o " +
-                             quote(path::join(dir, stem + ".s")) + configFlags(kind, config, arch);
+                             quote(path::join(dir, stem + ".s")) + configFlags(tool, kind, config, arch);
             return recipe;
         }
         for (size_t i = 0; i < sources.size(); ++i) {
             recipe.commands.push_back(quote(programOf(tool, kind)) + " -S" + archFlag(kind, arch) +
                                       " " + quote(sources[i]) + " -o " +
                                       quote(path::join(dir, objectFor(std::string(), sources[i], ".s"))) +
-                                      configFlags(kind, config, arch) + includeFlags(tool, kind));
+                                      configFlags(tool, kind, config, arch) + includeFlags(tool, kind));
             recipe.command += (i > 0 ? " && " : "") + recipe.commands.back();
         }
         return recipe;
     }
 
     recipe.command = quote(programOf(tool, kind)) + languageFlag(kind, lang) +
-                     named + " -o " + quote(program) + configFlags(kind, config, arch) +
+                     named + " -o " + quote(program) + configFlags(tool, kind, config, arch) +
                      assemblerFlag(kind, arch, config) + includeFlags(tool, kind);
     return recipe;
 }
@@ -863,7 +874,7 @@ Recipe objectRecipe(const Toolchain& tool, ToolchainKind kind,
         std::string pdb = path::join(objectDir, productNamed("target") + ".pdb");
 
         recipe.command = quote(programOf(tool, kind)) + " /nologo /diagnostics:column /c" +
-                         forLanguage + crt + configFlags(kind, config, arch) + includeFlags(tool, kind) +
+                         forLanguage + crt + configFlags(tool, kind, config, arch) + includeFlags(tool, kind) +
                          (config == ConfigDebug ? " /Fd" + quote(pdb) : std::string()) +
                          " /Fo" + quoteDirectory(objectDir + kSep) + named;
 
@@ -879,7 +890,7 @@ Recipe objectRecipe(const Toolchain& tool, ToolchainKind kind,
             std::string out = objectFor(objectDir, sources[i], ".s");
             recipe.commands.push_back(quote(programOf(tool, kind)) + " -S" + archFlag(kind, arch) +
                                       " " + quote(sources[i]) + " -o " + quote(out) +
-                                      configFlags(kind, config, arch) + includeFlags(tool, kind));
+                                      configFlags(tool, kind, config, arch) + includeFlags(tool, kind));
             recipe.command += (i > 0 ? " && " : "") + recipe.commands.back();
             objects.push_back(out);
         }
@@ -892,7 +903,7 @@ Recipe objectRecipe(const Toolchain& tool, ToolchainKind kind,
         // compiles as one, the object named so that it lands among the others.
         objects.push_back(objectFor(objectDir, sources[0], ".obj"));
         recipe.command = quote(programOf(tool, kind)) + named + " -c -o " + quote(objects[0]) +
-                         configFlags(kind, config, arch) + assemblerFlag(kind, arch, config);
+                         configFlags(tool, kind, config, arch) + assemblerFlag(kind, arch, config);
         recipe.leftovers = objects;
         return recipe;
     }
@@ -900,7 +911,7 @@ Recipe objectRecipe(const Toolchain& tool, ToolchainKind kind,
     recipe.command = "cd " + quote(objectDir) + " && " +
                      quote(programOf(tool, kind)) + " -c" +
                      languageFlag(kind, lang) + named +
-                     configFlags(kind, config, arch) + assemblerFlag(kind, arch, config) +
+                     configFlags(tool, kind, config, arch) + assemblerFlag(kind, arch, config) +
                      includeFlags(tool, kind);
 
     for (size_t i = 0; i < sources.size(); ++i)
@@ -926,8 +937,8 @@ const char* const kMicrosoftRefused =
 
 // Microsoft's, by name through LIB: the Debug build's own where _DEBUG asks for them.
 std::string microsoftCrt(Configuration config) {
-    return config == ConfigDebug ? "libcmtd.lib libucrtd.lib libvcruntimed.lib kernel32.lib legacy_stdio_definitions.lib"
-                                 : "libcmt.lib libucrt.lib libvcruntime.lib kernel32.lib legacy_stdio_definitions.lib";
+    return config == ConfigDebug ? "libcmtd.lib libucrtd.lib libvcruntimed.lib kernel32.lib legacy_stdio_definitions.lib libcpmtd.lib"
+                                 : "libcmt.lib libucrt.lib libvcruntime.lib kernel32.lib legacy_stdio_definitions.lib libcpmt.lib";
 }
 
 }
@@ -935,8 +946,11 @@ std::string microsoftCrt(Configuration config) {
 std::string grtDirectory() {
     const char* named = std::getenv("GRT");
     if (named && *named) return named;
+    // lib\x86_64-windows beside the editor (docs\Runtime_Design.md 5.3), else an earlier installation's lib
     const std::string here = path::programDirectory();
-    return here.empty() ? std::string("lib") : path::join(here, "lib");
+    const std::string tree = path::join(here.empty() ? std::string("lib") : path::join(here, "lib"), "x86_64-windows");
+    const std::string old = here.empty() ? std::string("lib") : path::join(here, "lib");
+    return !path::exists(path::join(tree, "grtc.lib")) && path::exists(path::join(old, "grtc.lib")) ? old : tree;
 }
 
 WindowsCrt windowsCrt(Configuration config, bool clObjects) {
@@ -965,7 +979,7 @@ WindowsCrt windowsCrt(Configuration config, bool clObjects) {
         if (choice != "auto" || visualStudioRoot().empty()) {
             c.error = "error: GRIDE's C runtime is not there: grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib "
                       "and kernel32.lib are looked for in " + dir + " beside " + product::kName +
-                      " (Setup installs them; Build Solution writes them into x64\\<Configuration>\\lib)";
+                      " (Setup installs them; Build Solution writes them into x64\\<Configuration>\\lib\\x86_64-windows)";
             return c;
         }
         c.said = "[GRIDE's C runtime is not in " + dir + " - Microsoft's (Visual Studio's) is linked instead]\n";
@@ -977,12 +991,17 @@ WindowsCrt windowsCrt(Configuration config, bool clObjects) {
 }
 
 std::string windowsShalimarRuntime(const Toolchain& tool, const std::string& crt, bool debugRuntime) {
-    const std::string leaf = std::string("shmrt-x86_64-windows") + (crt == "grt" ? "-grt" : "") +
-                             (debugRuntime ? "-debug" : "") + ".lib";
-    if (crt == "grt") return path::join(grtDirectory(), leaf);
-    // Microsoft's is where shalimar takes it when it links: lib beside it
+    // shmrt[d].lib in lib\x86_64-windows over GRIDE's runtime, in its msvc\ over Microsoft's, where shalimar takes it
+    // when it links; an earlier installation's lib\shmrt-x86_64-windows[-grt][-debug].lib where that is all there is
+    const std::string leaf = std::string("shmrt") + (debugRuntime ? "d" : "") + ".lib";
+    const std::string oldLeaf = std::string("shmrt-x86_64-windows") + (crt == "grt" ? "-grt" : "") +
+                                (debugRuntime ? "-debug" : "") + ".lib";
     const std::string beside = path::parent(tool.shc);
-    return path::join(path::join(beside.empty() ? path::programDirectory() : beside, "lib"), leaf);
+    const std::string lib = path::join(beside.empty() ? path::programDirectory() : beside, "lib");
+    const std::string dir = crt == "grt" ? grtDirectory() : path::join(path::join(lib, "x86_64-windows"), "msvc");
+    const std::string old = crt == "grt" ? path::parent(grtDirectory()) : lib;
+    const std::string full = path::join(dir, leaf);
+    return !path::exists(full) && path::exists(path::join(old, oldLeaf)) ? path::join(old, oldLeaf) : full;
 }
 
 bool linkedHere(ToolchainKind kind, const std::string& arch) {
@@ -1039,7 +1058,7 @@ Recipe programRecipe(const Toolchain& tool, ToolchainKind kind,
         recipe.assemblyPath = mine(productNamed("run")) + ".s";
         recipe.command = quote(programOf(tool, kind)) + " -S" + archFlag(kind, arch) + " " +
                          quote(source) + " -o " + quote(recipe.assemblyPath) +
-                         configFlags(kind, config, arch) + includeFlags(tool, kind);
+                         configFlags(tool, kind, config, arch) + includeFlags(tool, kind);
         return recipe;
     }
 
@@ -1050,7 +1069,7 @@ Recipe programRecipe(const Toolchain& tool, ToolchainKind kind,
 
         std::string pdb = mine(productNamed("run")) + ".pdb";
         recipe.command = quote(program) + " /nologo /diagnostics:column" + forLanguage +
-                         configFlags(kind, config, arch) + includeFlags(tool, kind) +
+                         configFlags(tool, kind, config, arch) + includeFlags(tool, kind) +
                          (config == ConfigDebug ? " /Fd" + quote(pdb) : std::string()) +
                          " /Fe" + quote(recipe.assemblyPath) +
                          " /Fo" + quote(obj) + " " + quote(source) + libraryArguments(tool) +
@@ -1067,7 +1086,7 @@ Recipe programRecipe(const Toolchain& tool, ToolchainKind kind,
     // the machine's own C++ takes them here. assemblerFlag as on F4: without it cpp11 writes the
     // GNU spelling and hands masm.exe clang's command line - "usage: asm -t x64 ..." in the first 4.0 install.
     recipe.command = quote(program) + " " + quote(source) + " -o " +
-                     quote(recipe.assemblyPath) + configFlags(kind, config, arch) +
+                     quote(recipe.assemblyPath) + configFlags(tool, kind, config, arch) +
                      assemblerFlag(kind, arch, config) + includeFlags(tool, kind) +
                      (kind == ToolCxx ? libraryArguments(tool) : std::string());
     return recipe;
@@ -1079,16 +1098,16 @@ std::string shownProgramCommand(const Toolchain& tool, ToolchainKind kind,
     std::string program = programOf(tool, kind);
     if (isEmulated(arch) && usesArch(kind))
         return program + " -S" + archFlag(kind, arch) + " " + source + " -o " + productNamed("run") + ".s" +
-               configFlags(kind, config, arch) + includeFlags(tool, kind) +
-               (emulate ? " && vm6747 " + productNamed("run") + ".s" + (kind == ToolShc ? " lib/shmrt-tms6747" : "")
+               configFlags(tool, kind, config, arch) + includeFlags(tool, kind) +
+               (emulate ? " && vm6747 " + productNamed("run") + ".s" + (kind == ToolShc ? " lib/tms6747/shmrt" : "")
                         : " && asm6x && lnk6x -o " + productNamed("run") + ".out && sim6747 --run " +
                               productNamed("run") + ".out");
     if (kind == ToolMsvc)
         return program + " /diagnostics:column" +
                ((lang == LangCpp) ? " /TP /EHsc /std:c++14" : " /TC") +
-               configFlags(kind, config, arch) + includeFlags(tool, kind) +
+               configFlags(tool, kind, config, arch) + includeFlags(tool, kind) +
                " /Fe" + productNamed("run") + " " + source + libraryArguments(tool);
-    return program + " " + source + " -o " + productNamed("run") + configFlags(kind, config, arch) +
+    return program + " " + source + " -o " + productNamed("run") + configFlags(tool, kind, config, arch) +
            assemblerFlag(kind, arch, config) + includeFlags(tool, kind) +
            (kind == ToolCxx ? libraryArguments(tool) : std::string());
 }
@@ -1107,7 +1126,7 @@ Recipe assemblyRecipe(const Toolchain& tool, ToolchainKind kind,
         std::string forLanguage = (lang == LangCpp) ? " /TP /EHsc /std:c++14" : " /TC";
 
         recipe.command = quote(program) + " /nologo /c /diagnostics:column /FAs" +
-                         forLanguage + configFlags(kind, config, arch) + includeFlags(tool, kind) +
+                         forLanguage + configFlags(tool, kind, config, arch) + includeFlags(tool, kind) +
                          " /Fa" + quote(recipe.assemblyPath) +
                          " /Fo" + quote(obj) + " " + quote(source);
         recipe.leftovers.push_back(obj);
@@ -1126,7 +1145,7 @@ Recipe assemblyRecipe(const Toolchain& tool, ToolchainKind kind,
     recipe.command = quote(programOf(tool, kind)) + " -S" + languageFlag(kind, lang) + " " +
                      quote(source) + " -o " + quote(recipe.assemblyPath) +
                      (usesArch(kind) ? " -arch " + arch : std::string()) +
-                     configFlags(kind, config, arch) + assemblerFlag(kind, arch, config) +
+                     configFlags(tool, kind, config, arch) + assemblerFlag(kind, arch, config) +
                      includeFlags(tool, kind);
     return recipe;
 }
@@ -1138,11 +1157,11 @@ std::string shownCommand(const Toolchain& tool, ToolchainKind kind,
     if (kind == ToolMsvc)
         return program + " /c /diagnostics:column /FAs" +
                ((lang == LangCpp) ? " /TP /EHsc /std:c++14" : " /TC") +
-               configFlags(kind, config, arch) + includeFlags(tool, kind) + " " + source;
+               configFlags(tool, kind, config, arch) + includeFlags(tool, kind) + " " + source;
     if (kind == ToolShc)
         return program + " -S " + source + " --target=" + arch;
     return program + " -S " + source + " -arch " + arch +
-           configFlags(kind, config, arch) + assemblerFlag(kind, arch, config) + includeFlags(tool, kind);
+           configFlags(tool, kind, config, arch) + assemblerFlag(kind, arch, config) + includeFlags(tool, kind);
 }
 
 // The environment Compiler Options asks for (options.h): set where it has a value, removed where it

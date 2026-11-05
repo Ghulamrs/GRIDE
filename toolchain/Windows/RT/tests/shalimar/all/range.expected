@@ -1,0 +1,3 @@
+1000 
+Error: line 6: llround: 1000000000000000 is past int's range
+[exit 1]

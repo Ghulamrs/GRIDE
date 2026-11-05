@@ -155,7 +155,12 @@ void Parser::topLevel(Program &program) {
             // **Refused by name if it names nothing**, rather than recorded and
             // found missing at the use - the position of the declaration is the
             // one that says which name was meant.
-            if (!hasTypeNamed(target) && !hasFunctionNamed(target) &&
+            // [namespace.udecl]: a class template is named as anything else is, the template it was.
+            const std::map<std::string, TemplateDecl>::const_iterator tmplNamed = findTemplate(target);
+            if (tmplNamed != templates_.end() && tmplNamed->second.isClass && cut != std::string::npos &&
+                tmplNamed->second.ns == target.substr(0, target.rfind("::") + 2))
+                templateUsing_[namespacePrefix() + target.substr(target.rfind("::") + 2)] = tmplNamed->first;
+            else if (!hasTypeNamed(target) && !hasFunctionNamed(target) &&
                 !hasGlobalNamed(target) &&
                 namespaces_.find(target) == namespaces_.end())
                 src_.fail(pos, "'" + written + "' is not declared, so there is "
@@ -272,6 +277,7 @@ void Parser::topLevel(Program &program) {
     frameSize_ = 0;
     freeSlots_.clear();
     Declared d = declarator(base);
+    if (fnPointerSpec_ == 1) noexceptPointers_.insert(d.name);
     // A closure's `operator()` reads the enclosing function's const locals for their values,
     // [expr.prim.lambda]/12 - declared first, so that a parameter or a local of the body hides one (1.27).
     {
@@ -397,6 +403,14 @@ void Parser::topLevel(Program &program) {
                              "without it");
         inNamespace.enter(definedIn);
         defineStaticMember(d, program, quals.isThreadLocal);
+        // [dcl.dcl]/3: `int A::x = 0, A::y = 1;` - every declarator of the list defines its own member.
+        while (consume(",")) {
+            Declared next = declarator(base);
+            if (next.qualifier.empty() || next.paramsAt != 0 || next.type->isFunction())
+                src_.fail(next.pos, "a declaration that defines a static member defines only static "
+                                    "members after it here - write '" + next.name + "' in a declaration of its own");
+            defineStaticMember(next, program, quals.isThreadLocal);
+        }
         return;
     }
 
@@ -861,7 +875,7 @@ void Parser::topLevel(Program &program) {
                 if (psc != StorageNone && psc != StorageRegister)
                     src_.fail(pscPos, "'register' is the only storage class a "
                                       "parameter may have");
-                Declared pd = declarator(pt, true);
+                Declared pd = parameterDeclarator(pt);
                 if (peek().is("(")) pd.type = functionTypeParameter(pd.type);
                 if (mentionsDeduced(pd.type))
                     src_.fail(pd.pos, "a parameter's type cannot be deduced - "
@@ -983,6 +997,12 @@ void Parser::topLevel(Program &program) {
     // **Captured here because declareFunction consumes it.**
     const bool declaredNoexcept = pendingNoexcept_;
     const DynamicSpec declaredSpec = pendingSpec_;
+    // [except.spec]/3: a destructor's definition says what its declaration said.
+    if (memberOf != nullptr && !d.name.empty() && d.name[0] == '~' &&
+        (declaredNoexcept || declaredSpec.written || declaredSpec.allowsAll) &&
+        destructorMayThrow(memberOf) == declaredNoexcept)
+        src_.fail(d.pos, "'" + d.name + "' is defined with an exception specification its declaration does "
+                         "not have - [except.spec]/3, every declaration of a function has the same specification");
     if (trailing) d.type = readTrailingReturn(0);
 
     // A member template only declared, made for the arguments it is asked for: its signature below, no body.
@@ -1004,6 +1024,8 @@ void Parser::topLevel(Program &program) {
         return;
     }
     const Signature *member = nullptr;
+    // Read before the body: compiling it makes more functions, and `member` points into their table.
+    bool memberStatic = false;
     if (memberOf != nullptr) {
         std::string key = d.qualifier + "::" + d.name;   // "Point::~Point" too
         // **A member function template specialization declares itself here.**
@@ -1065,6 +1087,9 @@ void Parser::topLevel(Program &program) {
                     d.pos, false, d.qualifier, constThis,
                     memberTemplateAccess_, false });
                 functions_.back().fromTemplate = true;
+                // [temp.func.order]: two member templates' specializations are ordered by their patterns,
+                // as free ones are - `(const tuple &)` before `(const tuple<U, V...> &)`.
+                functions_.back().pattern = memberTemplatePattern_;
                 functions_.back().isStaticMember = staticTemplate;
                 functions_.back().refThis = refThis;
                 functions_.back().volatileThis = volatileThis;
@@ -1092,8 +1117,10 @@ void Parser::topLevel(Program &program) {
                 if (f.fromTemplate != memberTemplateInst_) continue;
                 if ((f.constThis == constThis || (impliedConst && f.isStaticMember)) &&
                     f.volatileThis == volatileThis &&
-                    f.refThis == refThis && sameParameters(f.params, params))
+                    f.refThis == refThis && sameParameters(f.params, params)) {
                     member = &f;
+                    memberStatic = f.isStaticMember;
+                }
             }
         }
         if (member == nullptr)
@@ -1699,12 +1726,21 @@ void Parser::topLevel(Program &program) {
                     const Type *ptr = types_.pointerTo(mt);
                     ExprPtr addr(new Unary('&', std::move(field)));
                     addr->setType(ptr);
+                    // A default constructor whose parameters all have defaults takes them here:
+                    // `: e()` for `explicit E(result_type s = default_seed)` ([class.ctor]/5).
+                    const Signature ctor = functions_[vi->second];
+                    std::vector<ExprPtr> defaults;
+                    applyDefaults(ctor, defaults, epos);
                     std::vector<ExprPtr> one;
                     one.push_back(std::move(addr));
                     std::vector<const Type *> ps;
                     ps.push_back(ptr);
+                    for (std::size_t k = 0; k < defaults.size() && k < ctor.params.size(); k++) {
+                        one.push_back(std::move(defaults[k]));
+                        ps.push_back(ctor.params[k]);
+                    }
                     memberInits.push_back(StmtPtr(new ExprStmt(
-                        completeCall(mt->tag(), functions_[vi->second].symbol,
+                        completeCall(mt->tag(), ctor.symbol,
                                      nullptr, types_.get(Kind::Void), ps, false,
                                      epos, std::move(one)))));
                 }
@@ -1763,8 +1799,12 @@ void Parser::topLevel(Program &program) {
 
     atFunctionBody_ = true;
     // [except.spec]/9 needs this inside the body, and the declarator read it a
-    // few hundred lines up.
-    inNoexceptFunction_ = declaredNoexcept;
+    // few hundred lines up. [except.spec]/14: a destructor with no specification has the implicit one's.
+    inNoexceptFunction_ = declaredNoexcept ||
+        (memberOf != nullptr && !d.name.empty() && d.name[0] == '~' && !destructorMayThrow(memberOf));
+    dtorEndLabel_ = memberOf != nullptr && !d.name.empty() && d.name[0] == '~'
+                        ? "$dtorend" + std::to_string(refTemps_++) : std::string();
+    dtorReturned_ = false;
     bodyCleanupFrom_ = paramsFrom;
     // A class can be defined inside a function and its members defined from
     // there, so what this function allocates is what it added to the list.
@@ -1902,7 +1942,18 @@ void Parser::topLevel(Program &program) {
 
         // **[class.dtor]/8: a written destructor destroys the class's members
         // too**, after its body and before its bases.
-        if (memberOf != nullptr && d.name == "~" + localOf(d.qualifier)) {
+        if (dtorReturned_) {
+            std::vector<StmtPtr> ended;
+            ended.push_back(std::move(body));
+            ended.push_back(StmtPtr(new Label(dtorEndLabel_, StmtPtr(new Block({})))));
+            body = StmtPtr(new Block(std::move(ended)));
+        }
+        dtorEndLabel_.clear();
+        const bool chainedDtor = memberOf != nullptr && d.name == "~" + localOf(d.qualifier) &&
+                                 destructorMayThrow(memberOf);
+        if (chainedDtor) {
+            body = destroySubobjects(std::move(body), memberOf, thisOffset_, d.pos);
+        } else if (memberOf != nullptr && d.name == "~" + localOf(d.qualifier)) {
             std::vector<StmtPtr> withMembers;
             withMembers.push_back(std::move(body));
             std::vector<StmtPtr> mine =
@@ -1916,7 +1967,7 @@ void Parser::topLevel(Program &program) {
         // the order the standard fixes and clang emits. The base's C2 and D2 are what is
         // called, and on Windows there is one name for each, called directly.
         for (std::size_t bn = 0;
-             memberOf != nullptr && !delegates && bn < memberOf->bases().size() &&
+             memberOf != nullptr && !delegates && !chainedDtor && bn < memberOf->bases().size() &&
              (d.name == localOf(d.qualifier) ||
               d.name == "~" + localOf(d.qualifier)); bn++) {
             const bool building = d.name == localOf(d.qualifier);
@@ -2024,12 +2075,19 @@ void Parser::topLevel(Program &program) {
                     ExprPtr at(new Unary('&', std::move(src)));
                     at->setType(types_.pointerTo(from));
                     if (from != base->unqualified()) at = convert(std::move(at), basePtr);
-                    ExprPtr value(new Unary('*', std::move(at)));
-                    value->setType(base);
-                    ExprPtr there(new Unary('*', std::move(me)));
-                    there->setType(base);
-                    ExprPtr copy(new Assign(std::move(there), std::move(value)));
-                    copy->setType(base);
+                    // An empty base has no byte of its own to copy: on the Microsoft layout it lies at the
+                    // object's end, and the size of its class would write over what follows.
+                    ExprPtr copy;
+                    if (emptyClass(base)) {
+                        copy = std::move(at);
+                    } else {
+                        ExprPtr value(new Unary('*', std::move(at)));
+                        value->setType(base);
+                        ExprPtr there(new Unary('*', std::move(me)));
+                        there->setType(base);
+                        copy.reset(new Assign(std::move(there), std::move(value)));
+                        copy->setType(base);
+                    }
                     if (destructorOf(base) != nullptr) {
                         Alive one{ "this", thisOffset_, memberOf };
                         one.owner = memberOf;
@@ -2142,7 +2200,7 @@ void Parser::topLevel(Program &program) {
                                         variadic, d.pos).symbol;
     // **Entered at a later base's vfptr** (Phase 6): cl reads the members past the adjustor, and moving
     // `this` back by it first is the same function to every caller.
-    if (member != nullptr && !member->isStaticMember && body != nullptr && msThisAdjust(definedSymbol) != 0) {
+    if (member != nullptr && !memberStatic && body != nullptr && msThisAdjust(definedSymbol) != 0) {
         const Type *selfType = types_.pointerTo(constThis ? types_.withConst(memberOf) : memberOf);
         const Type *chars = types_.pointerTo(types_.get(Kind::Char));
         ExprPtr me(Var::local("this", thisOffset_));
@@ -2471,6 +2529,7 @@ const Type *Parser::readTrailingReturn(std::size_t paramsOpen) {
             Declared pd = declarator(pt, true);
             if (!pd.name.empty() && !pd.type->isVoid()) {
                 if (pd.type->isArray()) pd.type = types_.pointerTo(pd.type->pointee());
+                if (pd.type->kind() != Kind::PackExpansion) dropStalePack(pd.name);
                 locals_.push_back(Local{ pd.name, 0, pd.type, false, std::string() });
                 locals_.back().isParameter = true;
                 locals_.back().trailingParam = index;

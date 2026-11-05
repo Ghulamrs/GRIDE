@@ -236,6 +236,8 @@ namespace Gride
         property List<String^>^ CcsReportLines;                // RIDE's Messages lines about it, for the Output pane
         property bool IsCcs { bool get() { return Ccs != nullptr; } }
         property VsInfo^ Vs;                                   // a Visual Studio project's reading and report (R08), or nullptr
+        // the .pro's "paths": NAME -> value, which its lists use as $(NAME); kept in the file as it is, null when it has none
+        property Dictionary<String^, String^>^ Paths;
         property bool IsVs { bool get() { return Vs != nullptr; } }
         property bool IsImported { bool get() { return IsCcs || IsVs; } }   // read from another IDE: read-only, built, its state in the settings
         List<String^>^ ImportReportLines() { return IsVs ? Vs->ReportLines : CcsReportLines; }
@@ -485,6 +487,12 @@ namespace Gride
                 }
             p->IncludePaths = j->GetStringList("include");
             p->Libraries = j->GetStringList("libraries");
+            JsonValue^ named = j->GetObject("paths");
+            if (named != nullptr)
+            {
+                p->Paths = gcnew Dictionary<String^, String^>();
+                for each (String^ k in named->KeyNames) p->Paths[k] = named->GetString(k, String::Empty);
+            }
             p->EmulateOnly = j->GetBool("emulateOnly", false);
             JsonValue^ o = j->GetObject("options");
             if (o != nullptr)

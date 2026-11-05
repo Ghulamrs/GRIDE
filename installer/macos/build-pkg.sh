@@ -94,7 +94,7 @@ missing_from() { for f in $1; do [ -e "$TC/$f" ] || printf '  toolchain/%s\n' "$
 
 say "[0/6] The work tree: RIDE/ beside Compilers/ TI/ Windows/, in $WORK"
 rsync -a --exclude .DS_Store --exclude xcuserdata --exclude DerivedData "$ROOT/macos/" "$WORK/RIDE/"
-for d in Compilers TI Windows; do
+for d in Compilers TI Windows include; do
     rsync -a --exclude .DS_Store --exclude 'build/' --exclude 'x64/' --exclude 'obj/' "$TC/$d/" "$WORK/$d/"
 done
 
@@ -174,14 +174,14 @@ APP=$SA/Applications/$APP_NAME/Contents
 R=$ST/usr/local/$RDIR
 
 if [ "$APP_ONLY" = 0 ]; then
-    # The app: the tools beside it; cpp11's headers (C++ and the C ones they wrap) in Resources/include;
+    # The app: the tools beside it; cpp11's headers (C++ and the C ones they wrap, toolchain/include/c) in Resources/include;
     # Resources/lib holding c90's headers beside the runtime libraries, as RIDE's app carries them.
     for t in $TOOLS; do cp -p "$B/$t.exe" "$APP/MacOS/"; done
     rm -rf "$APP/Resources/include" "$APP/Resources/lib" "$APP/MacOS/include" "$APP/MacOS/lib"
     ditto "$WORK/$CPP/include" "$APP/Resources/include"
-    cp -p "$WORK/$CPP"/lib/*.h "$APP/Resources/include/"
+    cp -p "$WORK"/include/c/*.h "$APP/Resources/include/"
     ditto "$B/lib" "$APP/Resources/lib"
-    cp -p "$WORK/$CC1"/lib/*.h "$APP/Resources/lib/"
+    cp -p "$WORK"/include/c/*.h "$APP/Resources/lib/"
     ln -s ../Resources/include "$APP/MacOS/include"
     ln -s ../Resources/lib "$APP/MacOS/lib"
 
@@ -191,8 +191,8 @@ if [ "$APP_ONLY" = 0 ]; then
     if [ -n "$CONSOLE" ] && [ -f "$CONSOLE" ]; then cp -p "$CONSOLE" "$R/bin/RIDE.exe"; fi
     ditto "$B/lib" "$R/bin/lib"
     ditto "$WORK/$CPP/include" "$R/include"
-    cp -p "$WORK/$CPP"/lib/*.h "$R/include/"
-    ditto "$WORK/$CC1/lib" "$R/lib"
+    cp -p "$WORK"/include/c/*.h "$R/include/"
+    mkdir -p "$R/lib" && cp -p "$WORK"/include/c/*.h "$R/lib/"
     ditto "$ROOT/macos/help" "$R/help"
     # GRIDEx3's one examples folder, the one the Windows Setup installs: projects/ (cppparse among them) and programs/.
     mkdir -p "$R/examples"

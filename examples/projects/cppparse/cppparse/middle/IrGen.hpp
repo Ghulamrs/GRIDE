@@ -93,6 +93,7 @@ private:
         int               index;       // its position in m_flagged
         int               region;      // table model: the try region whose landing pad destroys the object; -1: none yet (the flag guards it), -2: retired on the normal path
         bool              destroyOnExit;   // leaving its region on the normal path runs the destructor (not for unwindOnly cleanups except a destructor's parts)
+        std::vector<int>  newer;       // table model: the flagged entries suspended under this entry's open region (an operand after the first of && or || in the condition of ?: or in a value); its pad destroys those alive, newest first, before the object
         Cleanup() : slot(-1), type(0), viaPointer(false), flag(-1), guarded(false), unwindOnly(false), baseSubobject(false), restIndex(-1), freeKind(0), freeCls(0), countSlot(-1), noCookie(false), freeSize(1), index(-1), region(-1), destroyOnExit(true) {}
     };
     struct ExitThunk {                 // destroys a global or static local at exit; registered with atexit once it is built
@@ -209,7 +210,7 @@ private:
     int  registerCleanup(int slot, const sema::Type* t, bool viaPointer, int mode, int line);
     void runCleanup(const Cleanup& c, bool guarded, int line);
     int  cleanupAddress(const Cleanup& c, int line);
-    sema::Symbol* plainDestructor(const Cleanup& c);
+    sema::Symbol* plainDestructor(const Cleanup& c, bool guarded);
     void openScope();
     void closeScope(int line);
     void leaveScopes(size_t depth, int line);
@@ -219,13 +220,14 @@ private:
     // the table model's object regions on m_tryStack: an entry e <= -2 is the cleanup m_flagged[-2 - e]
     static bool objectEntry(int e) { return e <= -2; }
     static int  entryIndex(int e) { return -2 - e; }
-    void openRegion(int k, int line);                                   // a region and its landing pad for m_flagged[k], pushed on m_tryStack
+    void openRegion(int k, int line, bool guarded);                     // a region and its landing pad for m_flagged[k], pushed on m_tryStack; guarded: the pad tests the flag (opened at a join, where the object may not exist)
     void emitExits(size_t depth, int line);                             // leaves the regions above depth, newest first: tryend, and the destructor of an object whose region ends on the normal path
     void popTo(size_t depth, int line);                                 // emitExits, and the entries are removed
     void retireEntries(const std::vector<int>& ks, bool destroy, int line);   // ends the regions of these cleanups wherever they lie on the stack; the entries above them are closed and reopened
     void retireEntry(int k, bool destroy, int line) { std::vector<int> ks(1, k); retireEntries(ks, destroy, line); }
     void forgetEntry(int k);                                            // the cleanup leaves m_cleanups / m_temps
     void openDeferredRegions(size_t from, int line);                    // regions for the flagged cleanups registered since m_flagged[from]
+    void suspendRegions(size_t from, int line, bool noteBelow);        // closes the regions of the flagged cleanups registered since m_flagged[from] without destroying them (region -1 again)
     void emitPads(int line);                                            // the object regions' landing pads (finishFunction)
     int  beginTerminateRegion(int& term, int line);
     void endTerminateRegion(int tid, int term, int line);
@@ -310,7 +312,9 @@ private:
     int    value(cxx::Expr* e);
     LValue lvalue(cxx::Expr* e);
     LValue builtinAssign(cxx::Expr* e, int& result);   // the right operand of = first, the left of op= first (cl)
-    void   condition(cxx::Expr* e, int trueBlock, int falseBlock);
+    void   condition(cxx::Expr* e, int trueBlock, int falseBlock, bool fullExpr = true);
+    void   conditionTree(cxx::Expr* e, int trueBlock, int falseBlock, bool fullExpr, bool last, int deferBefore);
+    void   redirectBranches(int startBlock, size_t firstBlock, int from, int to);
     int    conditional(cxx::Expr* e, bool byAddr);
     int    call(cxx::Expr* e, int sretAddr = -1);
     int    operatorCall(cxx::Expr* e);
@@ -427,7 +431,8 @@ private:
     bool                       m_tableEh;       // setTableExceptions
     int                        m_deferRegions;  // table model, > 0: a cleanup registered now gets its flag, its region later (openRegion at the join)
     std::vector<size_t>        m_scopeTry;      // table model: m_tryStack.size() at each open block scope
-    std::vector<std::pair<int, int> > m_pads;   // table model: the landing pad blocks to fill (block, cleanup index)
+    struct Pad { int block, entry; bool guarded; };
+    std::vector<Pad>           m_pads;   // table model: the landing pad blocks to fill; guarded: the pad tests the object's flag
 };
 
 } // namespace cppparse

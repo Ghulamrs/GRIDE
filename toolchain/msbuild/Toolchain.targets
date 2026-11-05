@@ -14,6 +14,18 @@
                    they are layers: no name defined twice, none calling a layer above, one importer of kernel32
     FrameCheck     no frame of a page or more without __chkstk in the assembly WindowsLibrary wrote
     CatalogueCheck the runtime's catalogue.json against its libraries and headers
+    ShalimarLibrary shalimar's library built-ins (Compiler-Si\src\Library.inc) and the runtime's wrappers for them
+                   (Compiler-Si\runtime\wrappers\, one file each) from the catalogue's Shalimar marks
+
+  ToolchainJobs - how many files Rts6xVariant and WindowsLibrary compile at once (rts6x's and grt's c90, cpp11,
+  asm6x and masm runs; each compiler run is one process on one file, single-threaded): 0, the default, one per
+  processor; 1 one at a time. Set it in Toolchain.user.props beside this file (not committed):
+
+    <Project><PropertyGroup><ToolchainJobs>1</ToolchainJobs></PropertyGroup></Project>
+
+  or as an environment variable before Visual Studio starts (ToolchainJobs=1), or on MSBuild's command line
+  (/p:ToolchainJobs=1). Visual Studio builds several projects at once besides (Tools > Options > Projects and
+  Solutions > Build And Run > maximum number of parallel project builds), so grt and rts6x may still run together.
 -->
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
@@ -85,6 +97,7 @@ public class Rts6xVariant : Task
     [Required] public string Members { get; set; }
     [Required] public string Library { get; set; }
     [Required] public string PrintfLibrary { get; set; }
+    public int Jobs { get; set; }                         // files compiled at once: 0 one per processor ($(ToolchainJobs))
 
     // runs one program; its output and exit code are returned, not logged, so it can run on several threads
     static int Exec(string exe, string args, out string output)
@@ -127,7 +140,7 @@ public class Rts6xVariant : Task
             {
                 Directory.CreateDirectory(asm);
                 var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
-                System.Threading.Tasks.Parallel.ForEach(sources, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, f =>
+                System.Threading.Tasks.Parallel.ForEach(sources, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Jobs > 0 ? Jobs : Environment.ProcessorCount }, f =>
                 {
                     string args = "-S -arch tms6747 -nologo " + Flags + " \"-I" + internalDir + "\" \"" + f + "\" -o \"" +
                                   Path.Combine(asm, Path.GetFileNameWithoutExtension(f) + ".s") + "\"";
@@ -200,7 +213,7 @@ public class Rts6xVariant : Task
       <Using Namespace="System.IO" />
       <Using Namespace="System.Linq" />
       <Code Type="Fragment" Language="cs"><![CDATA[
-        // rts6x's own step for the Shalimar runtime of the C6747: the assembly shc's build wrote (lib\shmrt-tms6747
+        // rts6x's own step for the Shalimar runtime of the C6747: the assembly shc's build wrote (lib\tms6747\shmrt
         // or its -debug twin) through asm6x into a fresh folder, and every object packed by ar6x into one library
         if (Directory.Exists(ObjDir)) Directory.Delete(ObjDir, true);
         Directory.CreateDirectory(ObjDir);
@@ -259,6 +272,7 @@ public class WindowsLibrary : Task
     public string SourceListRoot { get; set; }
     public string SourceDirs { get; set; }
     public string Sources { get; set; }
+    public int Jobs { get; set; }           // files compiled at once: 0 one per processor ($(ToolchainJobs))
 
     static int Exec(string exe, string args, out string output)
     {
@@ -328,7 +342,7 @@ public class WindowsLibrary : Task
         catch (Exception e) { Log.LogError(e.Message); return false; }
         string includes = string.Join(" ", Split(IncludeDirs).Select(d => "\"-I" + d.TrimEnd('\\') + "\""));
         var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
-        System.Threading.Tasks.Parallel.ForEach(units, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, u =>
+        System.Threading.Tasks.Parallel.ForEach(units, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Jobs > 0 ? Jobs : Environment.ProcessorCount }, u =>
         {
             string src = u.Item1, obj = u.Item2, output;
             Directory.CreateDirectory(Path.GetDirectoryName(obj));
@@ -378,7 +392,7 @@ using Microsoft.Build.Utilities;
 
 // Libraries that must be whole between them: every external a member leaves undefined is defined by some member
 // of one of them (an import library's short members define __imp_X and X), except the names a program brings
-// (Allowed: main, and the linker's own __ImageBase). An unresolved name is a build error here rather than a
+// (Allowed: main and the other entries, and the linker's own __ImageBase). An unresolved name is a build error here rather than a
 // link error in every program built with them.
 public class LibraryClosed : Task
 {
@@ -584,7 +598,7 @@ using Microsoft.Build.Utilities;
 // The runtime's catalogue (catalogue.json, one entry per line) against what is built and shipped
 // (docs\Runtime_Design.md 9.4, 14.2): every entry done for Target is defined, under its link name, by the library
 // it names in LibDir, and declared by one of the headers it names (in IncludeDirs) - a function as name(, a macro
-// by its name.
+// by its name. An entry of kind "entry" is where a program starts: the linker asks for it, and no header declares it.
 public class CatalogueCheck : Task
 {
     [Required] public string Catalogue { get; set; }
@@ -635,6 +649,7 @@ public class CatalogueCheck : Task
                 Log.LogError("catalogue: " + name + " is not defined by " + library + ".lib (as " + link + ")");
                 faults++;
             }
+            if (kind == "entry") continue;
             var headers = Regex.Matches(Regex.Match(line, "\"headers\": \\[([^\\]]*)\\]").Groups[1].Value, "\"([^\"]+)\"").Cast<Match>().Select(m => m.Groups[1].Value);
             var pattern = new Regex(kind == "macro" ? "\\b" + Regex.Escape(name) + "\\b" : "\\b" + Regex.Escape(name) + "\\s*\\(");
             bool declared = false;
@@ -660,9 +675,223 @@ public class CatalogueCheck : Task
     </Task>
   </UsingTask>
 
+  <!-- how many files grt and rts6x compile at once (the note at the top); the user's own setting first -->
+  <Import Project="$(MSBuildThisFileDirectory)Toolchain.user.props" Condition="Exists('$(MSBuildThisFileDirectory)Toolchain.user.props')" />
+  <PropertyGroup>
+    <ToolchainJobs Condition="'$(ToolchainJobs)'==''">0</ToolchainJobs>
+  </PropertyGroup>
+
   <!-- Visual Studio's compiler and librarian for the project's toolset, with the environment they read -->
   <PropertyGroup>
     <ToolchainCl>$(VCToolsInstallDir)bin\HostX64\x64\cl.exe</ToolchainCl>
     <ToolchainLib>$(VCToolsInstallDir)bin\HostX64\x64\lib.exe</ToolchainLib>
   </PropertyGroup>
+<UsingTask TaskName="ShalimarLibrary" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+// shalimar's library built-ins from the runtime's catalogue (docs\Runtime_Design.md 14.3). Table is the compiler's
+// rows: a built-in's name, arity, shape, the name it calls on the host targets (the x86_64-windows link name, or
+// its wrapper), Shalimar's own function for an int answer, the C6747's name (null where the tms6747 target is not
+// done), and a Typed row's outputs and inputs, a letter each: r real, i int, t text. Wrappers is the runtime's half, a
+// folder the task owns: shm_c_<name>.cpp for each function whose C signature is not Shalimar's, one file to a function
+// so that each is a library member by itself and a program links only what it borrows; every build of the runtime
+// takes the folder whole. A mark names a built-in and its shape, or is usable: true, with fail saying what ends the
+// program (nonzero, negative, null; else the C result is the answer) and omit that the pointer parameter is given as
+// null. All of it is committed, since macOS builds what is committed: when the catalogue has moved on the task rewrites
+// what differs, removes what it no longer writes and fails the build, so that the change is seen.
+public class ShalimarLibrary : Task
+{
+    [Required] public string Catalogue { get; set; }
+    [Required] public string Table { get; set; }
+    [Required] public string Wrappers { get; set; }
+
+    static string Field(string text, string key)
+    {
+        Match m = Regex.Match(text, "\"" + key + "\": \"([^\"]*)\"");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    static string Link(string line, string target)
+    {
+        Match t = Regex.Match(line, "\"" + Regex.Escape(target) + "\": \\{([^}]*)\\}");
+        return t.Success && Field(t.Groups[1].Value, "status") == "done" ? Field(t.Groups[1].Value, "link") : null;
+    }
+
+    static string Quoted(string s) { return s == null ? "nullptr" : "\"" + s + "\""; }
+
+    static string Row(string name, int arity, string shape, string symbol, string own, string c6x, string outputs, string inputs)
+    {
+        return "    {" + Quoted(name) + ", " + arity + ", Builtin::Shape::" + shape + ", " + Quoted(symbol) + ", " +
+               Quoted(own) + ", " + Quoted(c6x) + ", " + Quoted(outputs) + ", " + Quoted(inputs) + "},";
+    }
+
+    static List<string> Parameters(string line)
+    {
+        string list = Regex.Match(line, "\"parameters\": \\[([^\\]]*)\\]").Groups[1].Value;
+        return Regex.Matches(list, "\"type\": \"([^\"]+)\"").Cast<Match>().Select(m => m.Groups[1].Value).ToList();
+    }
+
+    void Typed(string line, string name, string mark, string host, string c6x, SortedDictionary<string, string> rows,
+               SortedDictionary<string, string> wrappers)
+    {
+        string fail = Field(mark, "fail");
+        bool omit = mark.Contains("\"omit\": true");
+        string returns = Field(line, "returns");
+        string hold = null, outputs = "", inputs = "";
+        bool wrapped = fail != null;
+        switch (returns)
+        {
+            case "void": break;
+            case "double": hold = "double"; outputs = "r"; break;
+            case "int32": hold = "int"; outputs = "i"; break;
+            case "long": case "int64": case "size": case "time": case "c:clock_t":
+                hold = "long long"; outputs = "i"; wrapped = true; break;
+            case "pointer:char": hold = "const char *const"; wrapped = true; break;
+            default: Log.LogError("catalogue: " + name + " is marked for Shalimar, whose types have no " + returns); return;
+        }
+
+        var declared = new List<string>();
+        var before = new List<string>();
+        var passed = new List<string>();
+        var extra = new List<string>();
+        List<string> parameters = Parameters(line);
+        for (int i = 0; i < parameters.Count; ++i)
+        {
+            string p = "p" + i;
+            switch (parameters[i])
+            {
+                case "double": inputs += "r"; declared.Add("double " + p); passed.Add(p); break;
+                case "int32": inputs += "i"; declared.Add("int32_t " + p); passed.Add(p); break;
+                case "uint32": inputs += "i"; declared.Add("int32_t " + p); passed.Add("static_cast<unsigned>(" + p + ")"); break;
+                case "long": wrapped = true; inputs += "i"; declared.Add("int32_t " + p); passed.Add("static_cast<long>(" + p + ")"); break;
+                case "time": wrapped = true; inputs += "i"; declared.Add("int32_t " + p); passed.Add("static_cast<time_t>(" + p + ")"); break;
+                case "size": wrapped = true; inputs += "i"; declared.Add("int32_t " + p); passed.Add("shm::toSize(\"" + name + "\", " + p + ")"); break;
+                case "text":
+                    wrapped = true; inputs += "t"; declared.Add("const ShmArray *" + p);
+                    before.Add("const shm::CText a" + i + "(" + p + ");"); passed.Add("a" + i);
+                    break;
+                case "pointer:double": case "pointer:int":
+                    if (omit) { passed.Add("0"); break; }
+                    wrapped = true;
+                    outputs += parameters[i] == "pointer:double" ? "r" : "i";
+                    before.Add((parameters[i] == "pointer:double" ? "double" : "int") + " w" + i + " = 0;");
+                    passed.Add("&w" + i); extra.Add("w" + i);
+                    break;
+                case "pointer:time_t":
+                    if (omit) { passed.Add("0"); break; }
+                    goto default;
+                default: Log.LogError("catalogue: " + name + " is marked for Shalimar, whose types have no " + parameters[i]); return;
+            }
+        }
+        if (returns == "pointer:char") { inputs += "t"; declared.Add("ShmArray *out"); }
+
+        string symbol = wrapped ? "shm_c_" + name : host;
+        rows[name] = Row(name, inputs.Length, "Typed", symbol, null, c6x == null ? null : wrapped ? symbol : c6x, outputs, inputs);
+        if (!wrapped) return;
+
+        string answer = hold == "long long" ? "shm::toInt(\"" + name + "\", r)" : "r";
+        string result = outputs.Length == 1 ? (outputs == "r" ? "double" : "int32_t") : "void";
+        if (outputs.Length > 1)
+            for (int i = 0; i < outputs.Length; ++i) declared.Add((outputs[i] == 'r' ? "double *o" : "int32_t *o") + i);
+
+        var headers = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (Match h in Regex.Matches(Regex.Match(line, "\"headers\": \\[([^\\]]*)\\]").Groups[1].Value, "\"([^\"]+)\""))
+            headers.Add(h.Groups[1].Value);
+        if (fail != null) headers.Add("errno.h");
+
+        var text = new StringBuilder();
+        text.Append("// " + symbol + ".cpp - " + name + " for Shalimar (docs\\Runtime_Design.md 14.3), written by Toolchain.targets'\r\n");
+        text.Append("// ShalimarLibrary from toolchain\\Windows\\RT\\catalogue.json in shc's build: change the catalogue, not this file.\r\n");
+        if (outputs.Length > 1) text.Append("// Two outputs come back through pointers after the inputs, as a Shalimar function's do.\r\n");
+        text.Append("#include \"../Borrow.h\"\r\n\r\n");
+        foreach (string h in headers) text.Append("#include <" + h + ">\r\n");
+        text.Append("\r\n");
+        if (c6x == null) text.Append("#ifndef __TMS320C6X__\r\n");
+        text.Append("extern \"C\" " + result + " " + symbol + "(" + string.Join(", ", declared) + ") {\r\n");
+        foreach (string b in before) text.Append("    " + b + "\r\n");
+        if (fail != null) text.Append("    errno = 0;\r\n");
+        string call = name + "(" + string.Join(", ", passed) + ")";
+        if (hold == null) text.Append("    " + call + ";\r\n");
+        else if (hold == "long long") text.Append("    const long long r = static_cast<long long>(" + call + ");\r\n");
+        else text.Append("    " + (hold.EndsWith("const") ? hold : "const " + hold) + " r = " + call + ";\r\n");
+        if (fail == "nonzero") text.Append("    if (r != 0) shm::failed(\"" + name + "\");\r\n");
+        else if (fail == "negative") text.Append("    if (r < 0) shm::failed(\"" + name + "\");\r\n");
+        else if (fail == "null") text.Append("    if (!r) shm::failed(\"" + name + "\");\r\n");
+        else if (fail != null) Log.LogError("catalogue: " + name + " has no failure rule called " + fail);
+        if (returns == "pointer:char") text.Append("    shm::copyText(out, r);\r\n");
+        else if (outputs.Length == 1) text.Append("    return " + answer + ";\r\n");
+        else if (outputs.Length > 1)
+        {
+            text.Append("    *o0 = " + answer + ";\r\n");
+            for (int i = 0; i < extra.Count; ++i)
+                text.Append("    *o" + (i + 1) + " = " + extra[i] + ";\r\n");
+        }
+        text.Append("}\r\n");
+        if (c6x == null) text.Append("#endif\r\n");
+        wrappers[symbol] = text.ToString();
+    }
+
+    void Keep(string path, string text)
+    {
+        string now = File.Exists(path) ? File.ReadAllText(path).Replace("\r\n", "\n") : null;
+        if (now == text.Replace("\r\n", "\n")) return;
+        File.WriteAllText(path, text);
+        Log.LogError(path + " was stale against the catalogue: rewritten - build again, and commit it");
+    }
+
+    public override bool Execute()
+    {
+        var rows = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var wrappers = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (string line in File.ReadAllLines(Catalogue))
+        {
+            if (!line.TrimStart().StartsWith("{\"name\"")) continue;
+            Match m = Regex.Match(line, "\"shalimar\": (\\{[^}]*\\})");
+            if (!m.Success) continue;
+            string mark = m.Groups[1].Value;
+            string name = Field(line, "name");
+            string host = Link(line, "x86_64-windows");
+            string c6x = Link(line, "tms6747");
+            if (host == null) { Log.LogError("catalogue: " + name + " is marked for Shalimar and has no x86_64-windows name"); continue; }
+            if (mark.Contains("\"usable\": true")) { Typed(line, name, mark, host, c6x, rows, wrappers); continue; }
+
+            string builtin = Field(mark, "builtin");
+            int arity = Parameters(line).Count;
+            rows[builtin] = Row(builtin, arity, Field(mark, "shape"), host, Field(mark, "int"), c6x, null, null);
+            if (builtin != name) rows[name] = Row(name, arity, "Real", host, null, c6x, null, null);
+        }
+        if (Log.HasLoggedErrors) return false;
+
+        var table = new StringBuilder();
+        table.Append("// Library.inc - shalimar's library built-ins, written by Toolchain.targets' ShalimarLibrary from\r\n");
+        table.Append("// toolchain\\Windows\\RT\\catalogue.json in shc's build: change the catalogue, not this file.\r\n");
+        table.Append("// name, arity, shape, the C function or its wrapper, Shalimar's own for an int answer, the C6747's name,\r\n");
+        table.Append("// and for a Typed row its outputs and inputs (r real, i int, t text)\r\n");
+        foreach (string row in rows.Values) table.Append(row).Append("\r\n");
+        Keep(Table, table.ToString());
+
+        Directory.CreateDirectory(Wrappers);
+        foreach (KeyValuePair<string, string> wrapper in wrappers) Keep(Path.Combine(Wrappers, wrapper.Key + ".cpp"), wrapper.Value);
+        foreach (string file in Directory.GetFiles(Wrappers))
+        {
+            if (wrappers.ContainsKey(Path.GetFileNameWithoutExtension(file))) continue;
+            File.Delete(file);
+            Log.LogError(file + " was stale against the catalogue: removed - build again, and commit it");
+        }
+        return !Log.HasLoggedErrors;
+    }
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
 </Project>

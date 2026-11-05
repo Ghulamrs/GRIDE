@@ -1,0 +1,7 @@
+// rename.shl - the nonzero rule over two texts
+uses rename
+
+fun <> = main() {
+  rename("gride-no-such-file", "gride-no-such-name")
+  ? 2
+}

@@ -11,6 +11,8 @@ public:
     static double fraction(double x, int *exponent);
     // ldexp: x * 2^n rounded once; ERANGE where it overflows or underflows to zero.
     static double scale(double x, int n);
+    // logb and ilogb: floor(log2 |x|) of a finite nonzero x, given as its bits, a subnormal counted from its top bit.
+    static int exponent(unsigned long long u);
     // fabs: the sign bit cleared.
     static double magnitude(double x);
 };

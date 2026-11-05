@@ -154,7 +154,7 @@ struct Options {
     bool dynamicbase;
     u32  timestamp;                      /* /timestamp:hex, so the bed can pin it */
     bool have_timestamp;
-    int  subsystem;
+    int  subsystem;                      /* /subsystem:, 0 until said: then the objects' mains decide */
     u64  image_base;
     u32  section_align;
     u32  file_align;

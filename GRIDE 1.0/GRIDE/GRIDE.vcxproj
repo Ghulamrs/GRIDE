@@ -50,6 +50,9 @@
          name, $(PRODUCT).exe from product.props. The console editor there is
          $(PRODUCT)Console.exe. The project file keeps its own name. -->
     <TargetName>$(PRODUCT)</TargetName>
+    <!-- GRIDE3.sln builds the three outlooks, each into its own folder: where GRIDE.sln puts this one, which
+         sets nothing itself (the note at the top) -->
+    <OutDir Condition="'$(SolutionName)'=='GRIDE3'">$(ProjectDir)..\$(Platform)\$(Configuration)\</OutDir>
   </PropertyGroup>
 
   <ItemDefinitionGroup>
@@ -148,7 +151,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 
   <!-- The installation beside GRIDE.exe (x64\<config>), where the editor reads it: its settings.json (the defaults
-       %APPDATA%\GRIDE\settings.json starts from), TI's CCS option tables in lib\ccs, and docs\ - the Help
+       %APPDATA%\GRIDE\settings.json starts from), TI's CCS option tables in share\ccs, and docs\ - the Help
        the three outlooks share, GRIDEx3's docs\. The programs, include\ and lib\ come from the toolchain's own
        projects. The check is off so that Visual Studio copies a changed page even when GRIDE.exe is up to date. -->
   <PropertyGroup>
@@ -160,7 +163,8 @@
       <GrideDocs Include="$(ProjectDir)..\..\docs\*.html;$(ProjectDir)..\..\docs\*.md" />
     </ItemGroup>
     <Copy SourceFiles="$(ProjectDir)..\settings.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(GrideCcs)" DestinationFolder="$(OutDir)lib\ccs" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(GrideCcs)" DestinationFolder="$(OutDir)share\ccs" SkipUnchangedFiles="true" />
+    <RemoveDir Directories="$(OutDir)lib\ccs" />
     <Copy SourceFiles="@(GrideDocs)" DestinationFolder="$(OutDir)docs" SkipUnchangedFiles="true" />
   </Target>
 </Project>

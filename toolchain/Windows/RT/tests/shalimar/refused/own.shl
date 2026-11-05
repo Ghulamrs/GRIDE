@@ -1,0 +1,5 @@
+// refused: 'len' is Shalimar's own, not the runtime's
+fun <> = main() {
+  int v[3]
+  ? c.len(v)
+}

@@ -1,0 +1,4 @@
+// refused: Unknown function 'strlen'
+fun <> = main() {
+  ? strlen("a")
+}

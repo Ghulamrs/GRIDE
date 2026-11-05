@@ -75,13 +75,12 @@ void swap(T (&a)[N], T (&b)[N]) {
     for (std::size_t i = 0; i != N; ++i) std::__cxx1_swap_adl(a[i], b[i]);
 }
 
-// [utility]: an rvalue when moving cannot throw, and otherwise a const lvalue, so a copy is made
-// instead. Whether T can be copied at all is not asked - there is no way to ask it here yet - so a
-// type that can only be moved, and whose move may throw, is given the lvalue.
+// [utility]: an rvalue unless moving may throw and a copy can be made, which a const lvalue then asks for.
 template <class T, bool Move> struct __cxx1_move_if { typedef const T &type; };
 template <class T> struct __cxx1_move_if<T, true> { typedef T &&type; };
 template <class T> struct __cxx1_move_if_noexcept {
-    typedef typename __cxx1_move_if<T, noexcept(T(std::declval<T>()))>::type type;
+    typedef typename __cxx1_move_if<T, is_nothrow_move_constructible<T>::value ||
+                                           !is_copy_constructible<T>::value>::type type;
 };
 
 template <class T>
@@ -91,6 +90,14 @@ typename __cxx1_move_if_noexcept<T>::type move_if_noexcept(T &x) noexcept {
 
 struct piecewise_construct_t {};
 constexpr piecewise_construct_t piecewise_construct = piecewise_construct_t();
+
+// What pair's piecewise constructor needs of <tuple> before <tuple> is read: 0, 1, ..., N - 1 as a pack, and
+// element I of a tuple through a class whose member is found when the constructor is instantiated.
+template <class... T> class tuple;
+template <std::size_t... I> struct __cxx1_indices {};
+template <std::size_t N, std::size_t... I> struct __cxx1_make_indices : __cxx1_make_indices<N - 1, N - 1, I...> {};
+template <std::size_t... I> struct __cxx1_make_indices<0, I...> { typedef __cxx1_indices<I...> type; };
+template <std::size_t I> struct __cxx1_tuple_fetch;
 
 // **`first` and `second` are public and that is the whole of the type.** The
 // constructors are here so a pair can be built in one expression; the copy and
@@ -110,7 +117,23 @@ struct pair {
     template <class U1, class U2> pair(const pair<U1, U2> &p) : first(p.first), second(p.second) {}
     template <class U1, class U2> pair(pair<U1, U2> &&p)
         : first(std::forward<U1>(p.first)), second(std::forward<U2>(p.second)) {}
+    // [pairs.pair]/9: two values of any types that convert, each forwarded as it was given.
+    template <class U1, class U2,
+              class = typename enable_if<is_convertible<U1, T1>::value && is_convertible<U2, T2>::value>::type>
+    pair(U1 &&a, U2 &&b) : first(std::forward<U1>(a)), second(std::forward<U2>(b)) {}
+    // [pairs.pair]/14: each member made in place from its tuple's elements.
+    template <class... A1, class... A2>
+    pair(piecewise_construct_t, tuple<A1...> a, tuple<A2...> b)
+        : pair(a, b, typename __cxx1_make_indices<sizeof...(A1)>::type(),
+               typename __cxx1_make_indices<sizeof...(A2)>::type()) {}
 
+private:
+    template <class... A1, class... A2, std::size_t... I1, std::size_t... I2>
+    pair(tuple<A1...> &a, tuple<A2...> &b, __cxx1_indices<I1...>, __cxx1_indices<I2...>)
+        : first(std::forward<A1>(__cxx1_tuple_fetch<I1>::of(a))...),
+          second(std::forward<A2>(__cxx1_tuple_fetch<I2>::of(b))...) {}
+
+public:
     // Spelled pair<T1, T2> &: a member template returning the injected name is "expected a type" here.
     template <class U1, class U2> pair<T1, T2> &operator=(const pair<U1, U2> &p) {
         first = p.first;
@@ -146,6 +169,21 @@ struct pair<const T1, T2> {
     template <class U1, class U2> pair(const pair<U1, U2> &p) : first(p.first), second(p.second) {}
     template <class U1, class U2> pair(pair<U1, U2> &&p)
         : first(std::forward<U1>(p.first)), second(std::forward<U2>(p.second)) {}
+    template <class U1, class U2,
+              class = typename enable_if<is_convertible<U1, const T1>::value && is_convertible<U2, T2>::value>::type>
+    pair(U1 &&a, U2 &&b) : first(std::forward<U1>(a)), second(std::forward<U2>(b)) {}
+    template <class... A1, class... A2>
+    pair(piecewise_construct_t, tuple<A1...> a, tuple<A2...> b)
+        : pair(a, b, typename __cxx1_make_indices<sizeof...(A1)>::type(),
+               typename __cxx1_make_indices<sizeof...(A2)>::type()) {}
+
+private:
+    template <class... A1, class... A2, std::size_t... I1, std::size_t... I2>
+    pair(tuple<A1...> &a, tuple<A2...> &b, __cxx1_indices<I1...>, __cxx1_indices<I2...>)
+        : first(std::forward<A1>(__cxx1_tuple_fetch<I1>::of(a))...),
+          second(std::forward<A2>(__cxx1_tuple_fetch<I2>::of(b))...) {}
+
+public:
 
     const T1 first;
     T2 second;
@@ -172,9 +210,15 @@ void swap(pair<T1, T2> &a, pair<T1, T2> &b) {
     a.swap(b);
 }
 
+// [pairs.spec]/9: each argument forwarded into a pair of its decayed type, a reference_wrapper<T> giving T &.
+template <class T> class reference_wrapper;
+template <class T> struct __cxx1_pair_unwrap { typedef T type; };
+template <class T> struct __cxx1_pair_unwrap<reference_wrapper<T> > { typedef T &type; };
 template <class T1, class T2>
-pair<T1, T2> make_pair(const T1 &a, const T2 &b) {
-    return pair<T1, T2>(a, b);
+pair<typename __cxx1_pair_unwrap<typename decay<T1>::type>::type, typename __cxx1_pair_unwrap<typename decay<T2>::type>::type>
+make_pair(T1 &&a, T2 &&b) {
+    return pair<typename __cxx1_pair_unwrap<typename decay<T1>::type>::type,
+                typename __cxx1_pair_unwrap<typename decay<T2>::type>::type>(std::forward<T1>(a), std::forward<T2>(b));
 }
 
 // [pair.astuple]: a pair as a tuple of two. An array answers through the two members it carries,

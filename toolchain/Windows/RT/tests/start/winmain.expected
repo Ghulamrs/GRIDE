@@ -1,0 +1,253 @@
+line [prog a b c]
+mode args, show -1
+static object made, 4 arguments
+instance the image, previous null, show 10
+line [a b c]
+__argc 4, __argv set, __wargv null
+__argv [prog]
+__argv [a]
+__argv [b]
+__argv [c]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [prog]
+mode args, show -1
+static object made, 1 arguments
+instance the image, previous null, show 10
+line []
+__argc 1, __argv set, __wargv null
+__argv [prog]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line []
+mode args, show -1
+static object made, 1 arguments
+instance the image, previous null, show 10
+line []
+__argc 1, __argv set, __wargv null
+__argv the program's path
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line ["quoted prog" one]
+mode args, show -1
+static object made, 2 arguments
+instance the image, previous null, show 10
+line [one]
+__argc 2, __argv set, __wargv null
+__argv [quoted prog]
+__argv [one]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line ["half"way prog<9>next]
+mode args, show -1
+static object made, 3 arguments
+instance the image, previous null, show 10
+line [prog<9>next]
+__argc 3, __argv set, __wargv null
+__argv [halfway]
+__argv [prog]
+__argv [next]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [   leading spaces]
+mode args, show -1
+static object made, 3 arguments
+instance the image, previous null, show 10
+line [leading spaces]
+__argc 3, __argv set, __wargv null
+__argv []
+__argv [leading]
+__argv [spaces]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [prog<9><9>tabs  "t<9>q"  ]
+mode args, show -1
+static object made, 3 arguments
+instance the image, previous null, show 10
+line [tabs  "t<9>q"  ]
+__argc 3, __argv set, __wargv null
+__argv [prog]
+__argv [tabs]
+__argv [t<9>q]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [prog a\b a\\b "c d" e\"f "g\\" h\\\"i "j""k" "" l"m n"o]
+mode args, show -1
+static object made, 10 arguments
+instance the image, previous null, show 10
+line [a\b a\\b "c d" e\"f "g\\" h\\\"i "j""k" "" l"m n"o]
+__argc 10, __argv set, __wargv null
+__argv [prog]
+__argv [a\b]
+__argv [a\\b]
+__argv [c d]
+__argv [e"f]
+__argv [g\]
+__argv [h\"i]
+__argv [j"k]
+__argv []
+__argv [lm no]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [prog <1> <2> <3> "x <1> y"]
+mode args, show -1
+static object made, 5 arguments
+instance the image, previous null, show 10
+line [? <e9> ?? "x ? y"]
+__argc 5, __argv set, __wargv null
+__argv [prog]
+__argv [?]
+__argv [<e9>]
+__argv [??]
+__argv [x ? y]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [prog 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]
+mode args, show -1
+static object made, 21 arguments
+instance the image, previous null, show 10
+line [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]
+__argc 21, __argv set, __wargv null
+__argv [prog]
+__argv [1]
+__argv [2]
+__argv [3]
+__argv [4]
+__argv [5]
+__argv [6]
+__argv [7]
+__argv [8]
+__argv [9]
+__argv [10]
+__argv [11]
+__argv [12]
+__argv [13]
+__argv [14]
+__argv [15]
+__argv [16]
+__argv [17]
+__argv [18]
+__argv [19]
+__argv [20]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [prog]
+mode fall, show -1
+static object made, 1 arguments
+instance the image, previous null, show 10
+line []
+__argc 1, __argv set, __wargv null
+__argv [prog]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 0
+
+line [prog]
+mode exit, show -1
+static object made, 1 arguments
+instance the image, previous null, show 10
+line []
+__argc 1, __argv set, __wargv null
+__argv [prog]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+left in the buffer for exit
+atexit
+static object destroyed
+exit 9
+
+line [prog]
+mode fault, show -1
+static object made, 1 arguments
+instance the image, previous null, show 10
+line []
+__argc 1, __argv set, __wargv null
+__argv [prog]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+signal 11
+static object destroyed
+exit 11
+
+line [prog]
+mode quiet, show -1
+descriptors -2 -2 -2, file 3
+printf 11 errno 9
+fflush -1 errno 9 error 1
+fprintf 11 errno 9 error 1
+fputs 0 errno 9 error 1
+fputc -1 errno 9 error 1
+getchar -1 errno 9 eof 0 error 1
+exit 5
+
+line [prog x]
+mode args, show 0
+static object made, 2 arguments
+instance the image, previous null, show 0
+line [x]
+__argc 2, __argv set, __wargv null
+__argv [prog]
+__argv [x]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [prog x]
+mode args, show 2
+static object made, 2 arguments
+instance the image, previous null, show 2
+line [x]
+__argc 2, __argv set, __wargv null
+__argv [prog]
+__argv [x]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+line [prog x]
+mode args, show 7
+static object made, 2 arguments
+instance the image, previous null, show 7
+line [x]
+__argc 2, __argv set, __wargv null
+__argv [prog]
+__argv [x]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+static object destroyed
+exit 7
+
+exit 0

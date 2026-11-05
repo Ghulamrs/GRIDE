@@ -147,7 +147,8 @@ static std::string quoted(const std::string& s) {
     return out + "\"";
 }
 
-std::string flags(const Store& store, ToolchainKind kind, Configuration config, const std::string& arch) {
+std::string flags(const Store& store, ToolchainKind kind, Configuration config, const std::string& arch,
+                  const path::Names* names) {
     std::string why, out;
     const char* tool = kind == ToolCc1 ? "c90" : kind == ToolCxx1 ? "cpp11" : kind == ToolShc ? "shc" : 0;
     if (!tool) return out;
@@ -165,9 +166,9 @@ std::string flags(const Store& store, ToolchainKind kind, Configuration config, 
     if (kind == ToolCxx1 && store.value(config, "cpp11.compress") == "0" && available("cpp11.compress", arch, why))
         out += " --no_compress";
     std::vector<std::string> defs = entries(store.value(config, t + ".defines"));
-    for (size_t i = 0; i < defs.size(); ++i) out += " -D" + quoted(defs[i]);
+    for (size_t i = 0; i < defs.size(); ++i) out += " -D" + quoted(names ? names->expand(defs[i]) : defs[i]);
     std::vector<std::string> undefs = entries(store.value(config, t + ".undefines"));
-    for (size_t i = 0; i < undefs.size(); ++i) out += " -U" + quoted(undefs[i]);
+    for (size_t i = 0; i < undefs.size(); ++i) out += " -U" + quoted(names ? names->expand(undefs[i]) : undefs[i]);
     if (store.value(config, "general.nologo") == "1") out += " -nologo";
     std::string jobs = store.value(config, "general.jobs");
     if (jobs != "Auto") out += " -j" + jobs;

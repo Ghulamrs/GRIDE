@@ -33,7 +33,7 @@ int __grt_temporary_name(char letter, char *out, unsigned size)
     int bytes, held;
     unsigned long tries;
     if (n == 0 || n >= 262) { __grt_set_errno_from(GetLastError()); return -1; }
-    bytes = WideCharToMultiByte(GRT_CP_ACP, 0, folder, -1, name, 260, 0, 0);
+    bytes = WideCharToMultiByte(GRT_CP_NARROW, 0, folder, -1, name, 260, 0, 0);
     if (bytes <= 0) { errno = ENOENT; return -1; }
     for (tries = 0; tries < 0x7FFFFFFFul; tries++) {
         unsigned long k;

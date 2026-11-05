@@ -3,11 +3,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+
+// RTS6x's GRIDE extension, the shortest text of a double (docs\Runtime_Design.md 14.4), which the Shalimar runtime
+// prints its reals with: the VM answers library calls itself, so it takes RTS6x's own source rather than a copy.
+#include "../../RTS6x/src/stdio/_gride_shortest_double.cpp"
 
 // ---- the argument cursor ------------------------------------------------------
 uint32_t Runtime::Args::word() { uint32_t v = cpu.load32(at); at += 4; return v; }
@@ -63,6 +68,27 @@ Runtime::File *Runtime::streamFile(uint32_t s) {
     }
     if (s >= 4 && s - 4 < files_.size()) return &files_[s - 4];
     return nullptr;
+}
+
+// RTS6x's strerror (src\misc\strerror.cpp): its numbers, the C6000's in <errno.h>, and its words.
+static const char *errorText(uint32_t code) {
+    switch (code) {
+    case 0: return "No error";
+    case 1: return "Operation not permitted";
+    case 2: return "No such file or directory";
+    case 4: return "Interrupted system call";
+    case 5: return "Input/output error";
+    case 9: return "Bad file descriptor";
+    case 12: return "Cannot allocate memory";
+    case 13: return "Permission denied";
+    case 17: return "File exists";
+    case 22: return "Invalid argument";
+    case 28: return "No space left on device";
+    case 33: return "Numerical argument out of domain";
+    case 34: return "Numerical result out of range";
+    case 84: return "Illegal byte sequence";
+    default: return "Unknown error";
+    }
 }
 
 // ---- errno: one word on the heap, handed out by address -----------------------
@@ -644,20 +670,22 @@ std::vector<std::string> Runtime::names() {
     static const char *const k[] = {
         "putchar", "puts", "printf", "vprintf", "sprintf", "vsprintf", "snprintf", "vsnprintf",
         "fprintf", "vfprintf", "fputs", "fputc", "putc", "fwrite", "fflush", "fopen", "fclose",
-        "fgetc", "getc", "getchar", "fgets", "fread", "ftell", "fseek", "rewind", "feof", "remove",
+        "fgetc", "getc", "getchar", "fgets", "fread", "ftell", "fseek", "rewind", "feof", "remove", "rename",
         "perror", "ferror", "clearerr", "__errno_location", "__c6xabi_errno_addr", "__assert_fail", "__assert_rtn", "_assert", "__c6xabi_abort_msg",
         "sscanf", "fscanf", "scanf", "ungetc", "gets",
-        "exit", "abort", "atexit", "close", "malloc", "calloc", "realloc", "free",
+        "exit", "_Exit", "abort", "atexit", "close", "malloc", "calloc", "realloc", "free",
         "memcpy", "memmove", "memset", "memcmp", "memchr",
         "strlen", "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp", "strchr", "strrchr",
-        "strstr", "strpbrk", "strspn", "strcspn", "strtok", "strerror", "strdup", "getenv",
-        "atoi", "atol", "atof", "strtol", "strtoul", "strtod", "abs", "labs", "llabs", "rand", "srand",
-        "qsort", "bsearch",
-        "isalnum", "isalpha", "iscntrl", "isdigit", "isgraph", "islower", "isprint", "ispunct",
+        "strstr", "strpbrk", "strspn", "strcspn", "strtok", "strerror", "strdup", "getenv", "strcoll",
+        "atoi", "atol", "atoll", "atof", "strtol", "strtoul", "strtod", "abs", "labs", "llabs", "rand", "srand",
+        "qsort", "bsearch", "mblen",
+        "isalnum", "isalpha", "isblank", "iscntrl", "isdigit", "isgraph", "islower", "isprint", "ispunct",
         "isspace", "isupper", "isxdigit", "tolower", "toupper",
         "sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh",
         "exp", "log", "log10", "pow", "fabs", "floor", "ceil", "fmod", "ldexp", "frexp", "modf", "trunc", "round", "__c6xabi_trunc", "__c6xabi_nround",
-        "log2", "cbrt", "hypot", "exp2", "log1p", "expm1",
+        "log2", "cbrt", "hypot", "exp2", "log1p", "expm1", "_gride_shortest_double",
+        "acosh", "asinh", "atanh", "erf", "erfc", "lgamma", "tgamma", "logb", "ilogb", "scalbn", "scalbln", "rint", "nearbyint",
+        "lrint", "llrint", "lround", "llround", "copysign", "nan", "nextafter", "fdim", "fmax", "fmin", "fma", "remainder", "remquo",
         "sqrtf", "fabsf", "floorf", "ceilf",
         "setjmp", "_setjmp", "longjmp", "time", "clock",
         "signal", "raise", "mktime", "localtime", "gmtime", "strftime", "difftime",
@@ -682,6 +710,7 @@ std::vector<std::string> Runtime::names() {
         "__vm6747_sb_sync", "__vm6747_sb_xsputn", "__vm6747_sb_xsputnc", "__vm6747_sb_overflow",
         "__vm6747_num_put_bool", "__vm6747_num_put_long", "__vm6747_num_put_ulong", "__vm6747_num_put_double",
         "__vm6747_num_put_ldouble", "__vm6747_num_put_llong", "__vm6747_num_put_ullong", "__vm6747_num_put_pointer",
+        "div", "ldiv", "lldiv",
         "__c6xabi_divi", "__c6xabi_divu", "__c6xabi_remi", "__c6xabi_remu",
         "__c6xabi_divlli", "__c6xabi_divull", "__c6xabi_remlli", "__c6xabi_remull",
         "__c6xabi_divf", "__c6xabi_divd", "__c6xabi_fixfu", "__c6xabi_fixdu",
@@ -848,7 +877,7 @@ bool Runtime::call(const std::string &n, Cpu &c) {
         c.exitWith(134);
         return true;
     }
-    if (n == "perror") { std::string s = c.readString(arg(c, 0)); std::fprintf(stderr, "%s: error\n", s.c_str()); return true; }
+    if (n == "perror") { std::string s = c.readString(arg(c, 0)); std::fprintf(stderr, "%s: %s\n", s.c_str(), errorText(c.load32(errnoAt(c)))); return true; }
     // ---- files: kept in memory on the host until closed ----
     if (n == "fopen") {
         std::string path = c.readString(arg(c, 0)), mode = c.readString(arg(c, 1));
@@ -934,9 +963,12 @@ bool Runtime::call(const std::string &n, Cpu &c) {
     }
     if (n == "rewind") { uint32_t s = arg(c, 0); if (s >= 4 && s - 4 < files_.size()) files_[s - 4].pos = 0; return true; }
     if (n == "feof") { File *f = streamFile(streamNumber(c, arg(c, 0))); ret(c, f != nullptr && f->pos >= f->data.size()); return true; }
+    // errno stays as it is, as RTS6x's: the C$$IO$$ channel answers these with a status and no reason.
     if (n == "remove") { ret(c, std::remove(c.readString(arg(c, 0)).c_str()) == 0 ? 0 : 0xffffffffu); return true; }
+    if (n == "rename") { ret(c, std::rename(c.readString(arg(c, 0)).c_str(), c.readString(arg(c, 1)).c_str()) == 0 ? 0 : 0xffffffffu); return true; }
     // ---- process ----
     if (n == "exit") { std::fflush(stdout); c.exitWith(static_cast<int>(arg(c, 0))); return true; }
+    if (n == "_Exit") { atExit_.clear(); std::fflush(stdout); c.exitWith(static_cast<int>(arg(c, 0))); return true; }
     if (n == "abort") { std::fflush(stdout); c.exitWith(134); return true; }   // silently, as the real one
     if (n == "atexit") { AtExit a; a.fn = arg(c, 0); a.arg = 0; atExit_.push_back(a); ret(c, 0); return true; }
     if (n == "time") { uint32_t p = arg(c, 0); uint32_t t = static_cast<uint32_t>(std::time(nullptr)); if (p) c.store32(p, t); ret(c, t); return true; }
@@ -1065,7 +1097,7 @@ bool Runtime::call(const std::string &n, Cpu &c) {
         c.writeBytes(at, s.data(), static_cast<uint32_t>(s.size())); c.store8(at + static_cast<uint32_t>(s.size()), 0);
         ret(c, d); return true;
     }
-    if (n == "strcmp") { int r = std::strcmp(c.readString(arg(c, 0)).c_str(), c.readString(arg(c, 1)).c_str()); ret(c, static_cast<uint32_t>(r < 0 ? -1 : r > 0 ? 1 : 0)); return true; }
+    if (n == "strcmp" || n == "strcoll") { int r = std::strcmp(c.readString(arg(c, 0)).c_str(), c.readString(arg(c, 1)).c_str()); ret(c, static_cast<uint32_t>(r < 0 ? -1 : r > 0 ? 1 : 0)); return true; }
     if (n == "strncmp") { int r = std::strncmp(c.readString(arg(c, 0)).c_str(), c.readString(arg(c, 1)).c_str(), arg(c, 2)); ret(c, static_cast<uint32_t>(r < 0 ? -1 : r > 0 ? 1 : 0)); return true; }
     if (n == "strchr" || n == "strrchr") {
         uint32_t p = arg(c, 0); std::string s = c.readString(p); char ch = static_cast<char>(arg(c, 1));
@@ -1089,7 +1121,14 @@ bool Runtime::call(const std::string &n, Cpu &c) {
         if (c.load8(p) != 0) { c.store8(p, 0); saved = p + 1; } else saved = 0;
         ret(c, start); return true;
     }
-    if (n == "strerror") { static uint32_t msg = 0; if (msg == 0) { msg = allocate(c, 32); c.writeBytes(msg, "error\0", 6); } ret(c, msg); return true; }
+    if (n == "strerror") {
+        static uint32_t msg = 0;
+        if (msg == 0) msg = allocate(c, 64);
+        const char *text = errorText(arg(c, 0));
+        c.writeBytes(msg, text, static_cast<uint32_t>(std::strlen(text)) + 1);
+        ret(c, msg);
+        return true;
+    }
     // getenv answers from the host's environment: Shalimar's Debug runtime asks it for SHM_DEBUG.
     if (n == "getenv") {
         const char *v = std::getenv(c.readString(arg(c, 0)).c_str());
@@ -1100,6 +1139,8 @@ bool Runtime::call(const std::string &n, Cpu &c) {
     if (n == "strdup") { std::string s = c.readString(arg(c, 0)); uint32_t p = allocate(c, static_cast<uint32_t>(s.size()) + 1); c.writeBytes(p, s.c_str(), static_cast<uint32_t>(s.size()) + 1); ret(c, p); return true; }
     // ---- conversions ----
     if (n == "atoi" || n == "atol") { ret(c, static_cast<uint32_t>(std::atoi(c.readString(arg(c, 0)).c_str()))); return true; }
+    if (n == "atoll") { retWide(c, static_cast<uint64_t>(std::strtoll(c.readString(arg(c, 0)).c_str(), nullptr, 10))); return true; }
+    if (n == "mblen") { ret(c, arg(c, 0) != 0 && arg(c, 1) != 0 && c.load8(arg(c, 0)) != 0); return true; }
     if (n == "atof") { retDouble(c, std::atof(c.readString(arg(c, 0)).c_str())); return true; }
     if (n == "strtol" || n == "strtoul" || n == "strtod") {
         uint32_t p = arg(c, 0); std::string s = c.readString(p); uint32_t endp = arg(c, 1);
@@ -1152,6 +1193,7 @@ bool Runtime::call(const std::string &n, Cpu &c) {
             ret(c, r != 0); return true;
         }
     }
+    if (n == "isblank") { uint32_t ch = arg(c, 0); ret(c, ch == ' ' || ch == '\t' ? 0x40 : 0); return true; }   // RTS6x's answer
     if (n == "tolower") { ret(c, static_cast<uint32_t>(std::tolower(static_cast<int>(arg(c, 0))))); return true; }
     if (n == "toupper") { ret(c, static_cast<uint32_t>(std::toupper(static_cast<int>(arg(c, 0))))); return true; }
     // ---- math ----
@@ -1161,13 +1203,61 @@ bool Runtime::call(const std::string &n, Cpu &c) {
             { "asin", std::asin }, { "acos", std::acos }, { "atan", std::atan }, { "sinh", std::sinh }, { "cosh", std::cosh },
             { "tanh", std::tanh }, { "exp", std::exp }, { "log", std::log }, { "log10", std::log10 }, { "fabs", std::fabs },
             { "floor", std::floor }, { "ceil", std::ceil }, { "trunc", std::trunc }, { "round", std::round }, { "__c6xabi_trunc", std::trunc }, { "__c6xabi_nround", std::round },
-            { "log2", std::log2 }, { "cbrt", std::cbrt }, { "exp2", std::exp2 }, { "log1p", std::log1p }, { "expm1", std::expm1 } };
+            { "log2", std::log2 }, { "cbrt", std::cbrt } };
         for (const M1 &m : m1) if (n == m.name) { retDouble(c, m.f(argDouble(c, 0))); return true; }
         struct M2 { const char *name; double (*f)(double, double); };
         static const M2 m2[] = { { "atan2", std::atan2 }, { "pow", std::pow }, { "fmod", std::fmod }, { "hypot", std::hypot } };
         for (const M2 &m : m2) if (n == m.name) { retDouble(c, m.f(argDouble(c, 0), argDouble(c, 1))); return true; }
+        // C99's, which RTS6x shares with GRIDE's runtime for Windows: the host's library gives the same values to within
+        // an ulp (tests\math99), and the UCRT's errno is the errno RTS6x sets, in the same numbers.
+        const auto hostErrno = [&]() { if (errno != 0) setErrno(c, static_cast<uint32_t>(errno)); };
+        static const M1 c1[] = { { "exp2", std::exp2 }, { "log1p", std::log1p }, { "expm1", std::expm1 }, { "acosh", std::acosh },
+            { "asinh", std::asinh }, { "atanh", std::atanh }, { "erf", std::erf }, { "erfc", std::erfc }, { "lgamma", std::lgamma },
+            { "tgamma", std::tgamma }, { "logb", std::logb }, { "rint", std::rint }, { "nearbyint", std::nearbyint } };
+        for (const M1 &m : c1) if (n == m.name) { errno = 0; const double r = m.f(argDouble(c, 0)); hostErrno(); retDouble(c, r); return true; }
+        static const M2 c2[] = { { "copysign", std::copysign }, { "nextafter", std::nextafter }, { "fdim", std::fdim }, { "fmax", std::fmax },
+            { "fmin", std::fmin }, { "remainder", std::remainder } };
+        for (const M2 &m : c2) if (n == m.name) { errno = 0; const double r = m.f(argDouble(c, 0), argDouble(c, 1)); hostErrno(); retDouble(c, r); return true; }
+        if (n == "fma") { retDouble(c, std::fma(argDouble(c, 0), argDouble(c, 1), argDouble(c, 2))); return true; }
+        if (n == "nan") { retDouble(c, std::nan("")); return true; }
+        if (n == "ilogb") { ret(c, static_cast<uint32_t>(std::ilogb(argDouble(c, 0)))); return true; }
+        if (n == "scalbn" || n == "scalbln") { errno = 0; const double r = std::scalbn(argDouble(c, 0), static_cast<int>(arg(c, 1))); hostErrno(); retDouble(c, r); return true; }
+        if (n == "remquo") {
+            int q = 0;
+            errno = 0;
+            const double r = std::remquo(argDouble(c, 0), argDouble(c, 1), &q);
+            hostErrno();
+            c.store32(arg(c, 2), static_cast<uint32_t>(q));
+            retDouble(c, r);
+            return true;
+        }
+        // By their range on the C6747, where a long is 32 bits, whatever the host's is: RTS6x's IntegralPart.
+        if (n == "lrint" || n == "lround") {
+            const double r = n == "lrint" ? std::rint(argDouble(c, 0)) : std::round(argDouble(c, 0));
+            if (r != r || r > 2147483647.0 || r < -2147483648.0) { setErrno(c, EDOM); ret(c, 0); return true; }
+            ret(c, static_cast<uint32_t>(static_cast<int32_t>(r)));
+            return true;
+        }
+        if (n == "llrint" || n == "llround") {
+            const double r = n == "llrint" ? std::rint(argDouble(c, 0)) : std::round(argDouble(c, 0));
+            if (r != r || r > 9223372036854775808.0 || r < -9223372036854775808.0) { setErrno(c, EDOM); retWide(c, 0); return true; }
+            retWide(c, r == 9223372036854775808.0 ? 0x8000000000000000ull : static_cast<uint64_t>(static_cast<int64_t>(r)));
+            return true;
+        }
         if (n == "ldexp") { retDouble(c, std::ldexp(argDouble(c, 0), static_cast<int>(arg(c, 1)))); return true; }
         if (n == "frexp") { int e = 0; double r = std::frexp(argDouble(c, 0), &e); c.store32(arg(c, 1), static_cast<uint32_t>(e)); retDouble(c, r); return true; }
+        if (n == "_gride_shortest_double") {
+            char text[512];
+            const int count = _gride_shortest_double(text, sizeof text, argDouble(c, 2));
+            const uint32_t buf = arg(c, 0), cap = arg(c, 1);
+            if (cap > 0) {
+                const uint32_t k = static_cast<uint32_t>(count) < cap - 1 ? static_cast<uint32_t>(count) : cap - 1;
+                c.writeBytes(buf, text, k);
+                c.store8(buf + k, 0);
+            }
+            ret(c, static_cast<uint32_t>(count));
+            return true;
+        }
         if (n == "modf") { double ip = 0; double r = std::modf(argDouble(c, 0), &ip); uint64_t v; std::memcpy(&v, &ip, 8); c.store64(arg(c, 1), v); retDouble(c, r); return true; }
         if (n == "sqrtf") { retFloat(c, std::sqrt(argFloat(c, 0))); return true; }
         if (n == "fabsf") { retFloat(c, std::fabs(argFloat(c, 0))); return true; }
@@ -1349,6 +1439,22 @@ bool Runtime::call(const std::string &n, Cpu &c) {
     if (n == "_ZNKSt9type_info4nameEv") { ret(c, c.load32(arg(c, 0) + 4)); return true; }
     if (n == "_ZNKSt9type_info6beforeERKS_") { ret(c, c.readString(c.load32(arg(c, 0) + 4)) < c.readString(c.load32(arg(c, 1) + 4))); return true; }
     // ---- the EABI helpers ----
+    // C's div family: a structure of eight bytes comes back in A5:A4, a larger one where A3 points.
+    if (n == "div" || n == "ldiv") {
+        int32_t a = static_cast<int32_t>(c.reg(Cpu::A4)), b = static_cast<int32_t>(c.reg(Cpu::B4));
+        if (b == 0) c.fault("division by zero");
+        const uint32_t quot = static_cast<uint32_t>(b == -1 ? -a : a / b), rem = static_cast<uint32_t>(b == -1 ? 0 : a % b);
+        retWide(c, (static_cast<uint64_t>(rem) << 32) | quot);
+        return true;
+    }
+    if (n == "lldiv") {
+        int64_t a = static_cast<int64_t>(c.pair(Cpu::A4)), b = static_cast<int64_t>(c.pair(Cpu::B4));
+        if (b == 0) c.fault("division by zero");
+        const uint32_t at = c.reg(Cpu::A + 3);
+        c.store64(at, static_cast<uint64_t>(b == -1 ? -a : a / b));
+        c.store64(at + 8, static_cast<uint64_t>(b == -1 ? 0 : a % b));
+        return true;
+    }
     if (n == "__c6xabi_divi") { int32_t a = static_cast<int32_t>(c.reg(Cpu::A4)), b = static_cast<int32_t>(c.reg(Cpu::B4)); if (b == 0) c.fault("division by zero"); ret(c, static_cast<uint32_t>(b == -1 ? -a : a / b)); return true; }
     if (n == "__c6xabi_divu") { uint32_t a = c.reg(Cpu::A4), b = c.reg(Cpu::B4); if (b == 0) c.fault("division by zero"); ret(c, a / b); return true; }
     if (n == "__c6xabi_remi") { int32_t a = static_cast<int32_t>(c.reg(Cpu::A4)), b = static_cast<int32_t>(c.reg(Cpu::B4)); if (b == 0) c.fault("division by zero"); ret(c, static_cast<uint32_t>(b == -1 ? 0 : a % b)); return true; }

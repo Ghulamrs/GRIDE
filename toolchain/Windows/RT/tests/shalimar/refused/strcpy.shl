@@ -1,0 +1,6 @@
+// refused: 'strcpy' writes through a pointer, which Shalimar has no type for
+uses strcpy
+
+fun <> = main() {
+  ? 1
+}

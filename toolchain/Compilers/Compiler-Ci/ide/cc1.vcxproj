@@ -42,7 +42,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <DisableSpecificWarnings>4996;4267;4244;4456;4146</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>$(ProjectDir)..\msvc\compat;$(ProjectDir)..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;CC1_INCLUDE_DIR="$([System.String]::Copy('$(ProjectDir)..\lib').Replace('\','/'))";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;CC1_INCLUDE_DIR="$([System.String]::Copy('$(ProjectDir)..\..\..\include\c').Replace('\','/'))";CC1_WIN_INCLUDE_DIR="$([System.String]::Copy('$(ProjectDir)..\..\..\include\win').Replace('\','/'))";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link><SubSystem>Console</SubSystem></Link>
@@ -105,25 +105,31 @@
     <ClInclude Include="..\src\backend\X86_64Windows.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <!-- The headers an installation ships, beside c90.exe: lib\ holds c90's C headers, which is where c90 looks first
-       (lib\ with stddef.h beside the program, as RIDE's stage.cmd lays it out); the runtime libraries share the
-       folder. Without them an installed c90 found its headers only through the checkout path compiled into it.
-       The list is made inside the target, so Visual Studio shows no wildcard item; the check is off so that Visual
-       Studio runs the copy even when c90.exe is up to date. -->
+  <!-- The C headers an installation ships beside c90.exe, one set with cpp11's (toolchain\include, docs\
+       Runtime_Design.md 5.2-5.4): include\c and include\win, where c90 looks first, and for one release the old
+       lib\ too, where earlier tools look. This project writes include\c and include\win for both compilers; cpp11's
+       writes include\c++. The list is made inside the target, so Visual Studio shows no wildcard item; the check is
+       off so that Visual Studio runs the copy even when c90.exe is up to date. -->
   <PropertyGroup>
     <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
   </PropertyGroup>
   <Target Name="C90Headers" AfterTargets="Build">
     <ItemGroup>
-      <C90Header Include="$(ProjectDir)..\lib\*.h" />
+      <CHeader Include="$(ProjectDir)..\..\..\include\c\*.h" />
+      <CSysHeader Include="$(ProjectDir)..\..\..\include\c\sys\*.h" />
+      <WinHeader Include="$(ProjectDir)..\..\..\include\win\*.h" />
     </ItemGroup>
-    <Copy SourceFiles="@(C90Header)" DestinationFolder="$(OutDir)lib" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CHeader)" DestinationFolder="$(OutDir)include\c" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CSysHeader)" DestinationFolder="$(OutDir)include\c\sys" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(WinHeader)" DestinationFolder="$(OutDir)include\win" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CHeader)" DestinationFolder="$(OutDir)lib" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="C90HeadersClean" AfterTargets="Clean">
     <ItemGroup>
-      <C90Header Include="$(ProjectDir)..\lib\*.h" />
-      <C90HeaderCopy Include="@(C90Header->'$(OutDir)lib\%(Filename)%(Extension)')" />
+      <CHeader Include="$(ProjectDir)..\..\..\include\c\*.h" />
+      <CHeaderCopy Include="@(CHeader->'$(OutDir)lib\%(Filename)%(Extension)')" />
     </ItemGroup>
-    <Delete Files="@(C90HeaderCopy)" />
+    <Delete Files="@(CHeaderCopy)" />
+    <RemoveDir Directories="$(OutDir)include\c;$(OutDir)include\win" />
   </Target>
 </Project>

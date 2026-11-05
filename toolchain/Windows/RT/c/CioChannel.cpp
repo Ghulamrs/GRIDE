@@ -9,7 +9,7 @@
 namespace rts6x {
 int CioChannel::write(int fd, const char *bytes, unsigned count)
 {
-    if (fd & grt::StreamDescriptor) return grt::put(__grt_streams[fd & 0xFFFF], bytes, count);
+    if (fd & grt::StreamDescriptor) return grt::putCall(__grt_streams[fd & 0xFFFF], bytes, count);
     return __grt_write(fd, bytes, count);
 }
 int CioChannel::read(int fd, char *bytes, unsigned count) { return __grt_read(fd, bytes, count); }

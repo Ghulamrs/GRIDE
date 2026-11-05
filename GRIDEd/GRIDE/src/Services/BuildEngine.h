@@ -300,6 +300,7 @@ namespace Gride { namespace Services {
         String^ writes;              // the file the running compiler writes: its echo of the path is not shown
         int toolLines;               // lines the running tool wrote
         int toolHidden;              // of them, the ones past MaxToolLines: counted, not shown
+        String^ toolCommand;         // its command line, shown beneath its lines when it fails
         literal int MaxToolLines = 40;
         bool clSettingsSaid;         // the project's own cl settings were named (once a project build)
         bool rideHeadersSaid;        // an installation header directory kept from cl was named (once)
@@ -312,13 +313,63 @@ namespace Gride { namespace Services {
         List<String^>^ loggedEnvironment;   // the variables the command logged before was given
 
         // The Windows C runtime a link takes: "grt" (GRIDE's) or "msvc" (Microsoft's). Tools > Options says which;
-        // automatic is Microsoft's only where Visual Studio is found and cl's objects are among the inputs - they
-        // name its libraries themselves - and GRIDE's otherwise, always where there is no Visual Studio.
-        String^ WindowsRuntime(bool clObjects)
+        // automatic is Microsoft's only where Visual Studio is found and the link has cl's objects or a library that
+        // names Microsoft's runtime by /DEFAULTLIB - both name its libraries themselves - and GRIDE's otherwise,
+        // always where there is no Visual Studio (docs\Runtime_Design.md 13.1).
+        String^ WindowsRuntime(bool clObjects, bool microsoftLibrary)
         {
             String^ choice = settings->Env->EffectiveWindowsRuntime();
             if (choice != "auto") return choice;
-            return clObjects && VisualStudio::Find() != nullptr ? "msvc" : "grt";
+            return (clObjects || microsoftLibrary) && VisualStudio::Find() != nullptr ? "msvc" : "grt";
+        }
+
+        // Whether the archive or object at path names Microsoft's C runtime by /DEFAULTLIB (or -defaultlib:), as a
+        // library cl built does: its objects' directives read from its bytes, as link reads them
+        static bool NamesMicrosoftRuntime(String^ path)
+        {
+            array<String^>^ runtimes = gcnew array<String^>{ "libcmt", "libcmtd", "msvcrt", "msvcrtd", "libucrt", "libucrtd",
+                "ucrt", "ucrtd", "libvcruntime", "libvcruntimed", "vcruntime", "vcruntimed", "libcpmt", "libcpmtd", "msvcprt", "msvcprtd" };
+            try
+            {
+                FileInfo^ f = gcnew FileInfo(path);
+                if (!f->Exists || f->Length > 64LL * 1024 * 1024) return false;
+                String^ text = System::Text::Encoding::GetEncoding(28591)->GetString(File::ReadAllBytes(path))->ToLowerInvariant();
+                for (int at = text->IndexOf("defaultlib:"); at >= 0; at = text->IndexOf("defaultlib:", at + 11))
+                {
+                    if (at == 0 || (text[at - 1] != '/' && text[at - 1] != '-')) continue;
+                    int i = at + 11;
+                    if (i < text->Length && text[i] == '"') i++;
+                    int start = i;
+                    while (i < text->Length && text[i] != '"' && text[i] != ' ' && text[i] > ' ') i++;
+                    String^ name = text->Substring(start, i - start);
+                    if (name->EndsWith(".lib")) name = name->Substring(0, name->Length - 4);
+                    if (Array::IndexOf(runtimes, name) >= 0) return true;
+                }
+            }
+            catch (Exception^) { }
+            return false;
+        }
+
+        // Whether a library this host link takes - the configuration's (found as the link finds them, in the project
+        // folder and its library folders), the .pro's, the shared ones - names Microsoft's C runtime
+        bool LinksMicrosoftLibrary(GrideProject^ p, BuildConfiguration^ cfg)
+        {
+            List<String^>^ dirs = gcnew List<String^>();
+            dirs->Add(p->ProjectDir);
+            for each (String^ d in cfg->LibDirs) dirs->Add(p->ToAbsolute(d));
+            List<String^>^ named = Filled(p, cfg->Libs);
+            for each (String^ l in p->Libraries) named->Add(p->ToAbsolute(l));
+            for each (String^ l in settings->Env->SharedLibraries) named->Add(Filled(p, l));
+            for each (String^ l in named)
+            {
+                if (String::IsNullOrWhiteSpace(l)) continue;
+                String^ name = l->Trim();
+                String^ path = nullptr;
+                if (Path::IsPathRooted(name)) path = name;
+                else for each (String^ d in dirs) if (File::Exists(Path::Combine(d, name))) { path = Path::Combine(d, name); break; }
+                if (path != nullptr && NamesMicrosoftRuntime(path)) return true;
+            }
+            return false;
         }
 
         // Microsoft's runtime libraries, each refused to a link with GRIDE's runtime (docs\Runtime_Design.md 13.4)
@@ -386,6 +437,7 @@ namespace Gride { namespace Services {
         // log - with the variables GRIDE sets that differ from the command before's, the others named
         void ShowCommand(String^ command, String^ workDir, ToolRunOptions^ options)
         {
+            toolCommand = command;
             if (settings->Env->ShowCommandLines) Output("> " + command);
             OpenLog();
             if (logWriter == nullptr) return;
@@ -483,6 +535,13 @@ namespace Gride { namespace Services {
         void EndTool(int rc, String^ source, String^ toolName, String^ targetName)
         {
             if (toolHidden > 0) Say(String::Format("[{0}: {1} more line(s) not shown]", toolName, toolHidden));
+            // a tool that failed: the command it was given, beneath what it said, unless the pane showed it before
+            // it ran (Tools > Options); the log has it either way
+            if (rc != 0 && rc != ToolRunner::ExitCancelled && !settings->Env->ShowCommandLines && !String::IsNullOrEmpty(toolCommand))
+            {
+                Output(String::Format("[{0} returned {1} - its command line:]", toolName, rc));
+                Output("> " + toolCommand);
+            }
             if (rc == ToolRunner::ExitStartFailed)
                 Report(Severity::Error, source, toolName + " could not be run - name it under Tools > Options > Toolchains > " + targetName + ", or put it on PATH");
         }
@@ -978,6 +1037,8 @@ namespace Gride { namespace Services {
 
             ToolchainSettings^ tc = settings->Toolchain(t);
             BuildConfiguration^ cfg = p->GetConfiguration(r->Config, t);
+            p->Names = NamesOf(p, cfg, tc, r);
+            if (r->Action != BuildAction::Clean && !NamesKnown(p, cfg, tc)) return -1;
             String^ objDir = p->ToAbsolute(cfg->ObjDir);
             String^ outDir = p->ToAbsolute(cfg->OutDir);
             bool debug = cfg->IsDebug;
@@ -1260,7 +1321,10 @@ namespace Gride { namespace Services {
             String^ crt = String::Empty;
             if (!emulated && RideToolchain::HostCrt(t, "grt") != nullptr)
             {
-                crt = WindowsRuntime(clObjects);
+                bool microsoftLibrary = LinksMicrosoftLibrary(p, cfg);
+                crt = WindowsRuntime(clObjects, microsoftLibrary);
+                if (crt == "msvc" && microsoftLibrary && !clObjects && settings->Env->EffectiveWindowsRuntime() == "auto")
+                    Say("[a library this link takes names Microsoft's C runtime by /DEFAULTLIB - Microsoft's is linked]");
                 String^ libs = RideToolchain::CrtLibraries(t, debug, crt, tc->ToolDir, ToolchainSettings::RideRoot);
                 String^ where = RideToolchain::CrtDirectory(t, "grt", tc->ToolDir, ToolchainSettings::RideRoot);
                 // a Debug build links the Debug variants (grtstartd.lib ...), as a Debug build on Microsoft's links libcmtd
@@ -1312,7 +1376,7 @@ namespace Gride { namespace Services {
         {
             if (shalimarProgram)
             {
-                // the Shalimar runtime built for the C runtime in force (shmrt-x86_64-windows-grt.lib over GRIDE's)
+                // the Shalimar runtime built for the C runtime in force (lib\x86_64-windows\shmrt.lib over GRIDE's, msvc\shmrt.lib over Microsoft's)
                 LibraryDefinition^ lib = ToolchainDefinitions::Current->LibraryByKind(RideToolchain::Arch(tc->TargetKind), "shalimarRuntime", crt);
                 String^ shm = RideToolchain::HostShalimarRuntime(tc->TargetKind, debug, tc->ToolDir, ToolchainSettings::RideRoot, crt);
                 if (shm != nullptr)
@@ -1372,7 +1436,7 @@ namespace Gride { namespace Services {
             List<String^>^ libs = gcnew List<String^>();
             String^ rts = rts6x ? RideToolchain::RtsLibrary(debug) : eh ? cd->RuntimeLibrary : cd->RuntimeFallback;
             bool namedRts = false;
-            for each (String^ lib in cfg->Libs)
+            for each (String^ lib in Filled(p, cfg->Libs))
             {
                 if (String::IsNullOrWhiteSpace(lib)) continue;
                 String^ l = lib->Trim();
@@ -1439,7 +1503,7 @@ namespace Gride { namespace Services {
                 if (Directory::Exists(abs)) libDirs->Add(abs);
                 else Say("[library search path not on this machine, left out: " + d + "]");
             }
-            libDirs->AddRange(tc->LibDirs);
+            libDirs->AddRange(Filled(p, tc->LibDirs));
             mx->Set("LibDirFlags", MacroExpander::JoinFlags(tc->LibDirFlag, libDirs));
             // TI's linker takes c_int00 from the library only under --rom_model, the model CCS defaults to
             if (!rts6x && ld->Role == "nativeLinker" && !ownCmd && cfg->ExtraLinkFlags->IndexOf("_model") < 0)
@@ -1512,7 +1576,7 @@ namespace Gride { namespace Services {
             // no clang: the Release spelling (-masm=masm) and no -g, which only clang's assembly carries
             bool noLineTable = debug && codeViewMissing && RideToolchain::DebugsWithCodeView(tool, cfg->TargetKind, true) &&
                                !RideToolchain::OwnCodeView(tool, cfg->TargetKind, true);
-            String^ flags = RideToolchain::ConfigFlags(tool, debug, cfg->TargetKind, p->Options);
+            String^ flags = RideToolchain::ConfigFlags(tool, debug, cfg->TargetKind, p->Options, p->Names);
             if (noLineTable)
             {
                 List<String^>^ kept = gcnew List<String^>();
@@ -1534,16 +1598,16 @@ namespace Gride { namespace Services {
             for each (String^ d in cfg->IncludeDirs) inc->Add(p->ToAbsolute(d));
             // the .pro's "include", for every configuration
             for each (String^ d in p->Includes) if (!String::IsNullOrWhiteSpace(d)) inc->Add(p->ToAbsolute(d->Trim()));
-            inc->AddRange(tc->IncludeDirs);
+            inc->AddRange(Filled(p, tc->IncludeDirs));
             for each (String^ d in settings->Env->SharedIncludes)
-                if (!String::IsNullOrWhiteSpace(d)) inc->Add(Environment::ExpandEnvironmentVariables(d->Trim()));
+                if (!String::IsNullOrWhiteSpace(d)) inc->Add(Filled(p, d->Trim()));
             for each (String^ d in RideToolchain::InstallIncludeDirs(tool, ToolchainSettings::RideRoot, settings->Env->RideIncludeDir, settings->Env->RideLibDir))
                 if (!inc->Contains(d)) inc->Add(d);
             // the host's compiler reads its own headers (Visual Studio's INCLUDE): an installation's header
             // directory, however it came (shared includes, the target's), would stand in front of them
             if (hostTool) KeepInstallHeadersFrom(inc);
             mx->Set("IncludeFlags", String::IsNullOrEmpty(ownInclude) ? String::Empty : MacroExpander::JoinFlags(includeFlag, inc));
-            mx->Set("DefineFlags", String::IsNullOrEmpty(ownDefine) ? String::Empty : MacroExpander::JoinDefines(defineFlag, cfg->Defines));
+            mx->Set("DefineFlags", String::IsNullOrEmpty(ownDefine) ? String::Empty : MacroExpander::JoinDefines(defineFlag, Filled(p, cfg->Defines)));
             // a Visual Studio project's own cl settings go to cl after the configuration's flags (/W4 /permissive- /EHsc /MT ...)
             String^ own = String::Empty;
             if (tool == RideTool::Cl && lang != Language::Assembly)
@@ -1582,6 +1646,62 @@ namespace Gride { namespace Services {
             Say("[" + String::Join(" and ", kept) + (kept->Count == 1 ? " is" : " are") + " not given to cl: the installation's headers would stand in front of Visual Studio's]");
         }
 
+        // the names a project's lists may use (NamedPaths): the .pro's "paths", settings.json's, read afresh for each
+        // build, then GRIDE's own - the project's and workspace's folders, Config, Arch, the installation's folders,
+        // and each library of toolchain.json under its key, the folder it is found in. Folders end in a backslash.
+        NamedPaths^ NamesOf(GrideProject^ p, BuildConfiguration^ cfg, ToolchainSettings^ tc, BuildRequest^ r)
+        {
+            NamedPaths^ n = gcnew NamedPaths();
+            for each (KeyValuePair<String^, String^> kv in p->Paths) n->Add(kv.Key, kv.Value);
+            try
+            {
+                JsonValue^ doc = File::Exists(settings->FilePath) ? JsonParser::ParseFile(settings->FilePath) : nullptr;
+                JsonValue^ named = doc == nullptr ? nullptr : doc->GetObject("paths");
+                if (named != nullptr) for each (String^ k in named->KeyNames) n->Add(k, named->GetString(k, String::Empty));
+            }
+            catch (Exception^) { /* an unreadable file: its other keys say so where they are read */ }
+            String^ root = ToolchainSettings::RideRoot;
+            InstallationDefinition^ inst = ToolchainDefinitions::Current->Installation;
+            n->Add("ProjectDir", PathUtil::WithTrailingSlash(p->ProjectDir));
+            n->Add("WorkspaceDir", PathUtil::WithTrailingSlash(String::IsNullOrEmpty(r->WorkspaceDir) ? p->ProjectDir : r->WorkspaceDir));
+            n->Add("Config", cfg->Config);
+            n->Add("Arch", RideToolchain::Arch(cfg->TargetKind));
+            n->Add("GrideRoot", PathUtil::WithTrailingSlash(RideToolchain::InstallRoot(root)));
+            n->Add("GrideRoot", PathUtil::WithTrailingSlash(PathUtil::AppDirectory()));
+            n->Add("GrideInclude", PathUtil::WithTrailingSlash(RideToolchain::InstallDir(root, inst->IncludeDir, settings->Env->RideIncludeDir)));
+            n->Add("GrideInclude", PathUtil::WithTrailingSlash(Path::Combine(PathUtil::AppDirectory(), inst->IncludeDir)));
+            n->Add("GrideLib", PathUtil::WithTrailingSlash(RideToolchain::InstallDir(root, inst->LibDir, settings->Env->RideLibDir)));
+            n->Add("GrideLib", PathUtil::WithTrailingSlash(Path::Combine(PathUtil::AppDirectory(), inst->LibDir)));
+            for each (LibraryDefinition^ l in ToolchainDefinitions::Current->Libraries)
+                n->Add(l->Id, PathUtil::WithTrailingSlash(RideToolchain::FindLibraryDir(l, tc->ToolDir, root)));
+            return n;
+        }
+
+        // every name the lists use is known, or the build stops here, naming it and the entry: a compiler given a
+        // $(NAME) says something far stranger. A CCS or Visual Studio project's $(...) are its own, and stay.
+        bool NamesKnown(GrideProject^ p, BuildConfiguration^ cfg, ToolchainSettings^ tc)
+        {
+            NamedPaths^ n = p->Names;
+            n->Unknown = nullptr;
+            for each (IEnumerable<String^>^ list in gcnew array<IEnumerable<String^>^>{ p->Includes, p->Libraries, cfg->IncludeDirs, cfg->LibDirs, cfg->Libs,
+                     cfg->Defines, tc->IncludeDirs, tc->LibDirs, settings->Env->SharedIncludes, settings->Env->SharedLibraries })
+                n->ExpandAll(list);
+            for each (RideTool t in RideToolchain::Compilers()) RideToolchain::ConfigFlags(t, cfg->IsDebug, cfg->TargetKind, p->Options, n);
+            if (n->Unknown == nullptr || p->IsReadOnly) return true;
+            Report(Severity::Error, p->FilePath, "$(" + n->Unknown + ") in \"" + n->UnknownIn + "\" is not a known name, or names itself: name it under \"paths\" in the .pro or in settings.json");
+            return false;
+        }
+
+        // an entry, or a list, of a project or of Tools > Options with its names filled in
+        static String^ Filled(GrideProject^ p, String^ s) { return p->Names == nullptr ? Environment::ExpandEnvironmentVariables(s) : p->Names->Expand(s); }
+
+        static List<String^>^ Filled(GrideProject^ p, IEnumerable<String^>^ list)
+        {
+            List<String^>^ r = gcnew List<String^>();
+            for each (String^ s in list) r->Add(Filled(p, s));
+            return r;
+        }
+
         MacroExpander^ BaseMacros(GrideProject^ p, BuildConfiguration^ cfg, ToolchainSettings^ tc, BuildRequest^ r)
         {
             MacroExpander^ mx = gcnew MacroExpander();
@@ -1597,7 +1717,7 @@ namespace Gride { namespace Services {
             mx->Set("Debugger", tc->ResolveFor("debugger", tc->Debugger));
             mx->Set("Arch", RideToolchain::Arch(cfg->TargetKind));
             mx->Set("ArchFlag", RideToolchain::ArchFlag(RideTool::C90, cfg->TargetKind));
-            mx->Set("ConfigFlags", RideToolchain::ConfigFlags(RideTool::C90, cfg->IsDebug, cfg->TargetKind, p->Options));
+            mx->Set("ConfigFlags", RideToolchain::ConfigFlags(RideTool::C90, cfg->IsDebug, cfg->TargetKind, p->Options, p->Names));
             mx->Set("CrtLibs", RideToolchain::CrtLibraries(cfg->TargetKind, cfg->IsDebug));
             mx->Set("Config", cfg->Config);
             mx->Set("Target", TargetInfo::Name(cfg->TargetKind));
@@ -1618,21 +1738,21 @@ namespace Gride { namespace Services {
             for each (String^ d in cfg->IncludeDirs) inc->Add(p->ToAbsolute(d));
             // the .pro's "include", for every configuration
             for each (String^ d in p->Includes) if (!String::IsNullOrWhiteSpace(d)) inc->Add(p->ToAbsolute(d->Trim()));
-            inc->AddRange(tc->IncludeDirs);
+            inc->AddRange(Filled(p, tc->IncludeDirs));
             mx->Set("IncludeFlags", MacroExpander::JoinFlags(tc->IncludeFlag, inc));
-            mx->Set("DefineFlags", MacroExpander::JoinDefines(tc->DefineFlag, cfg->Defines));
+            mx->Set("DefineFlags", MacroExpander::JoinDefines(tc->DefineFlag, Filled(p, cfg->Defines)));
 
             List<String^>^ libDirs = gcnew List<String^>();
             for each (String^ d in cfg->LibDirs) libDirs->Add(p->ToAbsolute(d));
-            libDirs->AddRange(tc->LibDirs);
+            libDirs->AddRange(Filled(p, tc->LibDirs));
             mx->Set("LibDirFlags", MacroExpander::JoinFlags(tc->LibDirFlag, libDirs));
             // the project's libraries, then the shared ones every host link takes (RIDE's settings.json "libraries")
-            List<String^>^ libs = gcnew List<String^>(cfg->Libs);
+            List<String^>^ libs = Filled(p, cfg->Libs);
             // the .pro's "libraries", for every configuration
             for each (String^ l in p->Libraries) if (!String::IsNullOrWhiteSpace(l)) libs->Add(p->ToAbsolute(l->Trim()));
             if (!RideToolchain::IsEmulated(cfg->TargetKind))
                 for each (String^ l in settings->Env->SharedLibraries)
-                    if (!String::IsNullOrWhiteSpace(l) && !libs->Contains(l->Trim())) libs->Add(Environment::ExpandEnvironmentVariables(l->Trim()));
+                    if (!String::IsNullOrWhiteSpace(l) && !libs->Contains(l->Trim())) libs->Add(Filled(p, l->Trim()));
             mx->Set("LibFlags", MacroExpander::JoinFlags(tc->LibFlag, libs));
             return mx;
         }

@@ -1,0 +1,6 @@
+// fenv.shl - what the hosts' runtimes have and the C6747's has not: RTS6x keeps no floating-point environment
+uses fegetround, fesetround, feclearexcept, fetestexcept
+
+fun <> = main() {
+  ? fegetround() fesetround(0) feclearexcept(0) fetestexcept(0)
+}

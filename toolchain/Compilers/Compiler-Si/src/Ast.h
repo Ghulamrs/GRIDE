@@ -298,6 +298,10 @@ public:
     int builtin() const { return builtin_; }
     void resolveBuiltin(int index) { builtin_ = index; }
 
+    // Written `c.name(...)`: the runtime's function, whatever the program has named or borrowed.
+    bool qualified() const { return qualified_; }
+    void qualify() { qualified_ = true; }
+
     void add(ExprPtr argument) { arguments_.push_back(std::move(argument)); }
 
     const std::string &callee() const { return callee_; }
@@ -319,6 +323,7 @@ private:
     const Prototype *prototype_ = nullptr;
     int scratchBase_ = 0;
     int builtin_ = -1;
+    bool qualified_ = false;
 };
 
 class Stmt : public Node {

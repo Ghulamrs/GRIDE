@@ -1,7 +1,7 @@
 /* grt.h - what the parts of GRIDE's runtime for Windows say to each other (docs\Runtime_Design.md 4.2).
  *
  * The libraries are layers, each calling only itself and the layers below it:
- *   grtstart   mainCRTStartup, the initialiser tables, __chkstk, _fltused
+ *   grtstart   the four entries (mainCRTStartup ...), the initialiser tables, __chkstk, _fltused
  *   grtcompat  legacy and Microsoft-compatibility names (32-bit time, POSIX names, /GS)
  *   grtcxx     C++ support
  *   grtc       the ISO C library: RTS6x's, and the Windows stream layer (c\Stream*.cpp)
@@ -21,6 +21,7 @@ extern "C" {
 #define GRT_TEXT   0x4000
 #define GRT_BINARY 0x8000
 #define GRT_DESCRIPTORS 8192        /* the Microsoft runtime's limit */
+#define GRT_READ_BLOCK 4096         /* what a handle that cannot seek is read by */
 
 /* What __grt_descriptor tells about an open descriptor, besides GRT_TEXT or GRT_BINARY */
 #define GRT_KIND_MASK    0x0F
@@ -30,6 +31,12 @@ extern "C" {
 #define GRT_KIND_CONSOLE 4          /* a character device on which GetConsoleMode succeeds */
 #define GRT_KIND_OTHER   5
 #define GRT_APPEND       0x10       /* every write goes to the end */
+
+/* ---- grtstart: start\start.c and start\entryguard.asm, what the four entries share */
+/* the program's start, up to and including its C and C++ initialisers; wide says which arguments it wants */
+void __grt_start(int wide);
+/* entry(a, b, c, d) under __grt_main_handler: its answer */
+int __grt_call_entry(void *entry, long long a, long long b, long long c, long long d);
 
 /* ---- grtwin: win\files.c, the descriptors. Each answers -1 on failure, errno set. */
 void __grt_files_start(void);
@@ -52,11 +59,18 @@ int  __grt_unlink(const char *path);
 int  __grt_rename(const char *from, const char *to);
 /* errno for a Windows error number, as the Microsoft runtime maps it */
 void __grt_set_errno_from(unsigned long code);
-/* path in UTF-16 from the ANSI code page, in memory from the process heap (the caller frees it with HeapFree);
-   0 with errno set */
+/* path in UTF-16 from the code page of the program's narrow strings, in memory from the process heap (the caller
+   frees it with HeapFree); 0 with errno set */
 unsigned short *__grt_widen(const char *path);
 /* a message on stderr, unbuffered, for the runtime's own errors */
 void __grt_say(const char *message);
+/* non-zero while the program's narrow strings are UTF-8, which setlocale asks for (docs\Runtime_Design.md 6); 0 as a
+   program starts: the ANSI code page */
+extern int __grt_utf8;
+/* a text console's bytes while __grt_utf8 is set, set by win\utf8.c when it is: every byte (1), or 0 with errno set; and
+   one read, its count, 0 at the end, -1 on an error */
+extern int (*__grt_console_put)(void *handle, char *cut, unsigned *cutCount, const char *bytes, unsigned count);
+extern int (*__grt_console_get)(void *handle, unsigned short *high, char *bytes);
 
 /* ---- grtwin: win\getcwd.c */
 /* the working directory's drive, 1 for A:, 2 for B: ...; 0 when it has no drive letter (a share's path) */
@@ -64,8 +78,22 @@ int  __grt_drive(void);
 
 /* ---- grtwin: win\environment.c */
 char **__grt_environment(void);
+unsigned short **__grt_wide_environment(void);
 int  __grt_getenv(const char *name, char *value, unsigned capacity);
-void __grt_arguments(int *argc, char ***argv);
+/* __argc, and __wargv when wide, else __argv, from the command line; <stdlib.h> reads them */
+void __grt_arguments(int wide);
+/* the vector the last __grt_environment made; null until then */
+extern char **__grt_envp_given;
+
+/* ---- grtwin: win\utf8.c */
+/* __grt_utf8 set, and argv and the environment spelled again in that encoding */
+void __grt_set_utf8(int on);
+
+/* ---- grtwin: win\winargs.c */
+/* WinMain's and wWinMain's third argument, and the fourth of both */
+char *__grt_winmain_line(void);
+unsigned short *__grt_wide_winmain_line(void);
+int  __grt_show_command(void);
 
 /* ---- grtwin: win\time.c, Windows' clock and time zone */
 long long __grt_time_now(void);          /* seconds since 1970-01-01 00:00:00 UTC */
@@ -87,6 +115,10 @@ void __grt_lock(void **lock);
 void __grt_unlock(void **lock);
 void __grt_wait(void **condition, void **lock);
 void __grt_wake_all(void **condition);
+
+/* ---- grtwin: win\chartype.c */
+/* a UTF-16 code unit's CT_CTYPE1 classes, as GetStringTypeW gives them; 0 when it gives none */
+unsigned short __grt_char_type(unsigned short c);
 
 /* ---- grtwin: win\control.c */
 /* routine set as a console control handler (Ctrl+C 0, Ctrl+Break 1; non-zero when it took the event); 0 or -1 */
@@ -148,6 +180,14 @@ void __grt_streams_start(void);
 void __grt_memory_start(void);
 
 #ifdef __cplusplus
+}
+#include <stddef.h>
+namespace grt {
+// q - p in bytes, without the idiv by 1 cpp11 writes for a difference of char pointers
+inline size_t bytesBetween(const void *p, const void *q)
+{
+    return (size_t)((unsigned long long)q - (unsigned long long)p);
+}
 }
 #endif
 #endif

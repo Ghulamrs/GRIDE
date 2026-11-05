@@ -261,11 +261,45 @@ std::string resolved(const std::string& name) {
     return found.empty() ? name : found;
 }
 
+// What a project's lists, the shared lists and the defines may name (path.h): the .pro's "paths",
+// settings.json's, read afresh, then GRIDE's own - by the names Black and Grey give them, a library
+// by its key in their toolchain.json. GRIDE 1.0 has one project, so the workspace is its folder.
+editor::path::Names namesFor(GRIDEProject* project, const char* arch, int config) {
+    typedef std::vector<std::pair<std::string, std::string> > Named;
+    editor::path::Names names;
+    const bool loaded = project && project->project.loaded();
+    if (loaded) {
+        const Named& own = project->project.paths();
+        for (size_t i = 0; i < own.size(); ++i) names.add(own[i].first, own[i].second);
+    }
+    const Named set = editor::settings::namedPaths();
+    for (size_t i = 0; i < set.size(); ++i) names.add(set[i].first, set[i].second);
+    if (loaded) {
+        names.addFolder("ProjectDir", project->project.root());
+        names.addFolder("WorkspaceDir", project->project.root());
+    }
+    if (config >= 0) names.add("Config", config == editor::ConfigDebug ? "Debug" : "Release");
+    if (arch && *arch) names.add("Arch", arch);
+    names.addFolder("GrideRoot", editor::path::programDirectory());
+    names.addFolder("GrideInclude", editor::settings::includeDir());
+    names.addFolder("GrideLib", editor::settings::libDir());
+    const std::string rts = editor::rts6xRuntimeDir();
+    names.addFolder("rts6x", rts);
+    names.addFolder("printf6x", rts);
+    names.addFolder("shmrt6x", rts);
+    const std::string grt = editor::grtDirectory();
+    names.addFolder("grt", grt);
+    names.addFolder("shmrtWindowsGrt", grt);
+    names.addFolder("shmrtWindows", grt.empty() ? grt : editor::path::join(grt, "msvc"));
+    return names;
+}
+
 // The toolchain every build is given: the compilers as named, the
 // installation's header directories, and the project's own paths when a
 // project is open. The window has one project and passes it, loaded or not.
-editor::Toolchain toolFrom(GRIDEProject* project, const char* cc1, const char* cl,
-                           const char* shc, const char* cxx1, int config = -1) {
+// ccsLink: a CCS project's link is wanted too, for the configuration being built.
+editor::Toolchain toolFrom(GRIDEProject* project, const char* cc1, const char* cl, const char* shc,
+                           const char* cxx1, const char* arch, int config, bool ccsLink = false) {
     editor::Toolchain tool;
     if (cc1 && *cc1) tool.cc1 = cc1;
     if (cl && *cl) tool.cl = cl;
@@ -278,17 +312,30 @@ editor::Toolchain toolFrom(GRIDEProject* project, const char* cc1, const char* c
     tool.cxx = resolved(tool.cxx);
     tool.include = editor::settings::includeDir();
     tool.lib = editor::settings::libDir();
+    tool.names = namesFor(project, arch, config);
     if (project && project->project.loaded()) {
-        tool.includes = project->project.absoluteIncludes();
-        tool.libraries = project->project.absoluteLibraries();
+        tool.includes = project->project.absoluteIncludes(&tool.names);
+        tool.libraries = project->project.absoluteLibraries(&tool.names);
         // A CCS project's link, for the configuration being built (ccs/ccsproject.h).
-        if (config >= 0) tool.tiLink = project->project.tiLink(static_cast<editor::Configuration>(config));
+        if (ccsLink && config >= 0) tool.tiLink = project->project.tiLink(static_cast<editor::Configuration>(config));
         tool.emulateOnly = project->project.emulateOnly();
     }
-    std::vector<std::string> shared = editor::settings::includes();
+    std::vector<std::string> shared = tool.names.expandAll(editor::settings::includes());
     tool.includes.insert(tool.includes.end(), shared.begin(), shared.end());
-    shared = editor::settings::libraries();
-    tool.libraries.insert(tool.libraries.end(), shared.begin(), shared.end());
+    // "libraries every host link takes": not a C6747 link, which takes the project's
+    if (!(arch && editor::isEmulated(arch))) {
+        shared = tool.names.expandAll(editor::settings::libraries());
+        tool.libraries.insert(tool.libraries.end(), shared.begin(), shared.end());
+    }
+    // Every name known, or the build stops, naming it and the entry; a CCS project's $(...) are its own.
+    if (config >= 0) {
+        const editor::Configuration built = static_cast<editor::Configuration>(config);
+        editor::options::flags(editor::options::active(), editor::ToolCc1, built, arch ? arch : "", &tool.names);
+        editor::options::flags(editor::options::active(), editor::ToolCxx1, built, arch ? arch : "", &tool.names);
+    }
+    if (!tool.names.unknown().empty() && !(project && project->project.isCcs()))
+        tool.namesRefused = "$(" + tool.names.unknown() + ") in \"" + tool.names.unknownIn() +
+                            "\" is not a known name, or names itself: name it under \"paths\" in the .pro or in settings.json";
     return tool;
 }
 
@@ -1150,7 +1197,7 @@ int gride_uses_arch(int kind) {
 const char* gride_shown_command(GRIDEProject* project, const char* cc1, const char* cl, const char* shc, const char* cxx1, int kind,
                               const char* source, int language, const char* arch,
                               int config) {
-    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1);
+    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1, arch, config);
 
     scratch() = editor::shownCommand(tool, static_cast<editor::ToolchainKind>(kind),
                                      source ? source : "",
@@ -1174,7 +1221,7 @@ const char* gride_host_arch(void) { return editor::hostArch(); }
 const char* gride_shown_run_command(GRIDEProject* project, const char* cc1, const char* cl, const char* shc, const char* cxx1, int kind,
                                   const char* source, int language, const char* arch,
                                   int config) {
-    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1);
+    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1, arch, config);
 
     scratch() = editor::shownProgramCommand(tool, static_cast<editor::ToolchainKind>(kind),
                                             source ? source : "",
@@ -1187,7 +1234,7 @@ const char* gride_shown_run_command(GRIDEProject* project, const char* cc1, cons
 
 GRIDERan* gride_run(GRIDEProject* project, const char* cc1, const char* cl, const char* shc, const char* cxx1, int kind, const char* source,
                 int language, const char* arch, int config) {
-    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1);
+    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1, arch, config);
 
     GRIDERan* out = new GRIDERan();
     editor::BuildScope scope;
@@ -1214,7 +1261,7 @@ const char* gride_ran_error_file(GRIDERan* ran) { return ran ? ran->ran.diag.fil
 
 GRIDEProgram* gride_build_program(GRIDEProject* project, const char* cc1, const char* cl, const char* shc, const char* cxx1, int kind, const char* source,
                               int language, const char* arch, int config) {
-    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1);
+    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1, arch, config);
 
     GRIDEProgram* out = new GRIDEProgram();
     editor::BuildScope scope;
@@ -1830,7 +1877,7 @@ int gride_project_debug_plan(GRIDEProject* project, const char* cc1, const char*
         return 0;
     }
 
-    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1);
+    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1, arch, editor::ConfigDebug);
     tool.kind = static_cast<editor::ToolchainKind>(kind);
 
     project->plan = editor::dbg_planFor(tool, project->parts, arch ? arch : "");
@@ -1865,7 +1912,7 @@ GRIDEBuild* gride_build_target(GRIDEProject* project, const char* cc1, const cha
     if (!project->prepared && !gride_project_target_ready(project)) return 0;
     project->prepared = false;
 
-    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1, config);
+    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1, arch, config, true);
 
     tool.kind = static_cast<editor::ToolchainKind>(kind);
     // An Emulate asked for before this build builds no .out; the .pro's emulateOnly the same (R5, D2).
@@ -1941,7 +1988,7 @@ const char* gride_conversion_output(GRIDEConversion* made) {
 
 GRIDEBuild* gride_build(GRIDEProject* project, const char* cc1, const char* cl, const char* shc, const char* cxx1, int kind, const char* source,
                     int language, const char* arch, int config) {
-    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1);
+    editor::Toolchain tool = toolFrom(project, cc1, cl, shc, cxx1, arch, config);
 
     GRIDEBuild* out = new GRIDEBuild();
     editor::BuildScope scope;
@@ -2166,7 +2213,7 @@ GRIDERunning* gride_run_start(GRIDEProject* project, const char* cc1, const char
     running->onOutput = onOutput;
     running->user = user;
     running->fromSource = true;
-    running->tool = toolFrom(project, cc1, cl, shc, cxx1, config);
+    running->tool = toolFrom(project, cc1, cl, shc, cxx1, arch, config, true);
     running->kind = static_cast<editor::ToolchainKind>(kind);
     running->source = source ? source : "";
     running->language = static_cast<editor::Language>(language);
@@ -2228,7 +2275,7 @@ GRIDERunning* gride_run_start_line(GRIDEProject* project, const char* cc1, const
     running->onOutput = onOutput;
     running->user = user;
     running->fromSource = true;
-    running->tool = toolFrom(project, cc1, cl, shc, cxx1, config);
+    running->tool = toolFrom(project, cc1, cl, shc, cxx1, arch, config, true);
     running->kind = static_cast<editor::ToolchainKind>(kind);
     running->source = source ? source : "";
     running->language = static_cast<editor::Language>(language);

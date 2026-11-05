@@ -47,7 +47,7 @@ namespace Gride { namespace Settings {
         property String^ DebugAssembler;    // clang, for a Debug build's CodeView on x86_64-windows
         property String^ DebugLinker;       // Microsoft's link.exe, the one that writes a PDB; empty = found through vcvars
         property String^ Runtime;           // a runtime library file handed to the link (rts6x.lib / rts6xd.lib by configuration)
-        property String^ RuntimeDir;        // RTS6x's directory, lnk6x's -i (lib\rts6x-tms6747)
+        property String^ RuntimeDir;        // RTS6x's directory, lnk6x's -i (lib\tms6747)
         property String^ Simulator;         // sim6747: runs the linked .out
         property String^ Emulator;          // vm6747: runs the assembly, and is the tms6747 debugger (--debug)
         property String^ Debugger;          // cdb for x86_64-windows, gdb / lldb elsewhere

@@ -6,9 +6,9 @@
     1  sieve.c on Windows        c90 -> masm -> link -> sieve.exe, run
     2  shapes.cpp on the C6747   cpp11 -> asm6x -> lnk6x (rts6x.lib) -> shapes.out, run by sim6747
     3  sieve.c as Shalimar       c2s -> sieve.shl -> shalimar, then
-                                   a  vm6747 runs the C6747 assembly straight (lib\shmrt-tms6747)
+                                   a  vm6747 runs the C6747 assembly straight (lib\tms6747\shmrt)
                                    b  asm6x -> lnk6x (shmrt6x.lib, rts6x.lib) -> sim6747
-                                   c  masm -> link (shmrt-x86_64-windows.lib) -> a Windows program
+                                   c  masm -> link (lib\x86_64-windows\msvc\shmrt.lib) -> a Windows program
                                  each prints what example 1 printed: the C and the Shalimar program agree
 
   The command lines are toolchain.json's (GRIDE's own). Nothing goes through cmd.exe. Run from PowerShell:
@@ -27,7 +27,9 @@ if (-not $Bin) {
 }
 $bin  = $Bin
 $out  = Join-Path $here "out\$Configuration"
-$rts  = Join-Path $bin 'lib\rts6x-tms6747'
+# the tree of docs\Runtime_Design.md 5.3, or an earlier installation's lib\ where that is what -Bin names
+function InTree([string]$now, [string]$before) { if (Test-Path (Join-Path $bin $now)) { Join-Path $bin $now } else { Join-Path $bin $before } }
+$rts  = InTree 'lib\tms6747' 'lib\rts6x-tms6747'
 $debug = $Configuration -eq 'Debug'
 
 foreach ($exe in 'c90','cpp11','shalimar','c2s','masm','link','asm6x','lnk6x','sim6747','vm6747') {
@@ -112,7 +114,7 @@ $shflags = if ($debug) { @('-g') } else { @() }
 Step (Tool shalimar) (@('-S', "$out\sieve.shl", '-o', "$out\sieve-shl.s", '--target=tms6747') + $shflags) | Out-Null
 
 Title "3a the C6747 assembly run straight: vm6747"
-$shmdir = Join-Path $bin $(if ($debug) { 'lib\shmrt-tms6747-debug' } else { 'lib\shmrt-tms6747' })
+$shmdir = if ($debug) { InTree 'lib\tms6747\shmrt-debug' 'lib\shmrt-tms6747-debug' } else { InTree 'lib\tms6747\shmrt' 'lib\shmrt-tms6747' }
 Same $expected (Step (Tool vm6747) @("$out\sieve-shl.s", $shmdir))
 
 Title "3b linked for the C6747: asm6x -> lnk6x (shmrt6x, RTS6x) -> sim6747"
@@ -122,7 +124,7 @@ Same $expected (Step (Tool sim6747) @('--run', '-c', "$out\sieve-shl.out"))
 
 Title "3c linked for Windows: shalimar -> masm -> link (the Shalimar runtime for Windows)"
 $shwin = if ($debug) { @('--debug') } else { @() }
-$shmwin = Join-Path $bin $(if ($debug) { 'lib\shmrt-x86_64-windows-debug.lib' } else { 'lib\shmrt-x86_64-windows.lib' })
+$shmwin = if ($debug) { InTree 'lib\x86_64-windows\msvc\shmrtd.lib' 'lib\shmrt-x86_64-windows-debug.lib' } else { InTree 'lib\x86_64-windows\msvc\shmrt.lib' 'lib\shmrt-x86_64-windows.lib' }
 Step (Tool shalimar) (@('-S', "$out\sieve.shl", '-o', "$out\sieve-shl-win.s", '--target=x86_64-windows') + $shwin) | Out-Null
 Step (Tool masm) @('-t', 'x64', "$out\sieve-shl-win.s", '-o', "$out\sieve-shl-win.obj") | Out-Null
 Step (Tool link) (@('/nologo', '/subsystem:console', "/out:$out\sieve-shl.exe", "$out\sieve-shl-win.obj", $shmwin) + $crt) | Out-Null

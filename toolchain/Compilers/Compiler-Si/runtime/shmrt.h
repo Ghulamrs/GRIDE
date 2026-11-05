@@ -45,6 +45,10 @@ void shm_line(int32_t unit, int32_t line);
 
 void shm_name_file(int32_t unit, const char *name);
 
+/* The program stops with "Error: <file> line <n>: <message>", the way the runtime's own failures end it: what a
+   library built-in calls when the C function it wraps reports failure (docs\Runtime_Design.md 14.3). */
+void shm_fail(const char *message);
+
 int32_t shm_int_add(int32_t a, int32_t b);
 int32_t shm_int_sub(int32_t a, int32_t b);
 int32_t shm_int_mul(int32_t a, int32_t b);

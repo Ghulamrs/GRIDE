@@ -462,8 +462,13 @@ std::vector<Token> Lexer::tokenize() {
                     const int digits = s[i + 1] == 'u' ? 4 : 8;
                     i += 2;
                     appendUtf8(text, universalName(s, i, digits));
-                } else if (s[i] == '\\') { i++; text.push_back(static_cast<char>(unescape(s, i, start))); }
-                else text.push_back(s[i++]);
+                } else if (s[i] == '\\') {
+                    i++;
+                    // [lex.string]/10: in a wide, char16_t or char32_t literal an escape is one code unit of its
+                    // value - carried in the UTF-8 text the way a universal-character-name is; elsewhere one byte.
+                    if (wide) appendUtf8(text, unescape(s, i, start, true));
+                    else text.push_back(static_cast<char>(unescape(s, i, start)));
+                } else text.push_back(s[i++]);
             }
             if (i >= s.size()) src_.fail(start, "unterminated string");
             i++;

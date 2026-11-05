@@ -7,7 +7,8 @@
   -OwnConsole runs each program in a hidden console of its own, for a probe that sends its console Ctrl+C, which
   reaches every process the console has. -DebugRuntime links the Debug variants: GRIDE's grtstartd ... grtwind and
   Microsoft's libcmtd, libucrtd and libvcruntimed; the transcript (<name>.debug.expected where there is one) is
-  what a correct program prints through either.
+  what a correct program prints through either. No /subsystem is given: link takes it, and the entry, from what
+  the object defines, so a source with WinMain is a windows program here.
 
     .\probe.ps1 <source> [-Opt -O2|-O0] [-Bin <toolchain folder>] [-Libs <the runtime's folder>] [-Record] [-OwnConsole]
                 [-DebugRuntime]
@@ -17,7 +18,7 @@ param([Parameter(Mandatory = $true)][string]$Source, [string]$Opt = '-O2', [stri
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 if (-not $Bin) { $Bin = (Resolve-Path (Join-Path $here '..\..\..\..\GRIDEd\x64\Release')).Path }
-if (-not $Libs) { $Libs = Join-Path $Bin 'lib' }
+if (-not $Libs) { $Libs = Join-Path $Bin 'lib\x86_64-windows'; if (-not (Test-Path (Join-Path $Libs 'grtc.lib'))) { $Libs = Join-Path $Bin 'lib' } }
 $Source = (Resolve-Path $Source).Path
 $name = [IO.Path]::GetFileNameWithoutExtension($Source)
 $work = Join-Path $env:TEMP "gride-probe-$name"
@@ -54,12 +55,12 @@ try {
     $env:LIB = ''
     # recording needs only the UCRT's run: a runtime still without the probe's names is reported, not fatal
     $grtLinked = $true
-    try { Tool link (@('/nologo', '/subsystem:console', "/out:$work\$name-grt.exe", "$work\$name.obj") + $grt) }
+    try { Tool link (@('/nologo', "/out:$work\$name-grt.exe", "$work\$name.obj") + $grt) }
     catch { if (-not $Record) { throw }; $grtLinked = $false; "${name} grt: not linked - $_" }
     $ms = MicrosoftLib
     if ($ms) {
         $env:LIB = $ms
-        Tool link @('/nologo', '/subsystem:console', "/out:$work\$name-msvc.exe", "$work\$name.obj", "libcmt$d.lib", "libucrt$d.lib",
+        Tool link @('/nologo', "/out:$work\$name-msvc.exe", "$work\$name.obj", "libcmt$d.lib", "libucrt$d.lib",
                     "libvcruntime$d.lib", 'kernel32.lib', 'legacy_stdio_definitions.lib')
     }
 } finally { $env:LIB = $saved }

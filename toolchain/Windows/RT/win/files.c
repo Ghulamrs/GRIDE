@@ -10,6 +10,9 @@
  * a read can be looked past. The table grows in blocks of 64 descriptors as files are opened. Nothing here
  * calls the C library: this is the lowest layer, and kernel32 is all it calls.
  *
+ * While the program's narrow strings are UTF-8 (__grt_utf8) a text console's bytes go through win\utf8.c, which only
+ * a program that asks for UTF-8 links. A file, a pipe and a console in binary mode take the bytes as they are.
+ *
  * Locks, as the Microsoft runtime's lowio takes them, once the program has threads (__grt_threads): each read,
  * write, seek, close and _setmode holds its descriptor's lock, and a free descriptor is claimed under the table's,
  * marked CLAIMED until its file is open, so that two opens never take one descriptor. A close frees it by its last
@@ -19,7 +22,7 @@
 #include "grt.h"
 #include "win32.h"
 
-#define AHEAD 4096
+#define AHEAD GRT_READ_BLOCK
 #define CTRL_Z 0x1A
 #define BLOCK 64
 #define BLOCKS (GRT_DESCRIPTORS / BLOCK)
@@ -33,12 +36,19 @@ struct Descriptor {
     int ended;              /* a text read met CTRL+Z */
     unsigned char *ahead;   /* a handle that cannot seek: bytes read from Windows, not yet given */
     unsigned aheadAt, aheadEnd;
+    char cut[3];            /* a text console under UTF-8: a character the last write stopped inside */
+    unsigned cutCount;
+    WCHAR high;             /* and a surrogate the last read stopped after, the first of its pair */
     void *lock;             /* an SRWLOCK, held for each call on the descriptor once there are threads */
 };
 
 static struct Descriptor first[BLOCK];
 static struct Descriptor *blocks[BLOCKS] = { first };
 static void *table;         /* an SRWLOCK: the growing of blocks and the claiming of a free descriptor */
+
+int __grt_utf8;
+int (*__grt_console_put)(void *handle, char *cut, unsigned *cutCount, const char *bytes, unsigned count);
+int (*__grt_console_get)(void *handle, unsigned short *high, char *bytes);
 
 /* the Microsoft runtime's errno for a Windows error number */
 void __grt_set_errno_from(unsigned long code)
@@ -124,6 +134,8 @@ static void grt_bind(struct Descriptor *d, HANDLE h, int mode)
     d->append = 0;
     d->ended = 0;
     d->aheadAt = d->aheadEnd = 0;
+    d->cutCount = 0;
+    d->high = 0;
 }
 
 /* 0, 1 and 2: the standard handles, in text mode, as a console program starts */
@@ -141,9 +153,16 @@ int __grt_descriptor(int fd)
     return d->mode | d->kind | (d->append ? GRT_APPEND : 0);
 }
 
+/* non-zero when this descriptor's text goes to and from Windows in UTF-16 (win\utf8.c) */
+static int grt_wide_console(const struct Descriptor *d)
+{
+    return __grt_utf8 && d->kind == GRT_KIND_CONSOLE && d->mode == GRT_TEXT;
+}
+
 /* every byte to Windows; 0 with errno set if it would not take them */
 static int grt_put(struct Descriptor *d, const char *bytes, unsigned count)
 {
+    if (grt_wide_console(d)) return __grt_console_put(d->handle, d->cut, &d->cutCount, bytes, count);
     if (d->append) SetFilePointerEx(d->handle, 0, 0, 2);
     while (count > 0) {
         DWORD wrote = 0;
@@ -206,6 +225,8 @@ static int grt_from_windows(struct Descriptor *d, char *bytes, unsigned count)
     return (int)got;
 }
 
+static int grt_raw(struct Descriptor *d, char *bytes, unsigned count);
+
 int __grt_read_raw(int fd, char *bytes, unsigned count)
 {
     int held, result;
@@ -218,6 +239,8 @@ int __grt_read_raw(int fd, char *bytes, unsigned count)
         for (i = 0; i < n; i++) bytes[i] = (char)d->ahead[d->aheadAt + i];
         d->aheadAt += n;
         result = (int)n;
+    } else if (grt_wide_console(d)) {
+        result = grt_raw(d, bytes, count);
     } else {
         result = grt_from_windows(d, bytes, count);
     }
@@ -236,7 +259,8 @@ static int grt_raw(struct Descriptor *d, char *bytes, unsigned count)
             d->ahead = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, AHEAD);
             if (!d->ahead) { errno = ENOMEM; return -1; }
         }
-        got = grt_from_windows(d, (char *)d->ahead, AHEAD);
+        got = grt_wide_console(d) ? __grt_console_get(d->handle, &d->high, (char *)d->ahead)
+                                  : grt_from_windows(d, (char *)d->ahead, AHEAD);
         d->aheadAt = 0;
         d->aheadEnd = got > 0 ? (unsigned)got : 0;
         if (got <= 0) return got;
@@ -299,11 +323,16 @@ int __grt_read(int fd, char *bytes, unsigned count)
 WCHAR *__grt_widen(const char *path)
 {
     WCHAR *wide;
-    int n = MultiByteToWideChar(GRT_CP_ACP, 0, path, -1, 0, 0);
-    if (n <= 0) { __grt_set_errno_from(GetLastError()); return 0; }
+    DWORD flags = __grt_utf8 ? GRT_MB_ERR_INVALID_CHARS : 0;    /* a name that is not UTF-8 names no file */
+    int n = MultiByteToWideChar(GRT_CP_NARROW, flags, path, -1, 0, 0);
+    if (n <= 0) {
+        if (__grt_utf8) errno = 42;                             /* EILSEQ */
+        else __grt_set_errno_from(GetLastError());
+        return 0;
+    }
     wide = (WCHAR *)HeapAlloc(GetProcessHeap(), 0, (unsigned long long)n * sizeof(WCHAR));
     if (!wide) { errno = ENOMEM; return 0; }
-    MultiByteToWideChar(GRT_CP_ACP, 0, path, -1, wide, n);
+    MultiByteToWideChar(GRT_CP_NARROW, flags, path, -1, wide, n);
     return wide;
 }
 

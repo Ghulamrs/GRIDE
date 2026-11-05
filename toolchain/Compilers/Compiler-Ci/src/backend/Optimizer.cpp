@@ -1548,6 +1548,7 @@ void Optimizer::location(int file, int line, int column) {
     event([this, file, line, column]() { under_->location(file, line, column); });
 }
 void Optimizer::predefine(const std::vector<std::string> &names) { interrupt(); under_->predefine(names); }
+void Optimizer::finishText(std::vector<std::string> &chunks) { interrupt(); under_->finishText(chunks); }
 void Optimizer::preamble(std::ostream &o) { interrupt(); under_->preamble(o); }
 void Optimizer::postamble(std::ostream &o) { interrupt(); under_->postamble(o); }
 void Optimizer::globl(const std::string &name) { interrupt(); under_->globl(name); }

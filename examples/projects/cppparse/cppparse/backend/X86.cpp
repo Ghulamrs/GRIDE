@@ -255,6 +255,7 @@ private:
     // blocks its branches reach, in chains, then the landing pads and handlers, each with what it alone reaches, so that
     // one target of every branch follows it where the order allows and a branch over a pad falls through
     std::vector<int>    m_order;
+    std::vector<bool>   m_emitted;        // the blocks the layout placed: the others nothing reaches
     std::vector<int>    m_next;           // block -> the block laid out after it, -1 for the last
     size_t              m_hotCount;       // the entry's group: the exit code follows its last block, the cold groups come after
     std::map<int, Interval> m_intervals;
@@ -423,12 +424,15 @@ void X86Function::layoutBlocks()
 {
     // group by group, each a root and the blocks its branches reach that no earlier group took, the roots in order of
     // their numbers: the entry's group is the ordinary code; a landing pad (a block only an exception enters) roots a
-    // group of its own, placed after the code of the region it serves, as are the handlers and whatever they alone reach
+    // group of its own, placed after the code of the region it serves, as are the handlers and whatever they alone
+    // reach. A block no branch and no region of a placed block reaches (the code after a return, a switch's end that
+    // no case breaks to: IrGen leaves them at -O0) is not placed, so not emitted
     const size_t n = m_f.blocks.size();
-    std::vector<bool> placed(n, false);
+    std::vector<bool> placed(n, false), reachable(n, false);
     m_order.clear();
+    if (n > 0) reachable[0] = true;
     for (size_t root = 0; root < n; ++root) {
-        if (placed[root]) continue;
+        if (placed[root] || !reachable[root]) continue;
         std::vector<bool> inGroup(n, false);
         std::vector<int> work;
         inGroup[root] = true;
@@ -469,7 +473,24 @@ void X86Function::layoutBlocks()
             cur = next;
         }
         if (root == 0) m_hotCount = m_order.size();
+        // the handlers of the regions the group opens root groups of their own (a handler may bear a lower number than
+        // this root: the scan goes back to it)
+        size_t lowest = n;
+        for (size_t k = 0; k < m_order.size(); ++k) {
+            const std::vector<IrInst>& insts = m_f.blocks[static_cast<size_t>(m_order[k])].insts;
+            for (size_t i = 0; i < insts.size(); ++i) {
+                if (insts[i].op != IrInst::TryBegin) continue;
+                for (size_t a = 0; a < insts[i].args.size(); ++a) {
+                    const int t = insts[i].args[a].id;
+                    if (insts[i].args[a].kind != IrOperand::Block || t < 0 || static_cast<size_t>(t) >= n || reachable[static_cast<size_t>(t)]) continue;
+                    reachable[static_cast<size_t>(t)] = true;
+                    if (static_cast<size_t>(t) < lowest) lowest = static_cast<size_t>(t);
+                }
+            }
+        }
+        if (lowest < root) root = lowest - 1;
     }
+    m_emitted = placed;
     m_next.assign(n, -1);
     for (size_t k = 0; k + 1 < m_order.size(); ++k) m_next[static_cast<size_t>(m_order[k])] = m_order[k + 1];
 }
@@ -941,9 +962,11 @@ void X86Function::resultsInRax()
     countSavedRegisters();
 }
 
+// (a function under the setjmp rules, hasTry without m_tableRegs, takes the hints too: a hinted value dies at its call
+// and crosses no call, throw or try operation, so no longjmp and no landing pad ever restores it; the landing pads'
+// own operands, the object's address and its destructor, went through callee-saved registers and two moves there)
 void X86Function::hintArguments()
 {
-    if (m_f.hasTry && !m_tableRegs) return;   // as coalesce: longjmp restores only the callee-saved registers
     for (size_t c = 0; c < m_calls.size(); ++c) {
         const int pos = m_calls[c];
         const IrInst& call = instAt(static_cast<size_t>(pos));
@@ -1948,7 +1971,7 @@ void X86Function::emitBody()
     for (size_t b = 0; b < m_f.blocks.size(); ++b)
         for (size_t i = 0; i < m_f.blocks[b].insts.size(); ++i) {
             const IrInst& in = m_f.blocks[b].insts[i];
-            if (in.op != IrInst::TryBegin) continue;
+            if (!m_emitted[b] || in.op != IrInst::TryBegin) continue;
             const int first = in.args.empty() || in.args[0].kind != IrOperand::Block ? -1 : in.args[0].id;
             if (m_tableEh && first >= 0 && catchType(first) == "...") {
                 // an object's landing pad, or catch (...) first: the stub would be one jump to the block, so the ranges
@@ -2109,6 +2132,50 @@ void replaceTempUses(IrFunction& f, int t, const IrOperand& o)
         }
 }
 
+// a value no instruction reads, computed without a side effect: an address, a constant, a copy, an arithmetic result
+// (not a division, which may trap), a comparison, a conversion, or a load of a local whose address nothing holds (a
+// volatile local is address-taken). IrGen leaves such loads of this, addresses of arrays and constants behind,
+// which the optimiser removes from -O1 on; -O0 emitted them as mov and lea
+bool unreadValue(const IrInst& in, const IrFunction& g, const std::map<int, int>& uses)
+{
+    if (in.dst < 0) return false;
+    const std::map<int, int>::const_iterator u = uses.find(in.dst);
+    if (u != uses.end() && u->second > 0) return false;
+    switch (in.op) {
+    case IrInst::Const: case IrInst::FConst: case IrInst::StrConst: case IrInst::Copy: case IrInst::AddrLocal: case IrInst::AddrField:
+    case IrInst::AddrIndex: case IrInst::AddrGlobal: case IrInst::Un: case IrInst::Cmp: case IrInst::Conv:
+        return true;
+    case IrInst::Bin:
+        return in.sub != "sdiv" && in.sub != "udiv" && in.sub != "srem" && in.sub != "urem";
+    case IrInst::LoadLocal:
+        return in.args.size() == 1 && in.args[0].kind == IrOperand::Local && in.args[0].id >= 0 && static_cast<size_t>(in.args[0].id) < g.locals.size() &&
+               !g.locals[static_cast<size_t>(in.args[0].id)].addressTaken;
+    default:
+        return false;
+    }
+}
+
+// drops the unread values, and what fed them alone, until none is left
+void dropUnreadValues(IrFunction& g)
+{
+    for (bool changed = true; changed;) {
+        changed = false;
+        std::map<int, int> uses;
+        for (size_t b = 0; b < g.blocks.size(); ++b)
+            for (size_t i = 0; i < g.blocks[b].insts.size(); ++i)
+                for (size_t a = 0; a < g.blocks[b].insts[i].args.size(); ++a)
+                    if (g.blocks[b].insts[i].args[a].kind == IrOperand::Temp) ++uses[g.blocks[b].insts[i].args[a].id];
+        for (size_t b = 0; b < g.blocks.size(); ++b) {
+            std::vector<IrInst> kept;
+            for (size_t i = 0; i < g.blocks[b].insts.size(); ++i) {
+                if (unreadValue(g.blocks[b].insts[i], g, uses)) changed = true;
+                else kept.push_back(g.blocks[b].insts[i]);
+            }
+            if (kept.size() != g.blocks[b].insts.size()) g.blocks[b].insts.swap(kept);
+        }
+    }
+}
+
 // -O0 lowers the IR as generated: a local assigned and read in the next statement is stored and loaded again, and
 // every constant is a `const` instruction whose value goes through a register to the one instruction that reads it.
 // Here, on a copy of the function (the IR itself is what the listings show), a load of a local that follows its
@@ -2118,7 +2185,7 @@ void replaceTempUses(IrFunction& f, int t, const IrOperand& o)
 // can change a local whose address is not taken). Then a `const` defined once and read once becomes its reader's
 // immediate operand where the instruction encodes or materialises it in place; a conversion of a constant to an
 // integer or pointer type folds to a constant of the converted type. The loads and `const` instructions that went
-// into their readers are dropped; the others keep their register
+// into their readers are dropped; the others keep their register. Last, the values nothing reads go (dropUnreadValues)
 bool constantsIntoOperands(const IrFunction& f, IrFunction& out)
 {
     std::map<int, int> defs, uses;
@@ -2140,6 +2207,9 @@ bool constantsIntoOperands(const IrFunction& f, IrFunction& out)
             else if (in.op == IrInst::Call || in.op == IrInst::VCall || in.op == IrInst::Throw || in.op == IrInst::TryBegin || in.op == IrInst::TryEnd || in.op == IrInst::CatchParam || in.op == IrInst::CatchEnd) stored = -1;
         }
     }
+    if (!any)
+        for (size_t b = 0; b < f.blocks.size() && !any; ++b)
+            for (size_t i = 0; i < f.blocks[b].insts.size() && !any; ++i) if (unreadValue(f.blocks[b].insts[i], f, uses)) any = true;
     if (!any) return false;
     out = f;
     // store-to-load forwarding within a block
@@ -2237,6 +2307,7 @@ bool constantsIntoOperands(const IrFunction& f, IrFunction& out)
         }
         out.blocks[b].insts.swap(kept);
     }
+    dropUnreadValues(out);
     return true;
 }
 

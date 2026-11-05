@@ -1,0 +1,2 @@
+Error: line 5: strncmp: a size of -1
+[exit 1]

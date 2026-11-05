@@ -32,7 +32,7 @@ public:
     void visit(Binary &n) override { walk(n.left()); walk(n.right()); }
 
     void visit(Call &n) override {
-        names.push_back(n.callee());
+        if (!n.qualified()) names.push_back(n.callee());
         for (ExprPtr &e : n.arguments()) walk(e);
     }
 
@@ -114,13 +114,7 @@ bool Checker::check(Program &program) {
     for (std::size_t i = 0; i < program.borrowed().size(); ++i) {
         const Program::Borrowed &b = program.borrowed()[i];
         if (findBuiltin(b.name) >= 0) continue;
-
-        if (const char *why = whyNotBorrowable(b.name)) {
-            diag_.error(unit_, b.line, "'" + b.name + "' " + why);
-        } else {
-            diag_.error(unit_, b.line,
-                        "'" + b.name + "' is not a library function this compiler knows");
-        }
+        diag_.error(unit_, b.line, notBorrowable(b.name));
     }
 
     for (StmtPtr &s : program.globals()) {
@@ -465,14 +459,27 @@ void Checker::visit(Binary &node) {
 
 void Checker::visit(Call &node) {
     // The program's own function wins: a builtin is what the name means when nothing in the file has claimed it, as sin is <math.h>'s until you declare your own.
-    Function *user = program_->find(node.callee());
+    Function *user = node.qualified() ? nullptr : program_->find(node.callee());
     // **And only if this file borrowed it.** A library function is not available by being known;
     // it is available by being asked for. Without the `uses` the name falls through to the
     // ordinary search for a function in the project's other files, and is reported missing like any other.
-    const int which = (user != nullptr || !program_->borrows(node.callee()))
+    // `c.name` asks for neither: it is the runtime's function, whatever this file has named or borrowed.
+    const int which = node.qualified() ? findLibrary(node.callee())
+                      : (user != nullptr || !program_->borrows(node.callee()))
                           ? -1
                           : findBuiltin(node.callee());
-    if (which >= 0) {
+    if (node.qualified() && which < 0) {
+        diag_.error(unit_, line_, notBorrowable(node.callee()));
+        for (ExprPtr &argument : node.arguments()) typeOf(argument);
+        return;
+    }
+    if (which >= 0 && c6747_ && findLibrary(node.callee()) >= 0 && !builtin(which).c6xSymbol) {
+        diag_.error(unit_, line_, "'" + node.callee() + "' is not in the C6747's runtime");
+        for (ExprPtr &argument : node.arguments()) typeOf(argument);
+        return;
+    }
+    const bool typed = which >= 0 && builtin(which).shape == Builtin::Shape::Typed;
+    if (which >= 0 && !typed) {
         const Builtin &fn = builtin(which);
         node.resolveBuiltin(which);
         if (static_cast<int>(node.arguments().size()) != fn.arity) {
@@ -503,8 +510,8 @@ void Checker::visit(Call &node) {
     }
 
     Function *callee = user;
-    const Prototype *declared = nullptr;
-    if (!callee) {
+    const Prototype *declared = typed ? &libraryPrototype(which) : nullptr;
+    if (!callee && !declared) {
         // A `uses` declaration, which carries its own prototype. It is checked exactly as a
         // written function's is - the declaration IS the contract, and it is the only thing this
         // compiler will ever know about the callee.

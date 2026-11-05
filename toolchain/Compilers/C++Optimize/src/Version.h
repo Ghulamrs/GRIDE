@@ -225,9 +225,75 @@
 // own errors said ([temp.res]/8-10) - Phase 4 finished; the library's compiler items: operator templates only
 // where lookup reaches them, explicit and converting constructor templates, bodies of unchosen candidates
 // left unsaid, ::operator new by name, initializer-list constructors with defaults, braced assignments.
-#define CXX1_VERSION      "1.49"
-#define CXX1_SEAL_DATE    "02-11-2026"
-#define CXX1_SEAL_FILE    "cxx1-1.49.dat"
+//
+// 1.50 (2026-11-02): Phase 7b begins - <functional> (function, bind, mem_fn, hash), <tuple>, <iterator> and
+// <string>'s iterator ranges, with what they met: deduction from pointers to member functions, assignment to
+// class prvalues, specializations only where deduced, copy-initialisation without explicit constructors,
+// member templates ranked, pointers to members through template-ids, and class-to-scalar casts refused.
+// 1.51 (2026-11-03): Phase 7b's containers - deque, list, forward_list, stack, queue, the unordered maps and
+// sets, bitset, vector<bool> - with vector and basic_string<charT, traits, Allocator> going through
+// allocator_traits, tuple's uses-allocator constructors and pair's piecewise one; and what they met: wrong
+// code where `return os << s.str();` returned a copy's address and `B(std::move(d))` moved a copy, a trait
+// asked inside a function clearing that function's slots, ADL through specializations, member templates'
+// namespaces and partial ordering with packs, `void()`, and C++11's converting constructors with defaults.
+// 1.52 (2026-11-03): Phase 7b finished - list, forward_list, deque and the unordered containers take their
+// storage from the allocator, rebound, and build elements through allocator_traits; map, multimap, set and
+// multiset keep an allocator and emplace in place, map::operator[] building its element piecewise; and what
+// they met: template template parameters passed on and matched with packs, empty pack expansions, a
+// template's own parameters hiding a template of their name, member defaults read in their class, trait
+// trials leaving functions marked used, and packs lost across a nested inline body.
+// 1.53 (2026-11-03): Phase 7c part 1 - <ratio>, <chrono>, <system_error> (ios_base::failure one), <cerrno>
+// with all of [errno]'s names, <typeindex>, <complex>, <valarray>, <random> with the standard's engine
+// values, <cmath>'s float, long double and integer overloads; and what they met: wrong code where `: m()`
+// skipped a default constructor taking defaults, block typedefs that were global, short-circuit constants,
+// constexpr bodies with typedefs, decltype as a nested name, and bound parameters in member templates.
+// 1.54 (2026-11-03): Phase 7e - <atomic>, <mutex>, <condition_variable>, <thread> and <future> over the
+// operating system's lock, condition variable and thread (atomics through one lock: the compiler emits no
+// interlocked instruction) - and Phase 7d: tms6747 is a freestanding implementation, __STDC_HOSTED__ 0; the
+// implicit object parameter ranked by its added qualifiers; nested #include to Annex B's 256.
+// 1.55 (2026-11-03): the iostreams as the standard's templates - basic_streambuf, basic_ios, basic_istream,
+// basic_ostream and the string and file streams over it, wide streams included, std::endl and its kin
+// templates, one cout per program. Compiler: an overloaded name right of << and >> resolved by the member
+// operator's parameter; a typedef of a specialization declared before its template's definition; a pointer
+// to a specialization put off while its base is made; earlier declarations' defaults under their own names;
+// a written template argument matched exactly in deduction; a base of a virtual base reached through the
+// table (wrong code); template-id vbtable names.
+// 1.56 (2026-11-03): <strstream> ([depr.str.strstreams]); a body compiled in the middle of another function -
+// a constructor template made for an initialiser - keeps its entry-zeroed flags and its statements'
+// temporaries in its own frame (wrong code: a std::function made in a variadic template wrote a parameter).
+// 1.57 (2026-11-03): <locale> and <codecvt> - the locale with every standard facet, a stream's numbers through
+// its num_put and num_get, imbue and getloc, wstring_convert and wbuffer_convert, codecvt_utf8/utf16; the
+// time and money manipulators through their facets. Compiler: operator member templates defined outside a
+// class; a protected base destructor in an implicit one; a default template argument read in its own
+// namespace; a conditional's same-typed arms keep their type; escapes in wide literals are code units;
+// <stdlib.h>'s MB_CUR_MAX.
+// 1.58 (2026-11-04): <regex> - the six grammars on a backtracking machine, leftmost-longest for POSIX's, with
+// regex_traits, sub_match, match_results, regex_match, regex_search, regex_replace and both iterators. Compiler:
+// k::name in an expression is k's, not a class template of the namespace around it; a function template's
+// default arguments are read in its namespace; a member's definition no longer reads its table entry after
+// the body has grown the table (a crash).
+// 1.59 (2026-11-04): a destructor that throws at the end of its scope runs once and the objects still alive are
+// destroyed; a destructor with no specification is non-throwing, [except.spec]/14; a throw in a noexcept function
+// calls std::terminate, not abort; noexcept(pf()) reads a pointer's own noexcept; throw of a prvalue builds the
+// exception object in place. Language: pointer to member to bool and the boolean conversion's rank, friend T,
+// function-type parameters, decltype of a function, T(4); as a temporary, lists of initializer_lists of two,
+// overloaded function arguments decided by the other arguments, the lvalue/rvalue reference tie-break of
+// [temp.deduct.partial]/9, packs of template template parameters, inherited constructor templates.
+// 1.60 (2026-11-04): <scoped_allocator>. A throwing destructor leaves its object's other members, bases and array
+// elements to be destroyed; a return in a destructor goes on to them; an initialiser's temporaries and object are
+// destroyed under a throw. Friends defined in a namespace's class template are defined; noexcept on friends, data
+// members and parameters; d.base::f() through a member typedef and a class's own private base by name; a trait no
+// longer asks for a constructor template's body; tag dispatch rules a candidate out before its body; a reference
+// binds a derived object with no constructor asked; an empty base is not copied over what follows it on the
+// Microsoft layout. Census complete.
+// 1.61 (2026-11-04): one name, one template per namespace - class templates, alias templates and function templates
+// of a name in several namespaces, a program's own `vector` beside the library's. Template names are looked up:
+// `vector<int>` with nothing bringing it here and `k::Box<int>` for a Box k has not are refused, two using-directives
+// finding two templates are ambiguous; using-declarations of class templates; `::X<int>` and `::g(1)`. Release links
+// by docs/Build_Policy.md: 7.45 MB to 4.73 MB.
+#define CXX1_VERSION      "1.61"
+#define CXX1_SEAL_DATE    "04-11-2026"
+#define CXX1_SEAL_FILE    "cxx1-1.61.dat"
 
 // The line every run prints first; what it claims is docs/EXCLUSIONS.md's to measure (review of 2026-10-08).
 #define CXX1_BANNER "©2026 G. R. Akhtar - C++03 with C++11 extensions"

@@ -1,7 +1,7 @@
-/* getcwd.c - _getcwd, the working directory in the ANSI code page (c90).
+/* getcwd.c - _getcwd, the working directory in the program's narrow code page (c90).
  *
  * Spec: Microsoft C runtime, _getcwd - the current drive's directory made whole ("X:." through GetFullPathNameW,
- * "." where the working directory has no drive letter), in the ANSI code page. Into buf when it and its terminator
+ * "." where the working directory has no drive letter), in the ANSI code page, or UTF-8 once setlocale asks. Into buf when it and its terminator
  * fit in size bytes; else a null pointer, errno ERANGE and buf[0] 0. A null buf: a block from malloc of size bytes
  * or the path's own, whichever is larger. A negative size, or size 0 with a buf, fails fast, as the runtime's check
  * of its parameters does. */
@@ -61,14 +61,14 @@ char *_getcwd(char *buf, int size)
     }
     full = grt_asked(where);
     if (!full) return 0;
-    need = WideCharToMultiByte(GRT_CP_ACP, 0, full, -1, 0, 0, 0, 0);
+    need = WideCharToMultiByte(GRT_CP_NARROW, 0, full, -1, 0, 0, 0, 0);
     if (need <= 0) __grt_set_errno_from(GetLastError());
     else if (buf) {
         if (need > size) errno = ERANGE;
         else out = buf;
     } else
         out = (char *)malloc((size_t)(need > size ? need : size));
-    if (out) WideCharToMultiByte(GRT_CP_ACP, 0, full, -1, out, need, 0, 0);
+    if (out) WideCharToMultiByte(GRT_CP_NARROW, 0, full, -1, out, need, 0, 0);
     HeapFree(GetProcessHeap(), 0, full);
     return out;
 }

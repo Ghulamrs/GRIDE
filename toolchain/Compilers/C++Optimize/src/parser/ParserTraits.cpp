@@ -232,10 +232,16 @@ bool Parser::traitWellFormed(TraitForm form, const Type *to, const std::vector<c
         std::vector<bool> used;
         int mayThrow;
         FrameSave frame;
+        // The trial's temporaries and their guards live in the trial's frame: left on the function's lists,
+        // the function zeroed those guards on entry in its own frame (`is_convertible` asked inside `make`
+        // wrote over its parameters).
+        std::vector<Temporary> temps, statementTemps;
+        std::vector<int> guards;
         Unrelated(Parser *pp, const std::vector<const Type *> &ops)
             : p(pp), operands(pp->traitOperands_), classes(pp->classStack_), cls(pp->currentClass_),
               function(pp->currentFunction_), instantiation(pp->instantiationOf_), mayThrow(pp->mayThrow_),
-              frame(pp->openFrame()) {
+              frame(pp->openFrame()), temps(pp->pendingTemps_), statementTemps(pp->statementTemps_),
+              guards(pp->guardSlots_) {
             for (const Signature &f : p->functions_) used.push_back(f.used);
             p->traitOperands_ = ops;
             p->classStack_.clear();
@@ -245,6 +251,9 @@ bool Parser::traitWellFormed(TraitForm form, const Type *to, const std::vector<c
             p->mayThrow_ = 0;
         }
         ~Unrelated() {
+            p->pendingTemps_ = temps;
+            p->statementTemps_ = statementTemps;
+            p->guardSlots_ = guards;
             p->closeFrame(frame);
             p->mayThrow_ = mayThrow;
             p->instantiationOf_ = instantiation;
@@ -252,9 +261,19 @@ bool Parser::traitWellFormed(TraitForm form, const Type *to, const std::vector<c
             p->currentClass_ = cls;
             p->classStack_ = classes;
             p->traitOperands_ = operands;
+            // What the trial's own specializations called is asked for again if the program turns out to use one.
+            TrialUses kept;
+            kept.from = used.size();
+            kept.to = p->functions_.size();
+            for (std::size_t i = 0; i < kept.to; i++)
+                if (p->functions_[i].used && (i >= used.size() || !used[i])) kept.called.push_back(i);
+            if (kept.from < kept.to && !kept.called.empty()) p->trialUses_.push_back(kept);
             // What the trial would have called is not used by the program for being asked about.
             for (std::size_t i = 0; i < used.size() && i < p->functions_.size(); i++)
                 p->functions_[i].used = used[i];
+            // Nor is anything the trial made: a specialization it instantiated would be emitted calling
+            // functions whose marks were just put back (unique_ptr's, asked about by is_constructible).
+            for (std::size_t i = used.size(); i < p->functions_.size(); i++) p->functions_[i].used = false;
         }
     };
 

@@ -54,6 +54,7 @@ namespace Gride { namespace Settings {
             C6747Debugger = "auto";
             WindowsDebugger = "auto";
             WindowsRuntime = "auto";
+            StepIntoRuntime = false;
             SyntaxColors = gcnew Dictionary<String^, String^>();
         }
         property String^ Theme;
@@ -90,8 +91,10 @@ namespace Gride { namespace Settings {
         property String^ WindowsDebugger;        // auto (gride-dbg beside GRIDE, else cdb, else lldb), gride-dbg, cdb: the other stands in where the one named is not there
         // the C runtime a Windows program links: grt (GRIDE's own, lib\grtc.lib and its layers), msvc (Microsoft's, Visual Studio's
         // libcmt and the SDK's UCRT), auto (Microsoft's only where Visual Studio is found and the build has cl's
-        // objects, GRIDE's otherwise); GRIDE_WINDOWS_RUNTIME in the environment at start wins
+        // objects or a library naming Microsoft's runtime by /DEFAULTLIB, GRIDE's otherwise); GRIDE_WINDOWS_RUNTIME in
+        // the environment at start wins
         property String^ WindowsRuntime;
+        property bool    StepIntoRuntime;        // a step into may stop in GRIDE's runtime's sources; off: stepped over, as Microsoft's CRT is
         property Dictionary<String^, String^>^ SyntaxColors;   // token -> "#RRGGBB" override
 
         // what ${CG_TOOL_ROOT} is resolved from, in RIDE's order: the CCS root when one is named (the
@@ -167,6 +170,7 @@ namespace Gride { namespace Settings {
             o->SetString("c6747Debugger", C6747Debugger);
             o->SetString("windowsDebugger", WindowsDebugger);
             o->SetString("windowsRuntime", WindowsRuntime);
+            o->SetBool("stepIntoRuntime", StepIntoRuntime);
             JsonValue^ c = JsonValue::MakeObject();
             for each (KeyValuePair<String^, String^> kv in SyntaxColors) c->SetString(kv.Key, kv.Value);
             o->SetValue("syntaxColors", c);
@@ -209,6 +213,7 @@ namespace Gride { namespace Settings {
             C6747Debugger = o->GetString("c6747Debugger", C6747Debugger);
             WindowsDebugger = o->GetString("windowsDebugger", WindowsDebugger);
             WindowsRuntime = o->GetString("windowsRuntime", WindowsRuntime);
+            StepIntoRuntime = o->GetBool("stepIntoRuntime", StepIntoRuntime);
             JsonValue^ c = o->GetObject("syntaxColors");
             if (c != nullptr)
                 for each (String^ k in c->KeyNames) SyntaxColors[k] = c->GetString(k, String::Empty);

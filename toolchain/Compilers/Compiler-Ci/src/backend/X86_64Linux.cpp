@@ -1600,6 +1600,7 @@ void X86_64Linux::run(const Program &program) {
         finishChunk();
     }
 
+    a_->finishText(chunks_);
     a_->preamble(sink_);
     for (const std::string &chunk : chunks_) sink_ << chunk;
     a_->postamble(sink_);

@@ -4,9 +4,13 @@
 # grtstart's), its assembly (.s, C6000 instructions), the C6000 ABI's helpers, the Itanium C++ ABI, and the
 # files whose Windows form is the runtime's own - noted where they go.
 ctype/*.cpp
+# locale: setlocale is c\setlocale.cpp, which also asks for UTF-8 (docs\Runtime_Design.md 6)
 locale/*.cpp
+-locale/setlocale.cpp
 # math: fabs is c\fabs.asm (two instructions) and sqrt c\sqrt.asm (the processor's sqrtsd, and EDOM); exp, log, sin,
-# cos and pow are c\mathfast.asm, which leaves the cases it does not take to RTS6x's kernels (c\mathslow.cpp)
+# cos and pow are c\mathfast.asm, which leaves the cases it does not take to RTS6x's kernels (c\mathslow.cpp);
+# rint and nearbyint are c\rint.asm, in the rounding mode in force; fma is c\fma.asm, the processor's instruction
+# where it has one and RTS6x's exact sum where not (c\fmasoft.cpp)
 math/*.cpp
 -math/fabs.cpp
 -math/sqrt.cpp
@@ -15,6 +19,9 @@ math/*.cpp
 -math/sin.cpp
 -math/cos.cpp
 -math/pow.cpp
+-math/rint.cpp
+-math/nearbyint.cpp
+-math/fma.cpp
 # exit: atexit is c\atexit.cpp, RTS6x's with its list locked once a program has threads; exit is c\exit.cpp, which
 # ends the calling thread's thread_local objects first; abort is c\abort.cpp, the Release and Debug runtimes' ends
 exit/*.cpp
@@ -37,8 +44,10 @@ string/*.cpp
 -string/strcpy.cpp
 -string/strcat.cpp
 # stdlib: the heap is Windows' (win\heap.c); qsort is c\qsort.cpp, the Microsoft runtime's order of equal elements;
-# rand and srand are c\rand.cpp, the Microsoft runtime's generator
+# rand and srand are c\rand.cpp, the Microsoft runtime's generator; mblen is c\multibyte.cpp, which reads UTF-8 once
+# setlocale asks for it
 stdlib/*.cpp
+-stdlib/mblen.cpp
 -stdlib/rand.cpp
 -stdlib/srand.cpp
 -stdlib/Random.cpp

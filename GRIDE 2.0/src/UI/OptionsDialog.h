@@ -462,7 +462,7 @@ namespace Gride
             y += 30;
             Note(p, "Debugger - auto: gride-dbg, GRIDE's own debugger, when it is beside GRIDE, else cdb (Debugging Tools for Windows), else lldb; "
                     "either named stands in for the other where that one is not there, and the Output pane says which.", y, 30); y += 38;
-            Note(p, "C runtime - GRIDE's: lib\\grtstart, grtcompat, grtcxx, grtc and grtwin.lib and GRIDE's own kernel32.lib, so a program needs no Visual Studio "
+            Note(p, "C runtime - GRIDE's: lib\\x86_64-windows\\grtstart, grtcompat, grtcxx, grtc and grtwin.lib and GRIDE's own kernel32.lib, so a program needs no Visual Studio "
                     "and no Windows SDK to link, and kernel32.dll alone to run. Microsoft's: Visual Studio's libcmt and the SDK's UCRT, found through LIB. "
                     "Automatic: Microsoft's only where Visual Studio is found and the build has cl's objects. GRIDE_WINDOWS_RUNTIME=grt / msvc at start wins.", y, 44); y += 52;
 

@@ -438,5 +438,82 @@ std::vector<Entry> entries(const std::string& directory, bool* ok) {
     return found;
 }
 
+
+// ---- the names (path.h) -----------------------------------------------------------------------
+
+namespace {
+
+bool sameName(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+    return true;
+}
+
+// %VAR% as the environment has it; a % that opens no variable set is the text's own.
+std::string environmentFilled(const std::string& text) {
+    std::string out;
+    size_t from = 0;
+    for (size_t at = text.find('%'); at != std::string::npos; at = text.find('%', from)) {
+        const size_t end = text.find('%', at + 1);
+        if (end == std::string::npos) break;
+        const char* value = std::getenv(text.substr(at + 1, end - at - 1).c_str());
+        out.append(text, from, at - from);
+        if (value) { out += value; from = end + 1; }
+        else { out += '%'; from = at + 1; }
+    }
+    return out.append(text, from, std::string::npos);
+}
+
+}
+
+void Names::add(const std::string& name, const std::string& value) {
+    if (!name.empty() && !find(name)) table_.push_back(std::make_pair(name, value));
+}
+
+void Names::addFolder(const std::string& name, const std::string& dir) {
+    if (dir.empty()) return;
+    const char last = dir[dir.size() - 1];
+#ifdef _WIN32
+    add(name, last == '\\' || last == '/' ? dir : dir + '\\');
+#else
+    add(name, last == '/' ? dir : dir + '/');
+#endif
+}
+
+const std::string* Names::find(const std::string& name) const {
+    for (size_t i = 0; i < table_.size(); ++i)
+        if (sameName(table_[i].first, name)) return &table_[i].second;
+    return 0;
+}
+
+// Deeper than 8 a value naming a name names itself.
+std::string Names::fill(const std::string& text, const std::string& entry, int depth) const {
+    std::string out;
+    size_t from = 0;
+    for (size_t at = text.find("$("); at != std::string::npos; at = text.find("$(", from)) {
+        const size_t end = text.find(')', at + 2);
+        if (end == std::string::npos) break;
+        const std::string name = text.substr(at + 2, end - at - 2);
+        const std::string* value = depth < 8 ? find(name) : 0;
+        out.append(text, from, at - from);
+        if (value) out += fill(*value, entry, depth + 1);
+        else {
+            if (unknown_.empty()) { unknown_ = name; unknownIn_ = entry; }
+            out.append(text, at, end + 1 - at);
+        }
+        from = end + 1;
+    }
+    return out.append(text, from, std::string::npos);
+}
+
+std::string Names::expand(const std::string& text) const { return environmentFilled(fill(text, text, 0)); }
+
+std::vector<std::string> Names::expandAll(const std::vector<std::string>& list) const {
+    std::vector<std::string> out;
+    for (size_t i = 0; i < list.size(); ++i) out.push_back(expand(list[i]));
+    return out;
+}
+
 }
 }

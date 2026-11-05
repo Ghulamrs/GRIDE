@@ -4,6 +4,8 @@
 #ifndef RTS6X_SQUARE_ROOT_H
 #define RTS6X_SQUARE_ROOT_H
 
+#include "DoubleDouble.h"
+
 namespace rts6x {
 
 class SquareRoot {
@@ -12,6 +14,8 @@ public:
     static double root(double x);
     // 1/sqrt(w) to within about 2 ulps, for 2^-1020 < w < 2^1020: no division, no rounding asked.
     static double inverse(double w);
+    // sqrt(v) of a double-double v > 0: sqrt(v.hi) corrected once by its exact residual.
+    static DoubleDouble extended(const DoubleDouble &v);
 
 private:
     // sqrt of x > 0 finite by an exact integer root: for a subnormal x, or a root near a half.

@@ -1,0 +1,221 @@
+line [prog a b c]
+mode args, show -1
+instance the image, previous null, show 10
+line [a b c]
+__argc 4, __wargv set, __argv null
+__wargv [prog]
+__wargv [a]
+__wargv [b]
+__wargv [c]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog]
+mode args, show -1
+instance the image, previous null, show 10
+line []
+__argc 1, __wargv set, __argv null
+__wargv [prog]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line []
+mode args, show -1
+instance the image, previous null, show 10
+line []
+__argc 1, __wargv set, __argv null
+__wargv the program's path
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line ["quoted prog" one]
+mode args, show -1
+instance the image, previous null, show 10
+line [one]
+__argc 2, __wargv set, __argv null
+__wargv [quoted prog]
+__wargv [one]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line ["half"way prog<9>next]
+mode args, show -1
+instance the image, previous null, show 10
+line [prog<9>next]
+__argc 3, __wargv set, __argv null
+__wargv [halfway]
+__wargv [prog]
+__wargv [next]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [   leading spaces]
+mode args, show -1
+instance the image, previous null, show 10
+line [leading spaces]
+__argc 3, __wargv set, __argv null
+__wargv []
+__wargv [leading]
+__wargv [spaces]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog<9><9>tabs  "t<9>q"  ]
+mode args, show -1
+instance the image, previous null, show 10
+line [tabs  "t<9>q"  ]
+__argc 3, __wargv set, __argv null
+__wargv [prog]
+__wargv [tabs]
+__wargv [t<9>q]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog a\b a\\b "c d" e\"f "g\\" h\\\"i "j""k" "" l"m n"o]
+mode args, show -1
+instance the image, previous null, show 10
+line [a\b a\\b "c d" e\"f "g\\" h\\\"i "j""k" "" l"m n"o]
+__argc 10, __wargv set, __argv null
+__wargv [prog]
+__wargv [a\b]
+__wargv [a\\b]
+__wargv [c d]
+__wargv [e"f]
+__wargv [g\]
+__wargv [h\"i]
+__wargv [j"k]
+__wargv []
+__wargv [lm no]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog <1> <2> <3> "x <1> y"]
+mode args, show -1
+instance the image, previous null, show 10
+line [<263a> <e9> <d83d><de00> "x <263a> y"]
+__argc 5, __wargv set, __argv null
+__wargv [prog]
+__wargv [<263a>]
+__wargv [<e9>]
+__wargv [<d83d><de00>]
+__wargv [x <263a> y]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]
+mode args, show -1
+instance the image, previous null, show 10
+line [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]
+__argc 21, __wargv set, __argv null
+__wargv [prog]
+__wargv [1]
+__wargv [2]
+__wargv [3]
+__wargv [4]
+__wargv [5]
+__wargv [6]
+__wargv [7]
+__wargv [8]
+__wargv [9]
+__wargv [10]
+__wargv [11]
+__wargv [12]
+__wargv [13]
+__wargv [14]
+__wargv [15]
+__wargv [16]
+__wargv [17]
+__wargv [18]
+__wargv [19]
+__wargv [20]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog]
+mode fall, show -1
+instance the image, previous null, show 10
+line []
+__argc 1, __wargv set, __argv null
+__wargv [prog]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 0
+
+line [prog]
+mode exit, show -1
+instance the image, previous null, show 10
+line []
+__argc 1, __wargv set, __argv null
+__wargv [prog]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+left in the buffer for exit
+atexit
+exit 9
+
+line [prog]
+mode fault, show -1
+instance the image, previous null, show 10
+line []
+__argc 1, __wargv set, __argv null
+__wargv [prog]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+signal 11
+exit 11
+
+line [prog]
+mode quiet, show -1
+descriptors -2 -2 -2, file 3
+printf 11 errno 9
+fflush -1 errno 9 error 1
+fprintf 11 errno 9 error 1
+fputs 0 errno 9 error 1
+fputc -1 errno 9 error 1
+getchar -1 errno 9 eof 0 error 1
+exit 5
+
+line [prog x]
+mode args, show 0
+instance the image, previous null, show 0
+line [x]
+__argc 2, __wargv set, __argv null
+__wargv [prog]
+__wargv [x]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog x]
+mode args, show 2
+instance the image, previous null, show 2
+line [x]
+__argc 2, __wargv set, __argv null
+__wargv [prog]
+__wargv [x]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+line [prog x]
+mode args, show 7
+instance the image, previous null, show 7
+line [x]
+__argc 2, __wargv set, __argv null
+__wargv [prog]
+__wargv [x]
+Zed last, ZED last, none (null)
+alpha [<e9>?]
+exit 7
+
+exit 0

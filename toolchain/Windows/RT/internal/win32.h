@@ -70,6 +70,8 @@ typedef struct {
 #define GRT_FILE_TYPE_DISK 1
 #define GRT_FILE_TYPE_CHAR 2
 #define GRT_FILE_TYPE_PIPE 3
+#define GRT_STARTF_USESHOWWINDOW 1ul
+#define GRT_SW_SHOWDEFAULT 10
 #define GRT_GENERIC_READ  0x80000000ul
 #define GRT_GENERIC_WRITE 0x40000000ul
 #define GRT_SHARE_READ_WRITE 3ul
@@ -80,6 +82,10 @@ typedef struct {
 #define GRT_FILE_ATTRIBUTE_NORMAL 0x80ul
 #define GRT_HEAP_ZERO_MEMORY 8ul
 #define GRT_CP_ACP 0u
+#define GRT_CP_UTF8 65001u
+#define GRT_MB_ERR_INVALID_CHARS 8ul
+/* the code page of the program's narrow strings: argv, the environment, and the paths it gives and is given */
+#define GRT_CP_NARROW (__grt_utf8 ? GRT_CP_UTF8 : GRT_CP_ACP)
 #define GRT_ERROR_FILE_NOT_FOUND 2ul
 #define GRT_ERROR_PATH_NOT_FOUND 3ul
 #define GRT_ERROR_TOO_MANY_OPEN_FILES 4ul
@@ -118,6 +124,8 @@ typedef struct {
 HANDLE GetStdHandle(DWORD which);
 DWORD GetFileType(HANDLE file);
 BOOL GetConsoleMode(HANDLE console, DWORD *mode);
+BOOL WriteConsoleW(HANDLE console, const WCHAR *text, DWORD count, DWORD *written, void *reserved);
+BOOL ReadConsoleW(HANDLE console, WCHAR *text, DWORD count, DWORD *read, void *control);
 BOOL WriteFile(HANDLE file, const void *bytes, DWORD count, DWORD *written, void *overlapped);
 BOOL ReadFile(HANDLE file, void *bytes, DWORD count, DWORD *read, void *overlapped);
 HANDLE CreateFileW(const WCHAR *path, DWORD access, DWORD share, void *security, DWORD disposition,
@@ -170,8 +178,20 @@ HANDLE GetProcessHeap(void);
 void *HeapAlloc(HANDLE heap, DWORD flags, unsigned long long size);
 void *HeapReAlloc(HANDLE heap, DWORD flags, void *block, unsigned long long size);
 BOOL HeapFree(HANDLE heap, DWORD flags, void *block);
+void *VirtualAlloc(void *address, unsigned long long size, DWORD type, DWORD protect);
+/* CT_CTYPE1 (1): a code unit's classes, the bits the Microsoft runtime's ctype masks are */
+BOOL GetStringTypeW(DWORD info, const WCHAR *s, int count, unsigned short *types);
+#define GRT_CT_CTYPE1 1ul
+HANDLE LoadLibraryW(const WCHAR *name);
+void *GetProcAddress(HANDLE module, const char *name);
+#define GRT_MEM_COMMIT 0x1000ul
+#define GRT_MEM_RESERVE 0x2000ul
+#define GRT_PAGE_READWRITE 4ul
 
 WCHAR *GetCommandLineW(void);
+char *GetCommandLineA(void);
+void GetStartupInfoW(GRT_STARTUPINFO *info);
+DWORD GetModuleFileNameW(void *module, WCHAR *name, DWORD size);
 WCHAR *GetEnvironmentStringsW(void);
 BOOL FreeEnvironmentStringsW(WCHAR *block);
 int WideCharToMultiByte(UINT codePage, DWORD flags, const WCHAR *wide, int wideCount, char *bytes, int byteCount,

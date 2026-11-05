@@ -22,7 +22,7 @@ It also has C ⇄ Shalimar conversion and read-only reading of Code Composer Stu
 2. Choose `Release | x64`.
 3. Build (F7) and run (F5).
 
-The output is `<platform>\<config>\GRIDE.exe` (`x64\Release\GRIDE.exe`), with `toolchain.json` and `lib\ccs\*.tsv` beside it, and in an x64 build the whole tool chain too - see *The tool chain in the solution* below. **Help > View Help** (F1) opens `GRIDE_Help.html`, the one brief Help the three outlooks share (GRIDEx3's `docs\`, copied to `docs\` beside the exe with the reference pages): GRIDE looks in the help directory named under Tools > Options > Projects, then beside the exe, in `docs` and `help` under it, then in `..\help` and `..\docs`. The Setup's layout is `GRIDE\Black\GRIDE.exe` with `toolchain.json`, the tools, `docs\`, `lib\` and `examples\cppparse` beside it. `docs\` here holds only notes for GRIDEd's developers. Both configurations build with 0 errors and 0 warnings on the v143 toolset; the Help is copied beside the exe by an MSBuild Copy, and no step of the build starts `cmd.exe`.
+The output is `<platform>\<config>\GRIDE.exe` (`x64\Release\GRIDE.exe`), with `toolchain.json` and `share\ccs\*.tsv` beside it, and in an x64 build the whole tool chain too - see *The tool chain in the solution* below. **Help > View Help** (F1) opens `GRIDE_Help.html`, the one brief Help the three outlooks share (GRIDEx3's `docs\`, copied to `docs\` beside the exe with the reference pages): GRIDE looks in the help directory named under Tools > Options > Projects, then beside the exe, in `docs` and `help` under it, then in `..\help` and `..\docs`. The Setup's layout is `GRIDE\Black\GRIDE.exe` with `toolchain.json`, the tools, `docs\`, `lib\` and `examples\cppparse` beside it. `docs\` here holds only notes for GRIDEd's developers. Both configurations build with 0 errors and 0 warnings on the v143 toolset; the Help is copied beside the exe by an MSBuild Copy, and no step of the build starts `cmd.exe`.
 
 `GRIDE.sln` holds every project GRIDE is built and shown with; Build Solution builds what the configuration selects:
 
@@ -31,11 +31,14 @@ The output is `<platform>\<config>\GRIDE.exe` (`x64\Release\GRIDE.exe`), with `t
 | `GRIDE` | - | `GRIDE\GRIDE.vcxproj` | every configuration | the IDE |
 | `cc1` (c90), `cxx1` (cpp11), `shc` (shalimar), `c2s` | Compilers | `toolchain\Compilers\...` | `Debug \| x64`, `Release \| x64` | the C90, C++11 and Shalimar compilers and the C ⇄ Shalimar converter |
 | `asm6x`, `lnk6x`, `ar6x`, `rts6x`, `sim6747`, `vm6747` | TI | `toolchain\TI\...` | `Debug \| x64`, `Release \| x64` | the TMS320C6747 assembler, linker, run-time libraries, simulator and emulator, and `ar6x`, the archiver rts6x packs its libraries with (a build tool, built into its own `build\`, not shipped) |
-| `masm`, `link`, `gride-dbg`, `grt` | Windows | `toolchain\Windows\...` | `Debug \| x64`, `Release \| x64` | the Windows assembler and linker, GRIDE's Windows debugger, and GRIDE's Windows C runtime (`lib\grt*.lib`) |
-| `Setup` | - | `..\installer\windows\Setup.vcxproj` | not with the solution: Build on it, in `Release \| x64` | GRIDE's Windows Setup, `installer\dist\GRIDE-Setup-<ver>.msi`, from the three outlooks' Release builds (GRIDEx3's `README.md`, Installers) |
+| `masm`, `link`, `gride-dbg`, `grt` | Windows | `toolchain\Windows\...` | `Debug \| x64`, `Release \| x64` | the Windows assembler and linker, GRIDE's Windows debugger, and GRIDE's Windows C runtime (`lib\x86_64-windows\grt*.lib`) |
+
+GRIDE's Windows Setup is not in this solution (taken out on 2026-11-03): `GRIDE3.sln`, beside the three outlooks' folders, builds the toolchain once, the three outlooks and then `installer\dist\GRIDE-Setup-<ver>.msi` (GRIDEx3's `README.md`, Installers). Nor are the RIDE port's test harnesses, `RidePortHarness` and `GrideHarness`, which the solution named by absolute path in a sandbox outside the repository.
 
 The examples are not in the solution (taken out on 2026-10-27): cppparse, the example of section 2, opens in GRIDE
 itself from its `.pro`, and in Visual Studio from its own `examples\projects\cppparse\cppparse.sln`.
+
+**Files compiled at once.** `grt` and `rts6x` build their runtime libraries with the solution's own c90, cpp11, asm6x and masm, one process per file, as many at once as the machine has processors - a dozen `cpp11.exe` in Task Manager is that. `ToolchainJobs` sets how many: 1 compiles one file at a time. Put it in `toolchain\msbuild\Toolchain.user.props` (not committed; `toolchain\msbuild\Toolchain.targets` reads it), `<Project><PropertyGroup><ToolchainJobs>1</ToolchainJobs></PropertyGroup></Project>`, or set the environment variable `ToolchainJobs=1` before Visual Studio starts, or pass `/p:ToolchainJobs=1` to MSBuild. Visual Studio's own *maximum number of parallel project builds* (Tools > Options > Projects and Solutions > Build And Run) decides how many projects build together.
 
 **Opening `GRIDE.sln` in Visual Studio 2026.** Every project targets v143, Visual Studio 2022's toolset, so the solution opens and builds in both. If Visual Studio 2026's *Setup assistant* offers to retarget a project to v145, choose **Ignore all** - nothing is missing (v143 is the *MSVC v143* component), and v145 would stop Visual Studio 2022 building it.
 
@@ -59,18 +62,16 @@ GRIDE  (the startup project; depends on all eleven tools)
 ├── rts6x      toolchain\TI\RTS6x\rts6x.vcxproj  (its steps are MSBuild tasks: toolchain\msbuild\Toolchain.targets)
 │   ├── cxx1           compiles the C6000 run-time library
 │   ├── asm6x          assembles it, and Shalimar's TMS6747 run-time
-│   ├── shc            writes lib\shmrt-tms6747\*.s, which rts6x assembles
+│   ├── shc            writes lib\tms6747\shmrt\*.s, which rts6x assembles
 │   └── ar6x           packs the libraries (toolchain\TI\RTS6x\tools\ar6x\ar6x.vcxproj, into its own build\)
 ├── sim6747    toolchain\TI\SIM6747\sim6747.vcxproj
 ├── vm6747     toolchain\TI\VM6747\vm6747.vcxproj
 ├── masm       toolchain\Windows\MASM\masm.vcxproj
 ├── link       toolchain\Windows\LINK\link.vcxproj
 ├── gride-dbg  toolchain\Windows\DBG\dbg.vcxproj
-└── grt        toolchain\Windows\RT\grt.vcxproj  (built by c90, cpp11, masm and link into lib\)
+└── grt        toolchain\Windows\RT\grt.vcxproj  (built by c90, cpp11, masm and link into lib\x86_64-windows)
     ├── cc1, cxx1
     └── masm, link
-
-Setup  ..\installer\windows\Setup.vcxproj  (after GRIDE; not built with the solution)
 ```
 
 Every project builds into the one folder `x64\<config>\` beside `GRIDE.sln` (ar6x, a build tool, into its own `build\`), so a build leaves GRIDE ready to run, each tool where `toolchain.json`'s lookup finds it - beside `GRIDE.exe`:
@@ -81,12 +82,19 @@ x64\Release\
 ├── c90.exe, cpp11.exe, shalimar.exe, c2s.exe
 ├── asm6x.exe, lnk6x.exe, sim6747.exe, vm6747.exe
 ├── masm.exe, link.exe
-└── lib\
-    ├── ccs\                       CCS 7.4 / 5.5 option tables (GRIDE)
-    ├── shmrt-x86_64-windows*.lib  the Shalimar run-time (shalimar's build step)
-    ├── shmrt-tms6747*\            its TMS6747 assembly (shalimar's build step)
-    └── rts6x-tms6747\             rts6x, rts6xd, printf6x, printf6xd, shmrt6x, shmrt6xd (rts6x)
+├── include\
+│   ├── c\                         the C headers c90 and cpp11 share (cc1, from toolchain\include\c), sys\ in it
+│   ├── c++\                       cpp11's C++ headers (cxx1)
+│   └── win\                       windows.h, io.h, direct.h, fcntl.h (cc1, from toolchain\include\win)
+├── lib\
+│   ├── x86_64-windows\            GRIDE's runtime: grtstart ... grtwin, their Debug variants, kernel32.lib (grt);
+│   │                              shmrt[d].lib, the Shalimar run-time over it (grt), and in msvc\ over Microsoft's (shc)
+│   └── tms6747\                   rts6x, rts6xd, printf6x, printf6xd, shmrt6x, shmrt6xd (rts6x); shmrt\ and
+│                                  shmrt-debug\, the Shalimar run-time's TMS6747 assembly (shc)
+└── share\ccs\                     CCS 7.4 / 5.5 option tables (GRIDE)
 ```
+
+For one release the headers are also where earlier tools read them, `lib\*.h` (c90's) and `include\*` (cpp11's, with the C ones), docs\Runtime_Design.md 5.4.
 
 The tools build for x64 only; the x86 configurations build GRIDE alone. The copies under `toolchain\` hold no solution of their own; `GRIDE.sln` builds them. `Debug | x64` builds the whole solution too, into `x64\Debug` (link's `image.cpp` starts two locals at 0, so its `/WX` no longer stops on C4701); `cpp11` warns C4702 (`A64Peep.cpp`), the tool's own, left as it is.
 
@@ -95,7 +103,7 @@ The tools build for x64 only; the x86 configurations build GRIDE alone. The copi
 1. Run GRIDE.
 2. Go to **File > Open > Project / Workspace** and pick `..\examples\projects\cppparse\cppparse.pro` (installed: `examples\projects\cppparse\cppparse.pro` beside `GRIDE.exe`).
 3. You get **cppparse**, the C++ project reader and compiler of the cpp repo: 39 sources and 36 headers in eight folders, a GRIDE project in the one `.pro` format the three outlooks share (section 3) - its compiler `cpp11`, its include directories (`"include"`) and the program's arguments (`"build"`'s `"args"`). The same folder holds `cppparse.sln`, which opens here too, read-only, as the Visual Studio project it is.
-4. Press **F7** to build - Release or Debug, nothing to set up first. Every source goes to GRIDE's own `cpp11` (to assembly), then `masm` and `link`; cpp11's headers and library cover what cppparse uses. The link takes GRIDE's own C runtime (`lib\grtstart.lib` ... `grtwin.lib` and GRIDE's `kernel32.lib`, by their paths): no Visual Studio, no Windows SDK, no `vcvars64.bat`, no `cmd.exe`. Where Visual Studio is installed, Tools > Options > Projects > GRIDE Paths > Windows C runtime can choose Microsoft's CRT instead.
+4. Press **F7** to build - Release or Debug, nothing to set up first. Every source goes to GRIDE's own `cpp11` (to assembly), then `masm` and `link`; cpp11's headers and library cover what cppparse uses. The link takes GRIDE's own C runtime (`lib\x86_64-windows\grtstart.lib` ... `grtwin.lib` and GRIDE's `kernel32.lib`, by their paths): no Visual Studio, no Windows SDK, no `vcvars64.bat`, no `cmd.exe`. Where Visual Studio is installed, Tools > Options > Projects > GRIDE Paths > Windows C runtime can choose Microsoft's CRT instead.
    The files compile and assemble side by side, one per processor (**Tools > Options > Environment > General > Files compiled at once**: `0`, the default, one per processor; `1`, one at a time, as before 2026-10-26; `buildJobs` in `settings.json`), the largest first; the Output pane and the Error List show each file's lines in the project's order, as one file after another would, and the first file that fails stops the rest. On the 12-processor machine this was measured on, cppparse's Release Rebuild takes 50 s instead of 190 s one at a time. A GRIDE started from `x64\Debug` runs the Debug-built compilers beside it, about 14 times slower than the Release ones (cpp11 on `Html.cpp`: 131 s against 9 s): build and run `x64\Release` (or the installed GRIDE) for real work.
 5. The program's arguments are set too: `--health` and `.` (**Project > Properties > Program arguments**, one per line), which make cppparse check its own sources. Press **Ctrl+F5** to run the startup project's program: its health report, then `[program returned N]`. It runs inside the Output pane, as RIDE runs one: its lines arrive as it writes them, the line under the output is its input (Enter sends it), **Debug > Stop Program** (or Ctrl+Break) kills it and everything it started.
 6. Press **F5** to debug. A Debug build for the **TMS320C6747** is debugged for real, as RIDE debugs one: on `sim6747 --run --debug` with the linked `.out` when it is this build's and carries a line table (`c90 -g` / `cpp11 -g` / `shalimar -g` write cl6x's `.dwpsn`), else on `vm6747 --debug` with the assembly - the Output pane (Debug) says which and why. It runs to the first breakpoint (`stopped at stepped.c:14 in main`), **F10 / F11 / Shift+F11** step, the Call Stack, Registers (`A0`..`B15`, `pc`), Watch (`$A4`, an expression) and Memory panes read the engine, and the program's own `printf` lines come through as the program's output; the end is `the program ran to the end and returned N`. A **Windows** Debug build (CodeView through clang and `link.exe /DEBUG`, or `cl`'s PDB) is debugged with `cdb` on a pseudo-console, as White does it (`cdb -y <dir> <exe>`; locals with their types and addresses from `dv /t /V`, the stack from `k`, `??` for a watch, `r`, `db`); without `cdb`, a debugger named for the role `fallbackDebugger` in `toolchain.json` (lldb) stands in when it is found. A **Shalimar** Debug build stops itself where no debugger reads it (RIDE's session): the program is started with `SHM_DEBUG=1` - on the C6747 its `.out` under `sim6747 --run` - and talks on its standard error (`#file`, `#ready`, `#stop unit line depth`, `#exit status`); a breakpoint, F10, F11 and Shift+F11 work by statement, the Call Stack shows one frame that says how deep the program is, and Locals says *a Shalimar program says where it is, not what is in it*. Where nothing can debug the build (a Release build, a target without a line table, no `vm6747` for a C program) the Output pane says why in RIDE's words and the placeholder (a simulation) stands in. The panes show what RIDE's Debug tab shows: **Locals** has the stop line on top (`stopped at stepped.c:14 in main`, and `the variables are main's, at ...` when a frame above is looked at), the variables as `Name | Value | Type | Address` with a value changed since the last stop in red, the engine's reason in brackets when there are none, and White's keys line along the bottom; the line above it sets a variable (`name = value`, Enter; Enter on a row fills it in). **Watch** lists the expressions the engine reads again at every stop and frame change (a refused one in grey), with `add a watch...` as its last row - the line under it adds one, Enter on a watch brings it there to be changed and an empty answer takes it away. **Call Stack** shows the frame looked at in bold; a double-click, **Debug > Up the Stack** and **Down the Stack** (RIDE's Ctrl+Up / Ctrl+Down) look at another frame, and the top frame is the stop again. **Tools > Options > Environment > Keyboard** has the key set: Visual Studio's (F5, F10, F11, Shift+F11, F9, F7, Ctrl+F5) or RIDE's (F8 debugs or carries on, F7 / F6 step over / into, F9 breakpoint, Ctrl+Up / Ctrl+Down the stack, F4 builds, F5 runs, Ctrl+B compiles this file), with your own bindings over either.
@@ -109,7 +117,7 @@ The tools build for x64 only; the x86 configurations build GRIDE alone. The copi
 | `*.grws` | Workspace: list of `.pro` files, CCS projects and Visual Studio projects (with their solution), startup project, active Config/Target, breakpoints; for a CCS or Visual Studio project, what GRIDE keeps for it - its compiler (`toolchain`), a folder's own (`folderToolchains`), the program's arguments (`programArgs`) and `emulateOnly` | Anywhere |
 | `settings.json` | IDE settings: tool paths, include/lib folders, command templates, languages, converters, theme, keys, layout, and RIDE's settings.json keys (section 4, RIDE's settings) - GRIDE's one settings file, which Grey and White keep their own keys in too; each outlook writes back the others' as it read them. A `gride.settings.json` from before is taken in the first time, and removed | `%APPDATA%\GRIDE\`, or next to `GRIDE.exe` for a portable install |
 | `toolchain.json` | The toolchain: every tool, its names and aliases, where it is found, its argument templates per operation, each debugger's session (how it is driven), the libraries, the Compiler Options rows, the CCS and Visual Studio sections, the C6747 linker command file (see section 4 and `docs\TOOLCHAIN-FORMAT.md`) | Shipped next to `GRIDE.exe`; your overrides in `%APPDATA%\GRIDE\toolchain.json` (portable: `toolchain.user.json` next to the exe); `GRIDE_TOOLCHAIN` names the shipped file outright |
-| `lib\ccs\*.tsv` | TI's option definitions for CCS 7.4 (compiler 8.2) and CCS 5.5 (compiler 7.4): the defaults of what a `.cproject` leaves unstored (see section 4, CCS projects) | Shipped next to `GRIDE.exe` |
+| `share\ccs\*.tsv` | TI's option definitions for CCS 7.4 (compiler 8.2) and CCS 5.5 (compiler 7.4): the defaults of what a `.cproject` leaves unstored (see section 4, CCS projects) | Shipped next to `GRIDE.exe` |
 | `.project`, `.ccsproject`, `.cproject` | A CCS project, read only (never written) | The CCS project folder |
 | `.sln`, `.vcxproj`, `.vcxproj.filters`, `.vcproj` | A Visual Studio solution / project, read only (never written); the solution opens as a workspace | Where Visual Studio keeps them |
 
@@ -184,7 +192,7 @@ variables and build macros resolve. What is read:
   command file, per-file options, exclusions (an excluded file is shown, greyed per configuration, and
   not built), build variables, pre/post-build steps, linked files and folders (shown under `(linked)`);
 - options CCS left unstored take their defaults from TI's own option definitions, shipped as
-  `lib\ccs\options-ccs74-C6000_8.2.tsv` (CCS 7.4) and `options-ccs55-C6000_7.4.tsv` (CCS 5.5) beside
+  `share\ccs\options-ccs74-C6000_8.2.tsv` (CCS 7.4) and `options-ccs55-C6000_7.4.tsv` (CCS 5.5) beside
   the exe; the `ccs` section of `toolchain.json` names the directory, the files and the device.
 
 The Output pane (Tools) prints RIDE's Messages lines for each CCS project: `CCS project X (Release): N

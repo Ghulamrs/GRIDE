@@ -10,7 +10,7 @@ param([string]$Bin = "", [string]$Libs = "")
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 if (-not $Bin) { $Bin = (Resolve-Path (Join-Path $here '..\..\..\..\..\GRIDEd\x64\Release')).Path }
-if (-not $Libs) { $Libs = Join-Path $Bin 'lib' }
+if (-not $Libs) { $Libs = Join-Path $Bin 'lib\x86_64-windows'; if (-not (Test-Path (Join-Path $Libs 'grtc.lib'))) { $Libs = Join-Path $Bin 'lib' } }
 foreach ($o in '-O0', '-O2') { & (Join-Path $here '..\probe.ps1') (Join-Path $here 'debugheap.c') -Opt $o -Bin $Bin -Libs $Libs -DebugRuntime }
 
 $work = Join-Path $env:TEMP 'gride-debug-ends'

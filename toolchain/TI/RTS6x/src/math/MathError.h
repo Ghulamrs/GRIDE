@@ -18,6 +18,9 @@ public:
 #else
     static double domain() { ErrorNumber::set(EDOM); return MathBits::notANumber(); }
 #endif
+    // A domain error of C99's functions, which the Microsoft runtime answers with the positive quiet NaN: EDOM, and
+    // that NaN on every target.
+    static double domainC99() { ErrorNumber::set(EDOM); return MathBits::notANumber(); }
     // A pole error or an overflow: ERANGE, and HUGE_VAL of the sign asked.
     static double overflow(bool negative) { ErrorNumber::set(ERANGE); return MathBits::infinity(negative); }
     // An underflow to zero: ERANGE, and a zero of the sign asked.

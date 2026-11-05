@@ -21,7 +21,6 @@
     <ClCompile Include="..\src\Check.cpp"><Filter>Source Files\src</Filter></ClCompile>
     <ClCompile Include="..\src\Resolve.cpp"><Filter>Source Files\src</Filter></ClCompile>
     <ClCompile Include="..\src\Builtin.cpp"><Filter>Source Files\src</Filter></ClCompile>
-    <ClCompile Include="..\runtime\Shortest.cpp"><Filter>Source Files\runtime</Filter></ClCompile>
     <ClCompile Include="..\src\CodeGen.cpp"><Filter>Source Files\src</Filter></ClCompile>
     <ClCompile Include="..\src\Target.cpp"><Filter>Source Files\src</Filter></ClCompile>
     <ClCompile Include="..\src\backend\Emitter.cpp"><Filter>Source Files\src\backend</Filter></ClCompile>
@@ -40,6 +39,7 @@
   <ItemGroup>
     <ClInclude Include="..\src\Ast.h"><Filter>Header Files\src</Filter></ClInclude>
     <ClInclude Include="..\src\Builtin.h"><Filter>Header Files\src</Filter></ClInclude>
+    <None Include="..\src\Library.inc"><Filter>Source Files\src</Filter></None>
     <ClInclude Include="..\src\Check.h"><Filter>Header Files\src</Filter></ClInclude>
     <ClInclude Include="..\src\CodeGen.h"><Filter>Header Files\src</Filter></ClInclude>
     <ClInclude Include="..\src\Diag.h"><Filter>Header Files\src</Filter></ClInclude>
@@ -64,9 +64,9 @@
     <ClInclude Include="..\src\backend\X86_64Coff.h"><Filter>Header Files\src\backend</Filter></ClInclude>
     <ClInclude Include="..\src\backend\X86_64Linux.h"><Filter>Header Files\src\backend</Filter></ClInclude>
     <ClInclude Include="..\src\backend\X86_64Windows.h"><Filter>Header Files\src\backend</Filter></ClInclude>
+    <ClInclude Include="..\runtime\Borrow.h"><Filter>Header Files\runtime</Filter></ClInclude>
     <ClInclude Include="..\runtime\Debug.h"><Filter>Header Files\runtime</Filter></ClInclude>
     <ClInclude Include="..\runtime\Internal.h"><Filter>Header Files\runtime</Filter></ClInclude>
-    <ClInclude Include="..\runtime\Shortest.h"><Filter>Header Files\runtime</Filter></ClInclude>
     <ClInclude Include="..\runtime\shmrt.h"><Filter>Header Files\runtime</Filter></ClInclude>
   </ItemGroup>
 </Project>

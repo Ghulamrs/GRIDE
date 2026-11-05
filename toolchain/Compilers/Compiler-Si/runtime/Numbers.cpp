@@ -1,6 +1,5 @@
 
 #include "Internal.h"
-#include "Shortest.h"
 
 #include <cmath>
 #include <cstdio>
@@ -26,7 +25,6 @@ int32_t narrow(int64_t wide, const char *op) {
 }
 
 using shm::fail;
-using shm::Shortest;
 
 extern "C" {
 
@@ -88,7 +86,7 @@ int32_t shm_real_to_int(double value) {
     const double truncated = std::trunc(value);
     if (!(truncated >= -2147483648.0 && truncated <= 2147483647.0)) {
         char text[400];
-        Shortest::write(text, sizeof text, value);
+        _gride_shortest_double(text, sizeof text, value);
         char message[440];
         std::snprintf(message, sizeof message, "Cannot convert %s to int", text);
         fail(message);
@@ -110,7 +108,7 @@ int32_t shm_real_to_char(double value) {
     const double truncated = std::trunc(value);
     if (!(truncated >= 0.0 && truncated <= 255.0)) {
         char text[400];
-        Shortest::write(text, sizeof text, value);
+        _gride_shortest_double(text, sizeof text, value);
         char message[440];
         std::snprintf(message, sizeof message, "%s is not a char (0 to 255)", text);
         fail(message);
@@ -135,7 +133,7 @@ void shm_loop_real_check(double start, double end, double step) {
     for (int i = 0; i < 3; ++i) {
         if (std::isfinite(values[i])) continue;
         char text[400];
-        Shortest::write(text, sizeof text, values[i]);
+        _gride_shortest_double(text, sizeof text, values[i]);
         char message[440];
         std::snprintf(message, sizeof message, "Loop %s out of range: %s", roles[i], text);
         fail(message);

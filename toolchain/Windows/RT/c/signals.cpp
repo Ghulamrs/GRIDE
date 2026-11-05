@@ -11,7 +11,7 @@
 //   - Ctrl+C and Ctrl+Break reach SIGINT's and SIGBREAK's handlers through a console control handler, set when
 //     either is first given one (win\control.c); with SIG_DFL, Windows' own end follows;
 //   - an access violation, an illegal instruction or a floating-point exception in the program's first thread
-//     reaches SIGSEGV's, SIGILL's or SIGFPE's handler through main's language handler (start\mainguard.asm), and the
+//     reaches SIGSEGV's, SIGILL's or SIGFPE's handler through main's language handler (start\entryguard.asm), and the
 //     program goes on where it stopped (__grt_signal_exception); an integer division by zero is not a signal.
 // abort reaches SIGABRT's handler through RTS6x's SignalTable::deliver, defined here: it runs a handler, if there is
 // one, and returns, abort going on to its end.

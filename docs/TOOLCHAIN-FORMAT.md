@@ -101,12 +101,12 @@ still wins; a tool whose lookup says `vcvars` is looked for in these folders).
 Reading Code Composer Studio 7.4 / 5.5 projects for the C6747, as RIDE's `src/ccs` reads them. CCS
 stores in `.cproject` only what differs from TI's definition of an option, so an unstored option's
 meaning and an enumerated value's command-line spelling come from TI's own definitions, shipped as
-one TSV per compiler major version (`lib\ccs\options-ccs74-C6000_8.2.tsv`, `options-ccs55-C6000_7.4.tsv`,
+one TSV per compiler major version (`share\ccs\options-ccs74-C6000_8.2.tsv`, `options-ccs55-C6000_7.4.tsv`,
 made from the XML CCS ships).
 
 | field | kind | meaning |
 |---|---|---|
-| `definitionsDir` | string | the folder of the definition files, looked for beside GRIDE.exe, above it (`..\lib\ccs`, the source layout's `GRIDE\lib\ccs`) and under the installation's roots |
+| `definitionsDir` | string | the folder of the definition files, looked for beside GRIDE.exe (`share\ccs`), above it and under the installation's roots |
 | `definitions` | object | compiler major version -> file name (`"8"`: the 8.2 file, `"7"`: the 7.4 file); another version takes the nearest |
 | `deviceFamily`, `deviceVariant`, `siliconVersion` | string | the projects the toolchain builds: family `C6000`, a variant containing `C674`, the core `6740`; a project for anything else, a COFF one or a big-endian one is read all the same, with RIDE's refusal as a note (GRIDEd opens it; RIDE would refuse it) |
 | `compilerDirs` | object | major version -> the compiler directory's name prefix under `<CCS root>\tools\compiler` (`ti-cgt-c6000_`, `c6000_`), for `${CG_TOOL_ROOT}` when the version is not installed |
@@ -182,7 +182,7 @@ tools), in that order, from the project's store (`.pro`: `"options": { "debug": 
 | `environment` | object | the variables the tool itself reads, each described (`C90_AS`, `C90_LD`, `SHM_DEBUG`, `GGRIDE_DEBUG_SIM6747`) |
 | `archFlag` | string | the target as the tool spells it, `$(Arch)` filled in (`-arch $(Arch)`, `--target=$(Arch)`); empty for a tool that builds for the machine it is on |
 | `includeFlag`, `defineFlag` | string | its `-I` / `-D` spellings (`/I`, `/D`); empty: the tool takes none (shalimar) |
-| `installIncludeDirs` | list | the installation directories it is given as includes: `include`, `lib` |
+| `installIncludeDirs` | list | the installation directories it is given as includes, in order: `include\c++` (cpp11), `include\c`, `include\win` (docs\Runtime_Design.md 5.3), then `include` and `lib` - an earlier installation's, or the folders `includeDir` and `libDir` (or settings.json's `include` and `lib`) name |
 | `languageFlags` | object | the switch per language (`C`: `/TC`, `C++`: `/TP /EHsc /std:c++14`) |
 | `configFlags` | object | the flags per configuration: `Debug`, `Release` - RIDE's flags before the Compiler Options existed; what a tool that lists no `options` takes (cl, the host's C++) |
 | `configFlagsByTarget` | object | arch -> { `Debug`, `Release` }: the exceptions (shalimar on tms6747: `-g` without `--debug`) |
@@ -258,12 +258,12 @@ A path placeholder is written without quotes; the template quotes it where the t
 | `name`, `description` | string | shown in the Options pages (the description one line) |
 | `kind` | string | `runtime` (the C runtime), `printf`, `shalimarRuntime` (the C6747's `shmrt6x`, linked before the C runtime and taken as assembly by the emulator; the Windows one, `lib\shmrt-x86_64-windows[-debug].lib`, which RIDE's `shalimar` links itself and GRIDE links first in a Shalimar program's host link - the Debug file is the runtime with the session in it), `hostCrt` |
 | `target` | string | the arch it belongs to |
-| `directory` | string | the installation-relative directory holding the files (`lib\rts6x-tms6747`), looked for under the tool folder, beside GRIDE.exe and the installation, in that order |
+| `directory` | string | the installation-relative directory holding the files (`lib\tms6747`, `lib\x86_64-windows`), looked for under the tool folder, beside GRIDE.exe and the installation, in that order |
 | `directoryEnv` | string | the environment variable naming the directory outright (`RTS6X`) |
 | `marker` | string | the file that proves the directory is the right one (`rts6x.lib`) |
 | `files` | object, required | `Debug` / `Release` -> the library file(s), a space-separated list where the link takes several (the host CRT) |
 | `aliases` | list | the names a project file may use for it, each read as the configuration's file; `*` at the end matches any ending (`rts6740*`) |
-| `assemblyDirectories` | object | `Debug` / `Release` -> the runtime's assembly directory for the emulator (`lib\shmrt-tms6747-debug`) |
+| `assemblyDirectories` | object | `Debug` / `Release` -> the runtime's assembly directory for the emulator (`lib\tms6747\shmrt-debug`) |
 | `assemblyDirectoryEnv` | object | `Debug` / `Release` -> the environment variable naming that directory (`SHMRT6747D`) |
 | `when` | string | when it is linked: `always`, `shalimar` (a Shalimar program), `printf`, `never` |
 
@@ -346,7 +346,7 @@ problem the reader found, the file's tools and libraries with the overridden one
 tool was found or looked for, and the problems are printed there at start-up.
 
 The CCS reader (`src\Import\CcsReading.h`, a port of GRIDEd's) takes the `ccs` section whole:
-`definitionsDir` and `definitions` (TI's option definitions per compiler major, `lib\ccs` beside
+`definitionsDir` and `definitions` (TI's option definitions per compiler major, `share\ccs` beside
 `GRIDE.exe` - the project copies them - or up to four folders above it), `deviceFamily`, `deviceVariant`,
 `siliconVersion` (what a project must be built for, else RIDE's refusal as a note), `compilerDirs` and
 `tiCompiler` (TI's compiler directory: `${CG_TOOL_ROOT}`), `tiRuntime` (`libc.a` as the runtime a linker

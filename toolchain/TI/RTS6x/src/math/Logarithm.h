@@ -15,6 +15,8 @@ public:
     static double binary(double x);     // log2
     // ln x = the result + lo, x finite and above zero (subnormal allowed): about 2^-70 relative.
     static double kernel(double x, double &lo);
+    // ln a for a double-double a > 0.
+    static DoubleDouble extended(const DoubleDouble &a);
 
 private:
     // True with result set for a zero (pole: ERANGE, -inf), x < 0 (EDOM), +inf or a NaN.

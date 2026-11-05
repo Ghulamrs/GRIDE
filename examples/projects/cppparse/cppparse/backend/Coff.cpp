@@ -463,6 +463,7 @@ void Encoder::shrinkJumps()
             for (size_t u = 0; u < m_c.unwind.size(); ++u) if (m_c.unwind[u].offset >= end) m_c.unwind[u].offset -= removed;
             if (m_c.prologEnd >= static_cast<long>(end)) m_c.prologEnd -= static_cast<long>(removed);
             for (size_t s = 0; s < m_c.symbols.size(); ++s) if (m_c.symbols[s].second >= end) m_c.symbols[s].second -= removed;
+            for (size_t l = 0; l < m_c.lines.size(); ++l) if (m_c.lines[l].first >= end) m_c.lines[l].first -= removed;   // the line records move with the code
             f.at = f.opcodeAt + 1;
             f.shortForm = true;
             changed = true;
