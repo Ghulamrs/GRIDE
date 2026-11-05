@@ -351,12 +351,19 @@ void Parser::layoutOneVtable(VtableGroup &g, const Type *x, int xAt,
                 const std::string want = slots[i].name == "~$deleting"
                                        ? std::string("~") : slots[i].name;
                 std::size_t idx = vcalls.size();
-                for (std::size_t k = 0; k < vcalls.size() && idx == vcalls.size(); k++)
-                    if (vcalls[k].cls == x && vcalls[k].name == want &&
+                // vcallEntries records a function under the class of the primary chain that
+                // declared it, and x's table holds that chain's slots as its own: a destructor
+                // a virtual base inherits from its primary base is `base::~`, looked for as x's.
+                for (std::size_t k = 0; k < vcalls.size() && idx == vcalls.size(); k++) {
+                    bool onChain = false;
+                    for (const Type *c = x; c != nullptr && !onChain; c = c->primaryBase())
+                        onChain = vcalls[k].cls == c;
+                    if (onChain && vcalls[k].name == want &&
                         vcalls[k].constThis == slots[i].constThis &&
                         vcalls[k].refThis == slots[i].refThis &&
                         sameParameters(vcalls[k].params, slots[i].params))
                         idx = k;
+                }
                 if (idx == vcalls.size())
                     src_.fail(pos, "no vcall offset for '" + x->tag() + "::" +
                                    want + "' in '" + vbase->tag() + "'");
