@@ -135,10 +135,9 @@ std::string Type::describe() const {
     return name();
 }
 
-// A specialization's tag is the parser's key, `Box<int>`, with its namespace kept apart (templateNamespace); a
-// class written in a namespace carries it in the tag, and a nested class carries its enclosing classes - so the
-// outermost class says whether a namespace is missing. The key spells a class argument as a diagnostic does,
-// `Box<struct Tally>`; cl's display name has the bare tag, `Box<Tally>`.
+// A specialization's tag is the parser's key, `Box<int>`, its namespace apart
+// (templateNamespace); a namespace or enclosing classes ride in the tag; the
+// key writes `Box<struct Tally>`, cl's display name `Box<Tally>`.
 std::string Type::displayTag() const {
     if (!cls().displayTag_.empty()) return displaySpelling(cls().displayTag_);
     const Type *root = &cls();
@@ -420,12 +419,9 @@ const Type *TypeTable::dependentArrayOf(const Type *t, const DepExpr *bound) {
 }
 
 const Member *Type::findMember(const std::string &name) const {
-    // **members(), not members_**: the qualified copy has none of its own, so a
-    // `const X` interned before X closed would forever see an empty list.
-    // **Backwards**: the list is base-first, and a derived member hides a base's.
-    // **The class's own first of all**: a virtual base is laid out after them, so the backward
-    // walk reached its `t` before the class's own `t` (1.27, 2026-10-21, review of 1.25, item 3 -
-    // `B1() : t("b1")` was refused as naming the base's member).
+    // **members(), not members_** (a qualified copy has none); **backwards**,
+    // as a derived member hides a base's; **the class's own first**, since a
+    // virtual base is laid after them.
     const std::vector<Member> &all = members();
     for (std::size_t i = all.size(); i > 0; i--)
         if (all[i - 1].name == name && all[i - 1].declaredIn == nullptr) return &all[i - 1];

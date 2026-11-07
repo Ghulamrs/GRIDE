@@ -206,12 +206,9 @@ ExprPtr Parser::convert(ExprPtr e, const Type *to, bool allowExplicit) const {
         both->setType(baseType);
         return both;
     }
-    // **A null data member pointer is -1 on both ABIs** - an offset of 0 is a
-    // real member - and Microsoft's virtual model writes {0, -1}. It had been a
-    // plain zero, so a member at 0 was null and a null from clang or cl was not.
-    // And a pointer to a member function from `nullptr` or the constant 0: the pair with a null code
-    // word; the constant 0 reaches a data member pointer the same way, [conv.mem]/1 (1.27, 2026-10-21,
-    // review of 1.25, item 3).
+    // **A null data member pointer is -1 on both ABIs** (0 is a real member;
+    // Microsoft's virtual model writes {0, -1}). nullptr or 0 as a member
+    // function pointer: the pair with a null code word, [conv.mem]/1.
     const bool nullConstant = e->type()->isNullPtr() || (e->type()->isInteger() && isNullConstant(*e));
     if (nullConstant && to->unqualified()->isMemberFunctionPointer())
         return const_cast<Parser *>(this)->nullMemberFunctionPointer(to->unqualified());
@@ -486,11 +483,9 @@ int publicBaseOffset(const Type *derived, const Type *base) {
     return -1;
 }
 
-// Every base, whatever its access: where a conversion lands once it has been allowed -
-// access is asked where it is checked, and a cast ignores it, [expr.cast]/4.
-// **How many `base` subobjects a `derived` object holds** - [class.mi]/4: one for each
-// non-virtual path to it, and one for all the virtual ones together; a virtual base reached twice
-// is walked once, so what it holds is counted once.
+// **How many `base` subobjects a `derived` holds**, whatever their access (a
+// cast ignores it, [expr.cast]/4) - [class.mi]/4: one per non-virtual path,
+// one for all virtual ones together; a virtual base reached twice counts once.
 static void countBaseSubobjects(const Type *d, const Type *base, int *plain, bool *shared,
                                 std::set<const Type *> *walkedVirtual) {
     for (const Type::BaseSpec &s : d->unqualified()->bases()) {
@@ -915,12 +910,9 @@ Parser::Rank Parser::rankArgument(const Expr &arg, const Type *param) {
     return Rank::None;
 }
 
-// [over.ics.rank]/3.3: two user-defined conversion sequences through the same conversion
-// function are told apart by their second standard conversion, so `lng(long)` beats `lng(int)`
-// for a class with `operator long()`. A class with one scalar conversion function reaches every
-// scalar target through it, and that target's distance from what the function returns is the
-// sub-rank; a class target is reached by a constructor instead and keeps the plain rank, which
-// betterCandidate leaves level against the others (1.27, review item 3).
+// [over.ics.rank]/3.3: sequences through one conversion function differ by the
+// conversion after it - the target's distance from its result is the sub-rank
+// (`lng(long)` beats `lng(int)`); a class target keeps the plain rank.
 Parser::Rank Parser::userDefinedRank(const Type *from, const Type *to) {
     const Type *want = to->unqualified();
     if (want->isStructOrUnion()) return Rank::UserDefined;
@@ -986,17 +978,9 @@ bool Parser::sameMatchEitherWay(const Type *pa, const Type *pb) {
     return va == vb;
 }
 
-// **Two parameters that took one argument at the same rank**, and what [over.ics.rank] still
-// has to say about them (1.27, review item 3 - these were ambiguities before):
-//   /3.2.3  an rvalue reference binding an rvalue beats an lvalue reference binding it;
-//   /3.2.6  references to the same type, the less cv-qualified binding is better;
-//   /4.3    pointers differing only in qualification, the less cv-qualified target is better;
-//   /4.4    to the nearer base - `H *` over `G *` for an `I *`, `H &` over `G &`, `H` over `G` -
-//           and to a class over `void *`.
-// A user-defined rank is not compared this way: two of those are told apart only through one
-// conversion function, [over.ics.rank]/3.3, which userDefinedRank already did. The /4 rules
-// need the argument: a null pointer constant reaches `G *` and `H *` alike, and only an object's
-// pointer reaches one of them through the other.
+// **Two parameters that took one argument at one rank**, [over.ics.rank]: the
+// rvalue ref for an rvalue (/3.2.3), less cv (/3.2.6, /4.3), the nearer base or
+// a class over void * (/4.4, needs the argument); user-defined ranks are not.
 int Parser::closerTarget(const Type *pa, const Type *pb, const Type *given) const {
     if (pa == nullptr || pb == nullptr || given == nullptr) return 0;
     struct Nearer {
@@ -1062,10 +1046,9 @@ bool Parser::betterCandidate(const std::vector<Rank> &a,
             continue;
         }
         if (a[i] == b[i]) {
-            // [over.ics.rank]/3.3: two user-defined sequences into one type meet at one conversion - the
-            // class's constructor, or the argument's conversion function - and the reference binding after
-            // it decides: `f("lit")` takes `f(std::string &&)` over `f(const std::string &)`, and a lambda
-            // `push_back(T &&)` over `push_back(const T &)`, the converted value being an rvalue (/3.2.3).
+            // [over.ics.rank]/3.3: user-defined sequences into one type meet at
+            // one conversion, the reference binding after it decides: f("lit")
+            // takes f(std::string &&), the converted value an rvalue (/3.2.3).
             const bool oneTarget = pa != nullptr && pb != nullptr && pa->isReference() && pb->isReference() &&
                                    pa->pointee()->unqualified() == pb->pointee()->unqualified();
             if (a[i] > Rank::Conversion &&
@@ -1256,12 +1239,9 @@ Parser::OperatorChoice Parser::resolveOperator(const std::string &name,
                                                const Expr &left,
                                                const Expr *right,
                                                std::size_t pos) {
-    // **A non-member operator may be a function template.** Deduce and
-    // instantiate every one that applies before ranking, so `a + b` for a
-    // class template reaches `template <int N> V<N> operator+(V<N>, V<N>)`.
-    // **[over.match.oper]/3: only the templates lookup reaches** - the namespaces around the use, those a
-    // using-directive opened, and the operands' associated ones; never `N::R`'s for an `N::S` (item 37).
-    // And of their specializations only those deduced here, [temp.over]/1.
+    // **Non-member operator templates**: deduce and instantiate each that
+    // applies before ranking (`a + b` on a class template); only those lookup
+    // reaches, [over.match.oper]/3, and only specializations deduced here.
     std::set<std::string> deduced;
     {
         std::vector<const Type *> argTypes;
@@ -1901,11 +1881,9 @@ void Parser::checkAssignable(const Expr &from, const Type *to, std::size_t pos,
         if (isNullConstant(from)) return;
         refuse(" - only the constant 0 becomes a pointer on its own");
     }
-    // `nullptr` converts to any pointer and to any pointer to member, and nothing
-    // is emitted: the value is already a pointer-sized zero, and what the type
-    // carried was the front end's knowledge that this zero is not the number 0.
-    // A pointer to a member function is a pointer to a member too, [conv.mem]/1, and the constant
-    // 0 reaches both kinds (1.27, 2026-10-21, review of 1.25, item 3: `void (S::*mf)() = nullptr`).
+    // `nullptr` (and the constant 0, [conv.mem]/1) converts to any pointer or
+    // pointer to member, function members too, and emits nothing: the value is
+    // already a pointer-sized zero the front end knows is not the number 0.
     if (ft->isNullPtr() &&
         (to->isPointer() || to->isMemberPointer() || to->isMemberFunctionPointer())) return;
     if ((to->isMemberPointer() || to->isMemberFunctionPointer()) && ft->isInteger() &&

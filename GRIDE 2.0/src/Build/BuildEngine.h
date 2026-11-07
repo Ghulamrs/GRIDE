@@ -128,7 +128,11 @@ namespace Gride
             if (String::IsNullOrEmpty(toolName) || String::IsNullOrEmpty(line)) return nullptr;
             int at = line->IndexOf(": ");
             if (at <= 0) return nullptr;
-            String^ who = Path::GetFileName(line->Substring(0, at)->Trim())->ToLowerInvariant();
+            // a compiler echoing the source line it stopped on ("class D : virtual public B<C, Tr> {") names no
+            // tool: text a path cannot hold is not one, where Path::GetFileName threw and the build stopped there
+            String^ head = line->Substring(0, at)->Trim();
+            if (head->IndexOfAny(Path::GetInvalidPathChars()) >= 0) return nullptr;
+            String^ who = Path::GetFileName(head)->ToLowerInvariant();
             String^ name = toolName->ToLowerInvariant();
             if (who != name && who != String::Concat(name, ".exe")) return nullptr;
             String^ text = line->Substring(at + 2)->Trim();

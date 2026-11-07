@@ -782,19 +782,17 @@ const Type *Parser::readTemplateDeclaration(const TemplateDecl &decl,
         const Type *written = d.type;
         parameterTypes(params, variadic);
         d.type = types_.functionType(d.type, std::move(params), variadic);
-        // **A bare `noexcept` or `throw()` on the signature is the specialization's too** - std::declval's
-        // - read here, where the pattern's signature is, so that the definition's replay finds the same
-        // promise it makes (1.27, 2026-10-21, review of 1.25, item 3). A `noexcept(e)` with a dependent e
-        // is left to the body's reading, as before.
+        // **A bare `noexcept` or `throw()` on the signature is the
+        // specialization's too**, read here so the definition's replay finds
+        // the same promise; a dependent `noexcept(e)` waits for the body.
         {
             std::size_t q = at_;
             while (tokens_[q].is("const") || tokens_[q].is("volatile") || tokens_[q].is("&") ||
                    tokens_[q].is("&&"))
                 q++;
-            // **`noexcept(e)` read with the specialization's arguments bound** - [except.spec]/1: the
-            // same promise the definition's replay will read, `noexcept(noexcept(X()))` at X = int
-            // (R20: the signature said none, and the definition was refused for adding one). The
-            // pattern's read that follows cannot fold a dependent e, and leaves that answer as it is.
+            // **`noexcept(e)` read with the arguments bound** -
+            // [except.spec]/1: the promise the definition's replay reads,
+            // `noexcept(noexcept(X()))` at X = int; a dependent e stays.
             bool concrete = true;
             for (std::size_t k = 0; k < binding.size(); k++)
                 if (binding[k] == nullptr || binding[k]->kind() == Kind::TemplateParam) concrete = false;
@@ -928,8 +926,7 @@ bool Parser::templateDeclaration() {
         }
     }
 
-    // A member template defined outside its class - `template <class U> U S::conv(U)`, or a class
-    // template's with its own list after the class's.
+    // A member template defined outside its class (`U S::conv(U)`, ...).
     if (outOfLineMemberTemplate(decl.params)) return true;
 
     // **`template <class T> Box<T>::Box(...)`**: from the `Box` after `::` it is shaped as a constructor
@@ -1006,9 +1003,7 @@ bool Parser::templateDeclaration() {
             bool mentioned = false;
             for (std::size_t k = 0; k < ps.args.size(); k++)
                 if (ps.args[k].isPackExpansion) {
-                    // `R...` names its parameter and holds no pattern to
-                    // walk, so it is asked about directly rather than through
-                    // mentionsParam - whose argument would be null.
+                    // `R...` names its parameter: asked directly
                     if (ps.args[k].param == i) mentioned = true;
                 } else if (!ps.args[k].isType) {
                     if (ps.args[k].isParam && ps.args[k].param == i) mentioned = true;
@@ -1282,13 +1277,9 @@ bool Parser::templateDeclaration() {
     return true;
 }
 
-// **`template <> int twice<int>(int x) { ... }`**, the arguments written or deduced from the
-// parameters. It is the specialization the primary would have made - its key and its name, which
-// is the primary's pattern plus the arguments - with these tokens as the body the replay reads.
-// **[temp.mem]/1: a member template defined outside its class** - `template <class U> U S::conv(U u) {...}`
-// for a class, `template <class T> template <class U> U W<T>::both(U u) {...}` for a class template. The
-// definition is kept without its qualifier, as the class would have held it, and given to the member template
-// the class declared: now, or when a later specialization of the class template declares it.
+// **[temp.mem]/1: a member template defined outside its class** (`S::conv`,
+// `W<T>::both`): kept without its qualifier, as the class would hold it, and
+// given to the class's member template, now or in a later specialization.
 bool Parser::outOfLineMemberTemplate(const std::vector<TemplateParam> &outer) {
     const std::size_t save = at_;
     std::vector<TemplateParam> inner;
@@ -1782,11 +1773,9 @@ bool Parser::memberExplicitSpecialization(std::size_t pos) {
     return false;
 }
 
-// **A member template of one class specialization, written out** - [temp.expl.spec]/16 (R7):
-// `template <> template <> int S<int>::g(char) {...}` is the specialization g<char> of S<int>'s member
-// template, made from these tokens and found by every later use that deduces char; `template <>
-// template <class U> int S<char>::g(U) {...}` is S<char>'s member template g defined anew. Either way the
-// tokens are copied without their `S<int>::`, which a member template's replay does not write.
+// **A member template of one class specialization, written out** -
+// [temp.expl.spec]/16: `S<int>::g(char)` specializes g<char>, `S<char>::g(U)`
+// defines g anew; the tokens are copied without their `S<int>::`.
 bool Parser::memberTemplateExplicitSpecialization(std::size_t pos) {
     at_++;
     std::vector<TemplateParam> ownParams;
@@ -2680,10 +2669,9 @@ void Parser::templateArguments(const TemplateDecl &decl,
     inTemplateArgs_ = wasInArgs;
 }
 
-// **A type as a specialization's key spells it**: describe(), except that an enumeration is
-// written by its own name where describe() writes its underlying type - `k<E>` and `k<int>`, and
-// `Box<E>` and `Box<int>`, were one specialization (review of 1.30, W6: an enum argument called
-// the explicit specialization for int). Without an enumeration in it, describe() itself.
+// **A type as a specialization's key spells it**: describe(), but an enum by
+// its own name, not its underlying type - `k<E>` and `k<int>` were one
+// specialization, and an enum argument called the one for int.
 static std::string keySpelling(const Type *t) {
     const Type *u = t->unqualified();
     std::string s;
@@ -3008,15 +2996,9 @@ void Parser::instantiatePending() {
     }
 }
 
-// **A chain of instantiations that never settles** - `template <class T> int f(T t) { return f(&t); }`
-// asks for f<T *> from inside f<T>'s body, and that for f<T **> - is refused by name once it is
-// kMaxNesting bodies deep, as cl and clang refuse it ("recursive template instantiation exceeded
-// maximum depth"); until 2026-10-21 (review of 1.25, fix 5) it ran until the stack went, 43 s later.
-// A body is replayed after the one that asked for it, not inside it, so the parser's own nesting
-// never sees the chain: each specialization carries the depth of the body it was asked from. The
-// request comes through deduction's trial, which keeps a failure to itself unless the words say the
-// compiler stopped ("yet", as Source::fail reads them) - and this one must reach the user as the
-// error it is, not as "no function takes these arguments".
+// **A chain of instantiations that never settles** (f<T> asking f<T *>) is
+// refused kMaxNesting bodies deep, as cl and clang do; each specialization
+// carries its depth, and the error reaches the user, not as a failed match.
 void Parser::refuseInstantiationDepth(const std::string &name, int depth, std::size_t pos) const {
     if (depth <= kMaxNesting) return;
     src_.fail(pos, "'" + name + "' is being instantiated from inside its own instantiations more than " +
@@ -3193,11 +3175,9 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
                        std::vector<const Type *> *binding,
                        std::vector<long long> *values,
                        std::string *why, Packs *packs, bool nested) const {
-    // **Inside a template-id the argument is matched as it is** ([temp.deduct.type]/8):
-    // `It<C, V>` against `It<S, const int>` deduces V as `const int`, and `It<C, const V>`
-    // against it V as `int`. The call-argument rules below - decay, and a cv-qualifier
-    // dropped - made V `int`, the parameter `It<S, int>`, and a map's const_iterator
-    // matched no template written for it (1.10, 2026-10-20).
+    // **Inside a template-id the argument is matched as it is**
+    // ([temp.deduct.type]/8): `It<C, V>` against `It<S, const int>` makes
+    // V `const int`; the call rules below (decay, cv dropped) do not apply.
     if (nested) {
         if (pattern->kind() == Kind::TemplateParam || pattern->kind() == Kind::Deduced) {
             const std::size_t i = pattern->kind() == Kind::Deduced
@@ -3233,14 +3213,9 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
         }
         return true;
     }
-    // **A reference parameter looks *through* itself and keeps the argument's
-    // qualifier; everything else decays.** `const T &` binding an `int`
-    // deduces T as int, and the const on the parameter is not part of T.
-    // **And where the parameter is `T &` or `auto &`, with nothing qualifying T, the argument's
-    // own qualifiers are part of T** - [temp.deduct.call]/3: `T &` given a `const int` deduces T as
-    // `const int`, and `auto &x = gc;` is `const int &` (1.27, 2026-10-21, review of 1.25, item 3:
-    // T lost the const, the parameter became `int &`, and a const argument found "no function",
-    // `auto &x = gc` "a reference that can write cannot bind to a const").
+    // **A reference parameter looks through itself; others decay.** `const
+    // T &` given int makes T int; `T &` or `auto &` with T unqualified keeps
+    // the argument's cv in T, [temp.deduct.call]/3 (`const int` stays).
     bool keepsQualifiers = false;
     if (nested) {
         // matched as it is - see the top
@@ -3423,17 +3398,15 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
         return true;
     }
 
-    // **What a pointer or an array holds is matched as it is**, its qualifiers part of T unless the
-    // pattern names them (1.27, as above): `T *` given a `const int *` deduces T as `const int`,
-    // `const T *` given an `int *` T as `int` - [temp.deduct.call]/4's qualification conversion -
-    // and `T (&)[N]` given a `const char[4]` T as `const char`.
+    // **What a pointer or array holds is matched as it is**, its cv part of
+    // T unless the pattern names it: `T *` given `const int *` makes T
+    // `const int`, `const T *` given `int *` T `int` ([temp.deduct.call]/4).
     if (pattern->isPointer() && arg->isPointer()) {
         const Type *pp = pattern->pointee(), *ap = arg->pointee();
         if (pp->unqualified() != pp) { ap = withoutCvOf(ap, pp); pp = pp->unqualified(); }
         if (pp->kind() == Kind::TemplateParam || pp->kind() == Kind::Deduced)
             return deduceOne(pp, ap, binding, values, why, packs, true);
-        // A function pointee is matched as it is too - decayed again it would be a pointer, and
-        // `R (*)(A)` below would never see the function.
+        // A function pointee is matched as is: decayed, R (*)(A) misses it.
         return deduceOne(pp, ap, binding, values, why, packs, nested || pp->isFunction());
     }
     if (pattern->isArray() && arg->isArray()) {
@@ -3465,11 +3438,9 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
             return deduceOne(pattern, arg, binding, values, why, packs, true);
         return deduceOne(pattern, arg, binding, values, why, packs);
     }
-    // **`R (*)(A)` against a function pointer** - [temp.deduct.type]/8's `T(*)()` and `T(T)`: the
-    // return type and each parameter, matched as they are (1.27, 2026-10-21, review of 1.25, item 3:
-    // `callIt(dbl, 21)` for `R callIt(R (*f)(A), A a)` bound nothing and R "appears in no parameter").
-    // `int (*)(Ts...)` against `int (*)(int, int)`: the trailing expansion takes every parameter left,
-    // [temp.deduct.type]/10.
+    // **`R (*)(A)` against a function pointer** - [temp.deduct.type]/8: the
+    // return type and each parameter as they are; a trailing `Ts...` takes
+    // every parameter left, [temp.deduct.type]/10.
     if (pattern->isFunction() && arg->isFunction()) {
         const std::vector<const Type *> &pp = pattern->params(), &ap = arg->params();
         const bool tail = !pp.empty() && pp.back()->kind() == Kind::PackExpansion &&
@@ -3515,10 +3486,7 @@ bool Parser::deduceOne(const Type *pattern, const Type *arg,
                          binding, values, why, packs, true);
     }
 
-    // Nothing to deduce here. A parameter written out in full does not have to match
-    // exactly - an ordinary conversion may still get the argument there - so this is
-    // not where a mismatch is reported; overload resolution ranks it after.
-    return true;
+    return true;  // nothing to deduce; overload resolution ranks a mismatch
 }
 
 // Every base of `cls` that is a specialization of `name`, at any depth - of any template for a pattern's `C<T>`.
@@ -3583,12 +3551,9 @@ bool Parser::deduceFromArgument(const Type *param, const Type *arg,
     return true;
 }
 
-// The whole call. Answers false with a reason rather than failing, because a
-// name may be both a template and an ordinary function: deduction not
-// working is then not an error, it is one fewer candidate.
-// **Tag dispatch**: a class parameter by value that names no template parameter, and an argument that
-// cannot become it. The candidate is out before its body is read - what that body asks for would
-// otherwise be made for a call that was never going to reach it.
+// **Tag dispatch**: a class parameter by value naming no template parameter
+// and an argument that cannot become it: the candidate is out before its body
+// is read, which would otherwise be made for a call that never reaches it.
 bool Parser::tagRulesOut(const Type *param, const Type *given) {
     if (given == nullptr || param->isReference()) return false;
     const Type *to = param->unqualified();
@@ -3622,10 +3587,9 @@ bool Parser::deduceTemplateArguments(const TemplateDecl &decl,
     std::string ignored;
     const Type *fn = readTemplateDeclaration(decl, pattern, seed, &ignored);
 
-    // **A trailing function parameter pack takes every argument the written parameters leave.** It is
-    // `Ts... rest`, the pattern's last parameter an expansion - a pack named only inside a parameter's
-    // type, `List<Ns...>`, deduces through it - and may be none, so this is `<` and not `!=` on the count.
-    // The pack is the last template parameter but for any with a default after it, [temp.param]/11.
+    // **A trailing parameter pack takes every argument the others leave**,
+    // may be empty (so `<`, not `!=`), and is the last template parameter
+    // but for any with a default after it, [temp.param]/11.
     std::size_t packAt = decl.params.size();
     for (std::size_t k = decl.params.size(); k-- > 0; )
         if (decl.params[k].isPack) { packAt = k; break; }
@@ -3922,11 +3886,9 @@ void Parser::checkNonTypeArgument(const Type *pt, long long v, std::size_t argPo
                           ", which cannot be narrowed to '" + pt->describe() + "'");
 }
 
-// **[temp.arg.nontype]/1, the argument of a parameter of pointer, reference, pointer to member or
-// std::nullptr_t type** (C++98, R1): `&gv`, or an array or a function named bare, for a pointer; `gv` for a
-// reference; `&S::m` and `&S::f` for a member pointer; a null pointer of the parameter's own type. Read by
-// name, so a use rebuilds it in the function reading it; the answer is its index in addressArgs_, the value
-// the parameter is bound to. [temp.arg.nontype]/5 allows the qualification and array-to-pointer conversions.
+// **[temp.arg.nontype]/1: an argument for a pointer, reference, member pointer
+// or nullptr_t parameter** (`&gv`, `gv`, `&S::m`, a null of its type), read by
+// name; the answer is its index in addressArgs_. /5 allows cv and decay.
 long long Parser::addressArgument(const Type *pt, std::size_t pos) {
     pt = pt->unqualified();
     std::size_t k = 0, open = 0;
@@ -4358,10 +4320,9 @@ Parser::Trial::~Trial() {
 bool Parser::matchPattern(const Type *pattern, const Type *arg,
                           std::vector<const Type *> *binding,
                           std::string *why) const {
-    // **The qualifier is asked about before anything else, and both sides must
-    // agree.** `Box<const T>` matches `Box<const int>` and not `Box<int>`; `Box<T>`
-    // matches both, binding T to the qualified type where there is one.
-    // `Is<volatile T>` takes a `const volatile int` with T `const int`: the pattern's cv comes off, the rest is T's.
+    // **The qualifier first; both sides must agree**: `Box<const T>` matches
+    // `Box<const int>`, not `Box<int>`; `Box<T>` both, T taking the qualifier;
+    // `Is<volatile T>` given `const volatile int` makes T `const int`.
     if (pattern->unqualified() != pattern) {
         if ((pattern->isConst() && !arg->isConst()) || (pattern->isVolatile() && !arg->isVolatile())) {
             *why = "'" + arg->describe() + "' is not " +
@@ -4675,16 +4636,9 @@ void Parser::partialArguments(TemplateDecl::Partial *ps,
     patternOnly_ = wasPattern;
 }
 
-// [temp.class.order], asked the standard's own way: A is at least as specialized as
-// B when B's pattern matches A's. A's parameters stand as opaque types while that
-// happens, which is exactly what Kind::TemplateParam already is.
-// **With a pack expansion, which is the last argument when there is one** ([temp.deduct.type]/9,
-// review of 1.30, W8 - the expansion's argument went to matchPattern as an ordinary one, and
-// `A<T, U, Ts...>` against `A<T, T, Ts...>` crashed the compiler): B's pack takes every argument A
-// has left, A's own pack among them, when its pattern is the bare parameter, and each of them
-// otherwise; A's pack against one argument of B's could be any number of arguments, which that one
-// does not take; A's pack where B has no argument left may be empty, and matches; and without a
-// pack the two lists are as long as each other.
+// [temp.class.order]: A is as specialized as B when B's pattern matches A's,
+// A's parameters opaque; B's pack expansion ([temp.deduct.type]/9) takes all
+// A has left and may be empty; one argument of B's never takes A's pack.
 bool Parser::atLeastAsSpecialized(const TemplateDecl::Partial &a,
                                   const TemplateDecl::Partial &b) const {
     std::vector<const Type *> binding(b.params.size());
@@ -5381,10 +5335,9 @@ ExprPtr Parser::templateCall(Program *program, const std::string &scope) {
         std::set<std::string> deduced;
         instantiateViableTemplates(reached, argTypes, pos, &deduced);
 
-        // Nothing deduced and no ordinary function - so say why the template
-        // failed, which beats "not declared". With more than one overload the
-        // first is representative enough for the message. [temp.deduct]/8: a template that does not
-        // deduce only drops out, so an ordinary function in the template's namespace still answers.
+        // Nothing deduced, no ordinary function: say why the template failed
+        // (better than `not declared`; the first overload stands for all).
+        // [temp.deduct]/8: a template that does not deduce only drops out.
         auto whyNot = [&]() {
             std::vector<const Type *> b;
             std::vector<long long> v;
@@ -5639,8 +5592,7 @@ ExprPtr Parser::memberTemplateCall(ExprPtr object, const Type *obj,
     Packs packs;
     std::vector<ExprPtr> deducedArgs;
     bool deduced = false;
-    // **Every member template of the name is a candidate for a written list too** ([temp.deduct]/8): each one
-    // the list does not substitute into is dropped - the sizeof idiom's `test<T>(0)` - and the call ranks the rest.
+    // Every member template is a candidate ([temp.deduct]/8); misfits drop
     std::vector<std::size_t> made;
 
     if (peek().is("<")) {
@@ -5792,10 +5744,9 @@ ExprPtr Parser::memberTemplateCall(ExprPtr object, const Type *obj,
         }
     }
 
-    // **The specialization is odr-used here**, so its definition stays in the unit - resolveOverload
-    // says so for the calls it ranks, and a call with explicit arguments never passes through it, so
-    // `s.m<int>(1)` referred to a function the pruning then dropped (1.28, 2026-10-22, review of
-    // 1.25, item 8: a link error).
+    // **The specialization is odr-used here**, so its definition stays: a
+    // call with explicit arguments never passes through resolveOverload,
+    // and `s.m<int>(1)` was pruned to a link error.
     markUsed(sig);
     // A copy, since applyDefaults and completeCall read it while the arguments
     // can grow functions_ out from under a reference.
@@ -5878,9 +5829,7 @@ const Parser::Signature *Parser::instantiateMemberTemplate(
         ~Busy() { p->memberTemplateBusy_.erase(made); }
     } busyNow{ this, made };
     memberTemplateBusy_[made] = before;
-    // One only declared - the sizeof idiom's `test` - makes a declaration, which is all an operand of
-    // sizeof or decltype asks for; a call that is evaluated finds no definition at the link.
-    (void)pos;
+    (void)pos;  // only declared (sizeof idiom): a declaration is enough
 
     // Both layers come off however the replay ends: a body that fails throws past here, and the caller -
     // a member of the class one level out, `Tu<P, int>` asking `Tu<int>` - read its own H as `int` after.
@@ -6058,9 +6007,7 @@ void Parser::instantiateViableTemplates(const std::vector<TemplateDecl> &overloa
             const std::string symbol = instantiate(decl, binding, values, args, pos, packs).symbol;
             if (made != nullptr) made->insert(symbol);
         } catch (const SubstitutionFailure &f) {
-            // This template does not apply; the others still might - unless
-            // what stopped it was a feature this compiler has not built, which
-            // is not [temp.deduct]/8's business and must not be swallowed.
+            // others may apply; a missing feature is no [temp.deduct]/8 drop
             if (f.unsupported) src_.fail(f.pos, f.why);
         }
     }
@@ -6269,10 +6216,9 @@ void Parser::instantiateViableMemberTemplate(const TemplateDecl &mt,
         if (made != nullptr)
             candidateSpecializations_.push_back(static_cast<std::size_t>(made - &functions_[0]));
     } catch (const SubstitutionFailure &f) {
-        // This one does not apply - unless it was a refusal, which is a fact about the compiler
-        // rather than about this candidate. **A body that failed** is no substitution failure either,
-        // [temp.deduct]/8 - but [temp.inst]/3 instantiates a body only for the candidate chosen (item 31):
-        // the one declared stays a candidate, and its error is said only if overload resolution takes it.
+        // Not this one - unless a refusal, a fact about the compiler. A failed
+        // body is no substitution failure, [temp.deduct]/8, but only the
+        // chosen candidate's body is instantiated ([temp.inst]/3) and errors.
         if (f.unsupported) src_.fail(f.pos, f.why);
         if (memberTemplateBody_) {
             const std::string said = f.why + " - in the instantiation of '" + mt.ownerTag + "::" +

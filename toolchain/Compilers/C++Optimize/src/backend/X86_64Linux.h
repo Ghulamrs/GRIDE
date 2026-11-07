@@ -122,10 +122,9 @@ protected:
     bool fnMergeable_ = false;
     // **A funclet's .pdata goes last, after every ordinary function's.**
     std::string funcletPdata_;
-    // **-g describes a funclet as a procedure of its own** (1.29, see DwarfFunction::funclet): opened with
-    // the funclet, pushed after its function's record; the spelling's lines go to it until the funclet
-    // closes. `funcletEntryLoc_` is the location of its first instruction - the `catch` line, as cl names
-    // it - which closeFunclet writes into the head it builds, since no instruction of the walk is there.
+    // **-g describes a funclet as a procedure of its own**: opened with it,
+    // after its function's record, taking the lines until it closes;
+    // `funcletEntryLoc_` is its first instruction's (the `catch` line).
     void funcletDebugBegin(const std::string &symbol, std::size_t pos, int number, bool cleanup);
     void funcletDebugEnd();
     std::string funcletEntryLoc_;
@@ -327,8 +326,7 @@ private:
     // whole call placed - what visit(Call) and the outgoing area both ask.
     bool returnsThroughPointer(const Call &n) const;
     Placement placeCall(const Call &n) const;
-    // Whether evaluating `e` may make a call at the floor that writes the
-    // outgoing area above its shadow space - see visit(Call).
+    // Whether `e` may call at the floor and write the outgoing area
     bool mayWriteArea(const Expr &e) const;
 };
 

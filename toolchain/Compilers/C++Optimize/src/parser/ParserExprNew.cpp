@@ -156,10 +156,9 @@ ExprPtr Parser::classTemporary(const Type *cls, std::size_t pos) {
         obj->setXvalue();
         obj->setDeclCategory(Expr::Category::Prvalue);
         if (args.empty()) {
-            // **[dcl.init]/8: `P()` value-initialises, and for a class with no
-            // user-provided constructor that means zeroing it.** The slot was
-            // handed back as it stood, so `f(P())` read whatever the frame held.
-            // Named `$vinit`, which is how a constant reads it as zeroes (a3).
+            // **[dcl.init]/8: `P()` value-initialises: zeroed when no
+            // constructor is user-provided** (it read the frame's leftovers);
+            // named `$vinit`, which a constant reads as zeroes.
             obj.reset(Var::local("$vinit", slot));
             obj->setType(plain);
             obj->setXvalue();
@@ -299,11 +298,9 @@ bool Parser::onlyImplicitConstructors(const std::string &tag) const {
     return true;
 }
 
-// The elements go in as written. **A nested list waits behind a placeholder** (1.25, 2026-10-21)
-// for the constructor whose parameter it initialises, as a braced call argument does
-// ([over.match.list]/1, [over.ics.list]): `CMatrix<3, 3> X = { {1.0, 2.0, 3.0}, ... }` makes each
-// row the CVector<3> that CMatrix(CVector<3>, CVector<3>, CVector<3>) takes. Until 1.24 it was
-// refused, and the rows had to be written CVector<3>{...}.
+// The elements go in as written; **a nested list waits behind a placeholder**
+// for the constructor parameter it initialises ([over.match.list]/1): each row
+// of `CMatrix<3, 3> X = { {1.0, 2.0, 3.0}, ... }` becomes the CVector<3>.
 Parser::Signature Parser::listConstructor(const Type *plain, Init &in,
                                           std::vector<ExprPtr> &args, bool copyList,
                                           std::size_t pos) {
@@ -423,10 +420,9 @@ ExprPtr Parser::listTemporaryFrom(const Type *to, Init &in, bool copyList, std::
                        "can have; name a variable for it");
     if (!plain->isStructOrUnion()) return scalarFromList(plain, in, pos);
     if (isInitializerListType(plain)) return initializerListExpr(plain, in, pos);
-    // [dcl.init.list]/3: an aggregate is initialised by its members, and the implicit constructors
-    // a class member with a constructor gives it do not make it less of one - `S{"made", 1}` for an
-    // S holding a std::string (1.27, 2026-10-21, review of 1.25, item 3: it asked for a two-argument
-    // constructor). An empty list on it is value-initialisation, which the default constructor is.
+    // [dcl.init.list]/3: an aggregate is initialised by its members, implicit
+    // constructors from a member's class aside (`S{"made", 1}` with a
+    // std::string member); an empty list value-initialises.
     if (!plain->tag().empty() && hasConstructors(plain->tag()) &&
         !(isAggregateClass(plain) && !in.items.empty())) {
         checkNotAbstract(plain, pos, "the temporary '" + plain->describe() + "{...}' would make");
@@ -602,10 +598,9 @@ const Parser::Signature *Parser::conversionFunction(const Type *from,
     return exact || !inexactTwice ? best : nullptr;
 }
 
-// **The one conversion this class has to a number or a pointer**, or null when
-// it has none or has more than one. **An `explicit` one is not a candidate**: an operand of a
-// built-in operator is converted implicitly ([over.match.oper]/7, [class.conv.fct]/2) - `s + 1`
-// called `explicit operator int` (review of 1.30, A4). Contextual conversions ask elsewhere.
+// **The one conversion this class has to a number or pointer**, or null for
+// none or several; an `explicit` one is no candidate for a built-in operand
+// ([over.match.oper]/7, [class.conv.fct]/2); contextual ones ask elsewhere.
 const Parser::Signature *Parser::soleNumericConversion(const Type *from) {
     const Type *plain = from->unqualified();
     if (!plain->isStructOrUnion()) return nullptr;
@@ -1058,10 +1053,9 @@ ExprPtr Parser::dynamicCast(std::size_t pos) {
     return dynamicCastFrom(std::move(v), to, pos);
 }
 
-// [expr.dynamic.cast]/9: the pointer form on the operand's address, a null answer
-// being `__cxa_bad_cast()` - the ABI's routine that throws std::bad_cast, as clang calls.
-// On the Microsoft ABI `__RTDynamicCast` is told it is a reference and throws the CRT's
-// std::bad_cast itself, as cl calls it: its answer is never null.
+// [expr.dynamic.cast]/9: the pointer form on the operand's address, null
+// answering `__cxa_bad_cast()` (as clang); Microsoft's `__RTDynamicCast`, told
+// it is a reference, throws std::bad_cast itself (as cl), never null.
 ExprPtr Parser::dynamicCastReference(ExprPtr v, const Type *to, std::size_t pos) {
     if (to->isRValueReference())
         src_.fail(pos, "'dynamic_cast' to an rvalue reference is not supported yet - the "
@@ -1336,10 +1330,9 @@ ExprPtr Parser::statementsAsExpression(StmtPtr s, std::size_t pos) {
     return chain;
 }
 
-// **[expr.throw]: `throw e` is an expression of type void** - an assignment-expression, so an arm of
-// `?:` (`b ? 7 : throw 1`) and the operand of `noexcept` (1.27, 2026-10-21, review of 1.25, item 3:
-// "expected an expression"). The same lowering as the statement's, chained; a rethrow where the
-// statement has one; [except.spec]/9's terminate where the statement puts it.
+// **[expr.throw]: `throw e` is a void expression** (an arm of `?:`, the operand
+// of noexcept), lowered as the statement is: chained, a rethrow where it has
+// one, [except.spec]/9's terminate where it puts it.
 ExprPtr Parser::throwExpression() {
     const std::size_t tpos = peek().pos;
     expect("throw");
@@ -1379,11 +1372,9 @@ ExprPtr Parser::rethrowCall() {
     return runtimeCall("_CxxThrowException", types_.get(Kind::Void), std::move(args));
 }
 
-// **[class.copy]/31-32: `throw x;` moves from x where it may** - always from an xvalue or a
-// prvalue; from a function's parameter, which /32 adds to /31's objects; and from the name of an
-// automatic object other than a catch clause's parameter whose scope ends inside the innermost
-// try block around the throw, or with no try block around it at all. Both copied before (review
-// of 1.30, W3). A class parameter that arrived by address is read through it, `*p`.
+// **[class.copy]/31-32: `throw x;` moves from x where it may**: an xvalue or
+// prvalue, a parameter, or an automatic object (no catch parameter) whose scope
+// ends in the innermost try or has none; a class by address is read via `*p`.
 bool Parser::throwOperandMoves(const Expr &value) const {
     if (value.isXvalue() || !isGlvalue(value)) return true;
     const Var *v = dynamic_cast<const Var *>(&value);
@@ -1480,12 +1471,9 @@ StmtPtr Parser::microsoftThrow(ExprPtr value, std::size_t pos) {
     return StmtPtr(b);
 }
 
-// **`throw x;` is three calls and a store, and no new machinery**:
-// __cxa_allocate_exception, the store, __cxa_throw with the type that identifies
-// it. That type_info pointer is the work - fundamental types, the rest refused.
-// [except.throw]/3 and /5: the exception object is copy-initialised from the operand, so its type is
-// complete, not abstract, and not void; for a class, the copy or move and the destructor are
-// accessible however the copy is elided.
+// [except.throw]/3,5: the exception object is copy-initialised from the
+// operand, so its type is complete, not abstract, not void; a class's copy or
+// move and destructor must be accessible, elided or not.
 void Parser::checkThrowOperand(const Expr &value, std::size_t pos) {
     const Type *thrown = value.type()->unqualified();
     if (thrown->isVoid())
@@ -1719,8 +1707,7 @@ ExprPtr Parser::newExpression(std::size_t pos) {
         (void)ppos;
     }
     const bool userAlloc = !userPlacement.empty();
-    // `new (p) T`: asked below after `placement` has been moved into the address, so kept here - its storage
-    // is the caller's, and a constructor that throws gives nothing back ([new.delete.placement]/7).
+    // `new (p) T`: the caller's storage; a throwing ctor frees nothing (/7)
     const bool reservedPlacement = placement != nullptr && !nothrow;
 
     StorageClass sc = StorageNone;
@@ -1866,11 +1853,9 @@ ExprPtr Parser::newExpression(std::size_t pos) {
                      ? arrayCookie(made) : 0;
     int countSlot = 0;
     std::string countTemp;
-    // **[expr.new]/7: a count below zero, or one whose elements and cookie do not fit in a size_t,
-    // allocates nothing and throws std::bad_array_new_length** - through <new>'s
-    // std::__throw_bad_array_new_length, where that header has been read and so the class can be
-    // caught at all. `new int[-1]` asked for 2^64 - 4 bytes and threw bad_alloc, and `new Big[1LL << 61]`
-    // wrapped round and allocated (review of 1.30, W4). A literal count that fits is not checked.
+    // **[expr.new]/7: a negative count, or one too big for a size_t with its
+    // cookie, throws std::bad_array_new_length** (via <new>'s helper, once
+    // read); a literal count that fits is not checked.
     ExprPtr countKept;
     ExprPtr tooMany;
     ExprPtr tooManyThrows;
@@ -2016,9 +2001,7 @@ ExprPtr Parser::newExpression(std::size_t pos) {
         raw = callAllocator(alloc.c_str(),
                             array ? "??_U@YAPEAX_K@Z" : "??2@YAPEAX_K@Z",
                             voidPtr, std::move(bytes), pos);
-        // [new.delete.single]/3: the library's allocator throws bad_alloc, so `noexcept(new int)` is
-        // false, as cl has it (1.27, 2026-10-21, review of 1.25, item 3). The nothrow one above does not.
-        mayThrow_++;
+        mayThrow_++;  // [new.delete.single]/3: may throw bad_alloc, as cl
     }
     // The cookie: the allocation held, the count written into its last
     // size_t, and the array beginning after it.

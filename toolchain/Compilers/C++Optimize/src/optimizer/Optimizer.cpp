@@ -88,10 +88,9 @@ void Optimizer::functionBegin(const std::string &name, bool exported, bool merge
     opaque_.clear();
 }
 
-// **A funclet is a function of its own to the passes** - the runtime calls it, with the parent's
-// frame under rbp - and a piece, never whole: no pass takes a register for it that its prologue does
-// not save. What it reads or writes of the parent's frame is shared with the parent, whose passes then leave those slots alone.
-// One begun inside another - a handler's own `try` or cleanup - holds the outer aside until it ends.
+// **A funclet is a function of its own to the passes**, run by the runtime
+// over the parent's rbp frame: no register its prologue does not save, shared
+// parent slots left alone; one begun inside another holds the outer aside.
 void Optimizer::funcletBegin() {
     assert(inFunction_ && "a funclet outside a function");
     if (funclet_) outerFunclets_.push_back(std::move(funclet_));

@@ -84,13 +84,9 @@ const Parser::Init *Parser::bracedInitOf(const Expr &e) const {
     return nullptr;
 }
 
-// **[over.ics.list], as far as choosing among overloads needs it** (1.25, 2026-10-21): whether
-// the list could initialise a parameter of this type at all, by listTemporaryFrom's own order - a
-// scalar from no element or one, an initializer_list constructor, a constructor taking that many
-// arguments (not an explicit one: a parameter is copy-list-initialised), or an aggregate, whose
-// members say when it is built. The elements' types are not ranked here. It is what tells
-// `{1.0, 2.0, 3.0}` for the CVector<3> of CMatrix(CVector<3>, CVector<3>, CVector<3>) from the same
-// list for the `const double *` of CMatrix(const double *, ...), which three values cannot be.
+// **[over.ics.list], as far as overload choice needs it**: whether the list
+// could initialise this parameter at all, in listTemporaryFrom's order (a
+// scalar, an initializer_list ctor, a non-explicit ctor, an aggregate).
 bool Parser::bracedListViable(const Type *param, const Init &in) {
     if (param->isReference() && !param->isRValueReference() && !param->referent()->isConst())
         return false;  // the list makes a temporary, which binds no non-const lvalue reference
@@ -346,11 +342,8 @@ ExprPtr Parser::finishCall(const std::string &name, const std::string &symbol,
                         variadic, pos, std::move(args));
 }
 
-// The caller's half of passing a class by value - a temporary, the copy run into
-// it, its address handed over, all one expression - and below it the end of a full
-// expression, where those temporaries are destroyed in the reverse of their order.
-// [except.ctor]/1: the object an initialiser built is complete when its temporaries go, and is destroyed
-// if the destructor of one of them throws.
+// [except.ctor]/1: the object an initialiser built is complete when its
+// temporaries go, and is destroyed if one of their destructors throws.
 void Parser::flushOverObject(std::vector<StmtPtr> &into, const Alive &made, std::size_t pos) {
     bool throwing = false;
     for (const Temporary &t : pendingTemps_) throwing = throwing || destructorMayThrow(t.type);
@@ -494,18 +487,9 @@ bool Parser::releaseTemporary(const Expr &value) {
     return false;
 }
 
-// **The pending temporary a bound address names, if it names one** - its index in
-// pendingTemps_, or -1. The walk down to the object passes what binding and lowering
-// wrapped it in: a comma's right side (`*(ctor(&tmp), &tmp)`), a dereference and an
-// address-of, a cast - the base pointer [conv.ptr] makes of a derived temporary's -
-// and, since 2026-10-21 (review of 1.25, fix 2), a member access: [class.temporary]/5
-// binds a reference to a subobject of a temporary and the *whole* temporary lives on,
-// `const T &m = Pair().b;`. Before that the walk stopped at the member, nothing was
-// extended, the Pair stayed pending with its guard, and the next full-expression
-// cleared that guard in front of itself, as every statement does - so the Pair was
-// never destroyed at all. A comma whose right side is the arithmetic `convert` does
-// on a base pointer it first saved in a slot of its own - `(.bp = (char *)&tmp, .bp ?
-// .bp + off : 0)`, or the vbtable walk - is asked on that store, where the object is.
+// **The pending temporary a bound address names**: its pendingTemps_ index or
+// -1, walking through commas, `*`/`&`, casts and member accesses (a subobject
+// keeps the whole temporary, [class.temporary]/5), or a saved base's store.
 int Parser::pendingTemporaryOf(const Expr &e) const {
     if (const Comma *c = dynamic_cast<const Comma *>(&e)) {
         const int right = pendingTemporaryOf(c->right());

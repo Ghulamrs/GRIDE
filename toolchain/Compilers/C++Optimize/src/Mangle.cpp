@@ -886,10 +886,9 @@ private:
         }
         else if (t->isArray()) {
             out += 'A';
-            // **A bound that is a template parameter is spelled as one, and is no
-            // substitution candidate** - it is an expression there, not a type.
-            // Measured: `T f(const T (&)[N])` is _Z1fIiLi3EET_RAT0__KS0_.
-            // An expression bound is the expression: `PAeqstS0_Li4E_c` for `char (*)[sizeof(T) == 4]`, measured.
+            // **A template-parameter bound is spelled as one, no substitution
+            // candidate**: `T f(const T (&)[N])` is _Z1fIiLi3EET_RAT0__KS0_;
+            // an expression bound the expression, `PAeqstS0_Li4E_c`.
             if (const DepExpr *b = t->dependentBound()) {
                 expression(b);
             } else if (t->boundParam() >= 0) {
@@ -1641,10 +1640,9 @@ std::string vtableSymbol(const std::string &tag, bool microsoft) {
     return "_ZTV" + itaniumClassNameString(tag);   // the St abbreviation included
 }
 
-// A class named by its tag in a vbtable or vbase-destructor name: its scopes innermost first, each ended by
-// '@'. A template-id's tag - `basic_istream<char,struct char_traits<char>>` - is split only outside its
-// brackets, and what no MASM name can hold is written `$` and two hex digits: the class's tables and
-// destructor have the one name in every unit, and only this compiler's code names them.
+// A class by its tag in a vbtable or vbase-destructor name: scopes innermost
+// first, each ended by '@', a template-id split outside its brackets only, and
+// what no MASM name holds written `$` and two hex digits.
 static std::string msTagComponents(const std::string &tag) {
     std::vector<std::string> parts(1);
     int depth = 0;
@@ -2014,9 +2012,7 @@ bool itaniumLocalMemberName(const std::string &owner, const std::string &cls,
     if (owner.compare(0, 2, "_Z") == 0) {
         function = owner.substr(2);
     } else {
-        // No mangled name to take apart - `main`, or `extern "C"`. Itanium
-        // writes the plain source name as a length-and-letters component,
-        // measured: _ZZ4mainEN1B3getEv.
+        // No mangled name (main, extern "C"): plain name, _ZZ4mainEN1B3getEv
         function = std::to_string(owner.size()) + owner;
     }
     *out = "_ZZ" + function + "E" + inner.substr(2);

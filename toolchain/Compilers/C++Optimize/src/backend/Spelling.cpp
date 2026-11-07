@@ -25,8 +25,7 @@ void GnuSpelling::op(const Op &x) {
     case Op::Ind: o_ += '*'; o_ += x.text; return;
     case Op::Lbl: o_ += sym(std::string(x.text.p, x.text.n)); return;
     case Op::Seg: o_ += x.text; o_ += ':'; appendNum(o_, x.disp); return;
-    // Local-exec, measured from clang: the symbol's offset from the thread pointer, which the
-    // linker resolves for an executable's own objects.
+    // Local-exec, as clang: the offset from the thread pointer (linker's)
     case Op::Tls: o_ += sym(std::string(x.text.p, x.text.n)); o_ += "@TPOFF("; o_ += x.index; o_ += ')'; return;
     }
 }

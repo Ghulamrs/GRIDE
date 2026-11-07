@@ -715,14 +715,13 @@ int Driver::run(const std::vector<std::string> &arguments) {
     std::string command;
     // -g on the link line too: on a Mac that is what makes clang run dsymutil, so the debug
     // information outlives the object the driver assembled and discarded.
-    // (linkDebug, not gnuDebug: that name is the bool above, which this branch shares the function with)
-    const std::string linkDebug = debugInfo_ ? " -g" : "";
+    const std::string gnuDebug = debugInfo_ ? " -g" : "";
     if (objectOnly_) {
-        command = "c++" + linkDebug + " -c -o " + shellQuote(named ? output_ : output_ + ".o") + " " +
+        command = "c++" + gnuDebug + " -c -o " + shellQuote(named ? output_ : output_ + ".o") + " " +
                   shellQuote(assemblyPath);
     } else {
         // **-lm, named rather than relied upon:** a borrowed `sin` is a direct call to libm, which older glibc does not link without it - docs/FOREIGN.md.
-        command = "c++" + linkDebug + " -o " + shellQuote(output_) + " " + shellQuote(assemblyPath);
+        command = "c++" + gnuDebug + " -o " + shellQuote(output_) + " " + shellQuote(assemblyPath);
         // Before the runtime, because a library may call into it and a linker
         // reads left to right.
         for (std::size_t i = 0; i < libraries_.size(); ++i)

@@ -191,8 +191,7 @@ struct MicrosoftBaseClass {
 std::string microsoftBaseDescriptorName(const MicrosoftBaseClass &row);
 bool microsoftBaseClassArray(const Type *cls, std::vector<MicrosoftBaseClass> *out,
                              int *hierarchyAttributes, std::string *problem);
-// The rows a class's RTTI is written with: that array where it can be, else the chain of first bases,
-// each at offset zero, that a class with a virtual base is described by (Phase 6's M3 is the rest).
+// A class's RTTI rows: that array where it can be, else its first-base chain
 std::vector<MicrosoftBaseClass> microsoftRttiRows(const Type *cls, int *hierarchyAttributes);
 
 // The copy assignment operator. Itanium spells `operator=` as the code `aS` and

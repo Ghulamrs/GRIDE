@@ -136,11 +136,9 @@ public:
 
     virtual void fileEntry(int, const std::string &) {}
     virtual void location(int, int, int) {}
-    // **-g inside a handler funclet** (1.29): its code is in another section, so its lines are a table of its
-    // own - between these two every location names the funclet (CodeView's next function id), with a run
-    // of lines of its own, and the function's are taken up again after. `locationDirective` is the text of
-    // one location for function `fn` (its index among the functions), for a code generator to place where
-    // it writes code of its own - a funclet's entry.
+    // **-g inside a handler funclet**: its code is in another section, so its
+    // lines are a table of their own between these two; `locationDirective` is
+    // one location of function `fn`, for a funclet's entry.
     virtual void funcletLinesBegin() {}
     virtual void funcletLinesEnd() {}
     virtual std::string locationDirective(int fn, int file, int line, int column) const {

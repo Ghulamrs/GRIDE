@@ -169,10 +169,12 @@
     <RunTool Exe="$(ToolchainLib)" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
              Arguments="/nologo /out:&quot;$(ShmWinDir)shmrtd.lib&quot; @(ShmRuntimeDebug->'&quot;$(IntDir)rtd\%(Filename).obj&quot;', ' ') &quot;$(IntDir)rtd\_gride_shortest_double.obj&quot;" />
     <Error Condition="!Exists('$(ShmCpp11)')" Text="shc.vcxproj: no cpp11.exe in $(OutDir) - the C6000 runtime is its output; cpp11 is built first in the solution" />
-    <RunTool Exe="$(ShmCpp11)" Quiet="true"
-             Arguments="-S -arch tms6747 -nologo -O2 &quot;$(ShmRuntimeDir)%(ShmRuntime.Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt\%(ShmRuntime.Filename).s&quot;" />
-    <RunTool Exe="$(ShmCpp11)" Quiet="true"
-             Arguments="-S -arch tms6747 -nologo -O0 -DSHM_DEBUG=1 &quot;$(ShmRuntimeDir)%(ShmRuntimeDebug.Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt-debug\%(ShmRuntimeDebug.Filename).s&quot;" />
+    <!-- each file one cpp11 run, $(ToolchainJobs) at a time (Toolchain.targets' note: 0 one per processor) -->
+    <ItemGroup>
+      <ShmCpp11Run Include="@(ShmRuntime->'-S -arch tms6747 -nologo -O2 &quot;$(ShmRuntimeDir)%(Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt\%(Filename).s&quot;')" />
+      <ShmCpp11Run Include="@(ShmRuntimeDebug->'-S -arch tms6747 -nologo -O0 -DSHM_DEBUG=1 &quot;$(ShmRuntimeDir)%(Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt-debug\%(Filename).s&quot;')" />
+    </ItemGroup>
+    <RunTools Exe="$(ShmCpp11)" Runs="@(ShmCpp11Run)" Jobs="$(ToolchainJobs)" Quiet="true" />
   </Target>
   <Target Name="ShalimarRuntimesClean" AfterTargets="Clean">
     <RemoveDir Directories="$(IntDir)rt;$(IntDir)rtd;$(Shm6xDir)shmrt;$(Shm6xDir)shmrt-debug" />

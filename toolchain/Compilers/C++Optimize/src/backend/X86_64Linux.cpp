@@ -1670,9 +1670,7 @@ void X86_64Linux::emit(const Function &fn) {
         resetBlocks(fn.blocks());
         a_->defLabel(d.begin);
     } else if (fn.hasLandingPads() && !usesFunclets()) {
-        // The call-site table measures from here, whether or not there is
-        // debug information. A funclet target has no call-site table and no
-        // use for the label - and MASM will not take one shaped like this.
+        // Call-site table origin, debug or not (not for a funclet target)
         a_->defLabel(".Lfunc.begin." + fn.symbol());
     }
     clearCallSites();
@@ -2275,9 +2273,7 @@ void X86_64Linux::emitCoffEhTables(const Function &fn) {
             o += "  .long " + std::to_string(h.objectSlot == 0
                                   ? 0 : establisherOffset(h.objectSlot)) + "\n";
             o += "  .long " + a_->labelText(h.funclet) + "@IMGREL\n";
-            // dispFrame: where the funclet saved the parent's frame pointer, from
-            // its own establisher - [rsp+16] at entry, past `push rbp; sub rsp,32`.
-            // Read only when an exception passes *through* a catch funclet. cl: 038H.
+            // dispFrame: the parent's saved frame pointer, [rsp+16]; cl 038H
             o += "  .long 56\n";
         }
     }

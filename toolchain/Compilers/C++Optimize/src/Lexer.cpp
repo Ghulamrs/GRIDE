@@ -532,9 +532,7 @@ std::vector<Token> Lexer::tokenize() {
                 const std::string suffix = suffixAt(i);
                 if (suffix == "f" || suffix == "F") {
                     t.suffixF = true;
-                    // A `float` literal is rounded once too: through `double` it
-                    // is rounded twice, 53 bits and then 24. [lex.fcon] gives the
-                    // literal the value of its own type, so `strtof` is that.
+                    // A float literal is rounded once ([lex.fcon]): strtof
                     t.dvalue = std::strtof(s.c_str() + from, nullptr);
                 } else if (suffix == "l" || suffix == "L") {
                     t.suffixL = true;

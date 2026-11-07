@@ -128,10 +128,9 @@ void Driver::standardIncludeDirectories(const std::string &argv0) {
         return;
     }
 
-    // Beside the binary or one directory up: include/c++, include/c and
-    // include/win (docs\Runtime_Design.md 5.3). Then an earlier layout, where
-    // include/ is this compiler's when it holds `cstddef`, a name only this
-    // library spells, and the C headers <cstddef> reaches are there too or in lib/.
+    // Beside the binary or one up: include/c++, include/c, include/win
+    // (docs\Runtime_Design.md 5.3); then the earlier layout, include/ being
+    // this compiler's when it holds `cstddef`, C headers there or in lib/.
     const std::string here = programDirectory(argv0);
     const std::string candidates[2] = { here, here + "/.." };
     for (const std::string &at : candidates) {
@@ -308,10 +307,9 @@ static std::string programOf(const std::string &command) {
 }
 
 #ifdef _WIN32
-// **Started directly, not through cmd.exe** (1.10, 2026-10-20). A machine may have cmd disabled by policy,
-// as the one GRIDE is built on does: there every cpp11 -c and every link through cmd failed, and an IDE
-// that starts cpp11 itself had no cmd to lend it. The command line is the one a shell would have been
-// given - the program's quoted path, then its arguments - which CreateProcess reads the same way.
+// **Started directly, not through cmd.exe**: a machine may disable cmd by
+// policy (GRIDE's build machine does); the command line is the one a shell
+// would get - the quoted path, then the arguments - read by CreateProcess.
 static int runDirect(const std::string &command) {
     STARTUPINFOA si;
     ZeroMemory(&si, sizeof si);
@@ -867,8 +865,7 @@ bool Driver::link() {
             }
             steps.push_back(step);
             objects.push_back(obj);
-            // Recorded before the run, so a failure still cleans up whatever
-            // the batch managed to write.
+            // Recorded first, so a failure still cleans up what was written
             temporaryNames().push_back(obj);
         }
         if (!runCommands(steps)) return false;
@@ -1255,13 +1252,9 @@ bool Driver::compile(const Job &job) {
     }
     auto t3 = Clock::now();
 
-    // **A file that writes `volatile` is compiled without -O**, and says so: the type system keeps
-    // the qualifier (1.34), but the optimiser's passes do not yet ask it, and would take a volatile
-    // read for a plain one and keep it in a register or delete it. **Said as a warning at the first
-    // `volatile`** (1.10, 2026-10-20), `file:line:col: warning:`: written `cpp11: ...` it had the shape of
-    // the compiler's own error, and GRIDE 2.0 stopped the build on it although the compile succeeded.
-    // **Where the backend writes such a function past its optimizer one by one** (x86_64, 1.40), the file
-    // keeps its -O and only those functions go without; the other targets still compile the file without.
+    // **A file that writes `volatile` is compiled without -O**, said as a
+    // `file:line:col: warning:` at the first one (the passes do not ask it);
+    // where the backend skips such functions one by one (x86_64), it keeps -O.
     const bool downgrade = program.usesVolatile && !backend_->optimizesAroundVolatile();
     const int level = downgrade ? 0 : optimize_;
     if (optimize_ > 0 && downgrade) {

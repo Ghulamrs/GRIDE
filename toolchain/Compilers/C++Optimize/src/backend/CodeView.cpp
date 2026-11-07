@@ -169,10 +169,9 @@ void writeScope(Records &r, const DwarfFunction &f, int scope, CodeViewTypes &ty
             writeBlock(r, f, b, types, spell);
 }
 
-// **A funclet's scope is its parent's frame** (1.29), as cl writes it: the parent's parameters and locals
-// first - rbp is the parent's inside the funclet, so the same records hold - then the objects of the
-// blocks the handler stands in (theirs, without ranges: those are the parent's code), then the handler's
-// own blocks, the caught object's among them.
+// **A funclet's scope is its parent's frame**, as cl writes it: the parent's
+// parameters and locals (rbp is the parent's), the enclosing blocks' objects
+// without ranges, then the handler's own blocks, the caught object's too.
 void writeFuncletScope(Records &r, const DwarfFunction &f, CodeViewTypes &types, const Spell &spell) {
     writeObjects(r, f, 0, types, spell);
     std::vector<bool> around(f.blocks.size(), false);

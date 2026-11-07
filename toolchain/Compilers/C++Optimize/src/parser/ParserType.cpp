@@ -213,9 +213,7 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
         type->setLocalName(tag);
         type->setSpecialization(specializationOf, instantiatingArgs_);
         type->setTemplateNamespace(instantiatingNamespace_);
-        // **The injected class name.** Inside `Holder`'s own body the word `Holder`
-        // means this specialization and not the template, which is what makes
-        // `const Holder &` a legal parameter there. Registered as a member type.
+        // **Injected class name**: `Holder` in its body is this specialization
         declareTypeName(tag + "::" + specializationOf, type);
     }
     // A class in a namespace: the manglers want the name without the
@@ -879,11 +877,9 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
         // Set when a body was held and stepped over.
         bool heldBody = false;
 
-        // **`explicit`, and the replay must not start at it** - the same rule
-        // `virtual` follows a few lines down: a held body is re-read through the
-        // out-of-line path, where C++ does not write the keyword.
-        // `constexpr explicit operator bool()` is `explicit constexpr ...`: the two are put in the order
-        // read here, for every replay of these tokens too.
+        // **`explicit`: the replay must not start at it** (as `virtual`): an
+        // out-of-line re-read does not write it. `constexpr explicit` is put
+        // in the order read here, for every replay of these tokens.
         if (peek().is("constexpr") && peekAt(1).is("explicit")) std::swap(tokens_[at_], tokens_[at_ + 1]);
         bool isExplicit = false;
         const std::size_t explicitAt = peek().pos;
@@ -936,10 +932,9 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             continue;
         }
 
-        // **`explicit` on a conversion function is C++11**: carried to the member's Signature,
-        // where conversionFunction leaves it out of a copy-initialisation (1.28; until then it was
-        // read and recorded nowhere, so `bool b = f` took it).
-        // `explicit constexpr operator bool()`: a specifier may stand between the two.
+        // **`explicit` on a conversion function is C++11**: carried to the
+        // Signature, where conversionFunction leaves it out of copy-init;
+        // a specifier may stand between (explicit constexpr operator bool).
         std::size_t opAt = 0;
         while (peekAt(opAt).is("constexpr") || peekAt(opAt).is("inline")) opAt++;
         if (isExplicit && peekAt(opAt).is("operator") &&
@@ -1802,11 +1797,9 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                     msThisAdjust_[it->first] = b.offset + it->second.within;
         }
 
-    // **Every vbtable pointer the complete object holds**, which cl's most-derived constructor stores:
-    // those of the virtual bases, where they are in this object, and a non-virtual base's after its
-    // first, recorded above. A base's first pointer is shared with that base, whose table it reads; a
-    // later one belongs to the subobject holding it. With only the first of each non-virtual base,
-    // `E : virtual D` with `D : L, R` left L's and R's pointers unset in E, and `rd.v` crashed (W13).
+    // **Every vbtable pointer the complete object holds** (cl's most-derived
+    // constructor stores them): the virtual bases', and each non-virtual
+    // base's after its first, which is shared with the base and its table.
     if (target_.microsoftNames() && kind != Kind::Union && anyVirtualBase && !type->vbptrs().empty()) {
         const std::vector<Type::BaseSpec> laid = type->bases();
         for (std::size_t bi = 0; bi < laid.size(); bi++) {
@@ -1858,14 +1851,9 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
     if (noData) empties.push_back(Type::EmptyAt{ type, 0 });
     type->setEmptySubobjects(empties);
     type->complete(members, size, align);
-    // Held bodies are read now, with the class complete, so a body may name a member declared below
-    // it; taken out of the vector first, since a body may define a class with held bodies of its own.
-    // A specialization also takes its nested classes' bodies, which waited for it, [temp.inst]/2.
-    // **And so does any class** (1.27, 2026-10-21, review of 1.25, item 3): a class nested in one
-    // still being read leaves its bodies waiting for the outermost, since [class.mem]/2 makes the
-    // enclosing class complete inside them too - `Nested::get(const Outer &o)` reads `o.later`,
-    // declared after Nested, where it found "no member" when its body was read at Nested's own end.
-    // A member class template's specialization keeps its own: they are replayed with its arguments bound.
+    // Held bodies are read now, the class complete, so one may name a member
+    // below it; nested classes' wait for the outermost ([temp.inst]/2,
+    // [class.mem]/2), a member template's specialization keeps its own.
     bool nestedInOpen = false;
     for (std::size_t i = 0; i < classStack_.size() && !nestedInOpen && specializationOf.empty(); i++)
         for (const Type *e = type->enclosing(); e != nullptr; e = e->enclosing())
@@ -2259,10 +2247,9 @@ const Type *Parser::specifiers(StorageClass *storage, Qualifiers *quals) {
     return t;
 }
 
-// **`volatile` is in the type system, and a file that writes it is still compiled without -O**: the
-// optimiser's passes do not yet tell a volatile access from a plain one, so they are not run on it
-// (see Program::usesVolatile). This marks the file and keeps where the first `volatile` was (the token
-// just consumed); always true.
+// **`volatile` is in the type system, yet its file is compiled without -O**:
+// the passes do not yet tell volatile accesses apart (Program::usesVolatile).
+// Marks the file and keeps where the first `volatile` was; always true.
 bool Parser::sawVolatile() {
     if (current_ != nullptr) {
         if (!current_->usesVolatile && at_ > 0) current_->volatileAt = src_.where(tokens_[at_ - 1].pos);
@@ -3007,9 +2994,7 @@ void Parser::checkOperatorDeclarable(const std::string &name,
             if (second->isReference() && second->pointee()->unqualified()->isStructOrUnion() &&
                 second->pointee()->unqualified()->tag() == "std::nothrow_t") return;
         }
-        // Any further parameters are placement ones - [expr.new]/14 reaches
-        // them from `new (a, b) T`, and a deallocation's from [expr.new]/20.
-        return;
+        return;  // further parameters are placement ones ([expr.new]/14, /20)
     }
 
     // **[over.oper]/6: a non-member operator needs a class or an enumeration
@@ -3234,11 +3219,9 @@ Parser::Declared Parser::declarator(const Type *base, bool nameOptional,
         bool wrapsAPointer = peek().is("*") || peek().is("&") || peek().is("&&") ||
                              wrapsMemberPointer;
 
-        // **To the matching ')' by counting brackets**, where the declarator inside was read
-        // once here and once more below, each level of `int (((x)))` doubling the work of the
-        // one in it - 2^N for N parentheses (2026-10-21, review of 1.25, fix 5). What the
-        // parentheses hold is balanced in any declarator that is well-formed; one that never
-        // closes is read the old way, so that it is refused where and as it was.
+        // **To the matching ')' by counting brackets**: reading the inner
+        // declarator twice doubled per level (2^N for `int (((x)))`); one that
+        // never closes is read the old way, refused where and as it was.
         std::size_t close = open;
         int depth = 0;
         for (; close < tokens_.size() && tokens_[close].kind != TokenKind::End; close++) {

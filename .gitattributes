@@ -1,3 +1,0 @@
-# Store every file byte for byte as it is on disk: no LF/CRLF conversion on any machine, whatever
-# core.autocrlf says, so a checkout on Windows or the Mac compares equal to the Windows tree.
-* -text

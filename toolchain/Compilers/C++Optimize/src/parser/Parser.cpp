@@ -629,9 +629,7 @@ bool Parser::atTypeName() const {
         return true;
     if (peekAt(1).is("<") && memberClassTemplate(peek().text) != nullptr) return true;
     if (findTypedef(peek().text) != nullptr) return true;
-    // `N::S` names a type as much as `Outer::Inner` does, and neither answers to
-    // its leading name alone. One of those is a namespace and the other a class;
-    // past that first token the walk is the same walk.
+    // `N::S` names a type as `Outer::Inner` does: the same walk past `N`
     return qualifiedTypeEnd() != 0;
 }
 
@@ -828,10 +826,9 @@ bool Parser::atDeclarationStart() const {
 void Parser::skipBracedBlock() {
     // A function try block's handlers are its body too, [dcl.fct.def.general]/1.
     const bool functionTry = peek().is("try");
-    // A constructor's body may be preceded by its mem-initializer list, so
-    // what is skipped starts at the ':' and the '{' is found from there - **past
-    // each entry's own arguments, which may be braced**: `: i{v}, d{1.5} {}` held
-    // `{v}` as the body (R-list).
+    // A constructor's body may follow its mem-initializers: skip from the
+    // ':' to the '{' **past each entry's own, maybe braced, arguments**
+    // (`: i{v}, d{1.5} {}` held `{v}` as the body).
     if (functionTry && peekAt(1).is(":")) at_++;
     if (peek().is(":")) {
         at_++;
@@ -1387,10 +1384,9 @@ ExprPtr Parser::defaultPromote(ExprPtr e) {
     return e;
 }
 
-// cl's other entry points: at file scope wmain, WinMain and wWinMain are C names whatever their
-// parameters, as `main` is, since Microsoft's start-up calls them by name and nothing need declare
-// wmain. So each is also one function: cl refuses an overload (C2731), and a member or a function
-// in a namespace, whose key has its qualifier, stays a C++ name. No other target has them.
+// cl's other entry points: wmain, WinMain and wWinMain at file scope are C
+// names whatever their parameters, as `main` is, and one function each (cl's
+// C2731); a member or namespaced one stays C++. No other target has them.
 bool Parser::microsoftEntry(const std::string &key) const {
     return target_.microsoftNames() && (key == "wmain" || key == "WinMain" || key == "wWinMain");
 }

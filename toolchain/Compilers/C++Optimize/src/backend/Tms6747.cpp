@@ -1046,9 +1046,8 @@ void Tms6747::visit(const For &n) { hasLoop_ = true; loopDepth_++; Walker::visit
 void Tms6747::visit(const DoWhile &n) { hasLoop_ = true; loopDepth_++; Walker::visit(n); loopDepth_--; }
 
 // ---- bit-fields ----------------------------------------------------------
-// A bit-field is width bits from bitOffset up in the unit at the member's
-// offset. EXT/EXTU read it in one instruction (up to the top of the word,
-// back down); a write is CLR, EXTU + SHL of the new value, OR, store.
+// A bit-field is width bits from bitOffset in the unit at the member's offset:
+// read by EXT/EXTU in one instruction; written by CLR, EXTU + SHL, OR, store.
 void Tms6747::bitFieldUnitAddr(const MemberAccess &m) {
     genAddr(m.object());
     addOffset(m.offset());
@@ -1950,9 +1949,8 @@ void Tms6747::visit(const MemberAccess &n) {
 }
 
 // ---- functions and the file ----------------------------------------------
-// Initialised data, in TI's directives: .byte, .short and .word (32 bits;
-// TI's .long is 32 bits too, so a 64-bit piece is two words, low first), a
-// .word of a symbol with its addend for a relocated piece, .space for a gap.
+// Initialised data in TI's directives: .byte, .short, .word (32-bit; a 64-bit
+// piece is two, low first), .word of a symbol + addend, .space for a gap.
 void Tms6747::emitGlobal(const Global &g, Segment seg) {
     int size = g.type->size(target_);
     // The type's own alignment: lifting a 16-byte object to 16 is x86's rule.

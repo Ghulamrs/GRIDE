@@ -293,35 +293,42 @@ void computeLiveness(std::vector<Line> &v) {
     liveStamp.data = v.data(); liveStamp.size = v.size(); liveStamp.edits = textEdits;
 }
 
+// What line j says of reg on the straight path from i: 1 dead (overwritten
+// first, or dead at the block's end), 0 live (a directive too), -1 go on; only
+// a non-instruction, a CALLP or B, or a line using reg can answer.
+int deadAt(const std::vector<Line> &v, std::size_t i, std::size_t j, const std::string &reg) {
+    if (!v[j].instr) return isLabel(v[j]) && (v[i].liveOut & bitOf(reg)) == 0 ? 1 : 0;
+    std::vector<std::string> reads, writes;
+    readsAndWrites(v[j], reads, writes);
+    if (has(reads, reg)) return 0;
+    if (v[j].mnem == "CALLP") {
+        if (callReads() & bitOf(reg)) return 0;                  // a call: its arguments
+        return (callWrites() & bitOf(reg)) || reg == "B3" || (v[j].liveOut & bitOf(reg)) == 0 ? 1 : 0;
+    }
+    if (v[j].mnem == "B") {
+        if (sideOf(v[j].ops[0]) ? v[j].ops[0] != "B3" : !startsWith(v[j].ops[0], "L$") && !startsWith(v[j].ops[0], "L.")) {
+            if (callReads() & bitOf(reg)) return 0;              // a call: its arguments
+            if (callWrites() & bitOf(reg)) return 1;             // clobbered by the callee
+        }
+        return (v[j].liveOut & bitOf(reg)) == 0 ? 1 : 0;
+    }
+    if (has(writes, reg) && v[j].pred.empty()) return 1;
+    return -1;
+}
+
 // Whether reg is overwritten before it is read on the straight path from i, or
 // is not live where the block ends; a directive ends the path and answers no.
 bool deadAfterAsComputed(const std::vector<Line> &v, std::size_t i, const std::string &reg) {
     for (std::size_t j = i + 1; j < v.size(); j++) {
-        if (!v[j].instr) return isLabel(v[j]) ? (v[i].liveOut & bitOf(reg)) == 0 : false;
-        std::vector<std::string> reads, writes;
-        readsAndWrites(v[j], reads, writes);
-        if (has(reads, reg)) return false;
-        if (v[j].mnem == "CALLP") {
-            if (callReads() & bitOf(reg)) return false;          // a call: its arguments
-            return (callWrites() & bitOf(reg)) || reg == "B3" || (v[j].liveOut & bitOf(reg)) == 0;
-        }
-        if (v[j].mnem == "B") {
-            if (sideOf(v[j].ops[0]) ? v[j].ops[0] != "B3" : !startsWith(v[j].ops[0], "L$") && !startsWith(v[j].ops[0], "L.")) {
-                if (callReads() & bitOf(reg)) return false;      // a call: its arguments
-                if (callWrites() & bitOf(reg)) return true;      // clobbered by the callee
-            }
-            return (v[j].liveOut & bitOf(reg)) == 0;
-        }
-        if (has(writes, reg) && v[j].pred.empty()) return true;
+        const int at = deadAt(v, i, j, reg);
+        if (at >= 0) return at == 1;
     }
     return (v[i].liveOut & bitOf(reg)) == 0;
 }
 
-// The question every pass asks, of liveness that is current - or, inside a LivenessHeld, as it was computed, which
-// CPP11_C6XLIVECHECK=1 holds to its vow: a "dead" the current text would answer "live" to stops the compiler.
-bool deadAfter(const std::vector<Line> &v, std::size_t i, const std::string &reg) {
-    if (!heldBy) { ensureLiveness(v); return deadAfterAsComputed(v, i, reg); }
-    const bool dead = deadAfterAsComputed(v, i, reg);
+// A dead answer given inside a LivenessHeld, which CPP11_C6XLIVECHECK=1 holds to the held pass's vow: a "dead" the
+// current text would answer "live" to stops the compiler.
+bool heldDeadAnswer(const std::vector<Line> &v, std::size_t i, const std::string &reg, const bool dead) {
     if (dead && liveChecking() && !liveCurrent(v)) {
         const std::uint64_t edits = textEdits;
         const LiveStamp stamp = liveStamp;
@@ -337,16 +344,34 @@ bool deadAfter(const std::vector<Line> &v, std::size_t i, const std::string &reg
     return dead;
 }
 
-// MVKL then MVKH of a constant that fits sixteen signed bits is one MVK.
+// The question every pass asks, of liveness that is current - or, inside a LivenessHeld, as it was computed.
+bool deadAfter(const std::vector<Line> &v, std::size_t i, const std::string &reg) {
+    if (!heldBy) { ensureLiveness(v); return deadAfterAsComputed(v, i, reg); }
+    return heldDeadAnswer(v, i, reg, deadAfterAsComputed(v, i, reg));
+}
+
+// MVKL then MVKH of a constant that fits sixteen signed bits is one MVK. One pass, the lines kept slid down over the
+// MVKHs dropped: erasing each from the middle moved every line after it, once for each - quadratic on a long block.
 void foldMvk(std::vector<Line> &v) {
-    for (std::size_t i = 0; i + 1 < v.size(); i++) {
-        const Line &a = v[i], &b = v[i + 1];
-        if (a.mnem != "MVKL" || b.mnem != "MVKH" || a.ops.size() != 2 || a.ops != b.ops || !isNumber(a.ops[0])) continue;
-        long k = std::atol(a.ops[0].c_str());
-        if (k < -32768 || k > 32767) continue;
-        v[i] = make("MVK", a.ops[0], a.ops[1]);
-        v.erase(v.begin() + static_cast<long>(i) + 1);
+    std::size_t w = 0, r = 0;   // v[0, w) the text so far; v[r] the next line to read
+    while (r < v.size()) {
+        if (r + 1 < v.size()) {
+            const Line &a = v[r], &b = v[r + 1];
+            if (a.mnem == "MVKL" && b.mnem == "MVKH" && a.ops.size() == 2 && a.ops == b.ops && isNumber(a.ops[0])) {
+                const long k = std::atol(a.ops[0].c_str());
+                if (k >= -32768 && k <= 32767) {
+                    Line mvk = make("MVK", a.ops[0], a.ops[1]);
+                    v[w++] = std::move(mvk);
+                    r += 2;
+                    continue;
+                }
+            }
+        }
+        if (w != r) v[w] = std::move(v[r]);
+        w++;
+        r++;
     }
+    v.erase(v.begin() + static_cast<long>(w), v.end());
 }
 
 int accessSize(const std::string &m) {
@@ -486,36 +511,47 @@ bool renameable(const Line &l) {
 bool forwardMoves(std::vector<Line> &v) {
     LivenessHeld held(v, "forwardMoves");   // A copy goes only where its destination's old value is read by nobody, its source read later in the same block.
     bool changed = false;
-    for (std::size_t i = 0; i < v.size(); i++) {
-        const Line &mv = v[i];
-        if (mv.mnem != "MV" || mv.ops.size() != 2 || !mv.pred.empty()) continue;
+    // The text is v[0, w) then v[r, end): a dropped copy stays in the gap, not
+    // erased mid-vector (quadratic); everything asked reads v[w - 1] or
+    // v[r, end), as the erased text would stand.
+    std::size_t w = 0, r = 0;
+    // deadAfter of the text as it stands, asked at line at (r or after). Only CPP11_C6XLIVECHECK's check reads the whole
+    // text, so with a gap open it is given the text itself.
+    auto deadHere = [&](std::size_t at, const std::string &reg) -> bool {
+        const bool dead = deadAfterAsComputed(v, at, reg);
+        if (!dead || w == r || !liveChecking()) return heldDeadAnswer(v, at, reg, dead);
+        std::vector<Line> text(v.begin(), v.begin() + static_cast<long>(w));
+        text.insert(text.end(), v.begin() + static_cast<long>(r), v.end());
+        return heldDeadAnswer(text, w + (at - r), reg, dead);
+    };
+    // Whether the copy at v[r] goes: a self-copy, or its work done by the line before or by its one reader.
+    auto goes = [&]() -> bool {
+        const Line &mv = v[r];
+        if (mv.mnem != "MV" || mv.ops.size() != 2 || !mv.pred.empty()) return false;
         const std::string S = mv.ops[0], D = mv.ops[1];
-        if (sideOf(S) && S == D) { v.erase(v.begin() + static_cast<long>(i)); i--; changed = true; continue; }   // a self-copy
-        if (!sideOf(S) || !sideOf(D) || S == "A15" || D == "A15" || S == "B15" || D == "B15") continue;
+        if (sideOf(S) && S == D) return true;   // a self-copy
+        if (!sideOf(S) || !sideOf(D) || S == "A15" || D == "A15" || S == "B15" || D == "B15") return false;
         // Retarget: the instruction before made S for this copy alone.
-        if (i > 0 && renameable(v[i - 1]) && v[i - 1].pred.empty() && v[i - 1].mnem != "MVKH" &&
-            !v[i - 1].ops.empty() && v[i - 1].ops.back() == S && deadAfter(v, i, S)) {
+        if (w > 0 && renameable(v[w - 1]) && v[w - 1].pred.empty() && v[w - 1].mnem != "MVKH" &&
+            !v[w - 1].ops.empty() && v[w - 1].ops.back() == S && deadHere(r, S)) {
             std::vector<std::string> reads, writes;
-            readsAndWrites(v[i - 1], reads, writes);
+            readsAndWrites(v[w - 1], reads, writes);
             if (writes.size() == 1) {
-                Line p = v[i - 1];
+                Line p = v[w - 1];
                 p.ops.back() = D;
-                Line r = rebuilt(p.mnem, p.ops);
-                if (crossings(r) <= 1 && unitsFor(r) != 0) {
-                    v[i - 1] = r;
-                    v.erase(v.begin() + static_cast<long>(i));
-                    i--;
-                    changed = true;
-                    continue;
+                Line made = rebuilt(p.mnem, p.ops);
+                if (crossings(made) <= 1 && unitsFor(made) != 0) {
+                    v[w - 1] = made;
+                    return true;
                 }
             }
         }
-        for (std::size_t j = i + 1; j < v.size(); j++) {
+        for (std::size_t j = r + 1; j < v.size(); j++) {
             if (blockEnd(v[j])) break;
             std::vector<std::string> reads, writes;
             readsAndWrites(v[j], reads, writes);
             if (has(reads, D)) {
-                if (!v[j].pred.empty() || (!has(writes, D) && !deadAfter(v, j, D))) break;
+                if (!v[j].pred.empty() || (!has(writes, D) && !deadHere(j, D))) break;
                 if (v[j].mnem == "ADDK" || v[j].mnem == "MVKH") break;      // the destination is read too
                 Line u = v[j];
                 bool pair = false;          // a register pair is odd:even, and a half cannot be renamed alone
@@ -525,29 +561,38 @@ bool forwardMoves(std::vector<Line> &v) {
                 for (std::size_t o = 0; o < last; o++) u.ops[o] = renamed(u.ops[o], D, S);
                 for (std::size_t o = last; o < u.ops.size(); o++)
                     if (u.ops[o][0] == '*') u.ops[o] = renamed(u.ops[o], D, S);
-                Line r = rebuilt(u.mnem, u.ops, u.pred);
+                Line made = rebuilt(u.mnem, u.ops, u.pred);
                 // A memory operand's registers stay on the unit's side; a branch register stays B.
                 bool memSide = false;
-                for (std::size_t o = 0; o < r.ops.size(); o++)
-                    if (r.ops[o][0] == '*') { std::vector<std::string> m; registersIn(r.ops[o], m); if (m.size() > 1 && sideOf(m[0]) != sideOf(m[1])) memSide = true; }
-                if (memSide || crossings(r) > 1 || unitsFor(r) == 0 || (r.mnem == "B" && sideOf(r.ops[0]) == 'A')) break;
-                v[j] = r;
-                v.erase(v.begin() + static_cast<long>(i));
-                i--;
-                changed = true;
-                break;
+                for (std::size_t o = 0; o < made.ops.size(); o++)
+                    if (made.ops[o][0] == '*') { std::vector<std::string> m; registersIn(made.ops[o], m); if (m.size() > 1 && sideOf(m[0]) != sideOf(m[1])) memSide = true; }
+                if (memSide || crossings(made) > 1 || unitsFor(made) == 0 || (made.mnem == "B" && sideOf(made.ops[0]) == 'A')) break;
+                v[j] = made;
+                return true;
             }
             if (has(writes, D) || has(writes, S)) break;
         }
+        return false;
+    };
+    for (r = 0; r < v.size(); r++) {
+        if (goes()) { changed = true; continue; }
+        if (w != r) v[w] = std::move(v[r]);
+        w++;
     }
+    v.erase(v.begin() + static_cast<long>(w), v.end());
     // A copy nothing reads before it is written again.
-    for (std::size_t i = 0; i < v.size(); i++)
-        if (v[i].mnem == "MV" && v[i].ops.size() == 2 && v[i].pred.empty() && sideOf(v[i].ops[1]) &&
-            v[i].ops[1] != "A15" && v[i].ops[1] != "B15" && deadAfter(v, i, v[i].ops[1])) {
-            v.erase(v.begin() + static_cast<long>(i));
-            i--;
+    w = 0;
+    for (r = 0; r < v.size(); r++) {
+        const Line &l = v[r];
+        if (l.mnem == "MV" && l.ops.size() == 2 && l.pred.empty() && sideOf(l.ops[1]) &&
+            l.ops[1] != "A15" && l.ops[1] != "B15" && deadHere(r, l.ops[1])) {
             changed = true;
+            continue;
         }
+        if (w != r) v[w] = std::move(v[r]);
+        w++;
+    }
+    v.erase(v.begin() + static_cast<long>(w), v.end());
     return changed;
 }
 
@@ -1766,6 +1811,69 @@ bool isPop(const std::vector<Line> &v, std::size_t i) {
            (v[i].ops[0] == "*B15" || (v[i].ops[0] == "*+B15(4)" && v[i].mnem == "LDW")) && v[i + 1].raw == "\tADD\tB15, 8, B15";
 }
 
+// Where a straight path can stop, for A16-A31 (foldPushPop's registers): the
+// lines ending every path (no instruction, CALLP, B) and each register's users;
+// a path's answer is found by lookup, not by walking every line between.
+class PathStops {
+public:
+    explicit PathStops(const std::vector<Line> &v) : v_(v) {
+        for (int r = 16; r < 32; r++) names_.push_back("A" + std::to_string(r));
+        touches_.resize(names_.size());
+        for (std::size_t j = 0; j < v_.size(); j++) note(j);
+    }
+    // Line j was rewritten: what it stops and touches now.
+    void renew(std::size_t j) {
+        ends_.erase(j);
+        for (std::size_t r = 0; r < touches_.size(); r++) touches_[r].erase(j);
+        note(j);
+    }
+    // deadAfterAsComputed, by lookup; a register outside A16-A31 is asked line by line.
+    bool deadAfter(std::size_t i, const std::string &reg) const {
+        const std::set<std::size_t> *t = touching(reg);
+        if (!t) return deadAfterAsComputed(v_, i, reg);
+        std::size_t j = i;
+        for (;;) {
+            const std::set<std::size_t>::const_iterator e = ends_.upper_bound(j), w = t->upper_bound(j);
+            if (e == ends_.end() && w == t->end()) return (v_[i].liveOut & bitOf(reg)) == 0;
+            j = e == ends_.end() ? *w : w == t->end() ? *e : std::min(*e, *w);
+            const int at = deadAt(v_, i, j, reg);
+            if (at >= 0) return at == 1;
+        }
+    }
+    // Whether a line from first to last, both included, reads or writes reg.
+    bool touched(std::size_t first, std::size_t last, const std::string &reg) const {
+        const std::set<std::size_t> *t = touching(reg);
+        if (!t) {
+            for (std::size_t k = first; k <= last; k++) {
+                std::vector<std::string> r, w;
+                readsAndWrites(v_[k], r, w);
+                if (has(r, reg) || has(w, reg)) return true;
+            }
+            return false;
+        }
+        const std::set<std::size_t>::const_iterator at = t->lower_bound(first);
+        return at != t->end() && *at <= last;
+    }
+
+private:
+    void note(std::size_t j) {
+        const Line &l = v_[j];
+        if (!l.instr || l.mnem == "CALLP" || l.mnem == "B") ends_.insert(j);
+        std::vector<std::string> reads, writes;
+        readsAndWrites(l, reads, writes);
+        for (std::size_t r = 0; r < names_.size(); r++)
+            if (has(reads, names_[r]) || has(writes, names_[r])) touches_[r].insert(j);
+    }
+    const std::set<std::size_t> *touching(const std::string &reg) const {
+        for (std::size_t r = 0; r < names_.size(); r++) if (names_[r] == reg) return &touches_[r];
+        return nullptr;
+    }
+    const std::vector<Line> &v_;
+    std::vector<std::string> names_;
+    std::set<std::size_t> ends_;
+    std::vector<std::set<std::size_t> > touches_;
+};
+
 // A push whose pop is in the same block, with no call and no other use of
 // B15 between, keeps its value in A16-A31 instead: the pair's slot d takes
 // A(16+2d):A(17+2d), and the two stack adjustments go with the memory access.
@@ -1786,6 +1894,7 @@ void foldPushPop(std::vector<Line> &v) {
         if (has(reads, "B15") || has(writes, "B15")) open.clear();
     }
     std::vector<bool> drop(v.size(), false);
+    PathStops stops(v);
     for (std::size_t p = 0; p < pairs.size(); p++) {
         std::size_t push = pairs[p].first, pop = pairs[p].second;
         int depth = 0;
@@ -1796,12 +1905,8 @@ void foldPushPop(std::vector<Line> &v) {
         std::string lo, hi;
         for (; depth < 8 && lo.empty(); depth++) {
             const std::string l = "A" + std::to_string(16 + 2 * depth), h = "A" + std::to_string(17 + 2 * depth);
-            bool ok = deadAfter(v, push, l) && deadAfter(v, push, h);
-            for (std::size_t k = push + 1; k <= pop + 1 && ok; k++) {
-                std::vector<std::string> r, w;
-                readsAndWrites(v[k], r, w);
-                if (has(r, l) || has(w, l) || has(r, h) || has(w, h)) ok = false;
-            }
+            bool ok = heldDeadAnswer(v, push, l, stops.deadAfter(push, l)) && heldDeadAnswer(v, push, h, stops.deadAfter(push, h));
+            if (ok && (stops.touched(push + 1, pop + 1, l) || stops.touched(push + 1, pop + 1, h))) ok = false;
             if (ok) { lo = l; hi = h; }
         }
         if (lo.empty()) continue;
@@ -1811,10 +1916,12 @@ void foldPushPop(std::vector<Line> &v) {
             v[push + 1] = make("MV", src.substr(0, src.find(':')), hi);
             v[pop] = make("MV", lo, dst.substr(dst.find(':') + 1));
             v[pop + 1] = make("MV", hi, dst.substr(0, dst.find(':')));
+            stops.renew(push); stops.renew(push + 1); stops.renew(pop); stops.renew(pop + 1);
             continue;
         }
         v[push + 1] = make("MV", src, lo);
         v[pop] = make("MV", lo, dst);
+        stops.renew(push + 1); stops.renew(pop);
         drop[push] = true;
         drop[pop + 1] = true;
     }
@@ -2003,12 +2110,31 @@ std::vector<Pending> scheduleBlock(std::vector<Node> &nodes, std::ostringstream 
             if (d >= 0) b.preds.push_back(std::make_pair(static_cast<int>(j), d));
         }
     }
-    for (std::size_t i = n; i-- > 0;) {
-        Node &a = nodes[i];
-        a.height = a.lat;
-        for (std::size_t k = i + 1; k < n; k++)
-            for (std::size_t e = 0; e < nodes[k].preds.size(); e++)
-                if (nodes[k].preds[e].first == static_cast<int>(i)) a.height = std::max(a.height, nodes[k].preds[e].second + nodes[k].height);
+    // A node's height: its latency, or the longest edge-plus-height after it.
+    // Edges run forward, so walking back each height is final before it is
+    // handed on: one pass over the edges, where the old search was cubic.
+    for (std::size_t i = 0; i < n; i++) nodes[i].height = nodes[i].lat;
+    for (std::size_t k = n; k-- > 0;) {
+        const Node &b = nodes[k];
+        for (std::size_t e = 0; e < b.preds.size(); e++) {
+            Node &a = nodes[static_cast<std::size_t>(b.preds[e].first)];
+            a.height = std::max(a.height, b.preds[e].second + b.height);
+        }
+    }
+    // A node is ready when every predecessor but a branch is issued and the last of their distances has passed. Kept per
+    // node - the predecessors still waiting, and the cycle the issued ones allow - and brought up to date as each issues,
+    // rather than every edge of every node asked again each cycle (cycles times edges: cubic on a long block).
+    std::vector<int> waiting(n, 0), earliest(n, 0);
+    std::vector<std::vector<std::pair<int, int> > > succs(n);   // (later node, distance), for each node a later one waits on
+    for (std::size_t i = 0; i < n; i++) {
+        const Node &x = nodes[i];
+        for (std::size_t e = 0; e < x.preds.size(); e++) {
+            const std::size_t j = static_cast<std::size_t>(x.preds[e].first);
+            const Node &y = nodes[j];
+            if (y.branch) continue;
+            if (y.issue < 0) { waiting[i]++; succs[j].push_back(std::make_pair(static_cast<int>(i), x.preds[e].second)); }
+            else earliest[i] = std::max(earliest[i], y.issue + x.preds[e].second);
+        }
     }
     std::vector<Packet> cycles;
     std::size_t left = n - (branchAt >= 0 ? 1 : 0);
@@ -2020,13 +2146,7 @@ std::vector<Pending> scheduleBlock(std::vector<Node> &nodes, std::ostringstream 
             for (std::size_t i = 0; i < n; i++) {
                 Node &x = nodes[i];
                 if (x.issue >= 0 || x.branch || c < minIssue[i]) continue;
-                bool ready = true;
-                for (std::size_t e = 0; e < x.preds.size() && ready; e++) {
-                    const Node &y = nodes[static_cast<std::size_t>(x.preds[e].first)];
-                    if (y.branch) continue;
-                    if (y.issue < 0 || y.issue + x.preds[e].second > c) ready = false;
-                }
-                if (!ready || !fits(p, x)) continue;
+                if (waiting[i] > 0 || earliest[i] > c || !fits(p, x)) continue;
                 if (best < 0 || x.height > nodes[static_cast<std::size_t>(best)].height) best = static_cast<int>(i);
             }
             if (best < 0) break;
@@ -2034,6 +2154,12 @@ std::vector<Pending> scheduleBlock(std::vector<Node> &nodes, std::ostringstream 
             chosen.issue = c;
             add(p, chosen);
             left--;
+            const std::vector<std::pair<int, int> > &after = succs[static_cast<std::size_t>(best)];
+            for (std::size_t s = 0; s < after.size(); s++) {
+                const std::size_t k = static_cast<std::size_t>(after[s].first);
+                waiting[k]--;
+                earliest[k] = std::max(earliest[k], c + after[s].second);
+            }
             // A DP instruction holds its unit on its side - each it might be given - for its late cycles, and a crossed pair the cross path.
             for (int k = 1; k <= chosen.late; k++) {
                 while (static_cast<int>(cycles.size()) <= c + k) cycles.push_back(Packet());

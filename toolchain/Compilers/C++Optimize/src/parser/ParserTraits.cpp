@@ -201,11 +201,9 @@ ExprPtr Parser::traitOperand(const Type *t) {
     return e;
 }
 
-// **Whether the expression a trait asks about is well-formed**, read in a trial from tokens that name
-// its operands (`$trait0 = $trait1`; `$trait0, $trait1)` after a class's name; `$trait0` copy-
-// initialising `to`) and thrown away. [meta.unary.prop]/6 and [meta.rel]/4 check access from a context
-// unrelated to every type in it, so no class or function of the program's is current; `nothrow` says
-// whether nothing it calls may throw, which is what `noexcept(e)` counts.
+// **Whether the expression a trait asks about is well-formed**, read in a
+// thrown-away trial from tokens naming its operands, outside every program
+// class ([meta.unary.prop]/6, [meta.rel]/4); `nothrow` as `noexcept(e)`.
 bool Parser::traitWellFormed(TraitForm form, const Type *to, const std::vector<const Type *> &operands,
                              std::size_t pos, bool *nothrow) {
     std::vector<Token> spelled;
@@ -271,8 +269,7 @@ bool Parser::traitWellFormed(TraitForm form, const Type *to, const std::vector<c
             // What the trial would have called is not used by the program for being asked about.
             for (std::size_t i = 0; i < used.size() && i < p->functions_.size(); i++)
                 p->functions_[i].used = used[i];
-            // Nor is anything the trial made: a specialization it instantiated would be emitted calling
-            // functions whose marks were just put back (unique_ptr's, asked about by is_constructible).
+            // Nor anything the trial made (its marks were just put back)
             for (std::size_t i = used.size(); i < p->functions_.size(); i++) p->functions_[i].used = false;
         }
     };

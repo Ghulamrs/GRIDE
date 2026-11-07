@@ -60,8 +60,7 @@ struct EntryOf {
     std::string label;
     Payload event;
     bool dead = false;
-    // A label where the exception state changes: see Spelling::stateLabel.
-    bool state = false;
+    bool state = false;  // the exception state changes here (stateLabel)
 };
 
 // **An edge of the flow graph**, as GCC has them: from one block to another, or out of the function, with the kind that says what crosses it.

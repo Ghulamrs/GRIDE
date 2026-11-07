@@ -1231,10 +1231,9 @@ Parser::CtorInit Parser::readConstructorInitialiser(const Declared &d) {
             ci.listInit = true;
         }
     }
-    // **A braced list written as the argument**, `Row r({1, 2})`: [dcl.init]/16
-    // and [over.match.list] reach the initializer_list constructor. Built here,
-    // where the target type is known - parseArguments cannot build one alone.
-    // Only where the list is the one argument: `D v({1, 2}, alloc)` goes on to the general road below.
+    // **A braced list as the argument**, `Row r({1, 2})`: [dcl.init]/16 and
+    // [over.match.list] reach the initializer_list constructor, built here;
+    // only as the one argument (`D v({1, 2}, alloc)` goes the general road).
     bool onlyList = false;
     if (!ci.listInit && peek().is("(") && peekAt(1).is("{")) {
         int depth = 0;
@@ -1935,14 +1934,9 @@ StmtPtr Parser::guardOnce(const std::string &symbol, std::vector<StmtPtr> body) 
         return c;
     };
 
-    // **An initialiser that throws leaves the guard saying "being built"**, and [stmt.dcl]/4 wants
-    // the next call to try again: so the construction runs under a cleanup of its own that tells the
-    // runtime so - `__cxa_guard_abort`, `_Init_thread_abort` - before the exception goes on, as cl
-    // and clang both emit (2026-10-21, review of 1.25, fix 3: until then the guard stayed at -1 and
-    // the next call's _Init_thread_header waited for it for ever). The release and footer stay
-    // outside the region: they do not throw, and cl puts them after it. Not inside a Microsoft
-    // handler, where a cleanup would be a funclet inside a funclet - see block(); such an initialiser
-    // keeps the shape it had.
+    // **A throwing initialiser leaves the guard `being built`**: the build
+    // runs under a cleanup that aborts it (__cxa_guard_abort, [stmt.dcl]/4),
+    // release and footer outside; not in a Microsoft handler (see block()).
     auto guarded = [&](const char *abort) {
         std::vector<ExprPtr> a;
         a.push_back(guardAddr());
@@ -1988,17 +1982,9 @@ StmtPtr Parser::guardOnce(const std::string &symbol, std::vector<StmtPtr> body) 
     return StmtPtr(new Block(std::move(whole)));
 }
 
-// A static local's symbol: the function's *mangled* symbol and the object's
-// name, numbered where a name is declared twice in one function. The bare
-// name was used until 2026-09-17, and S::f, T::f and f(double) all made `f.n`.
-// **An inline function's static local is one object for the program** - [basic.def.odr]/6 - so it
-// takes the ABI's name, and the backends put it in a COMDAT that cl's or clang's unit folds with
-// (1.28, 2026-10-22, review of 1.25, item 14: each unit counted in a copy of its own). Measured
-// from cl: `?a@?1??f@@YAHXZ@4HA` - the name, `?<n>?` for the block (1 the body, each block
-// entered counting up; cl also counts an if's or a loop's own scopes, which this does not), the
-// function, `4` for a function-local static, then the type as a data symbol spells it, `PADA` for
-// an array, `US@@A` for a class. Itanium: `_ZZ1fvE1a`, and `_ZZ1fvE1a_0` for the function's
-// second `a`. Without a type - a reference, an anonymous union, a thread_local - the per-unit name.
+// A static local's symbol: the function's mangled symbol and the name; an
+// inline function's is one object, [basic.def.odr]/6, with the ABI's name in a
+// COMDAT (`?a@?1??f@@YAHXZ@4HA`, `_ZZ1fvE1a`); without a type, per unit.
 std::string Parser::uniqueStaticSymbol(const std::string &name, const Type *type) {
     const std::string &owner = currentFunction_.empty() ? functionName_
                                                         : currentFunction_;
@@ -2078,10 +2064,9 @@ void Parser::bindStaticReference(const Declared &d, const std::string &symbol,
     at_++;
     ExprPtr init;
     { OverloadTarget hold(*this, d.type); init = assign(); }
-    // [class.temporary]/5: the temporary a reference with static storage binds lives as long - an object
-    // of static storage of its own, internal, as clang's `_ZGR` and cl's `?$S` are. A scalar one's value is
-    // laid down where it is a constant and stored before main otherwise; a class one is built where `into`
-    // says, of its own class, and destroyed at exit after what was built before it ([basic.start.term]/1).
+    // [class.temporary]/5: a static reference's temporary is a static object
+    // of its own (clang's `_ZGR`, cl's `?$S`): a scalar laid down or stored
+    // before main, a class built at `into`, destroyed at exit in order.
     const Type *held = d.type->referent()->unqualified();
     const std::string tmp = target_.microsoftNames()
         ? "?$RT" + std::to_string(staticTemps_ + 1) + "@" + symbol

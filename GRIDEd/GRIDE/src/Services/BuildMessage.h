@@ -71,7 +71,9 @@ namespace Gride { namespace Services {
 
             BuildMessage^ b = gcnew BuildMessage();
             String^ file = m->Groups["file"]->Success ? m->Groups["file"]->Value->Trim() : String::Empty;
-            // "LINK : fatal error LNK1104 ..." names a tool, not a file
+            // "LINK : fatal error LNK1104 ..." names a tool, not a file; nor does text a path cannot hold, which
+            // Path::HasExtension throws on (outside the try below)
+            if (file->Length > 0 && file->IndexOfAny(Path::GetInvalidPathChars()) >= 0) file = String::Empty;
             if (file->Length > 0 && !Path::HasExtension(file) && file->IndexOfAny(gcnew array<wchar_t>{ L'\\', L'/' }) < 0) file = String::Empty;
             try
             {
@@ -268,7 +270,11 @@ namespace Gride { namespace Services {
             if (toolName->Length == 0 || String::IsNullOrEmpty(line)) return nullptr;
             int at = line->IndexOf(": ");
             if (at <= 0) return nullptr;
-            String^ who = Path::GetFileName(line->Substring(0, at)->Trim())->ToLowerInvariant();
+            // a compiler echoing the source line it stopped on ("class D : virtual public B<C, Tr> {") names no
+            // tool: text a path cannot hold is not one, where Path::GetFileName threw and the build stopped there
+            String^ head = line->Substring(0, at)->Trim();
+            if (head->IndexOfAny(Path::GetInvalidPathChars()) >= 0) return nullptr;
+            String^ who = Path::GetFileName(head)->ToLowerInvariant();
             if (who != toolName && who != toolName + ".exe") return nullptr;
             String^ text = line->Substring(at + 2)->Trim();
             if (text->Length == 0) return nullptr;

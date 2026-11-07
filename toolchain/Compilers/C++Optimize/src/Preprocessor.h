@@ -10,10 +10,9 @@
 #include <utility>
 #include <vector>
 
-// **Translation phases 1 to 4 over preprocessing tokens** - [lex.phases]. A file's characters are
-// mapped (trigraphs, line splices), cut into pp-tokens with each comment one space, and the
-// directives and macro replacement work on those tokens; what comes out is the program's text, one
-// output line per source line it came from, which the lexer reads as phase 7.
+// **Translation phases 1 to 4 over preprocessing tokens** - [lex.phases]:
+// characters mapped, cut into pp-tokens (a comment one space), directives and
+// macros applied; one output line per source line, read by the lexer (7).
 class Preprocessor {
 public:
 
@@ -144,8 +143,7 @@ private:
     void pragma(const std::string &spec, const Tok &at);
 
     std::vector<Cond> conds_;
-    // `__COUNTER__`, an extension clang and cl share: 0, 1, 2 ... one per expansion.
-    int counter_ = 0;
+    int counter_ = 0;  // __COUNTER__ (clang and cl): 0, 1, 2 ... per expansion
 
     static bool isDynamicMacro(const std::string &name);
     static bool isStandardHeader(const std::string &name);

@@ -123,12 +123,9 @@ struct TemplateArg {
     // **A template template argument**, `Holder<Box, int>`'s Box: `type` is the stand-in TypeTable::templateNameType makes,
     // or a Kind::TemplateParam where a pattern names an enclosing template template parameter.
     bool isTemplate = false;
-    // **An address or a member pointer as a non-type argument** ([temp.arg.nontype]/1): `deref<&gv>`, `call<fn>`,
-    // `inc<gv>`, `member<&S::m>`, `nv<nullptr>`. `value` is the parser's index of it, `address` how a key spells
-    // it, `entity` the symbol of what it names in this target's ABI - cl's `?gv@@3HA`, clang's `_Z2gv`, empty for
-    // a null one - and `form` how the ABIs wrap that: 'p' a pointer or member pointer, 'c' a pointer gaining a
-    // const on the way, 'r' a reference, 'a' an array named bare, its `element` the parameter's pointee, 'm' a data
-    // member at `offset`, 'n' null. 0 otherwise.
+    // **An address or member pointer as a non-type argument**: `form` is how
+    // the ABIs wrap `entity` - 'p' pointer, 'c' gaining const, 'r' reference,
+    // 'a' array, 'm' member at `offset`, 'n' null; 0 otherwise.
     char form = 0;
     std::string address;
     std::string entity;

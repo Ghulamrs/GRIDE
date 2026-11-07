@@ -31,7 +31,7 @@ private:
     int32_t unit_ = 0;
     int32_t line_ = 0;
     int32_t named_ = 0;
-    const char *names_[capacity] = {0};
+    const char *names_[capacity] = {};   // null pointers, one memset (Runtime.cpp's Depth says why not `= {0}`)
 };
 
 [[noreturn]] void fail(const char *message);

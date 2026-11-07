@@ -295,10 +295,9 @@ void Parser::registerDestructor(const std::string &cls, std::size_t pos,
     if (!ms) slots.push_back(VSlot{ "~$deleting", deleting, none, false });
 }
 
-// **The table a vbptr reads, by name**: the class's own where it holds one pointer, else the
-// subobject's holding it, with its path through this class's bases where one class holds two of
-// them - `G : virtual D, F` with a B in each named both of B's R tables `??_8G@@7BR@@@`, and one
-// pointer read the other's offsets (W13).
+// **The table a vbptr reads, by name**: the class's own where it holds one
+// pointer, else the holding subobject's, with its path through the bases when
+// one class holds two (`G : virtual D, F` named both of B's tables alike).
 static std::string vbptrTable(const std::string &tag, const std::vector<Type::VbPtr> &ptrs,
                               std::size_t p) {
     if (ptrs.size() == 1 || ptrs[p].base == nullptr) return vbtableSymbol(tag);
@@ -466,12 +465,9 @@ std::vector<StmtPtr> Parser::storeVptrs(const std::string &cls,
     return withVptr;
 }
 
-// **A function with no source behind it.** The deleting destructor runs the
-// destructor and then gives the memory back, because `delete p` through a base
-// pointer reaches both through one slot. Itanium's D0 and Microsoft's ??_G differ.
-// **-g: the name a debugger shows for a member the parser made** (1.29), as cl's PDB has it - `geo::Pair::Pair`,
-// `geo::Tally::~Tally`, `` Tally::`scalar deleting destructor' ``: the class's whole name (Type::displayTag, the
-// namespace a specialization keeps apart included), then the member. The Function's own name stays `tag::member`.
+// **-g: the name a debugger shows for a member the parser made**, as cl's PDB
+// has it (`geo::Pair::Pair`, `` Tally::`scalar deleting destructor' ``): the
+// class's whole name, then the member; the Function keeps `tag::member`.
 static void showMemberAs(Function &f, const Type *cls, const std::string &member) {
     f.setDisplayName(Type::displaySpelling(cls->displayTag() + "::" + member));
 }
@@ -1050,12 +1046,9 @@ std::vector<StmtPtr> Parser::wrapCleanups(
     return out;
 }
 
-// **One list of statements under one cleanup action of its own** - `onUnwind` runs when an
-// exception leaves the list, and the unwinding then goes on - for a cleanup that is not a
-// destructor: the guard a static local's initialiser leaves at "being built" when it throws,
-// [stmt.dcl]/4 (2026-10-21, review of 1.25, fix 3). The Microsoft shape is wrapMsCleanups's, a
-// state whose action is a funclet; the Itanium one wrapCleanups's, a pad that resumes - or hands
-// over to the enclosing `try`'s chain, since inside a `try` body the slots are the `try`'s.
+// **One statement list under a cleanup of its own** - `onUnwind` runs as an
+// exception leaves it, then unwinding goes on: a static local's guard reset on
+// a throw, [stmt.dcl]/4 (Microsoft: a funclet state; Itanium: a pad).
 StmtPtr Parser::cleanupRegion(std::vector<StmtPtr> body, StmtPtr onUnwind) {
     const Type *voidPtr = types_.pointerTo(types_.get(Kind::Void));
     functionHasPads_ = true;
@@ -1510,8 +1503,7 @@ bool Parser::sameParameters(const std::vector<const Type *> &a,
 }
 
 bool Parser::memberFromBase(const Type *, const Member &m) {
-    // Which class wrote it, not where it sits: a base's data size reaches past its own members
-    // once a virtual base is laid at the end, and a derived member may sit in that range.
+    // Which class wrote it, not where it sits: a base's size can pass a vbase.
     return m.declaredIn != nullptr || m.inVirtualBase != nullptr;
 }
 
@@ -1579,14 +1571,9 @@ void Parser::refuseVirtualBaseMember(const Type *staticType, const Member &m,
                    "targets compile this");
 }
 
-// **Which entry of the vbtable holds this base**, and where the base sits in
-// the complete object. Entry 0 is the vbptr's own offset back to the top, so
-// the first virtual base is entry 1 and a zero answer means "not there".
-// **The order a class's vbtable names its virtual bases in.** A vbptr the class shares with the base it
-// came down from is read by that base's code too, by that base's numbering, so the table begins with
-// the base's own order and the class's other virtual bases follow, in the order it holds them. With the
-// class's order alone, `G : virtual D, F` gave the pointer it shares with F the entries D, B, V, W, and
-// F's code read B's offset for W (W13).
+// **The order a class's vbtable names its virtual bases in**: a vbptr shared
+// with the base it came from is read by that base's code, so the base's order
+// comes first, then the class's other virtual bases, in the order held.
 static std::vector<const Type *> vbtableOrder(const Type *cls) {
     const Type *c = cls->unqualified();
     std::vector<const Type *> order;
@@ -2085,10 +2072,9 @@ void Parser::emitVbtable(const Type *cls, const std::string &tag,
     }
 }
 
-// **A base's tables come down at its offset**, each slot replaced where this class overrides it; the
-// first base's first is this class's own, vtables_[tag], which carries its new slots. The names follow
-// clang's computeVTablePaths: a path keeps the base it came through as the next to mangle, and paths
-// that would be spelled alike are extended by it until none is.
+// **A base's tables come down at its offset**, overridden slots replaced; the
+// first base's first is the class's own (vtables_[tag]). Names follow clang's
+// computeVTablePaths, paths spelled alike extended until none is.
 std::vector<Parser::MsVftable> Parser::msVftables(const Type *cls) {
     const Type *plain = cls->unqualified();
     const std::string tag = plain->tag();
@@ -2702,13 +2688,9 @@ bool Parser::initializerListFits(const Type *ilType, const Init &in) {
     return true;
 }
 
-// **A brace-init-list becomes a backing array and an initializer_list over
-// it**, [dcl.init.list]/5. The array holds the elements; the list is `{
-// &array[0], count }` - the pointer and count <initializer_list> lays out.
-// **A temporary of class `cls` built where it belongs instead** - `*(T(&$tmp, ...), &$tmp)` with its
-// constructor's `this` pointed at `at`, and taken off the pending list, nothing being left to destroy
-// there: the copy [class.copy]/31 lets cl and clang leave out. Only the plain shapes, the call alone or
-// followed by its guard; one that zeroes the temporary first keeps its copy. True if it was one.
+// **A temporary of class `cls` built where it belongs** (`*(T(&$tmp,...),
+// &$tmp)` with `this` at `at`), the copy [class.copy]/31 lets cl and clang
+// leave out; plain shapes only, a zeroed one keeps its copy. True if done.
 bool Parser::constructInPlace(const Expr &value, const Type *cls, ExprPtr &at) {
     if (value.type() == nullptr || value.type()->unqualified() != cls) return false;
     const Unary *u = dynamic_cast<const Unary *>(&value);
@@ -3505,10 +3487,9 @@ void Parser::declareImplicitSpecials(const std::string &tag, const Type *type,
     if (tag.empty()) return;
     // Asked before the copy constructor is declared, because declaring one would answer it yes.
     const bool wroteConstructor = hasConstructors(tag);
-    // [class.union]/4: a union's one member initialiser is applied by its implicit default
-    // constructor, the only special member of a union of trivial members that has work.
-    // /2: a member whose class has a non-trivial special member deletes the union's implicit one of
-    // that kind - an implicit one is declared only where it has work, so its existence is the test.
+    // [class.union]/4: a union's one member initialiser is applied by its
+    // implicit default constructor; /2: a member with a non-trivial special
+    // member deletes the union's one of that kind (declared only with work).
     if (type->kind() == Kind::Union) {
         bool ctor = false, copy = false, assign = false, dtor = false;
         for (const Member &m : type->members()) {
@@ -3543,13 +3524,9 @@ void Parser::declareImplicitSpecials(const std::string &tag, const Type *type,
     }
     // A member written `= default` is user-declared for [class.copy]/7 and /9 and implicit for everything else.
     const Defaulted df = defaulted_.count(tag) != 0 ? defaulted_[tag] : Defaulted();
-    // **Read now, for the same reason and at the same moment.** After the three calls
-    // below, every one of these answers yes for a class that wrote nothing at all,
-    // and [class.copy]/9 is a question about what the *user* declared. A written copy
-    // or move assignment is one of its five (2026-10-21, review of 1.25, fix 4: until
-    // then `X &operator=(const X &)` written by hand left the implicit move constructor
-    // declared, and `X b = std::move(a)` moved where cl copies); copyAssignOf answers
-    // the move assignment too where that is the only one written.
+    // **Read now, before the calls below declare all five**: [class.copy]/9
+    // asks what the user declared, and a written copy or move assignment is
+    // one (copyAssignOf answers the move too where only it is written).
     const bool wroteCopyOrDtor = copyConstructorOf(type) != nullptr ||
                                  moveConstructorOf(type) != nullptr ||
                                  copyAssignOf(type) != nullptr ||
@@ -3956,8 +3933,7 @@ void Parser::synthesizeDestructor(std::size_t which) {
     }
     closeFrame(savedFrame);
 
-    // A virtual one carries the deleting form into the vtable beside it, the
-    // same as a written virtual destructor does.
+    // A virtual one puts its deleting form in the vtable, as a written one.
     if (isVirtual) synthesizeDeleting(cls, type, Access::Public, pos);
 }
 
@@ -4016,12 +3992,9 @@ void Parser::declareImplicitCopyAssign(const std::string &tag, const Type *type,
     functions_.back().deleted = deleted;
 }
 
-// The move assignment the class did not write - [class.copy]/20: declared where none of /9's five
-// is user-declared, and trivial ones are not functions, on the copy assignment's measured line. One
-// /23 would define as deleted - a base or member that can be neither moved nor copied - is one
-// overload resolution ignores (/23, as DR 1402 has it), so it is left undeclared and the copy
-// assignment takes the call; a const member leaves the copy undeclared too, and so this one.
-// (2026-10-21, review of 1.25, fix 4.)
+// The move assignment the class did not write - [class.copy]/20: declared where
+// none of /9's five is user-declared; one /23 would delete is left undeclared
+// (DR 1402), so the copy assignment takes the call, as with a const member.
 void Parser::declareImplicitMoveAssign(const std::string &tag, const Type *type, std::size_t pos,
                                        bool userDeclared) {
     if (userDeclared) return;
@@ -4117,12 +4090,9 @@ void Parser::declareImplicitCopyCtor(const std::string &tag, const Type *type,
                                      std::size_t pos) {
     if (copyConstructorOf(type) != nullptr) return;
     const Defaulted df = defaultedFor(tag);
-    // [class.copy]/7: a user-declared move constructor **deletes** the implicit copy constructor;
-    // written by hand it is left undeclared, and the copy is refused where the move is not viable.
-    // **Not a copy the class wrote `= default` itself** (2026-10-21, review of 1.25, fix 4): /7
-    // deletes the *implicitly-declared* one, and `T(const T &) = default;` beside `T(T &&) =
-    // default;` is user-declared, written as the compiler would - until then it was refused as
-    // deleted, and beside a hand-written move it was never declared at all.
+    // [class.copy]/7: a user-declared move deletes the implicit copy (written
+    // by hand: left undeclared, refused where the move is not viable); a copy
+    // written `= default` beside it is user-declared, not deleted.
     bool deleted = (df.moveCtor.is || df.moveAssign.is) && !df.copyCtor.is;
     if (moveConstructorOf(type) != nullptr && !deleted && !df.copyCtor.is) return;
 
@@ -4164,10 +4134,9 @@ void Parser::declareImplicitCopyCtor(const std::string &tag, const Type *type,
     functions_.back().deleted = deleted;
 }
 
-// `using B::m;` in the body of `tag`, at `using` - [namespace.udecl]/3: B is a base and m a member of it,
-// which the declaration makes a member of this class too, with the access it is written under (/15). A
-// function's overloads join this class's set once it is complete; a data member, static member or type
-// keeps its own entity, reached here with that access.
+// `using B::m;` in `tag`'s body - [namespace.udecl]/3: m, a member of base B,
+// becomes this class's too, with the access it is written under (/15); its
+// overloads join once the class is complete, other members keep their entity.
 void Parser::classUsingDeclaration(const std::string &tag, const Type *type, Access access) {
     const std::size_t pos = peek().pos;
     at_++;
@@ -5896,11 +5865,9 @@ void Parser::declareFunction(const std::string &name, const Type *returns,
         return;
     }
 
-    // A new parameter list, so a new function - unless the name can only hold
-    // one. Both halves of that are refused here rather than at the link, where
-    // the report would be about a duplicate symbol in a file nobody wrote.
-    // **[dcl.link]/6 limits the C one, not the set**: C++ overloads sit beside
-    // C's `abs(int)` in cl's own headers, each with its own mangled name.
+    // A new parameter list is a new function, unless the name holds one:
+    // refused here, not at the link. [dcl.link]/6 limits the C one, not the
+    // set: C++ overloads sit beside C's `abs(int)`, each mangled.
     if (!set.empty()) {
         bool cBefore = false;
         for (std::size_t k = 0; k < set.size(); k++)
@@ -6166,10 +6133,9 @@ StmtPtr Parser::memberInitialiser(const std::string &tag, const Type *type,
     const std::size_t resume = at_;
     std::vector<Local> outer;
     outer.swap(locals_);
-    // `this` stays: [class.mem]/4 lets the initialiser name another member, read through the object.
-    // **It is this constructor's `this`**: an implicit one is made wherever it is first needed, and the
-    // `this` around that is some other function's, or none - `this->a` read garbage and `a` had no
-    // object (review of 1.30, W7). Kept where it is the slot and class here, made for them otherwise.
+    // `this` stays ([class.mem]/4: the initialiser may name other members),
+    // and it is this constructor's `this` - kept where it is the slot and
+    // class here, made for them otherwise (else `this->a` read garbage).
     bool ownThis = false;
     for (const Local &l : outer)
         if (l.name == "this" && l.offset == thisSlot && l.type != nullptr && l.type->isPointer() &&
@@ -6434,10 +6400,9 @@ Parser::Declared Parser::parameterDeclarator(const Type *base) {
     return declarator(base, true);
 }
 
-// **`noexcept`, `throw()` or `throw(T)` written on a function type that is not a function's
-// declaration** - a pointer to function, a parameter of function type, a typedef. [except.spec]/2
-// lets it stand there, and in C++11 it is no part of the type; read and set aside, leaving the
-// specification of the function being declared around it alone. "expected ';'" before (R19).
+// **`noexcept`, `throw()` or `throw(T)` on a function type that is no
+// declaration** (a function pointer, parameter, typedef), [except.spec]/2:
+// read and set aside, no part of the type in C++11 (was `expected ';'`).
 int Parser::skipExceptionSpecification() {
     if (!peek().is("noexcept") && !(peek().is("throw") && peekAt(1).is("("))) return 0;
     // **Except in a typedef or an alias declaration, where [except.spec]/2 forbids it**: the
@@ -6461,11 +6426,9 @@ int Parser::skipExceptionSpecification() {
     return code;
 }
 
-// [dcl.fct.default]/7-9 over the tokens [from, to) of one default argument: a parameter of this list,
-// a local of the function around it, `this`, or a non-static member of the class being defined is not
-// read there - outside the operand of `sizeof`, `alignof`, `decltype` or `noexcept`, and but as `x.m`.
-// The members are known once the class is: `cls` null skips that one, which the class's end asks again;
-// `locals` false skips the enclosing function's, for a definition read where no function encloses it.
+// [dcl.fct.default]/7-9 over one default argument's tokens [from, to): no
+// parameter, enclosing local, `this` or non-static member is read (but as
+// `x.m` or in sizeof/alignof/decltype/noexcept); `cls`/`locals` skip some.
 void Parser::checkDefaultArgument(std::size_t from, std::size_t to, const std::vector<std::string> &params,
                                   const Type *cls, bool locals) {
     for (std::size_t i = from; i < to; i++) {

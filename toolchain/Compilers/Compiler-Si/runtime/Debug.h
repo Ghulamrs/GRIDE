@@ -31,8 +31,9 @@ private:
     Mode mode_ = Running;
     int32_t restDepth_ = 0;
     int32_t count_ = 0;
-    int32_t units_[capacity] = {0};
-    int32_t lines_[capacity] = {0};
+    // `= {}`, as Runtime.cpp's Depth: one memset each in the constructor, where `= {0}` is a store per element.
+    int32_t units_[capacity] = {};
+    int32_t lines_[capacity] = {};
 
     bool isBreakpoint(int32_t unit, int32_t line) const;
     void addBreakpoint(int32_t unit, int32_t line);

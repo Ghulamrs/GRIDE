@@ -1091,8 +1091,7 @@ void Arm64Darwin::emitFunction(const Function &fn) {
         resetBlocks(fn.blocks());
         out_ << d.begin << ":\n";
     } else if (fn.hasLandingPads()) {
-        // The call-site table measures from here, so the label has to exist
-        // whether or not there is debug information.
+        // The call-site table measures from here: always defined
         out_ << "Lfunc.begin." << fn.symbol() << ":\n";
     }
     clearCallSites();

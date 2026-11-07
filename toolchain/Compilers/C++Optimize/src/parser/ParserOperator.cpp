@@ -943,10 +943,9 @@ ExprPtr Parser::conditional() {
     const Type *tb = b->type();
     const Type *result = nullptr;
 
-    // **[expr.cond]/2: an arm that is a throw-expression takes the other arm's type** - `b ? 7 : throw 1`
-    // is an int, and the value the throw arm "yields" is never reached (1.27, 2026-10-21, review of
-    // 1.25, item 3: "expected an expression"). A class-typed other arm would need its temporary built
-    // by the arm, which this does not do yet.
+    // **[expr.cond]/2: a throw-expression arm takes the other arm's type**
+    // (`b ? 7 : throw 1` is an int); a class-typed other arm would need its
+    // temporary built by the arm, not done yet.
     {
         const bool aThrows = ta->isVoid() && throwsAfterA > throwsBeforeA;
         const bool bThrows = tb->isVoid() && throwsSeen_ > throwsAfterA;
@@ -971,10 +970,9 @@ ExprPtr Parser::conditional() {
         }
     }
 
-    // **[expr.cond]/3 with one class arm and one that is not**: the class converts through its
-    // conversion function to the other arm's type, and that type is the answer - `t ? f : 1.0` for an
-    // F with `operator double()` (1.27, 2026-10-21, review of 1.25, item 3: "neither converts to the
-    // other", the class-to-class question being the only one asked).
+    // **[expr.cond]/3, one class arm and one not**: the class converts by its
+    // conversion function to the other's type, the answer (`t ? f : 1.0`
+    // for an F with `operator double()`).
     if (ta->unqualified()->isStructOrUnion() != tb->unqualified()->isStructOrUnion()) {
         const bool classIsA = ta->unqualified()->isStructOrUnion();
         const Type *cls = classIsA ? ta : tb;
@@ -986,10 +984,9 @@ ExprPtr Parser::conditional() {
         }
     }
 
-    // **[expr.cond]/3: two lvalues of one type but for const** - `c ? x : cx` - and the plain one
-    // converts to a reference to the const one, so the `?:` is an lvalue of the const type and
-    // `decltype` of it `const int &` (1.27, 2026-10-21, review of 1.25, item 3: it was read as an
-    // `int` prvalue).
+    // **[expr.cond]/3: two lvalues of one type but for const** (`c ? x : cx`):
+    // the plain one converts to a reference to the const one, so the result
+    // is a const lvalue and its decltype `const int &`.
     if (ta != tb && ta->unqualified() == tb->unqualified() && !ta->isStructOrUnion() &&
         ta->isConst() != tb->isConst() && isLvalue(*a) && isLvalue(*b)) {
         const Type *constOne = ta->isConst() ? ta : tb;
@@ -1029,9 +1026,7 @@ ExprPtr Parser::conditional() {
         const Type *pb = tb->unqualified();
         const Type *want = nullptr;
         if (pa == pb) {
-            // One class, two qualifications: the result is a prvalue, so
-            // neither arm's constness reaches it.
-            want = pa;
+            want = pa;  // one class, two cv: a prvalue, no constness
         } else {
             const bool aToB = pb->isStructOrUnion() &&
                               convertingConstructor(pb, *a) != nullptr;
@@ -1080,8 +1075,7 @@ ExprPtr Parser::conditional() {
     } else if (ta == tb) {
         result = ta;
     } else if (ta->unqualified() == tb->unqualified()) {
-        // [expr.cond]/6: a prvalue of a non-class type carries no cv - `const char
-        // *const` beside `const char *` is `const char *`.
+        // [expr.cond]/6: a non-class prvalue has no cv (`const char *`)
         result = ta->unqualified();
     } else if (ta->isPointer() && isNullConstant(*b)) {
         result = ta;

@@ -286,11 +286,9 @@ void Allocator::coalesce() {
         if (isPseudo(copies_[c].src) && isPseudo(copies_[c].dst)) byWeight.push_back(static_cast<int>(c));
     std::stable_sort(byWeight.begin(), byWeight.end(),
                      [&](int x, int y) { return copies_[x].weight > copies_[y].weight; });
-    // **The degrees after a merge, kept up rather than counted again** - what the count over the
-    // whole matrix gave, once it has been made the first time: u's own, and one fewer for each
-    // node next to both u and v, whose two neighbours are one now. Counting them all again after
-    // every merge was cubic in a block's length - a 3000-term expression ran for minutes at -O1
-    // (review of 1.30, W12).
+    // **The degrees after a merge, kept up rather than counted again**: u's
+    // own, and one fewer for each node next to both u and v; counting all
+    // again after every merge was cubic (a 3000-term expression, minutes).
     bool counted = false;
     auto rowDegree = [&](int q) {
         int d = popcount(nodes_[q].forbid & palette_);
@@ -468,10 +466,9 @@ bool Allocator::run() {
     fellBack_ = false;
     if (n_ == 0) return Webs::dropSelfCopies(fn_);
     demoted_.assign(n_, false);
-    // **One failed node a round, for the first sixteen** - the colouring it gives, kept as it
-    // was; after that every node a round cannot colour goes back to its slot together. A
-    // 3000-term expression failed one node a round for 3000 rounds, each building the graph
-    // again, and -O1 ran for minutes (review of 1.30, W12).
+    // **One failed node a round, for the first sixteen** (their colouring
+    // kept); then every node a round cannot colour goes back together - one
+    // a round took 3000 rounds for a 3000-term expression.
     batch_ = false;
     int roundsRun = 0;
     for (;;) {

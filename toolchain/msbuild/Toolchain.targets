@@ -5,6 +5,7 @@
 
     RunTool        runs one program with its arguments, in a folder, optionally with Visual Studio's INCLUDE,
                    LIB and PATH (for cl and lib); fails the build when it exits non-zero
+    RunTools       one program run once per item, ToolchainJobs runs at a time (shc's C6747 runtime through cpp11)
     Rts6xVariant   RTS6x's build.cmd :variant - every folder of src\ through cpp11 (its .cpp) and asm6x (its .s),
                    then the library's members packed by ar6x into rts6x<tag>.lib and printf6x<tag>.lib
     PackObjects    a folder of .s through asm6x and the objects packed by ar6x into one library (shmrt6x[d].lib)
@@ -17,8 +18,8 @@
     ShalimarLibrary shalimar's library built-ins (Compiler-Si\src\Library.inc) and the runtime's wrappers for them
                    (Compiler-Si\runtime\wrappers\, one file each) from the catalogue's Shalimar marks
 
-  ToolchainJobs - how many files Rts6xVariant and WindowsLibrary compile at once (rts6x's and grt's c90, cpp11,
-  asm6x and masm runs; each compiler run is one process on one file, single-threaded): 0, the default, one per
+  ToolchainJobs - how many files Rts6xVariant, WindowsLibrary and RunTools compile at once (rts6x's and grt's c90,
+  cpp11, asm6x and masm runs, and shc's cpp11 runs; each compiler run is one process on one file, single-threaded): 0, the default, one per
   processor; 1 one at a time. Set it in Toolchain.user.props beside this file (not committed):
 
     <Project><PropertyGroup><ToolchainJobs>1</ToolchainJobs></PropertyGroup></Project>
@@ -66,6 +67,60 @@
             if (p.ExitCode != 0) Log.LogError(Path.GetFileName(Exe) + " exited with " + p.ExitCode + " (" + Arguments + ")");
         }
         // (the task factory ends the fragment with return !Log.HasLoggedErrors)
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <!-- RunTools: one program run once per item of Runs, the item's text its arguments, Jobs runs at a time (0 one per
+       processor, 1 one at a time: $(ToolchainJobs)); each run's output is logged after all have ended, in the items'
+       order, and any that exits non-zero fails the build - RunTool batched over the items, but not one after another. -->
+  <UsingTask TaskName="RunTools" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+public class RunTools : Task
+{
+    [Required] public string Exe { get; set; }
+    [Required] public ITaskItem[] Runs { get; set; }
+    public int Jobs { get; set; }
+    public bool Quiet { get; set; }
+
+    public override bool Execute()
+    {
+        if (!File.Exists(Exe)) { Log.LogError("RunTools: no program at " + Exe); return false; }
+        int count = Runs.Length;
+        var codes = new int[count];
+        var outputs = new string[count];
+        var options = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Jobs > 0 ? Jobs : Environment.ProcessorCount };
+        System.Threading.Tasks.Parallel.For(0, count, options, k =>
+        {
+            var psi = new ProcessStartInfo(Exe, Runs[k].ItemSpec) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            var lines = new List<string>(); object gate = new object();
+            using (var p = new Process { StartInfo = psi })
+            {
+                p.OutputDataReceived += (s, e) => { if (e.Data != null) lock (gate) lines.Add(e.Data); };
+                p.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (gate) lines.Add(e.Data); };
+                p.Start(); p.BeginOutputReadLine(); p.BeginErrorReadLine(); p.WaitForExit();
+                codes[k] = p.ExitCode;
+                lock (gate) outputs[k] = string.Join(Environment.NewLine, lines);
+            }
+        });
+        var imp = Quiet ? MessageImportance.Low : MessageImportance.Normal;
+        for (int k = 0; k < count; k++)
+        {
+            Log.LogMessage(imp, "> \"" + Exe + "\" " + Runs[k].ItemSpec);
+            if (outputs[k].Length > 0) Log.LogMessage(codes[k] != 0 ? MessageImportance.High : imp, outputs[k]);
+            if (codes[k] != 0) Log.LogError(Path.GetFileName(Exe) + " exited with " + codes[k] + " (" + Runs[k].ItemSpec + ")");
+        }
+        return !Log.HasLoggedErrors;
+    }
+}
       ]]></Code>
     </Task>
   </UsingTask>
@@ -675,7 +730,7 @@ public class CatalogueCheck : Task
     </Task>
   </UsingTask>
 
-  <!-- how many files grt and rts6x compile at once (the note at the top); the user's own setting first -->
+  <!-- how many files grt, rts6x and shc's C6747 runtime compile at once (the note at the top); the user's own setting first -->
   <Import Project="$(MSBuildThisFileDirectory)Toolchain.user.props" Condition="Exists('$(MSBuildThisFileDirectory)Toolchain.user.props')" />
   <PropertyGroup>
     <ToolchainJobs Condition="'$(ToolchainJobs)'==''">0</ToolchainJobs>

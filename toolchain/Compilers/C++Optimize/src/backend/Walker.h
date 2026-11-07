@@ -96,10 +96,7 @@ protected:
         bool cleanup = false;   // a trailing action record with filter 0
         bool terminate = false; // a throw out of here ends the program: a pad's own code
         bool handsOver = false; // a pad in this region, or its own, goes on to another by a jump
-        // Where this segment begins, counted in the order labels are defined -
-        // which is address order, since the walk emits as it goes. Only usable
-        // as a sort key because the segments below are disjoint.
-        int at = 0;
+        int at = 0;  // where it begins, in label (address) order: a sort key
     };
 
     // **A region open right now, and the segments of it already closed.**
@@ -160,8 +157,7 @@ protected:
     // Write -2 into the runtime's scratch word.
     virtual void storeUnwindHelp(int slot) { (void)slot; }
 
-    // FH3's scratch word set to -2 before the body's first call; see Walker.cpp. `frame` is the function's
-    // own where it carries one with no `try` (Function::msUnwindHelp).
+    // FH3's scratch word set to -2 before the first call (see Walker.cpp)
     void storeUnwindHelpAtEntry(const Stmt &body, int frame = 0);
 
     // A cleanup funclet is opened the same way and closed differently.

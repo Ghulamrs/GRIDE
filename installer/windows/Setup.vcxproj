@@ -116,7 +116,7 @@
       <SetupSign Condition="'$(PfxFile)'!=''"> -PfxFile &quot;$(PfxFile)&quot;</SetupSign>
     </PropertyGroup>
     <RunLive Exe="$(PowerShellExe)" WorkingDirectory="$(MSBuildThisFileDirectory)"
-             Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build-setup.ps1&quot; -Version $(SetupVersion) -OutDir &quot;$(SetupDist)&quot;$(SetupSign)" />
+             Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build-setup.ps1&quot; -Version $(SetupVersion) -OutDir &quot;$(SetupDist)&quot; -VsRoot &quot;$(VsInstallRoot.TrimEnd('\'))&quot;$(SetupSign)" />
     <RunLive Condition="'$(ValidateSetup)'=='true'" Exe="$(PowerShellExe)" WorkingDirectory="$(MSBuildThisFileDirectory)"
              Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)validate-msi.ps1&quot; -Msi &quot;$(SetupMsi)&quot; -OutDir &quot;$(SetupDist)&quot; -SdkBin &quot;$(SdkMsiBin)&quot;" />
     <Warning Condition="'$(ValidateSetup)'!='true'" Text="Setup: the Windows SDK's MsiInfo is not in $(SdkMsiBin) - $(SetupMsi) is made but not validated (validate-msi.ps1)" />

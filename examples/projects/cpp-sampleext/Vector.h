@@ -28,7 +28,7 @@ protected:
 	double vector[N];
 
 public:
-	CVector<N>(double *v = 0) {
+	CVector<N>(const double *v = 0) {	// const: it only reads v (CMatrix builds rows from const double*)
 		if (!v) memset(vector, 0, N*sizeof(double));
 		else memcpy(vector, v, N*sizeof(double));
 	}

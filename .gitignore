@@ -24,7 +24,3 @@ installer/dist/
 /toolchain/msbuild/Toolchain.user.props
 # The third-party example's prebuilt library is a source of that example, not build output.
 !/examples/projects/thirdparty-mathx/third_party/mathx/libs/**/*.lib
-
-# The Mac's folder metadata and Python's byte-code caches are never committed.
-.DS_Store
-__pycache__/

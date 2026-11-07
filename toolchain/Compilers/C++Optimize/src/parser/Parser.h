@@ -28,10 +28,9 @@ public:
 
     Program parse();
 
-    // **[temp.res]/8-10 (A15): a function template the main file defines and nothing instantiates** is made
-    // once with stand-in arguments - every type parameter `int` (variant 0) or `double` (1), every value 1 -
-    // in a parser whose program is thrown away, the driver's: the first failure is kept, and `report` says
-    // whether it is the template's own, in its body and in a statement naming nothing that depends.
+    // **[temp.res]/8-10: a function template defined, never instantiated**
+    // is made once with stand-ins (types int or double, values 1) in a parser
+    // thrown away; the first failure is kept, `report` says if it is its own.
     struct ProbeResult {
         bool failed = false;
         bool report = false;
@@ -159,8 +158,7 @@ private:
         RefQual refThis = RefQual::None;
         // `f() volatile`, the other half of the cv on `this`.
         bool volatileThis = false;
-        // [namespace.memdef]/3: first declared by a friend declaration, so no lookup but the
-        // argument-dependent one finds it until a declaration outside the class.
+        // [namespace.memdef]/3: friend-declared first, found by ADL only
         bool hiddenFriend = false;
     };
     // The cv of a member function's `this` as its function type carries it, Type::kThisConst and kThisVolatile.
@@ -206,10 +204,9 @@ private:
     // `volatile` after a member function's parameter list, read with its `const` and taken where its
     // Signature is made, as pendingNoexcept_ is.
     bool pendingVolatileThis_ = false;
-    // **A Microsoft class holds a vfptr per polymorphic base**, and one table each (Phase 6): where the
-    // vfptr sits, the bases that name the table (clang's MangledPath, made unique as cl's names are),
-    // each slot's entry and where in the class that entry wants `this`. The first is the class's own
-    // table, vtables_[tag]; a class with no polymorphic base has that one alone.
+    // **A Microsoft class holds a vfptr and a table per polymorphic base**:
+    // where it sits, the bases naming it (clang's MangledPath), each slot's
+    // entry and `this`; the first is the class's own, vtables_[tag].
     struct MsVftable {
         int at = 0;
         std::vector<const Type *> path;
@@ -575,9 +572,7 @@ private:
                 bool isParam = false;
                 std::size_t param = 0;
                 long long value = 0;
-                // `R...` written as the last argument of the pattern, where R is this
-                // specialization's own pack. It takes every argument the fixed ones in
-                // front did not, which lets `L<T, R...>` peel one type off any length.
+                // `R...` last: the pack takes the rest (`L<T, R...>`)
                 bool isPackExpansion = false;
             };
             std::vector<Arg> args;
@@ -762,9 +757,7 @@ private:
             std::string key;
         };
         std::vector<Outside> outside;
-        // Which of the class template's out-of-line definitions have been replayed for
-        // this specialization. Not a count: the list can grow after the class is made,
-        // a definition being writable further down the file than the first use.
+        // Out-of-line definitions replayed so far (a list: more can come)
         std::vector<bool> outsideDone;
     };
     std::vector<Specialization> specializations_;
@@ -804,8 +797,7 @@ private:
         std::vector<long long> values;
         std::vector<TemplateArg> args;
         Packs packs;
-        // Put off by instantiateClass, not named before its template was defined.
-        bool deferred;
+        bool deferred;  // put off by instantiateClass: template not defined yet
     };
     std::map<std::string, PendingSpecialization> pendingSpecializations_;
     // The class template specializations being read, one inside another.
@@ -1035,12 +1027,9 @@ private:
                                  std::string *why,
                                  const std::vector<const Type *> *givenTypes = nullptr,
                                  const std::vector<long long> *givenValues = nullptr);
-    // `values` receives a deduced non-type argument (the 3 in V<3>); it may be
-    // null where only type parameters can occur (the `auto` path).
-    // `nested`: inside a template-id, where an argument is matched as it is - no
-    // decay, and a cv-qualifier the pattern does not write is part of what is
-    // deduced ([temp.deduct.type]/8: `It<C, V>` against `It<S, const int>` is V =
-    // const int, where a call argument's `const int` deduces a T as int).
+    // `values` takes a deduced non-type argument (the 3 in V<3>; may be null);
+    // `nested`: inside a template-id, matched as is - no decay, the pattern's
+    // missing cv deduced too ([temp.deduct.type]/8: V = const int).
     bool deduceOne(const Type *pattern, const Type *arg,
                    std::vector<const Type *> *binding,
                    std::vector<long long> *values, std::string *why,
@@ -1294,11 +1283,9 @@ private:
         std::size_t pos, int srcSlot, bool moving,
         std::map<std::string, std::vector<ExprPtr> > *vbaseArgs,
         std::vector<Alive> *vbs = nullptr);
-    // A thunk: the entry a secondary table holds for a function this class
-    // overrides. It moves `this` back to the complete object and calls the
-    // real one. Named for the offset it undoes - _ZThn16_N1C1gEv.
-    // `named` and `returns` where the caller knows them: a Microsoft adjustor thunk's name, a deleting
-    // destructor's `void *`.
+    // A thunk: a secondary table's entry for an override, moving `this` back
+    // to the complete object (named for the offset, _ZThn16_N1C1gEv); `named`,
+    // `returns` where known (a Microsoft adjustor's name, a deleting void *).
     std::string synthesizeThunk(const std::string &cls, const Type *type,
                                 const VSlot &slot, int offset, std::size_t pos,
                                 const std::string &named = std::string(), const Type *returns = nullptr,
@@ -1309,10 +1296,9 @@ private:
     std::string synthesizeVcallThunk(const Type *cls, const Signature &f,
                                      int index, std::size_t pos);
 
-    // How well one argument matches one parameter, in the order [over.ics.scs]
-    // ranks them - the values are compared, so do not reorder this enum. The three
-    // UserDefined values are one rank with its second standard conversion behind it,
-    // [over.ics.rank]/3.3, told apart only through the same conversion function (1.27).
+    // How well an argument matches a parameter, in [over.ics.scs]'s order -
+    // compared as values, so do not reorder; the three UserDefined values are
+    // one rank split by the second conversion, [over.ics.rank]/3.3.
     enum class Rank { Identity, Qualification, Promotion, Conversion, BooleanConversion,
                       UserDefined, UserDefinedPromotion, UserDefinedConversion,
                       Ellipsis, None };
@@ -1345,9 +1331,7 @@ private:
         std::size_t pos;
 
         std::size_t paramsAt = 0;
-        // The class named before a `::` in a definition's declarator -
-        // `int Point::get()` declares nothing called "Point::get", it defines
-        // the `get` that Point already declared.
+        // The class before `::` in a definition (`Point::get` defines get)
         std::string qualifier;
     };
 
@@ -1526,8 +1510,7 @@ private:
         std::vector<const Case *> cases;
         const Case *deflt;
         const Type *governing;
-        // What was in scope at the `switch` itself, which is where every one
-        // of its case labels is jumped to from.
+        // What was in scope at the `switch`, where every case jumps from
         std::vector<JumpGuard> guards;
     };
     std::vector<SwitchCtx> switches_;
@@ -1779,9 +1762,7 @@ private:
         int placementDelete = -1;
         // From `::new`: given back to the global `operator delete`, not the class's.
         bool newGlobal = false;
-        // **The storage `__cxa_allocate_exception` handed back**, which is a
-        // temporary of the throw's own full expression and is released with
-        // `__cxa_free_exception` rather than destroyed.
+        // `__cxa_allocate_exception`'s storage: freed, never destroyed
         bool exceptionStorage = false;
     };
     // [expr.new]/20: a placement `operator delete` matched to the `operator new` that allocated, and
@@ -1869,8 +1850,7 @@ private:
         int mayThrow = 0;
         bool conditionDecl = false;
         std::string conditionName;
-        // Block-scope, and a lambda's body is its own block: a using-directive
-        // written in one reached the end of the enclosing function.
+        // Block-scope; a lambda body is a block (a directive leaked out)
         std::vector<std::string> usingNamespaces;
     };
     // **A parse whose result is discarded must put back what it accumulated.**
@@ -1893,14 +1873,9 @@ private:
         Unevaluated &operator=(const Unevaluated &) = delete;
     };
 
-    // **How deep the parser's own recursion is**, counted where it re-enters itself for a level of
-    // the program's nesting - a parenthesised expression or declarator, an argument list, a braced
-    // list, a block, a statement under another, a lambda, a class template instantiation - and
-    // refused by name past kMaxNesting, before the stack runs out (2026-10-21, review of 1.25, fix
-    // 5: at the linker's 1 MB, 80 nested parentheses, a 40-deep template recursion, 300 blocks or 50
-    // lambdas overflowed it). The stack ide\cxx1.vcxproj reserves is 256 MB; the costliest level
-    // measured, an instantiation, overflows it between 5000 and 10000 deep - 25 to 50 KB a level -
-    // so 2048 leaves room twice over, and is twice the 1024 [implimits] asks of an instantiation.
+    // **How deep the parser's own recursion is**, at each level of nesting it
+    // re-enters for; refused by name past kMaxNesting before the stack runs out
+    // (256 MB reserved, 25-50 KB a level: 2048, twice [implimits]' 1024).
     static const int kMaxNesting = 2048;
     int nesting_ = 0;
     struct Nesting {
@@ -2284,8 +2259,7 @@ private:
     // Whether that function is inline - written so, defined in a class, or a template's - so that a
     // static local of it is one object for the program, in a COMDAT under the ABI's name (1.28).
     bool currentFunctionInline_ = false;
-    // cl's `$TSS0`, `$TSS1` guards count up within one function.
-    int tssSeq_ = 0;
+    int tssSeq_ = 0;  // cl's `$TSS0`, `$TSS1` guards, counted per function
 
     bool isFriendOf(const Type *cls) const;
 
@@ -2356,10 +2330,9 @@ private:
                             std::size_t pos, const std::string &symbol);
     void requireAssignable(const Expr &e, std::size_t pos, const char *what);
     const Local *findLocal(const std::string &name) const;
-    // **A template's own scope has none of the locals of the function that named it**: held aside
-    // while its declaration or class body is read, put back on every way out - with the function's packs
-    // (`make_shared<T>()` binds its own `Args` and `args`, async's names too) and its freed frame slots, which
-    // the scopes closed meanwhile must not add to: a slot of another frame reused here overlaid a parameter.
+    // **A template's own scope has none of the naming function's locals**:
+    // held aside while it is read and put back on every way out, with the
+    // function's packs and freed frame slots (reused, one overlaid a param).
     struct LocalsHidden {
         Parser *p;
         std::vector<Local> held;
@@ -2899,10 +2872,8 @@ private:
                             const Member &m, int thisSlot,
                             std::vector<ExprPtr> &args, std::size_t pos,
                             bool implicit);
-    // [dcl.fct.default]/4: the defaults have to be a suffix of the parameter list. Asked
-    // by both parameter-list parsers - declarations and definitions - because a
-    // definition may carry the defaults where the declaration did not.
-    // Where the last parameter list closed, for [dcl.fct.default]/4 asked once its defaults are stored.
+    // Where the last parameter list closed: [dcl.fct.default]/4 (defaults a
+    // suffix of the list) is asked once its defaults are stored.
     std::size_t pendingDefaultsAt_ = 0;
     void requireDefaultsAreASuffix(const std::vector<std::size_t> &defaults,
                                    std::size_t pos);

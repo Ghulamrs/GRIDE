@@ -49,10 +49,9 @@ Parser::Init Parser::parenthesisedInitialiser(const Declared &d) {
         in.value.reset(new Num(0LL));
         in.value->setType(types_.get(Kind::Bool));
     }
-    // [over.match.conv]: direct-initialising a scalar from a class considers its `explicit`
-    // conversion functions too - `bool c(f)` with `explicit operator bool` - where `bool b = f`
-    // may not, so the call is made here, before the copy's rules see the value (1.28, 2026-10-22,
-    // review of 1.25, neg07: the `explicit` was recorded nowhere, and both forms passed).
+    // [over.match.conv]: direct-initialising a scalar from a class takes its
+    // `explicit` conversions too (`bool c(f)`, not `bool b = f`), so the call
+    // is made here, before the copy's rules see the value.
     if (!d.type->isReference() && !d.type->unqualified()->isStructOrUnion() && in.value != nullptr &&
         in.value->type() != nullptr && in.value->type()->unqualified()->isStructOrUnion()) {
         if (const Signature *how = conversionFunction(in.value->type(), d.type->unqualified(), true)) {
@@ -137,11 +136,9 @@ StmtPtr Parser::declarationBody() {
             Declared td = declarator(base);
             refuseThreadLocalHere(quals.isThreadLocal, td.pos);
             typedefFunctionSuffix(td);
-            // [dcl.typedef]/2 lets a typedef-name be redeclared to the same type,
-            // which is what makes the C idiom "typedef struct S S;" legal now that
-            // the tag names the type by itself. Only a different type in the same
-            // block is an error: an outer one, or one of another function or another
-            // specialization of this one, is hidden until the '}' ([basic.scope.block]).
+            // [dcl.typedef]/2: a typedef may redeclare the same type (C's
+            // `typedef struct S S;`); only another type in this block is an
+            // error - outer ones are hidden to the '}' ([basic.scope.block]).
             const std::map<std::string, const Type *>::const_iterator was = localTypes_.find(td.name);
             for (std::size_t u = localTypeBlockStart_; u < localTypeUndo_.size(); u++)
                 if (localTypeUndo_[u].first == td.name && was != localTypes_.end() && was->second != td.type)
@@ -344,8 +341,7 @@ StmtPtr Parser::declarationBody() {
             flushOverObject(inits, Alive{ d.name, off, d.type->unqualified() }, d.pos);
             if (destructorOf(d.type) != nullptr)
                 alive_.push_back(Alive{ d.name, off, d.type->unqualified() });
-            // **The comma belongs to the loop condition.**
-            continue;
+            continue;  // the comma belongs to the loop condition
         }
 
         // **`X q(p);` where X has no constructor at all.** Its copy is trivial, so what
@@ -516,14 +512,9 @@ StmtPtr Parser::declarationBody() {
             ExprPtr bind(new Assign(std::move(target), std::move(addr)));
             bind->setType(slot);
             inits.push_back(StmtPtr(new ExprStmt(std::move(bind))));
-            // And anything else the initialiser built - `const T &r =
-            // f(T(1));` makes T(1) as well, and that one does die here, as does
-            // the one a call was handed by reference, `const T &p = pass(make());`
-            // - [class.temporary]/5's second exception. Flushed whether or not
-            // something was extended (2026-10-21, review of 1.25, fixes 1 and
-            // 2): until then a declaration that extended nothing ended no full-
-            // expression, and what it had built died at the end of the *next*
-            // statement - or never, where that statement cleared its guard.
+            // And what else the initialiser built (T(1) in `const T &r =
+            // f(T(1));`) dies here, [class.temporary]/5's second exception -
+            // flushed whether or not something was extended.
             flushTemporaries(inits, true);
             continue;
         }
@@ -899,8 +890,7 @@ StmtPtr Parser::rangeForStatement(int scope) {
 
         elemPtr = types_.pointerTo(rt->pointee());
 
-        // `for (int x : H().a)`: `auto &&__range` binds a member of the temporary H(), which then
-        // lives as long as __range does - to the loop's end, [class.temporary]/5, as clang has it.
+        // `for (x : H().a)`: H() lives as long as __range, [class.temporary]/5
         const bool kept = extendTemporary(*range, ".rt" + std::to_string(refTemps_++));
 
         // `T *__b = a;` - the array decayed, evaluated here and nowhere else.
@@ -1115,10 +1105,9 @@ bool Parser::conditionDeclaresObject() {
     return d.type->isStructOrUnion() || d.type->isReference() || d.type->isArray() || mentionsDeduced(d.type);
 }
 
-// [stmt.while]/2: `while (T t = e) s` is `label: { T t = e; if (t) { s; goto label; } }`, the object
-// made and destroyed on every turn, and a `for` condition the same with its step after the body
-// ([stmt.for]/1). Lowered as a `for (;;)` whose body is that block, its own `break` reaching the object
-// as a block's does; the step, read here, runs once the object is gone.
+// [stmt.while]/2: `while (T t = e) s` makes and destroys t every turn, a `for`
+// condition too with its step after ([stmt.for]/1); lowered as `for (;;)` over
+// that block, `break` reaching the object, the step run once it is gone.
 StmtPtr Parser::declaringLoop(std::size_t pos, bool forStep) {
     loopDepth_++;
     enterScope();
@@ -2289,11 +2278,9 @@ void Parser::enterBlockEntry(std::map<std::string, std::string> &table, const st
     table[key] = value;
 }
 
-// `using N::f;` in a block, at `using`: [namespace.udecl]/1 declares `f` from here to the block's
-// '}' as the entity N's `f` is. A function's name - an operator's or a template's too - is entered
-// in the using-declarations for the block, which keeps it unqualified for argument-dependent lookup;
-// every other later unqualified `f` there is rewritten to N's name in place - as a namespace alias
-// is - until a nested declaration of `f` hides it.
+// `using N::f;` in a block - [namespace.udecl]/1: `f` is N's to the block's
+// '}'; a function's name joins the block's using-declarations (ADL stays),
+// any other later `f` is rewritten to N's, until a nested `f` hides it.
 void Parser::blockUsingDeclaration() {
     const std::size_t pos = peek().pos;
     at_++;

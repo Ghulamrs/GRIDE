@@ -75,13 +75,9 @@ bool isReservedInMasm(const std::string &name) {
     return false;
 }
 
-// **The reserved words this spelling writes as keywords** - every register, the size words, its
-// directives, and the instructions kRules and the prologues spell. Any other reserved word a symbol
-// is named - `fabs`, C90's `div`, `length` - is given up with `OPTION NOKEYWORD:<...>` at the top of
-// the file, as ml64 has it, and the C name is the symbol's (1.30, 2026-10-23: a definition of `fabs`
-// was renamed `$fabs`, which nothing outside the file could call). `div` and `idiv` are written as
-// instructions too and given up all the same: their instructions are then written as bytes - see
-// finishText.
+// **The reserved words this spelling writes as keywords** (registers, sizes,
+// directives, the instructions it spells); any other a symbol is named (`fabs`,
+// `div`) is given up by `OPTION NOKEYWORD:<...>`, its instructions as bytes.
 bool writtenAsKeyword(const std::string &lower) {
     static const char *const kWritten[] = {
         "ah","al","ax","eax","rax","bh","bl","bx","ebx","rbx",
@@ -570,10 +566,9 @@ void MasmSpelling::functionEnd(const std::string &name) {
     saves_.clear();
 }
 
-// **-g through GRIDE's masm** (1.29, 2026-10-22, the PDB line, as c90 does it): `.FILE n, "path"`
-// names source file n, and masm writes the CodeView line table from the `.LINE`s that follow. The
-// path arrives as codeViewPath spelt it for clang - absolute, backslashes and quotes escaped - and a
-// MASM string undoes that, doubling a quote instead.
+// **-g through GRIDE's masm**: `.FILE n, "path"` names source file n and masm
+// writes the line table from the `.LINE`s; the path comes as codeViewPath spelt
+// it for clang, and a MASM string undoes that, doubling a quote instead.
 void MasmSpelling::fileEntry(int n, const std::string &name) {
     std::string path;
     for (std::size_t i = 0; i < name.size(); i++) {
@@ -659,13 +654,9 @@ std::string MasmSpelling::mangleNames(const std::string &expr) {
     return out;
 }
 
-// **The CodeView writeCodeView makes for clang, in MASM** - one writer of the records, two spellings
-// of them, as c90's MasmSpelling::codeView has it. `.section .debug$S` and `.debug$T` become SEGMENTs
-// GRIDE's masm carries into the object - a mergeable function's records in one ASSOCIATIVE with its
-// COMDAT, kept or dropped with the copy; `.long`, `.short`, `.byte` and `.asciz` its DD, DW and DB;
-// `.secrel32` and `.secidx` SECTIONREL and SECTION; a label its MASM name. The line table, the file
-// checksums and the string table are left to masm, which makes them from the `.LINE`s and appends
-// them to the plain `.debug$S`.
+// **writeCodeView's records for clang, in MASM**: the sections become SEGMENTs
+// (a mergeable function's ASSOCIATIVE with its COMDAT), the data DD/DW/DB, the
+// relocations SECTIONREL/SECTION; masm makes the line table from `.LINE`s.
 void MasmSpelling::codeView(const std::string &gnu) {
     flushPending();
     closeDataBlock();
@@ -720,8 +711,7 @@ void MasmSpelling::codeView(const std::string &gnu) {
         }
     }
     if (!open.empty()) o_ += open + " ENDS\n";
-    // The next code or data reopens its segment.
-    seg_ = None;
+    seg_ = None;  // the next code or data reopens its segment
 }
 
 void MasmCodeGen::writeDebug(const std::vector<DwarfFunction> &fns,
@@ -1029,10 +1019,9 @@ void MasmCodeGen::storeUnwindHelp(int slot) {
     a_->ins("movq", imm(-2), mem(-slot, "%rbp"));
 }
 
-// **A funclet is a slice of the ordinary output, lifted.** Walking the handler
-// appends its code like any other, so remembering where that began and cutting
-// back to it gives the body exactly - and the code generator knows none of it.
-// **One opened inside another is cut out of it first**, a handler's own `try` or cleanup: the slices nest.
+// **A funclet is a slice of the ordinary output, lifted**: where the handler's
+// code began is remembered and cut back to, so the body is exact; one opened
+// inside another is cut out of it first - the slices nest.
 std::string MasmCodeGen::beginFunclet(std::size_t pos, int number, bool cleanup) {
     if (optimizing()) optimizer_->funcletBegin();
     atOutput([this] {
@@ -1206,9 +1195,7 @@ void MasmCodeGen::emitExceptionTables(const Function &fn) {
             o += "  DD " + std::to_string(h.objectSlot == 0
                                               ? 0 : establisherOffset(h.objectSlot)) + "\n";
             o += "  DD imagerel " + h.funclet + "\n";
-            // dispFrame: where the funclet saved the parent's frame pointer, from
-            // its own establisher - [rsp+16] at entry, past `push rbp; sub rsp,32`.
-            // Read only when an exception passes *through* a catch funclet. cl: 038H.
+            // dispFrame: the parent's saved frame pointer, [rsp+16]; cl 038H
             o += "  DD 56\n";
         }
     }

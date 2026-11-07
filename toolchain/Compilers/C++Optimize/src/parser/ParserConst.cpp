@@ -940,10 +940,9 @@ bool Parser::instantiateForConstant(const std::string &symbol) const {
     const std::size_t c2 = complete.find("C2E");
     if (c2 != std::string::npos) complete.replace(c2, 3, "C1E");
     for (std::size_t i = 0; i < specializations_.size(); i++) {
-        // **A constexpr function template's specialization, made now** - [dcl.constexpr]/6 with
-        // [temp.inst]/3: `Arr<sq(3)>` and `int a[sq(3)]` need its body while the expression is read,
-        // where the end of the file used to make it (R16). Replayed as that emission replays it, with
-        // the function being read put aside, and not made a second time there.
+        // **A constexpr function template's specialization, made now** -
+        // [dcl.constexpr]/6, [temp.inst]/3: `Arr<sq(3)>` needs its body as
+        // read; replayed as emission would, and not made again there.
         if (!specializations_[i].isClass) {
             if (specializations_[i].emitted || specializations_[i].explicitly ||
                 specializations_[i].symbol != symbol || templates_.count(specializations_[i].templateKey) == 0)

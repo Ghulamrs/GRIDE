@@ -1349,10 +1349,9 @@ long long Preprocessor::evalCondition(const std::vector<Tok> &line, const Tok &a
     const std::vector<Tok> e = expandAll(line, true);
     if (e.empty()) fail(at, "this directive needs a condition");
 
-    // [cpp.cond]/4: every value is an intmax_t or a uintmax_t, and the usual arithmetic conversions
-    // make an operation unsigned where either operand is - `#if -1 > 0u` holds, as it does in C
-    // (1.27, 2026-10-21, review of 1.25, item 3: the `u` was read and dropped). A value carries the
-    // flag; a comparison's or `!`'s result is a signed int.
+    // [cpp.cond]/4: values are intmax_t or uintmax_t, and the usual arithmetic
+    // conversions make an operation unsigned with either operand (`#if -1 >
+    // 0u` holds); a value carries the flag, `!` and comparisons give int.
     struct V {
         long long v;
         bool u;

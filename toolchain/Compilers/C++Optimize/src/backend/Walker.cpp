@@ -435,12 +435,9 @@ void Walker::msTryStatement(const Try &n) {
     msCurState_ = parent;
     msIpRows_.push_back(MsIpRow{ end, parent, funcletNo_ });
 
-    // The funclets come after the range they belong to is closed, so nothing
-    // they emit lands between `begin` and `end` - those bound the addresses the
-    // runtime matches a thrown object against, and a handler must not be inside.
-    // **Its row is taken where its body ends**, as cl orders them: a `try` inside this body before
-    // this one, a `try` inside a handler of this one after it - the runtime takes the last row whose
-    // handlers hold the state for the catch it is in.
+    // The funclets come after their range closes, so none lands between
+    // `begin` and `end`; **its row is taken where its body ends**, as cl
+    // orders them (an inner `try` before, a handler's `try` after).
     const std::size_t tbAt = msTryBlocks_.size();
     msTryBlocks_.push_back(MsTryBlock());
     MsTryBlock tb;

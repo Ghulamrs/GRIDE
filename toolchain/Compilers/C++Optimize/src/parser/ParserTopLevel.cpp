@@ -152,10 +152,9 @@ void Parser::topLevel(Program &program) {
             }
             // What another using-declaration put there: `using std::scanf;` over <cstdio>'s `using ::scanf;`.
             target = followUsingDeclaration(target);
-            // **Refused by name if it names nothing**, rather than recorded and
-            // found missing at the use - the position of the declaration is the
-            // one that says which name was meant.
-            // [namespace.udecl]: a class template is named as anything else is, the template it was.
+            // **Refused by name if it names nothing**, at the declaration
+            // that says which name was meant; a class template is named as
+            // anything else is, the template it was ([namespace.udecl]).
             const std::map<std::string, TemplateDecl>::const_iterator tmplNamed = findTemplate(target);
             if (tmplNamed != templates_.end() && tmplNamed->second.isClass && cut != std::string::npos &&
                 tmplNamed->second.ns == target.substr(0, target.rfind("::") + 2))
@@ -682,9 +681,7 @@ void Parser::topLevel(Program &program) {
                 src_.fail(d.pos, "'" + d.name + "' is 'constexpr' and has no "
                                  "initialiser - there is nothing for it to be");
             } else if (d.type->isConst() && sc != StorageExtern) {
-                // The same [dcl.init]/7 the local path asks about. `extern` is
-                // exempt because it declares rather than defines: the definition
-                // is somewhere else and is where the initialiser has to be.
+                // [dcl.init]/7, as locals; not `extern`: defined elsewhere
                 requireConstInitialised(d.type, d.name, d.pos);
             } else if (d.type->isArray() && d.type->length() < 0 &&
                        sc != StorageExtern) {
@@ -1220,10 +1217,9 @@ void Parser::topLevel(Program &program) {
         currentFunction_ = definedSymbol;
     }
     currentFunctionName_ = d.name;
-    // **A static local of an inline function is one object for the whole program** - [basic.def.odr]/6
-    // with [dcl.inline]/4 - so uniqueStaticSymbol and guardOnce name it as the ABI does and the
-    // backends put it in a COMDAT: an inline, in-class or template function's, not one with internal
-    // linkage (1.28, 2026-10-22, review of 1.25, item 14: each unit had a copy of its own).
+    // **An inline function's static local is one object for the program**
+    // ([basic.def.odr]/6, [dcl.inline]/4): ABI-named, in a COMDAT, for an
+    // inline, in-class or template function, not an internal one.
     currentFunctionInline_ = (replayingInline_ || inlineFunction) &&
                              !(memberOf != nullptr ? inUnnamedNamespace_ : internalLinkage(sc));
     tssSeq_ = 0;
@@ -1392,10 +1388,9 @@ void Parser::topLevel(Program &program) {
                     entry += "::" + expectIdent("a name after '::'");
                 }
             }
-            // **`: m{v}`, a braced mem-initialiser** ([class.base.init]/7 with [dcl.init.list]): its
-            // values, as `: m(v)` gives them, with what the braces add - no narrowing for a scalar, and
-            // for a class the list-initialisation the parentheses do not have (R-list, C++11: every
-            // braced one was "expected a type").
+            // **`: m{v}`, a braced mem-initialiser** ([class.base.init]/7):
+            // `: m(v)`'s values plus what braces add - no narrowing for a
+            // scalar, list-initialisation for a class.
             const bool braced = peek().is("{");
             const std::size_t bracePos = peek().pos;
             // An array member, or a class member given values, takes the braces as a list.
@@ -2276,11 +2271,9 @@ void Parser::topLevel(Program &program) {
                                          variadic, regSaveSlot, d.pos,
                                          std::move(fnVars_)));
     program.functions.back().setSymbol(definedSymbol);
-    // **-g: the name a debugger shows, as cl's PDB has it** (1.29): a specialization with its arguments,
-    // `ns::biggest<int>` - the same test that chose its key and symbol above - and a member under its class's
-    // whole name, `std::basic_string<char>::basic_string<char>`, `geo::Box<int>::count`, `Counter::head<3>`:
-    // the class's tag with the namespace a specialization keeps apart (Type::displayTag), which the backend
-    // cannot read back out of the symbol. GRIDE's step filter `*!std::*` relies on the prefix.
+    // **-g: the name a debugger shows, as cl's PDB has it**: a specialization
+    // with its arguments (`ns::biggest<int>`), a member under its class's whole
+    // name (Type::displayTag); GRIDE's step filter `*!std::*` relies on it.
     if (!instantiationDisplay_.empty() && d.name == instantiationOf_)
         program.functions.back().setDisplayName(Type::displaySpelling(instantiationDisplay_));
     else if (memberOf != nullptr)
@@ -2623,10 +2616,9 @@ StmtPtr Parser::delegatingCall(const Declared &d, const Type *cls, std::vector<E
     all.push_back(std::move(me));
     std::vector<const Type *> params;
     params.push_back(self);
-    // **A class with a virtual base**: the target builds them where this constructor would. On cl's ABI this
-    // one's most-derived flag is handed on; on Itanium this C2 calls the target's C2 with its VTT, and C1 -
-    // building the virtual bases by default before it - stands in for the target's C1, which is only right where
-    // the target's list names none of them.
+    // **A class with a virtual base**: the target builds them where this ctor
+    // would - cl hands on the most-derived flag; Itanium's C2 calls the
+    // target's C2 with its VTT, C1 standing in only if its list names none.
     std::string symbol = chosen.symbol;
     if (cls->hasVirtualBase() && !target_.microsoftNames()) {
         if (!chosen.defined || virtualBaseInitialisers_.count(chosen.symbol) != 0)

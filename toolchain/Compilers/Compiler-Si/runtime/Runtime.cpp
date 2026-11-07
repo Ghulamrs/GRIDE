@@ -44,7 +44,10 @@ private:
 
     static const int capacity = 1024;
 
-    int32_t perFunction_[capacity] = {0};
+    // Zeroed by the constructor itself - one memset: `= {}` is value-initialisation, which cpp11 writes as a memset of
+    // the member, where `= {0}` is a list it writes element by element (1024 stores). Not left to .bss being zero,
+    // which nothing in a --ram_model C6747 image does.
+    int32_t perFunction_[capacity] = {};
     int32_t total_ = 0;
 };
 

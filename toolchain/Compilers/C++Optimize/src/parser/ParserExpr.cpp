@@ -78,11 +78,8 @@ const char *binOpSpelling(BinOp op) {
     return "";
 }
 
-// [over.match.oper]: where an operand has class type, `a @ b` is a *call* and not
-// the built-in operation. Null when neither operand is a class. **A member is
-// looked for on the left operand only, and the two halves are ranked together.**
-// [expr.unary.op]/3 through a template-id: the qualifier read as a type from a copy of its tokens, the member's
-// name left where it is.
+// [expr.unary.op]/3 through a template-id: the qualifier read as a type from a
+// copy of its tokens, the member's name left where it is.
 const Type *Parser::templateIdQualifier(std::size_t *member) {
     std::size_t i = at_;
     if (tokens_[i].is("::")) i++;
@@ -135,12 +132,9 @@ ExprPtr Parser::overloadedBinary(BinOp op, ExprPtr &lhs, ExprPtr &rhs,
                                  std::size_t pos) {
     const Type *lt = lhs->type();
     const Type *rt = rhs->type();
-    // **An enumeration operand asks for an operator too** - [over.match.oper]/1 names class *or
-    // enumeration* type, and /3 finds `N::operator|(Flag, Flag)` by argument-dependent lookup in the
-    // enumeration's namespace (1.27, 2026-10-21, review of 1.25, item 3: the built-in `|` was taken,
-    // and its int "does not convert to the enum"). Where none is declared, the built-in goes on below.
-    // A pointer to a member function is laid out as a struct here and is no class: `mf == nullptr`
-    // is the built-in comparison, [expr.eq]/2 (1.27).
+    // **An enumeration operand asks for an operator too** -
+    // [over.match.oper]/1,3: `N::operator|(Flag, Flag)` by ADL, else the
+    // built-in; a member function pointer is no class ([expr.eq]/2).
     const bool leftIsClass = lt->unqualified()->isStructOrUnion() &&
                              !lt->unqualified()->isMemberFunctionPointer();
     const bool rightIsClass = rt->unqualified()->isStructOrUnion() &&
@@ -211,10 +205,9 @@ ExprPtr Parser::overloadedBinary(BinOp op, ExprPtr &lhs, ExprPtr &rhs,
                    "them");
 }
 
-// `a && b`, `a || b`, `a, b` and `a ->* b` with a class or enumeration operand: [over.match.oper]/1
-// makes the expression a call where an operator function takes the operands - both evaluated, the
-// built-in's sequencing gone - and leaves the built-in where none does. Null for the built-in, the
-// operands untouched.
+// `a && b`, `a || b`, `a, b`, `a ->* b` with a class or enum operand: a call
+// where an operator function takes them ([over.match.oper]/1, both evaluated),
+// else the built-in. Null for the built-in, the operands untouched.
 ExprPtr Parser::overloadedSpelled(const char *spelling, ExprPtr &lhs, ExprPtr &rhs, std::size_t pos) {
     const Type *lt = lhs->type(), *rt = rhs->type();
     if (lt == nullptr || rt == nullptr || lt->isVoid() || rt->isVoid()) return nullptr;
@@ -291,11 +284,9 @@ ExprPtr Parser::arithmetic(BinOp op, ExprPtr lhs, ExprPtr rhs, std::size_t pos) 
     }
     if (op == BinOp::Sub && lhs->type()->isPointer()) {
         if (rhs->type()->isInteger()) {
-            // **The index is widened to the pointer's width before it is negated** - zero- or
-            // sign-extended as its own type says - since [expr.add]/4 subtracts its value. Negated in
-            // its promoted type first, an `unsigned` n became 2^32 - n and `p - n` on a 64-bit target
-            // was p + (2^32 - n) (1.30, 2026-10-23: RTS6x's `text_ + sizeof text_ - length_`). A
-            // promoted type as wide as the pointer - every one on the C6000 - is negated as it was.
+            // **The index is widened to the pointer's width before it is
+            // negated** ([expr.add]/4): negated narrow, `p - n` for an
+            // unsigned n was p + (2^32 - n); as wide (the C6000), as it was.
             const Type *lt = promote(rhs->type());
             const Type *pd = ptrdiffType();
             if (lt->size(target_) < pd->size(target_)) lt = pd;
@@ -491,10 +482,9 @@ ExprPtr Parser::staticCast(std::size_t pos) {
             }
         }
         refuseUnrelatedClassCast(*v, to, pos, "'static_cast'");
-        // [expr.static.cast]: between pointers to objects, only `void *` in either direction or a
-        // base-derived line above - `static_cast<int *>(&someDouble)` is a type pun, which
-        // reinterpret_cast spells and static_cast must refuse (1.28, 2026-10-22, review of 1.25,
-        // neg38: it was accepted).
+        // [expr.static.cast]: between object pointers only `void *` either
+        // way or along a base-derived line; `static_cast<int *>(&someDouble)`
+        // is a pun, reinterpret_cast's, and is refused.
         if (to->isPointer() && v->type()->isPointer()) {
             const Type *tp = to->pointee()->unqualified(), *vp = v->type()->pointee()->unqualified();
             if (tp != vp && !tp->isVoid() && !vp->isVoid() && !tp->isFunction() && !vp->isFunction() &&
@@ -715,9 +705,7 @@ ExprPtr Parser::reinterpretCast(std::size_t pos) {
     } else if (to->isPointer() && from->isInteger()) {
         // An integer becoming an address.
     } else if (to->unqualified() == from->unqualified()) {
-        // `reinterpret_cast<int>(n)` where n is already an int. Legal, and
-        // does nothing, which is what it should do.
-        return v;
+        return v;  // reinterpret_cast<int>(n) of an int: legal, a no-op
     } else {
         src_.fail(pos, "'reinterpret_cast<" + to->describe() + ">' of a '" +
                        from->describe() + "' - reinterpret_cast reads one set "
@@ -1181,10 +1169,9 @@ ExprPtr Parser::userDefinedLiteral(Program *program) {
     return made;
 }
 
-// [class.mfct.non-static]/3: inside a member function of the class or of one derived from it,
-// `PB::v` is `(*this).PB::v` - the qualified spelling that reaches a base's member past one of the
-// same name, and `Base<T>::v` in a class template (1.27, 2026-10-21, review of 1.25, item 3: it
-// "needs an object here"). Null where there is no `this` of a class the member belongs to.
+// [class.mfct.non-static]/3: in a member function of the class or a derived
+// one, `PB::v` is `(*this).PB::v` (also `Base<T>::v` in a class template).
+// Null where there is no `this` of a class the member belongs to.
 ExprPtr Parser::qualifiedMemberThroughThis(const Type *cls, const Member &m,
                                             const std::string &member, std::size_t pos) {
     const Local *self = findLocal("this");
@@ -1780,11 +1767,9 @@ ExprPtr Parser::primary(Program *program) {
 
     if (peek().kind == TokenKind::Ident && peekAt(1).is("::") &&
         peekAt(2).kind == TokenKind::Ident) {
-        // The longest prefix that names a class and has such a member wins, so
-        // that `Outer::Inner::shared` finds Inner's rather than stopping at
-        // Outer.
-        // Each prefix is the class it names: `WI::flag::value` reaches `flag` as a member type of the
-        // class WI names, which no key `WI::flag` spells.
+        // The longest prefix naming a class with such a member wins
+        // (`Outer::Inner::shared` finds Inner's); each prefix is the class it
+        // names, so `WI::flag::value` reaches flag as a member type of WI's.
         std::string q = peek().text;
         const Type *cls = findTypedef(q);
         const Type *owner = nullptr;
@@ -2053,12 +2038,9 @@ ExprPtr Parser::primary(Program *program) {
                         callsThroughObject = callable(m->type);
         }
 
-        // **An unqualified static member, inside a member function, the class's
-        // own body, or a lambda written in either** - `static const int n = 8;`
-        // as an array bound. It needs no object; a nearer local or global won above.
-        // **And the enclosing classes' after the class's own**, [basic.lookup.unqual]/7: a nested
-        // class's member reads the outer class's `K` by its bare name (1.27, 2026-10-21, review of
-        // 1.25, item 3 - it was "not declared", the search stopping at the nested class).
+        // **An unqualified static member** in a member function, the class
+        // body or a lambda in either (`n` as an array bound), needing no
+        // object; then enclosing classes' ([basic.lookup.unqual]/7).
         std::vector<const Type *> staticScopes;
         for (const Type *c = currentClass_ != nullptr ? currentClass_
                              : classStack_.empty() ? nullptr : classStack_.back();
@@ -2492,12 +2474,9 @@ const Type *Parser::decltypeSpecifier() {
     if (t == nullptr)
         src_.fail(pos, "'decltype' needs an expression with a type, and this "
                        "one has none");
-    // **An unparenthesised member access answers the member's declared type** whatever its object -
-    // `decltype(T().v)` is `double` as `decltype(s.v)` is, though the object is a temporary.
-    // **Declared, so without the const a const object gives the access** - `decltype(cs.m)` is
-    // `int` (review of 1.30, W5: it answered `const int`, the name path included). The record is
-    // the one the access was built from where the name and offset both match it; otherwise the
-    // access's own type.
+    // **An unparenthesised member access answers the declared type**
+    // whatever its object (`decltype(T().v)` is double; `decltype(cs.m)` int,
+    // no const): the record's where name and offset match, else the access's.
     if (to >= from + 3 && tokens_[to - 1].kind == TokenKind::Ident &&
         (tokens_[to - 2].is(".") || tokens_[to - 2].is("->"))) {
         // A reference member is read through the address it holds, `*(s.r)`.
@@ -2624,10 +2603,9 @@ ExprPtr Parser::bindReference(const Type *ref, ExprPtr init, std::size_t pos,
             noAddressName = v->name();
         }
 
-    // **An rvalue reference takes exactly what an lvalue one will not.**
-    // [dcl.init.ref]: `T &&` binds to a value with nowhere to live and refuses an
-    // object that has somewhere - which is how a move takes an object apart. An lvalue
-    // of another type that converts makes such a value first, and that one binds (/5).
+    // **An rvalue reference takes exactly what an lvalue one will not**
+    // ([dcl.init.ref]): a value with nowhere to live, not an object; an
+    // lvalue of another type that converts makes such a value first (/5).
     const bool sameKind = it->unqualified() == referent->unqualified() ||
                           accessibleBaseOffset(it, referent) > -1 ||
                           (it->isArray() && referent->isArray() && it->sameArrayShape(referent));
@@ -2637,10 +2615,9 @@ ExprPtr Parser::bindReference(const Type *ref, ExprPtr init, std::size_t pos,
                        "reference binds only to a value that has none, so "
                        "that taking it apart harms nobody");
 
-    // The direct binding: an addressable glvalue of exactly the type named,
-    // which the reference then *is*.
-    // **A string literal is an lvalue array** ([expr.prim.general]/1), bound where it lies: `const char (&)[3]`
-    // from "cd" holds the literal's own address, which its decayed first element already is.
+    // The direct binding: an addressable glvalue of the type named. A string
+    // literal is an lvalue array ([expr.prim.general]/1): `const char (&)[3]`
+    // from "cd" holds the literal's own address.
     if (referent->isArray() && it->isArray() && dynamic_cast<const StrLit *>(init.get()) != nullptr &&
         it->sameArrayShape(referent) &&
         it->innermostElement()->unqualified() == referent->innermostElement()->unqualified() &&
@@ -2717,15 +2694,9 @@ ExprPtr Parser::bindReference(const Type *ref, ExprPtr init, std::size_t pos,
                        "copy of it instead");
     }
 
-    // **A class a call returns is an object of this frame already** - the result slot the callee
-    // built it in - so the reference binds to that slot, and not to a copy of its bytes made below
-    // (2026-10-21, review of 1.25, fix 1). Until then `T &&r = make();`, `auto &&r = make();` and
-    // `const T &c = make();` all took the copy: the reference read bytes nobody would destroy, and
-    // the call's own object - the one the destructor runs on - was still on the pending list, found
-    // by nothing, and destroyed at the end of the *next* full-expression. Bound to the slot, it is
-    // the object extendTemporary finds and keeps to the end of the reference's scope, or that the
-    // full-expression destroys when the reference is a parameter's, [class.temporary]/5. A derived
-    // class's result bound to a base reference is converted the way the subobject case below is.
+    // **A class a call returns is an object of this frame already** (the
+    // callee's result slot): the reference binds to it, not a copy, and it
+    // is what extendTemporary keeps or the full-expression ends (/5).
     if (it->unqualified()->isStructOrUnion() && referent->unqualified()->isStructOrUnion() &&
         (it->unqualified() == referent->unqualified() || accessibleBaseOffset(it, referent) > -1))
         if (const Call *c = dynamic_cast<const Call *>(init.get()))
@@ -2782,8 +2753,7 @@ ExprPtr Parser::bindReference(const Type *ref, ExprPtr init, std::size_t pos,
 
     ExprPtr both(new Comma(std::move(keep), std::move(addr)));
     both->setType(addrType);
-    // **This copy is not registered for destruction, deliberately.**
-    return both;
+    return both;  // not registered for destruction, deliberately
 }
 
 // **Block scope and namespace scope are separate questions**, because [basic.lookup.unqual] puts
@@ -2861,8 +2831,7 @@ ExprPtr Parser::globalRef(const std::string &name) {
         if (g->isThreadLocal) tlsVar(v, g->tlsViaWrapper, g->tlsExternal);
         ExprPtr n(v);
         n->setType(g->type);
-        // A reference at file scope is a slot holding an address, as a local
-        // one is, so a mention of it is a dereference of the slot.
+        // A file-scope reference, like a local one, is a slot of its address
         return useReference(std::move(n));
     }
     return nullptr;
@@ -2923,12 +2892,9 @@ static int fixedBaseOffset(const Type *derived, const Type *base) {
     return -1;
 }
 
-// **`d.L::v` names L's member in d's L subobject** ([class.qual], [expr.ref]/4), and `m` is
-// L's own record, its offsets L's. Reached by a constant offset, the object stays as it is and
-// *offset says how far L is; otherwise - a virtual step on the way, or a member of L's own
-// virtual base, which L's vbptr or vptr finds and d's layout does not (review of 1.30, W2:
-// `d.R::v` read garbage) - the object becomes the L subobject by the derived-to-base
-// conversion, which knows every path. The access was asked of the name already.
+// **`d.L::v`: L's member in d's L subobject** ([class.qual], [expr.ref]/4),
+// `m` L's record: a constant offset leaves the object and sets *offset; a
+// virtual step converts the object to L by derived-to-base, which knows all.
 ExprPtr Parser::qualifiedSubobject(ExprPtr object, const Type *obj, const Type *base,
                                    const Member &m, int *offset) {
     *offset = 0;
