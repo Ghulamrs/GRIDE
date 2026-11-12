@@ -57,6 +57,7 @@ stdlib/*.cpp
 -stdlib/calloc.cpp
 -stdlib/realloc.cpp
 -stdlib/free.cpp
+-stdlib/_msize.cpp
 # stdio: the scanning engine and the float conversions are RTS6x's; the printf family reads its format as the
 # Microsoft runtime does (c\fmt\Printer.h), into memory (c\sprintf.cpp ...) or a stream. The stream itself (its
 # buffer, opening and closing, position) is the Windows stream layer's (c\Stream*.cpp), and so are fflush,
@@ -105,6 +106,8 @@ stdio/*.cpp
 -stdio/snprintf.cpp
 -stdio/vsprintf.cpp
 -stdio/vsnprintf.cpp
+-stdio/_snprintf.cpp
+-stdio/_vsnprintf.cpp
 # time: the calendar and the formatter; the clock and the time zone are Windows' (win\time.c, c\time64.cpp)
 time/Calendar.cpp
 time/TimeFormatter.cpp

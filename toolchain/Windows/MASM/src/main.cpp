@@ -33,10 +33,15 @@ static void job(Assembler *a, bool *ok)
     }
 }
 
+/* 1.0 is the first number this assembler has had (2026-11-12). It came into GRIDE on 2026-10-16 with no number
+   and no --version, taking ml64's switches; its own tree and its own history, so its own number from here. */
+#define MASM_VERSION "1.0"
+
 static int usage()
 {
-    fprintf(stderr, "usage: asm -t x64 [-g] file.asm... [-o out.obj]\n"
-                    "       asm /c [/nologo] [/Zi] [/Fo out.obj] file.asm      (ml64's spelling, x64)\n"
+    fprintf(stderr, "usage: masm -t x64 [-g] file.asm... [-o out.obj]\n"
+                    "       masm /c [/nologo] [/Zi] [/Fo out.obj] file.asm      (ml64's spelling, x64)\n"
+                    "       masm --version\n"
                     "  -g, /Zi or /Zd: CodeView line records for the .asm's own lines; a file with .FILE\n"
                     "  and .LINE directives gets the source lines they name without being asked\n");
     return 2;
@@ -49,6 +54,13 @@ int main(int argc, char **argv)
     std::vector<std::string> inputs;
     bool debug = false;
     for (int i = 1; i < argc; i++) {
+        /* the shape every program of the toolchain answers in: its name, its number and what it is, then the
+           copyright on a line of its own - on stdout and with 0, a question answered */
+        if (strcmp(argv[i], "--version") == 0) {
+            printf("masm " MASM_VERSION " - x64 assembler, MASM syntax\n"
+                   "\xc2\xa9" "2026 G. R. Akhtar\n");
+            return 0;
+        }
         if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) target = argv[++i];
         else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) output = argv[++i];
         else if (strcmp(argv[i], "-g") == 0) debug = true;

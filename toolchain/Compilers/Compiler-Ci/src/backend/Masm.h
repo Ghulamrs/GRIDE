@@ -93,6 +93,7 @@ private:
     // -g: absolute, as cdb matches a breakpoint's file by its path; a MASM string, not escaped
     std::string debugFileName(const std::string &name) const override;
     bool marksClosingBrace() const override { return true; }
+    bool probesStack() const override { return true; }
 
     const Target &masmTarget_;
     MasmSpelling masm_;

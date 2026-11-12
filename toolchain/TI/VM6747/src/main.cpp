@@ -98,7 +98,8 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (a == "--version") {
-            std::printf("\xc2\xa9" "2026 G. R. Akhtar - VM6747 (C6000 emulator) 1.1\n");
+            // as every program of the toolchain answers it: its name, its number and what it is, then the copyright
+            std::printf("vm6747 1.1 - TMS320C6000 emulator, runs assembly\n\xc2\xa9" "2026 G. R. Akhtar\n");
             return 0;
         }
         if (isDirectory(a)) {

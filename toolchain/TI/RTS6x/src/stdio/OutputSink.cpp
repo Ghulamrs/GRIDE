@@ -8,7 +8,7 @@
 namespace rts6x {
 
 OutputSink::OutputSink(char *dst, size_t capacity)
-    : start_(dst), next_(dst), end_(dst), passed_(0), capacity_(capacity), fd_(-1), failed_(false)
+    : start_(dst), next_(dst), end_(dst), passed_(0), capacity_(capacity), fd_(-1), failed_(false), whole_(false)
 {
     if (capacity != 0) {
         size_t room = capacity - 1, most = (size_t)-1 - (size_t)dst;
@@ -16,9 +16,18 @@ OutputSink::OutputSink(char *dst, size_t capacity)
     }
 }
 
+OutputSink::OutputSink(char *dst, size_t capacity, bool whole)
+    : start_(dst), next_(dst), end_(dst), passed_(0), capacity_(capacity), fd_(-1), failed_(false), whole_(whole)
+{
+    if (capacity != 0) {
+        size_t room = whole ? capacity : capacity - 1, most = (size_t)-1 - (size_t)dst;
+        end_ = dst + (room < most ? room : most);
+    }
+}
+
 OutputSink::OutputSink(int fd)
     : start_(staging_), next_(staging_), end_(staging_ + Staging), passed_(0), capacity_(0), fd_(fd),
-      failed_(fd < 0)
+      failed_(fd < 0), whole_(false)
 {
 }
 
@@ -66,7 +75,7 @@ int OutputSink::finish()
         if (staged != 0 && CioChannel::write(fd_, staging_, staged) < 0) failed_ = true;
         passed_ += staged;
         next_ = staging_;
-    } else if (capacity_ != 0) {
+    } else if (capacity_ != 0 && (!whole_ || count() < capacity_)) {
         *next_ = '\0';
     }
     return failed_ ? -1 : (int)count();

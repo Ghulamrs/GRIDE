@@ -109,6 +109,10 @@ static bool expand(const char *a, std::vector<std::string> &out)
     return true;
 }
 
+/* 1.0 is the first number this linker has had (2026-11-12). It came into GRIDE on 2026-10-16 with no number and
+   no --version, taking link.exe's switches; its own tree and its own history, so its own number from here. */
+#define LINK_VERSION "1.0"
+
 int main(int argc, char **argv)
 {
     Link lk;
@@ -117,6 +121,13 @@ int main(int argc, char **argv)
     std::vector<std::string> args;
     for (int i = 1; i < argc; i++)
         if (!expand(argv[i], args)) return 2;
+    /* --version, in the shape every program of the toolchain answers in: its name, its number and what it is, then
+       the copyright on a line of its own. Two dashes only: /version: is Microsoft's switch for the image's version. */
+    if (args.size() == 1 && args[0] == "--version") {
+        printf("link " LINK_VERSION " - x64 linker and librarian\n"
+               "\xc2\xa9" "2026 G. R. Akhtar\n");
+        return 0;
+    }
     /* /LIB first: the librarian (librarian.cpp), as link.exe /LIB is lib.exe */
     if (!args.empty() && (args[0] == "/lib" || args[0] == "/LIB" || args[0] == "/Lib" || args[0] == "-lib" || args[0] == "-LIB"))
         return librarian(std::vector<std::string>(args.begin() + 1, args.end()));

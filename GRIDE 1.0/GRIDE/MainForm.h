@@ -6,6 +6,7 @@
 #include "TextFile.h"
 #include "DebugView.h"
 #include "ErrorList.h"
+#include "../../common/AboutBox.h"
 #include <cstring>
 #include <msclr/auto_handle.h>
 
@@ -4490,10 +4491,18 @@ private:
         ShowPanel(0);
     }
 
+    // The box the three outlooks share (common/AboutBox.h): the compilers, the other tools, the runtime group, the editors. Nothing of
+    // the toolchain is written here: every program beside this one is asked for its version as the box opens, and
+    // every runtime library read for its own. Help > Environment still says where each thing was found.
     void OnAbout(Object^, EventArgs^) {
-        MessageBox::Show(this, TakeUtf8(gride_about())->Replace("\n", "\r\n"),
-                         "About",
-                         MessageBoxButtons::OK, MessageBoxIcon::Information);
+        GrideAbout::AboutInfo^ info = gcnew GrideAbout::AboutInfo();
+        info->Outlook = "White";
+        info->Icon = this->Icon;
+        // the box's colours are this outlook's own: the white its editor is, and the blue it marks a line with
+        info->Back = System::Drawing::SystemColors::Window;
+        info->Fore = System::Drawing::SystemColors::WindowText;
+        info->Accent = System::Drawing::Color::FromArgb(214, 234, 255);
+        GrideAbout::AboutBox::Open(this, info);
     }
 
     Toolchain^ ToolsNow() { return gcnew Toolchain(cc1_, cl_, shc_, cxx1_, arch_); }

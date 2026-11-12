@@ -155,6 +155,29 @@ FILE *Stream::open(const char *path, const char *mode, FILE *slot)
     return slot;
 }
 
+// _fdopen's: a stream over the open descriptor fd, its mode the descriptor's (text or binary), in a free slot.
+FILE *Stream::adopt(int fd, const char *mode)
+{
+    unsigned host, own;
+    if (!mode) __grt_fail_fast();
+    if (!parseMode(mode, host, own)) {
+        errno = EINVAL;
+        return 0;
+    }
+    int info = __grt_descriptor(fd);
+    if (info < 0) {
+        errno = EBADF;
+        return 0;
+    }
+    FILE *slot = grt::freeStream();
+    if (!slot) return 0;
+    slot->fd = fd;
+    slot->buf = slot->pos = slot->bufend = slot->buff_stop = 0;
+    slot->flags = Open | own | ((info & GRT_TEXT) ? 0 : Binary);
+    Termination::closeStreamsWith(grt::closeAll);
+    return slot;
+}
+
 int Stream::close()
 {
     grt::valid(f_);

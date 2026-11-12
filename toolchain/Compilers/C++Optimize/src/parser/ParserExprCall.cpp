@@ -847,6 +847,11 @@ ExprPtr Parser::completeCall(const std::string &name, const std::string &symbol,
                           slot, named, std::move(argSlots));
     call->setSymbol(symbol);
     call->setHasThis(hasThis);
+    // **`_alloca` and `alloca` with C linkage are the compiler's own**, as cl's are: <malloc.h> declares
+    // `void *_alloca(size_t)` and spells alloca as it, and each backend lowers the call where it stands (9.4).
+    if (call->callee() == nullptr && !hasThis && call->args().size() == 1 && returns->isPointer() &&
+        (symbol == "_alloca" || symbol == "alloca"))
+        call->setAlloca();
     ExprPtr n(call);
     n->setType(returns);
 

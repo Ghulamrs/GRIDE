@@ -1,0 +1,16 @@
+_getpid: positive 1, steady 1, getpid the same 1
+  getenv(GRIDE_MSPROBE): (none)
+_putenv set: 0
+  getenv(GRIDE_MSPROBE): first value
+  getenv(gride_msprobe): first value
+_putenv replace, another case: 0
+  getenv(GRIDE_MSPROBE): second
+_putenv a second name: 0
+  getenv(GRIDE_MSPROBE2): x=y
+_putenv remove: 0
+  getenv(GRIDE_MSPROBE): (none)
+  getenv(GRIDE_MSPROBE2): x=y
+_putenv remove what is not there: 0
+putenv: 0
+  getenv(GRIDE_MSPROBE3): old name
+exit 0

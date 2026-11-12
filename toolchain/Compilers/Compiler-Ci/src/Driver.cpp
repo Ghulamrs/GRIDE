@@ -689,7 +689,7 @@ bool Driver::link() {
         for (const std::string &o : objects) command += " " + shellQuote(o);
 
         command += " libcmt.lib libucrt.lib libvcruntime.lib kernel32.lib"
-                   " legacy_stdio_definitions.lib";
+                   " legacy_stdio_definitions.lib oldnames.lib";
     } else {
         command = shellQuote(hostCompiler());
 
@@ -825,7 +825,9 @@ bool Driver::parseArguments(int argc, char **argv) {
         } else if (std::strcmp(argv[i], "-c") == 0) {
             objectOnly_ = true;
         } else if (std::strcmp(argv[i], "--version") == 0) {
-            std::printf("%s\n", bannerLine());
+            // The shape every program of the toolchain answers in (2026-11-12): its name, its number and what it
+            // is, then the copyright on a line of its own. The banner before a compile is bannerLine(), as it was.
+            std::printf("%s %s - ISO C 90 compiler\n\xC2\xA9" "2026 G. R. Akhtar\n", program::kName, cc1Version());
             answered_ = true;
             return false;
         } else if (std::strcmp(argv[i], "-time") == 0) {
@@ -875,11 +877,7 @@ bool Driver::parseArguments(int argc, char **argv) {
                              "as cpp11 writes it; compile with -g alone\n", argv[0]);
         return false;
     }
-    // The C6000 generator has no optimiser yet: it writes the same code at -O2 as at -O0. Said once, so that a
-    // Release build is not taken for an optimised one in silence.
-    if (optimize_ > 0 && std::strcmp(backend_->name(), "tms6747") == 0)
-        std::fprintf(stderr, "%s: warning: -O%d is not yet written for tms6747 - the code is -O0's\n",
-                     argv[0], optimize_);
+
     if (debug_ && !backend_->emitsLineTable()) {
         std::fprintf(stderr,
                      "%s: -g asks where each line of C went, and this compiler "

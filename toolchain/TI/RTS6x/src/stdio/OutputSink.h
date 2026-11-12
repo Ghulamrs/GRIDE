@@ -12,6 +12,9 @@ class OutputSink {
 public:
     // Into memory at dst; capacity is how many bytes may be written, the NUL included.
     OutputSink(char *dst, size_t capacity);
+    // Into memory at dst, Microsoft's way (_snprintf): every one of capacity bytes may be written, and the NUL only
+    // where there is room left for it.
+    OutputSink(char *dst, size_t capacity, bool whole);
     // To the host file descriptor fd; a negative one is a stream refusing to write, and finish() says -1.
     explicit OutputSink(int fd);
 
@@ -41,6 +44,7 @@ private:
     size_t capacity_;
     int fd_;
     bool failed_;
+    bool whole_;
     char staging_[Staging];
 };
 

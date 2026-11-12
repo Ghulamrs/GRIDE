@@ -167,6 +167,14 @@ int sprintf(char *, const char *, ...);
 #ifdef _GRIDE_C99_LIBRARY
 int snprintf(char *, size_t, const char *, ...);
 #endif
+// Microsoft's snprintf before C99's (docs\Runtime_Design.md 9.4): at most n characters, the NUL only where there is
+// room for it, and -1 when the text did not fit.
+int _snprintf(char *, size_t, const char *, ...);
+// Microsoft's (docs\Runtime_Design.md 9.4): a stream over an open descriptor, in mode; fdopen is its old spelling.
+FILE *_fdopen(int fd, const char *mode);
+#if defined(__cplusplus) || defined(_POSIX_C_SOURCE) || defined(_POSIX_SOURCE)
+FILE *fdopen(int fd, const char *mode);
+#endif
 // GRIDE's own (docs\Runtime_Design.md 14.4): a double in the fewest digits that read back as it, as Shalimar
 // prints its reals; snprintf's bound and count.
 int _gride_shortest_double(char *, size_t, double);

@@ -32,6 +32,31 @@ extern "C" {
 // the previous one, or -1. The mode is one of the _O_ values in <fcntl.h>.
 int _setmode(int fd, int mode);
 
+// **The descriptor calls** (docs\Runtime_Design.md 9.4, the policy of 2026-11-10), both runtimes', as the UCRT
+// has them: a descriptor, a count or a position, or -1 with errno. _open takes <fcntl.h>'s _O_ flags and, with
+// _O_CREAT, <sys/stat.h>'s _S_IREAD and _S_IWRITE; _dup2 answers 0. On the C6747 they go to the host through the
+// C$$IO$$ channel. Their old spellings are behind POSIX's guard, as fileno's is.
+int _open(const char *path, int oflag, ...);
+int _close(int fd);
+int _read(int fd, void *buffer, unsigned int count);
+int _write(int fd, const void *buffer, unsigned int count);
+long _lseek(int fd, long offset, int origin);
+int _dup(int fd);
+int _dup2(int fd, int to);
+int _isatty(int fd);
+int _unlink(const char *path);
+#if defined(__cplusplus) || defined(_POSIX_C_SOURCE) || defined(_POSIX_SOURCE)
+int open(const char *path, int oflag, ...);
+int close(int fd);
+int read(int fd, void *buffer, unsigned int count);
+int write(int fd, const void *buffer, unsigned int count);
+long lseek(int fd, long offset, int origin);
+int dup(int fd);
+int dup2(int fd, int to);
+int isatty(int fd);
+int unlink(const char *path);
+#endif
+
 // 0 when the file is there with the access asked (0 there, 2 write, 4 read,
 // 6 both), -1 and errno otherwise.
 int _access(const char *path, int mode);

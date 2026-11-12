@@ -156,6 +156,17 @@ void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 void *bsearch(const void *, const void *, size_t, size_t,
               int (*)(const void *, const void *));
 
+// Microsoft's (docs\Runtime_Design.md 9.4): value in radix 2 to 36 into buf, lowercase digits, a '-' in radix 10
+// alone (any other radix writes the bits of a negative value unsigned); buf is answered. itoa is its old spelling.
+char *_itoa(int value, char *buf, int radix);
+// Microsoft's: "NAME=value" sets NAME for getenv (and on Windows for a program system() starts), "NAME=" removes it;
+// 0, or -1 with errno. putenv is its old spelling.
+int _putenv(const char *entry);
+#if defined(__cplusplus) || defined(_POSIX_C_SOURCE) || defined(_POSIX_SOURCE)
+char *itoa(int value, char *buf, int radix);
+int putenv(const char *entry);
+#endif
+
 #ifdef __cplusplus
 double fabs(double);
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__TMS320C6X__)

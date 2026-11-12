@@ -591,6 +591,7 @@ void Arm64Darwin::visit(const Postfix &n) {
 }
 
 void Arm64Darwin::visit(const Call &n) {
+    if (n.isAlloca()) unsupported("_alloca");
     const std::vector<ExprPtr> &args = n.args();
     std::size_t named = static_cast<std::size_t>(n.namedArgs());
     if (named > args.size()) named = args.size();

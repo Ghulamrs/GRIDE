@@ -1,0 +1,25 @@
+_msize(malloc(1)) at least 1: 1
+  after realloc to 3: 1, kept 1
+_msize(malloc(10)) at least 10: 1
+  after realloc to 30: 1, kept 1
+_msize(malloc(16)) at least 16: 1
+  after realloc to 48: 1, kept 1
+_msize(malloc(100)) at least 100: 1
+  after realloc to 300: 1, kept 1
+_msize(malloc(4000)) at least 4000: 1
+  after realloc to 12000: 1, kept 1
+_msize(malloc(5000)) at least 5000: 1
+  after realloc to 15000: 1, kept 1
+_msize(malloc(100000)) at least 100000: 1
+  after realloc to 300000: 1, kept 1
+_msize(calloc(7, 9)) at least 63: 1
+_aligned_malloc at 1: 7 sizes aligned and freed
+_aligned_malloc at 2: 7 sizes aligned and freed
+_aligned_malloc at 8: 7 sizes aligned and freed
+_aligned_malloc at 16: 7 sizes aligned and freed
+_aligned_malloc at 64: 7 sizes aligned and freed
+_aligned_malloc at 256: 7 sizes aligned and freed
+_aligned_malloc at 4096: 7 sizes aligned and freed
+_aligned_malloc(0, 32): a block
+_aligned_free(NULL): nothing
+exit 0

@@ -1,0 +1,5 @@
+ungetc: Z
+ftell after ungetc at 0: 0
+getc: Z
+getc: a, ftell 1
+exit 0

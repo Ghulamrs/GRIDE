@@ -8,6 +8,7 @@
  * wmain's has it; the environment read once into "NAME=value" strings, the "=C:" ones left out, and
  * getenv a search of them that ignores case - Windows' names do. Once setlocale asks for UTF-8 the narrow
  * ones are spelled again in it (win\utf8.c). */
+#include <errno.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdlib.h>
@@ -136,11 +137,12 @@ char **__grt_environment(void)
     return __grt_envp_given;
 }
 
+static WCHAR **wideEnvironment;
+
 WCHAR **__grt_wide_environment(void)
 {
-    static WCHAR **environment;
-    if (!environment) environment = (WCHAR **)grt_read_environment(grt_wide);
-    return environment;
+    if (!wideEnvironment) wideEnvironment = (WCHAR **)grt_read_environment(grt_wide);
+    return wideEnvironment;
 }
 
 static int grt_same_letter(char a, char b)
@@ -164,6 +166,51 @@ char *getenv(const char *name)
         while (i < n && (*e)[i] && grt_same_letter((*e)[i], name[i])) i++;
         if (i == n && (*e)[n] == '=') return *e + n + 1;
     }
+    return 0;
+}
+
+/* Spec: Microsoft C runtime, _putenv - "NAME=value" sets NAME and "NAME=" removes it, in the table getenv reads and
+   in Windows' own environment, which a program system() starts inherits; the wide table is read again from
+   Windows when next asked for. 0, or -1 with errno: EINVAL for an entry with no name or no '=', ENOMEM. A null
+   entry fails fast, as the UCRT's invalid parameter does. The replaced strings are not freed: a pointer getenv gave
+   for them may still be held. */
+int _putenv(const char *entry)
+{
+    char **e, **grown, *copy;
+    size_t n = 0, len, k, count, at;
+    WCHAR *wide, *w;
+    if (!entry) __grt_fail_fast();
+    while (entry[n] && entry[n] != '=') n++;                /* the lowest layer counts for itself */
+    if (n == 0 || entry[n] != '=') { errno = EINVAL; return -1; }
+    for (len = n; entry[len]; len++) {}
+    e = __grt_environment();
+    if (!e) { errno = ENOMEM; return -1; }
+    wide = __grt_widen(entry);
+    if (!wide) return -1;
+    for (w = wide; *w && *w != (WCHAR)'='; w++) {}
+    *w = 0;
+    SetEnvironmentVariableW(wide, w[1] ? w + 1 : 0);
+    HeapFree(GetProcessHeap(), 0, wide);
+    wideEnvironment = 0;
+    for (count = 0; e[count]; count++) {}
+    for (at = 0; at < count; at++) {
+        k = 0;
+        while (k < n && e[at][k] && grt_same_letter(e[at][k], entry[k])) k++;
+        if (k == n && e[at][n] == '=') break;
+    }
+    if (entry[n + 1] == 0) {                                /* "NAME=": removed */
+        if (at < count) for (; at < count; at++) e[at] = e[at + 1];
+        return 0;
+    }
+    copy = (char *)malloc(len + 1);
+    if (!copy) { errno = ENOMEM; return -1; }
+    for (k = 0; k <= len; k++) copy[k] = entry[k];
+    if (at < count) { e[at] = copy; return 0; }
+    grown = (char **)realloc(e, (count + 2) * sizeof(char *));
+    if (!grown) { free(copy); errno = ENOMEM; return -1; }
+    grown[count] = copy;
+    grown[count + 1] = 0;
+    __grt_envp_given = grown;
     return 0;
 }
 

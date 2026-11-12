@@ -27,6 +27,10 @@ foreach ($b in (Import-Csv (Join-Path $suite 'baseline.tsv') -Delimiter "`t")) {
 $work = {
     param($mine, $suite, $Out, $Bin, $grt, $LevelsIn, $CompileSecs, $RunSecs)
     $env:LIB = ''
+    # A program that faults stays until Windows Error Reporting has done with it, 4 to 40 seconds, and two cases end
+    # that way as cl's did. This mode, which the programs inherit, ends them at once with the same exit code.
+    Add-Type -Namespace Grt -Name Faults -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);'
+    [void][Grt.Faults]::SetErrorMode(0x8003)
     $empty = Join-Path $Out "empty.stdin"; if (-not (Test-Path $empty)) { try { [IO.File]::WriteAllText($empty, "") } catch {} }
     function run($exe, $argList, $log, $secs) {
         $more = @{}; if (@($argList).Count -gt 0) { $more.ArgumentList = $argList }

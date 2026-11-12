@@ -527,10 +527,11 @@ void buildEdges(Loop &L, const std::set<std::string> &renameable) {
                 if (nextW < 0 && !renameable.count(it->first)) { const Node &w = n[static_cast<std::size_t>(a[static_cast<std::size_t>(firstW)].first)]; Edge e = { op, a[static_cast<std::size_t>(firstW)].first, antiDelay(n[static_cast<std::size_t>(op)], w), 1, "anti1" }; L.edges.push_back(e); }
             } else if (nextW >= 0) {
                 const Node &w1 = n[static_cast<std::size_t>(op)], &w2 = n[static_cast<std::size_t>(a[static_cast<std::size_t>(nextW)].first)];
-                Edge e = { op, a[static_cast<std::size_t>(nextW)].first, std::max(1, w1.lat - w2.lat + 1), 0, "out" }; L.edges.push_back(e);
+                // (a double's low word lands a cycle before its latency - C6xSched.cpp's lowWordFirst)
+                Edge e = { op, a[static_cast<std::size_t>(nextW)].first, std::max(1, w1.lat - w2.lat + 1 + ((w2.early & bitOf(it->first)) ? 1 : 0)), 0, "out" }; L.edges.push_back(e);
             } else if (!renameable.count(it->first)) {
                 const Node &w1 = n[static_cast<std::size_t>(op)], &w2 = n[static_cast<std::size_t>(a[static_cast<std::size_t>(firstW)].first)];
-                Edge e = { op, a[static_cast<std::size_t>(firstW)].first, std::max(1, w1.lat - w2.lat + 1), 1, "out1" }; L.edges.push_back(e);
+                Edge e = { op, a[static_cast<std::size_t>(firstW)].first, std::max(1, w1.lat - w2.lat + 1 + ((w2.early & bitOf(it->first)) ? 1 : 0)), 1, "out1" }; L.edges.push_back(e);
             }
         }
     }
@@ -1986,17 +1987,23 @@ void pipelineLoops(std::vector<Line> &v) {
         if (isLabel(v[i])) labels.insert(labelName(v[i]));
         for (std::size_t o = 0; o < v[i].ops.size(); o++) named.insert(v[i].ops[o]);
     }
+    LabelIndex index;                               // v is not edited before the swap below
+    index.refresh(v);
     std::vector<Line> out;
     std::size_t copied = 0;
     for (std::size_t i = 0; i < v.size(); i++) {
         if (!v[i].instr || v[i].mnem != "B" || isCall(v[i], labels)) continue;
-        if (v[i].pred.empty()) {                    // an unconditional branch is a back branch only to a label above
-            bool above = false;
-            for (std::size_t k = 0; k < i && !above; k++) above = isLabel(v[k]) && labelName(v[k]) == v[i].ops[0];
-            if (!above) continue;
-        }
+        const bool above = index.lastBefore(v[i].ops[0], i, i) != i;
+        if (v[i].pred.empty() && !above) continue;  // an unconditional branch is a back branch only to a label above
         Loop L;
         std::string why;
+        // A forward branch to a label is neither loop's back edge: what recognise and recogniseWindow would answer, unasked.
+        if (!above && labels.count(v[i].ops[0])) {
+            const std::string &to = v[i].ops[0];
+            why = to.size() > 5 && to.compare(to.size() - 5, 5, "$fill") == 0 ? "a fill loop, memory-bound, kept as written" : "the head is not above";
+            if (tracing()) std::fprintf(stderr, "pipe %s: %s [window: %s]\n", to.c_str(), why.c_str(), "the head is not above");
+            continue;
+        }
         if (v[i].pred.empty() || !recognise(v, i, labels, named, L, why)) {
             if (v[i].pred.empty()) why = "an unconditional back branch";
             // Not counted: a loop that leaves on a byte it reads takes eight turns of one aligned block at a time.

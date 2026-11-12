@@ -1,5 +1,6 @@
 #include "Driver.h"
 #include "Name.h"
+#include "ShalimarVersion.h"
 
 #include "Check.h"
 #include "CodeGen.h"
@@ -35,10 +36,11 @@
 namespace shalimar {
 
 // **1.2 is the first version this compiler has had a number for**, numbered alongside the RStudio that drives it - see CLAUDE.md.
-const char *shcVersion() { return "1.3"; }
+// The number itself is runtime/ShalimarVersion.h's, which the runtime's own string takes too.
+const char *shcVersion() { return SHALIMAR_VERSION; }
 
-// The line printed before each compile and by --version. `-nologo` omits it.
-const char *Driver::bannerLine() { return "©2026 G. R. Akhtar - Shalimar 1.3"; }
+// The line printed before each compile. `-nologo` omits it.
+const char *Driver::bannerLine() { return "©2026 G. R. Akhtar - Shalimar " SHALIMAR_VERSION; }
 
 
 void Driver::usage() const {
@@ -418,7 +420,9 @@ bool Driver::parseArguments(const std::vector<std::string> &arguments) {
         } else if (a == "-masm=masm" || a == "-masm=gnu") {
             masmDebug_ = a == "-masm=masm";
         } else if (a == "--version") {
-            std::cout << bannerLine() << "\n";
+            // The shape every program of the toolchain answers in (2026-11-12): its name, its number and what it
+            // is, then the copyright on a line of its own.
+            std::cout << program::kName << " " << shcVersion() << " - the Shalimar language compiler\n\xC2\xA9" "2026 G. R. Akhtar\n";
             answered_ = true;
             return false;
         } else if (a == "-h" || a == "--help") {

@@ -1709,11 +1709,13 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
         std::string name = dcl->name.parts.back().ident;
         Scope* target = in;
         if (dcl->name.parts.size() > 1) {
-            // member of a class template defined out of line: attach to the template so instantiation finds it
+            // member of a class template defined out of line: attach to the template so instantiation finds it. The
+            // first component names the template, the parts between it and the member are nested classes
+            // ("Box<T>::In::twice")
             Symbol* ct = 0;
             std::vector<Symbol*> out;
             cxx::QualifiedName q = dcl->name; q.parts.pop_back();
-            if (q.parts.size() == 1) { lookupUnqualified(q.parts[0].ident, in, false, &out); for (size_t i = 0; i < out.size() && !ct; ++i) if (out[i]->kind == Symbol::ClassTemplate) ct = out[i]; }
+            if (q.parts.size() == 1 || (q.parts.size() > 1 && q.parts[0].hasTemplateArgs)) { lookupUnqualified(q.parts[0].ident, in, false, &out); for (size_t i = 0; i < out.size() && !ct; ++i) if (out[i]->kind == Symbol::ClassTemplate) ct = out[i]; }
             if (ct) { Symbol* mt = m_prog.newSymbol(Symbol::FunctionTemplate, name, tscope); mt->templateAst = d; mt->templateParams = tparams; mt->declAst = inner; mt->isDependentContext = true; mt->ownerClass = ct; ct->partialSpecs.push_back(mt); tscope->owner = mt; d->semaSym = mt; return; }
             Scope* qs = scopeForQualifier(dcl->name, in);
             if (qs) target = qs;
@@ -1757,7 +1759,7 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
         Symbol* ct = 0;
         std::vector<Symbol*> out;
         cxx::QualifiedName q = dcl->name; q.parts.pop_back();
-        if (q.parts.size() == 1) { lookupUnqualified(q.parts[0].ident, in, false, &out); for (size_t i = 0; i < out.size() && !ct; ++i) if (out[i]->kind == Symbol::ClassTemplate) ct = out[i]; }
+        if (q.parts.size() == 1 || (q.parts.size() > 1 && q.parts[0].hasTemplateArgs)) { lookupUnqualified(q.parts[0].ident, in, false, &out); for (size_t i = 0; i < out.size() && !ct; ++i) if (out[i]->kind == Symbol::ClassTemplate) ct = out[i]; }   // "Box<T>::In::count" too
         if (ct) {
             Symbol* mv = m_prog.newSymbol(Symbol::Variable, dcl->name.parts.back().ident, tscope);
             mv->templateAst = d; mv->templateParams = tparams; mv->declAst = inner; mv->isDependentContext = true; mv->ownerClass = ct; mv->isMember = true; mv->isStatic = true;
@@ -1772,10 +1774,19 @@ void Sema::declareTemplate(cxx::Decl* d, Scope* in, cxx::Access access)
     // other templates (typedef templates do not exist in C++98): ignore
 }
 
+// "Stack<T>::m" or "Stack<T>::In::m" declared for an instantiation: the first component, the template, becomes the
+// instantiation's name; the nested classes between it and the member stay
+static void nameInstantiation(cxx::QualifiedName& n, const std::string& name)
+{
+    if (n.parts.size() < 2) return;
+    n.parts[0].ident = name;
+    n.parts[0].hasTemplateArgs = false;
+}
+
 // an out-of-line member definition of a class template ("template <class T> void Stack<T>::push(...)", "template <class
-// T> int Stack<T>::count = 0;") declared for the instantiation cls: a copy of the definition in a scope that binds the
-// template's parameters to cls's arguments, with "Stack<T>::" rewritten to the instantiation's name so that the member
-// is found
+// T> int Stack<T>::count = 0;", "template <class T> int Stack<T>::In::twice(int) const") declared for the instantiation
+// cls: a copy of the definition in a scope that binds the template's parameters to cls's arguments, with "Stack<T>::"
+// rewritten to the instantiation's name so that the member is found
 void Sema::declareTemplateMemberDefinition(Symbol* tmpl, Symbol* cls, Symbol* mt)
 {
     cxx::Decl* def = mt->declAst;
@@ -1791,12 +1802,12 @@ void Sema::declareTemplateMemberDefinition(Symbol* tmpl, Symbol* cls, Symbol* mt
     if (def->kind == cxx::Decl::Function && def->declarator) {
         cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
         cxx::Declarator* dcopy = copy->declarator;
-        if (dcopy->name.parts.size() >= 2) { dcopy->name.parts[dcopy->name.parts.size() - 2].ident = cls->name; dcopy->name.parts[dcopy->name.parts.size() - 2].hasTemplateArgs = false; }
+        nameInstantiation(dcopy->name, cls->name);
         declare(copy, mscope, cxx::AccessPublic);
     } else if (def->kind == cxx::Decl::Simple && !def->declarators.empty() && def->declarators[0].decl) {
         cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
         cxx::Declarator* dcopy = copy->declarators[0].decl;
-        if (dcopy->name.parts.size() >= 2) { dcopy->name.parts[dcopy->name.parts.size() - 2].ident = cls->name; dcopy->name.parts[dcopy->name.parts.size() - 2].hasTemplateArgs = false; }
+        nameInstantiation(dcopy->name, cls->name);
         declare(copy, mscope, cxx::AccessPublic);
     } else if (def->kind == cxx::Decl::Template && !def->decls.empty()) {
         // a member template: the copy is declared as a template of the instantiation's class (declareTemplate takes the
@@ -1804,21 +1815,22 @@ void Sema::declareTemplateMemberDefinition(Symbol* tmpl, Symbol* cls, Symbol* mt
         cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
         cxx::Decl* m = copy->decls[0];
         cxx::Declarator* dcopy = m->kind == cxx::Decl::Function ? m->declarator : (m->kind == cxx::Decl::Simple && !m->declarators.empty() ? m->declarators[0].decl : 0);
-        if (dcopy && dcopy->name.parts.size() >= 2) { dcopy->name.parts[dcopy->name.parts.size() - 2].ident = cls->name; dcopy->name.parts[dcopy->name.parts.size() - 2].hasTemplateArgs = false; }
+        if (dcopy) nameInstantiation(dcopy->name, cls->name);
         declare(copy, mscope, cxx::AccessPublic);
     } else if (def->kind == cxx::Decl::Class || (def->kind == cxx::Decl::Simple && def->spec.classDef)) {
         // a nested class defined out of class: declareClass finds the nested class declared in the instantiation
         cxx::Decl* copy = cxx::cloneDecl(def, nodeArena());
         cxx::ClassDecl* k = copy->kind == cxx::Decl::Class ? copy->classDef : copy->spec.classDef;
-        if (k && k->name.parts.size() >= 2) { k->name.parts[k->name.parts.size() - 2].ident = cls->name; k->name.parts[k->name.parts.size() - 2].hasTemplateArgs = false; }
+        if (k) nameInstantiation(k->name, cls->name);
         declare(copy, mscope, cxx::AccessPublic);
     }
 }
 
-// the class template a qualified member name "Box<T>::m" belongs to (its first component names one in scope), or 0
+// the class template a qualified member name "Box<T>::m" or "Box<T>::In::m" belongs to (its first component names one
+// in scope; the parts between it and the member are nested classes), or 0
 Symbol* Sema::classTemplateOfQualifier(const cxx::QualifiedName& n, Scope* in)
 {
-    if (n.parts.size() != 2 || n.global) return 0;
+    if (n.parts.size() < 2 || n.global || (n.parts.size() > 2 && !n.parts[0].hasTemplateArgs)) return 0;
     std::vector<Symbol*> out;
     lookupUnqualified(n.parts[0].ident, in, false, &out);
     for (size_t i = 0; i < out.size(); ++i) if (out[i]->kind == Symbol::ClassTemplate && out[i]->patternArgs.empty() && !out[i]->instantiatedFrom) return out[i];

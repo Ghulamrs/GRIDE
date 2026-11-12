@@ -4,7 +4,13 @@
 # GRIDE.exe starts and answers and cpp11 runs; the tree of headers and libraries (docs\Runtime_Design.md 5.3) is
 # there folder by folder; GRIDE's runtime for Windows is in lib\x86_64-windows and a C program
 # built and linked with it alone runs, and the programs need no VC++ runtime DLL; a deleted program comes back
-# with msiexec /fa; msiexec /x takes the folder, the shortcut and the registry values away again.
+# with msiexec /fa; msiexec /x takes the folder, the shortcut and the registry values away again - and, since
+# 2026-11-11, everything else of GRIDE's: what was written in the install folder after it, %APPDATA%\GRIDE,
+# %USERPROFILE%\GRIDE 1.0, %USERPROFILE%\.gride\state.json (1.6.2) and GRIDE's files in %TEMP%. So it removes this user's GRIDE settings: on a machine
+# whose own GRIDE builds use %APPDATA%\GRIDE, keep a copy of it first.
+# Run it from a shell of the user's own, not from inside a packaged (MSIX) app such as the Claude desktop app:
+# Windows sends such an app's - and its children's - writes to %APPDATA% to the package's own store, which an
+# uninstall (rightly) never sees, and the %APPDATA% checks would then fail.
 #
 #   test-setup.ps1 [-Msi <GRIDE-Setup-ver.msi>] [-Choices Black,Grey,White] [-Cpp11Version 1.46]
 # Without -Cpp11Version the version expected is the one the sources say (C++Optimize\src\Version.h's CXX1_VERSION).
@@ -97,7 +103,8 @@ foreach ($c in $Choices) {
   $hs = @(Get-ChildItem "$dir\include\c\sys" -Filter *.h -ErrorAction SilentlyContinue).Count
   $hx = @(Get-ChildItem "$dir\include\c++" -File -ErrorAction SilentlyContinue).Count
   $hw = @(Get-ChildItem "$dir\include\win" -Filter *.h -ErrorAction SilentlyContinue).Count
-  Check ($hc -eq 23 -and $hs -eq 2 -and $hx -ge 80 -and $hw -eq 4 -and (Test-Path "$dir\include\c++\cstddef")) "include\c: $hc C headers and sys\: $hs; include\c++: $hx; include\win: $hw"
+  # include\win: windows.h, and since the runtimes review's names (2026-11-10) direct.h, fcntl.h, io.h, malloc.h, process.h
+  Check ($hc -eq 23 -and $hs -eq 2 -and $hx -ge 80 -and $hw -eq 6 -and (Test-Path "$dir\include\c++\cstddef")) "include\c: $hc C headers and sys\: $hs; include\c++: $hx; include\win: $hw"
   Check ((Test-Path "$dir\lib\stddef.h") -and (Test-Path "$dir\include\cstddef") -and (Test-Path "$dir\include\stddef.h")) "the earlier header folders, for one release: lib\*.h and include\*"
   Check (@(Get-ChildItem "$dir\share\ccs" -Filter *.tsv -ErrorAction SilentlyContinue).Count -eq 2) "share\ccs: TI's two CCS option tables"
   $list = (& "$dir\link.exe" /LIB /LIST "$win\grtstart.lib" 2>&1) + (& "$dir\link.exe" /LIB /LIST "$win\kernel32.lib" 2>&1)
@@ -127,10 +134,29 @@ foreach ($c in $Choices) {
   $publisher = try { [string](Get-MsiProp $inst "ProductInfo" @($prop.ProductCode, "Publisher")) } catch { "" }
   Check ($name -eq $prop.ProductName -and $publisher -eq $prop.Manufacturer) "Programs and Features: '$name', publisher '$publisher'"
   # all of its output first: a Select-Object -First on the pipe stops it early, and the exit code is then -1
+  # Every program answers --version in one shape (2026-11-12): `name x.y - what it is`, then the copyright.
   $said = @(& "$dir\cpp11.exe" --version 2>&1)
   $rc = $LASTEXITCODE
-  $v = $said | Where-Object { "$_" -match '^Version ' } | Select-Object -First 1
-  Check ($rc -eq 0 -and "$v" -match "^Version $([regex]::Escape($Cpp11Version))\b") "cpp11 --version: $v (exit $rc)"
+  $v = "$($said | Select-Object -First 1)"
+  Check ($rc -eq 0 -and $v -match "^cpp11 $([regex]::Escape($Cpp11Version)) - ") "cpp11 --version: $v (exit $rc)"
+  $odd = @(foreach ($t in "c90", "shalimar", "c2s", "masm", "link", "gride-dbg", "asm6x", "lnk6x", "sim6747", "vm6747") {
+    $a = @(& "$dir\$t.exe" --version 2>&1)
+    $code = $LASTEXITCODE
+    if ($code -ne 0 -or $a.Count -lt 2 -or "$($a[0])" -notmatch "^$([regex]::Escape($t)) \d+(\.\d+)+ - \S" -or "$($a[1])" -notmatch 'G\. R\. Akhtar$') { "$t (exit $code): $($a | Select-Object -First 1)" }
+  })
+  Check ($odd.Count -eq 0) "the other ten programs answer --version as 'name x.y - what it is' and the copyright$(if ($odd) { ' - not these: ' + ($odd -join '; ') })"
+  # the runtime libraries carry a string of the same shape, which Help > About reads out of them
+  $latin = [System.Text.Encoding]::GetEncoding(28591)
+  $unnamed = @(foreach ($l in @(@("grt", "lib\x86_64-windows\grtc.lib"), @("grt", "lib\x86_64-windows\grtcd.lib"), @("shmrt", "lib\x86_64-windows\shmrt.lib"), @("shmrt", "lib\x86_64-windows\shmrtd.lib"),
+                              @("RTS6x", "lib\tms6747\rts6x.lib"), @("RTS6x", "lib\tms6747\rts6xd.lib"), @("printf6x", "lib\tms6747\printf6x.lib"), @("printf6x", "lib\tms6747\printf6xd.lib"),
+                              @("shmrt", "lib\tms6747\shmrt6x.lib"), @("shmrt", "lib\tms6747\shmrt6xd.lib"))) {
+    $f = Join-Path $dir $l[1]
+    if (-not (Test-Path $f) -or $latin.GetString([System.IO.File]::ReadAllBytes($f)) -cnotmatch "(?<![A-Za-z0-9_])$([regex]::Escape($l[0])) \d+(\.\d+)+ - \S") { $l[1] }
+  })
+  Check ($unnamed.Count -eq 0) "the runtime libraries name themselves: grt, shmrt, RTS6x and printf6x, Release and Debug$(if ($unnamed) { ' - not these: ' + ($unnamed -join ', ') })"
+  # setup.txt beside GRIDE.exe says which Setup installed it; About shows that line
+  $setupLine = if (Test-Path "$dir\setup.txt") { "$(Get-Content "$dir\setup.txt" -TotalCount 1)" } else { "" }
+  Check ($setupLine -eq "GRIDE Setup $($prop.ProductVersion)") "setup.txt: '$setupLine'"
   $p = Start-Process "$dir\GRIDE.exe" -PassThru
   $h = [IntPtr]::Zero
   for ($i = 0; $i -lt 60 -and $h -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 500; $p.Refresh(); if ($p.HasExited) { break }; $h = $p.MainWindowHandle }
@@ -143,22 +169,31 @@ foreach ($c in $Choices) {
   $shared = Join-Path $env:APPDATA "GRIDE\settings.json"
   if ($c -eq "White") { Check (-not (Test-Path (Join-Path $env:USERPROFILE "GRIDE 1.0\settings.json"))) "no settings.json at White's former place" }
   else { Check ((Test-Path $shared) -and (Get-Item $shared).LastWriteTime -ge $p.StartTime) "$shared written by $c" }
+  # each outlook takes in only its own former names: the file names no RIDE once it has run
+  $keys = if (Test-Path $shared) { [regex]::Matches((Get-Content $shared -Raw), '"([^"\\]+)"\s*:') | ForEach-Object { $_.Groups[1].Value } } else { @() }
+  $ride = @($keys | Where-Object { $_ -match '(?i)(?<!g)ride' } | Sort-Object -Unique)
+  Check ($ride.Count -eq 0 -and -not (Test-Path (Join-Path $env:APPDATA "GRIDE\gride.settings.json"))) "$shared names no RIDE among its keys, and no former gride.settings.json beside it$(if ($ride) { ': ' + ($ride -join ', ') })"
+  Check (Test-Path "$base\cleanup.ps1") "cleanup.ps1 at the install folder's top"
   Remove-Item "$dir\c2s.exe" -Force
   $rc = Msiexec @("/fa", "`"$Msi`"", "/qn") "repair-$c.log"
   Check ($rc -eq 0 -and (Test-Path "$dir\c2s.exe")) "repair (/fa) puts a deleted c2s.exe back -> $rc"
+  # **an uninstall leaves nothing behind** (2026-11-11): what an IDE and a user's build leave in the outlook's folder,
+  # the settings folder, White's former one and GRIDE's files in %TEMP% all go; another program's file in %TEMP% stays
+  New-Item -ItemType Directory -Force "$dir\examples\projects\cpp-sampleext\build\Windows\Debug\obj", (Join-Path $env:USERPROFILE "GRIDE 1.0"), (Join-Path $env:USERPROFILE ".gride"), (Join-Path $env:TEMP "gride-parts-4242"), (Join-Path $env:APPDATA "GRIDE") | Out-Null
+  foreach ($left in "$dir\settings.json", "$dir\examples\projects\cpp-sampleext\build\Windows\Debug\obj\Math.obj", "$dir\examples\projects\cpp-sampleext\cpp-sampleext.exe",
+                    (Join-Path $env:APPDATA "GRIDE\toolchain.json"), (Join-Path $env:USERPROFILE "GRIDE 1.0\settings.json"), (Join-Path $env:USERPROFILE ".gride\state.json"), (Join-Path $env:TEMP "GRIDE.log"),
+                    (Join-Path $env:TEMP "gride-parts-4242\Math.o"), (Join-Path $env:TEMP "gride-not-the-ide-test-setup.log")) { Set-Content -LiteralPath $left "left by test-setup" }
   $rc = Msiexec @("/x", "`"$Msi`"", "/qn") "uninstall-$c.log"
   Check ($rc -eq 0) "msiexec /x -> $rc"
-  Check (-not (Test-Path $dir)) "$dir removed"
+  Check (-not (Test-Path $dir)) "$dir removed, with what was written in it after the install"
+  Check (-not (Test-Path $base)) "$base removed"
+  Check (-not (Test-Path (Join-Path $env:APPDATA "GRIDE"))) "%APPDATA%\GRIDE removed"
+  Check (-not (Test-Path (Join-Path $env:USERPROFILE "GRIDE 1.0"))) "%USERPROFILE%\GRIDE 1.0 removed"
+  Check (-not (Test-Path (Join-Path $env:USERPROFILE ".gride"))) "%USERPROFILE%\.gride (White's state.json) removed"
+  Check (-not (Test-Path (Join-Path $env:TEMP "GRIDE.log")) -and -not (Test-Path (Join-Path $env:TEMP "gride-parts-4242"))) "GRIDE's files in %TEMP% removed"
+  Check (Test-Path (Join-Path $env:TEMP "gride-not-the-ide-test-setup.log")) "another log in %TEMP%, even one named gride-*.log, kept"
+  Remove-Item -LiteralPath (Join-Path $env:TEMP "gride-not-the-ide-test-setup.log") -Force -ErrorAction SilentlyContinue
   Check (-not (Test-Path (Join-Path $menu $links[$c]))) "the shortcut removed"
   Check (-not (Test-Path "$regKey\$c")) "the registry key removed"
-}
-# Each outlook takes in only its own former names, so the file is free of RIDE's once all three have run.
-if (@("Black", "Grey", "White" | Where-Object { $Choices -notcontains $_ }).Count -eq 0) {
-  "== settings, after the three"
-  $shared = Join-Path $env:APPDATA "GRIDE\settings.json"
-  $keys = if (Test-Path $shared) { [regex]::Matches((Get-Content $shared -Raw), '"([^"\\]+)"\s*:') | ForEach-Object { $_.Groups[1].Value } } else { @() }
-  $ride = @($keys | Where-Object { $_ -match '(?i)(?<!g)ride' } | Sort-Object -Unique)
-  Check ((Test-Path $shared) -and $ride.Count -eq 0) "$shared names no RIDE among its keys, at any depth$(if ($ride) { ': ' + ($ride -join ', ') })"
-  Check (-not (Test-Path (Join-Path $env:APPDATA "GRIDE\gride.settings.json"))) "no former gride.settings.json beside it"
 }
 if ($script:fail -eq 0) { "all checks passed" } else { "$($script:fail) check(s) failed"; exit 1 }

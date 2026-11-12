@@ -38,8 +38,13 @@
 # Windows, .NET Framework 4.8, no newer GRIDE. Component GUIDs are a hash of each file's install path,
 # the ProductCode a hash of the version, the UpgradeCode fixed - still made from "GRIDEx2", so this
 # Setup replaces 1.1.0.
+#
+# **An uninstall leaves nothing behind** (2026-11-11): cleanup.ps1, packed at the install folder's top in all three
+# features, is run by the RemoveLeftovers custom action on a full removal, just before the files go - the outlook
+# folders whole (with what the IDE and the user's builds wrote in them), %APPDATA%\GRIDE, White's former
+# %USERPROFILE%\GRIDE 1.0 and GRIDE's own files in %TEMP% - so the next installation starts from nothing.
 param(
-    [string]$Version = "1.5.0",
+    [string]$Version = "1.6.3",
     [string]$OutDir = "",
     [string]$VsRoot = "D:\Microsoft Visual Studio 2026",
     [string]$CrtFolder = "",
@@ -161,10 +166,15 @@ foreach ($ide in $ides) {
             Copy-Item -LiteralPath $_.FullName -Destination $to
         }
     }
+    # setup.txt beside GRIDE.exe: which Setup installed this outlook, the one thing Help > About cannot ask a program
+    # for (common\AboutBox.h reads its first line). A build from the sources has no such file and its About names no Setup.
+    Set-Content -LiteralPath (Join-Path $dest "setup.txt") -Encoding ASCII -Value @("GRIDE Setup $Version", "outlook $($ide.Feature)", "packed $(Get-Date -Format 'dd-MM-yyyy')")
     $n = (Get-ChildItem -LiteralPath $dest -Recurse -File).Count
     Say ("  {0,-10} {1,-10} {2,4} files, {3:N1} MB" -f $ide.Feature, $ide.Folder, $n, ((Get-ChildItem -LiteralPath $dest -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
 }
 Say "  VC++ runtime from $CrtFolder"
+# the uninstall's cleanup, at the top of the install folder: one file every outlook's feature installs
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "cleanup.ps1") -Destination (Join-Path $stage "cleanup.ps1")
 if ($sign) {
     # GRIDE's own programs only: the VC++ runtime DLLs carry Microsoft's signature already
     $own = foreach ($ide in $ides) { foreach ($t in "GRIDE", "c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747", "gride-dbg") { Join-Path $stage "$($ide.Folder)\$t.exe" } }
@@ -192,8 +202,10 @@ function Get-ShortName([string]$dirKey, [string]$long) {
 }
 $files = @(Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object { $_.FullName.ToLowerInvariant() } | ForEach-Object {
     $rel = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
-    $dir = $rel.Substring(0, $rel.LastIndexOf('/'))
-    [pscustomobject]@{ Rel = $rel; Dir = $dir; Name = $_.Name; Full = $_.FullName; Size = [int]$_.Length; Top = $rel.Substring(0, $rel.IndexOf('/')) }
+    # a file at the stage's top (cleanup.ps1) is in INSTALLDIR itself and belongs to no one outlook
+    $dir = if ($rel.Contains('/')) { $rel.Substring(0, $rel.LastIndexOf('/')) } else { "" }
+    $top = if ($rel.Contains('/')) { $rel.Substring(0, $rel.IndexOf('/')) } else { "" }
+    [pscustomobject]@{ Rel = $rel; Dir = $dir; Name = $_.Name; Full = $_.FullName; Size = [int]$_.Length; Top = $top }
 })
 $dirKeys = @{ "" = "INSTALLDIR" }
 function Get-DirKey([string]$rel) {
@@ -226,7 +238,8 @@ foreach ($f in $files) {
     $h = Get-HashHex "file|$($f.Rel.ToLowerInvariant())"
     $fileKey = "F_$h"; $compKey = "C_$h"
     $fileKeyOf[$f.Rel] = $fileKey
-    $components.Add([pscustomobject]@{ Row = @($compKey, (Get-HashGuid "component|$codeName|$($f.Rel.ToLowerInvariant())"), (Get-DirKey $f.Dir), 256, $null, $fileKey); Feature = $featureOf[$f.Top] })
+    $features = if ($f.Top) { @($featureOf[$f.Top]) } else { @($ides | ForEach-Object { $_.Feature }) }
+    $components.Add([pscustomobject]@{ Row = @($compKey, (Get-HashGuid "component|$codeName|$($f.Rel.ToLowerInvariant())"), (Get-DirKey $f.Dir), 256, $null, $fileKey); Features = $features })
     $fileVer = $null; $language = $null
     try { $fileVer = [string](Invoke-Msi $inst "FileVersion" @($f.Full, $false)) } catch { $fileVer = "" }
     if ($fileVer) {
@@ -289,7 +302,7 @@ foreach ($ide in $ides) { $order += 2; Row "Feature" @($ide.Feature, $null, $ide
 Row "Condition" @("Black", 3, "IDE=`"Grey`" OR IDE=`"White`"")
 Row "Condition" @("Grey", 1, "IDE=`"Grey`"")
 Row "Condition" @("White", 1, "IDE=`"White`"")
-foreach ($c in $components) { Row "Component" $c.Row; Row "FeatureComponents" @($c.Feature, $c.Row[0]) }
+foreach ($c in $components) { Row "Component" $c.Row; foreach ($feature in $c.Features) { Row "FeatureComponents" @($feature, $c.Row[0]) } }
 foreach ($r in $fileRows) { Row "File" $r }
 foreach ($r in $hashRows) { Row "MsiFileHash" $r }
 Row "Media" @(1, $seq, $null, "#$cabName", $null, $null)
@@ -317,12 +330,19 @@ Row "LaunchCondition" @("VersionNT64", "$product is a 64-bit program and needs 6
 Row "LaunchCondition" @("Installed OR NOT NEWERPRODUCTFOUND", "A newer version of $product is already installed. Remove it first to install $productName.")
 Row "LaunchCondition" @("Installed OR NETFRAMEWORK48 >= `"#528040`"", "$product needs the .NET Framework 4.8 or later. Install it from Microsoft and run this setup again.")
 Row "CustomAction" @("SetArpInstallLocation", 51, "ARPINSTALLLOCATION", "[INSTALLDIR]")
+# RemoveLeftovers: cleanup.ps1 on a full removal - 34 (a program, its working folder a Directory row) + 64 (its exit
+# code ignored: an uninstall never fails on it) + 1024 (deferred, in the script) + 2048 (no impersonation, so a
+# per-machine folder under Program Files can go too). Each folder ends in "\.", as a "\" before a quote escapes it.
+if (-not $fileKeyOf.ContainsKey("cleanup.ps1")) { throw "the stage has no cleanup.ps1" }
+Row "CustomAction" @("RemoveLeftovers", 3170, "TARGETDIR",
+    "`"[System64Folder]WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"[INSTALLDIR]cleanup.ps1`" `"[INSTALLDIR].`" `"[AppDataFolder].`" `"[TempFolder].`"")
 
 $execute = @(
     @("FindRelatedProducts", $null, 25), @("AppSearch", $null, 50), @("LaunchConditions", $null, 100), @("ValidateProductID", $null, 700),
     @("CostInitialize", $null, 800), @("FileCost", $null, 900), @("CostFinalize", $null, 1000), @("SetArpInstallLocation", $null, 1001), @("InstallValidate", $null, 1400),
     @("InstallInitialize", $null, 1500), @("RemoveExistingProducts", $null, 1501), @("ProcessComponents", $null, 1600),
     @("UnpublishFeatures", $null, 1800), @("RemoveRegistryValues", $null, 2600), @("RemoveShortcuts", $null, 3200),
+    @("RemoveLeftovers", "REMOVE~=`"ALL`"", 3490),
     @("RemoveFiles", $null, 3500), @("RemoveFolders", $null, 3600), @("CreateFolders", $null, 3700), @("InstallFiles", $null, 4000),
     @("CreateShortcuts", $null, 4500), @("WriteRegistryValues", $null, 5000), @("RegisterUser", $null, 6000), @("RegisterProduct", $null, 6100),
     @("PublishFeatures", $null, 6300), @("PublishProduct", $null, 6400), @("InstallFinalize", $null, 6600))

@@ -17,7 +17,7 @@
                               storage, the environment and argv, the clock and time zone, locks, the TLS
                               directory, structured exceptions, the end
     kernel32.lib              the import library kernel32.def names, written by link /LIB /DEF
-    shmrt.lib       the Shalimar runtime (Compiler-Si\runtime) over them, by cpp11 -O2
+    shmrt.lib       the Shalimar runtime (Compiler-Si\runtime) over them, by cpp11 -O2 -g
     shmrtd.lib      and its debugging build (-O0 -g -DSHM_DEBUG=1, the session in Debug.cpp, lines for gride-dbg)
   Each is checked as it is built: every name defined once across the layers, each library's undefined names
   defined in itself or below it, only grtwin reaching kernel32, nothing left undefined but the program's own entry
@@ -27,8 +27,9 @@
   Release runtime), and again -O0 -g -DGRT_DEBUG=1 as the Debug variants a Debug build links (grtstartd.lib ...
   grtwind.lib, docs\Runtime_Design.md 4.3), each set checked the same way; both configurations build both sets. A
   program linked with them depends on kernel32.dll alone.
-  The Release set has no -g: under -g cpp11 inlines nothing and c90 writes about a sixth more instructions, which
-  made fgets and sscanf 12 to 29 % slower (docs\Runtime_Design.md 9.3, bench\results.md).
+  The Release set has -g too (2026-11-10): cpp11 and c90 write the same instructions with it as without, so a Release
+  program shows the runtime's functions and lines in a debugger at no cost; until then -g stopped cpp11 inlining and
+  cut c90's function at every line (docs\Runtime_Design.md 9.3 and 16).
   The steps are MSBuild tasks (..\..\msbuild\Toolchain.targets): nothing runs through cmd.exe. Built after c90,
   cpp11, masm and link.
 -->
@@ -67,7 +68,7 @@
     <GrtLibDir>$(OutDir)lib\x86_64-windows\</GrtLibDir>
     <GrtRts6x>$(ProjectDir)..\..\TI\RTS6x\src\</GrtRts6x>
     <GrtShalimar>$(ProjectDir)..\..\Compilers\Compiler-Si\runtime\</GrtShalimar>
-    <GrtFlags>-O2 -DNDEBUG=1</GrtFlags>
+    <GrtFlags>-O2 -g -DNDEBUG=1</GrtFlags>
     <GrtDebugFlags>-O0 -g -DGRT_DEBUG=1</GrtDebugFlags>
     <GrtIncludes>$(ProjectDir)internal;$(GrtRts6x)</GrtIncludes>
     <GrtLayers>$(GrtLibDir)grtstart.lib;$(GrtLibDir)grtcompat.lib;$(GrtLibDir)grtcxx.lib;$(GrtLibDir)grtc.lib;$(GrtLibDir)grtwin.lib;$(GrtLibDir)kernel32.lib</GrtLayers>
@@ -142,7 +143,7 @@
     <FrameCheck ObjDirs="$(IntDir)obj" />
     <CatalogueCheck Catalogue="$(ProjectDir)catalogue.json" LibDir="$(GrtLibDir)" IncludeDirs="$(OutDir)include\c;$(OutDir)include\win;$(OutDir)include\c++" />
     <WindowsLibrary Jobs="$(ToolchainJobs)" C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)shmrt"
-                    Flags="-O2" IncludeDirs="$(GrtShalimar)"
+                    Flags="-O2 -g" IncludeDirs="$(GrtShalimar)"
                     SourceDirs="$(GrtShalimar)wrappers"
                     Sources="$(GrtShalimar)Failure.cpp;$(GrtShalimar)Numbers.cpp;$(GrtShalimar)Array.cpp;$(GrtShalimar)Console.cpp;$(GrtShalimar)Runtime.cpp;$(GrtShalimar)Borrow.cpp"
                     Library="$(GrtLibDir)shmrt.lib" />

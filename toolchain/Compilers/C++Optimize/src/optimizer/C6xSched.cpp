@@ -52,6 +52,16 @@ int lateReads(const std::string &m) {
     return startsWith(m, "CMP") && endsWith(m, "DP") ? 1 : 0;
 }
 
+// A double-precision result lands low word first, one cycle before the high word its delay slots count to (SPRUFE8, and SIM6747's table:
+// INTDP writes dst_l in E4 and dst_h in E5, ADDDP in E6 and E7, MPYDP in E9 and E10, SPDP in E1 and E2). So whatever was written to that
+// low register before it has to have landed a cycle sooner than the two latencies alone say: `LDBU *m, A4` and, a cycle on,
+// `INTDP A16, A5:A4` were issued a cycle apart with five cycles each, and the load and the low word reached A4 together - two results in
+// one register in one cycle (SPRUFE8 3.8.8), which sim6747 stops on: cpp-table's main at -O2 (1.65).
+bool lowWordFirst(const std::string &m) {
+    return m == "INTDP" || m == "INTDPU" || m == "SPDP" || m == "ADDDP" || m == "SUBDP" || m == "MPYDP" || m == "MPYSPDP" ||
+           m == "MPYSP2DP" || m == "MPYID" || m == "ABSDP" || m == "RCPDP" || m == "RSQRDP";
+}
+
 Line parse(const std::string &raw) {
     Line l;
     l.raw = raw;
@@ -239,6 +249,26 @@ LivenessHeld::~LivenessHeld() { heldBy = outer; }
 
 std::uint64_t liveOutAt(const std::vector<Line> &v, std::size_t i) { if (!heldBy) ensureLiveness(v); return v[i].liveOut; }
 std::uint64_t liveInAt(const std::vector<Line> &v, std::size_t i) { if (!heldBy) ensureLiveness(v); return v[i].liveIn; }
+
+void LabelIndex::refresh(const std::vector<Line> &v) {
+    if (data == v.data() && size == v.size() && edits == textEdits) return;
+    at.clear();
+    named.clear();
+    for (std::size_t i = 0; i < v.size(); i++) if (isLabel(v[i])) at[labelName(v[i])].push_back(i);
+    for (std::size_t i = 0; i < v.size(); i++)
+        if (v[i].instr) for (std::size_t o = 0; o < v[i].ops.size(); o++) if (at.count(v[i].ops[o])) named[v[i].ops[o]]++;
+    data = v.data(); size = v.size(); edits = textEdits;
+}
+std::size_t LabelIndex::lastBefore(const std::string &name, std::size_t i, std::size_t none) const {
+    std::map<std::string, std::vector<std::size_t> >::const_iterator it = at.find(name);
+    if (it == at.end()) return none;
+    std::vector<std::size_t>::const_iterator k = std::lower_bound(it->second.begin(), it->second.end(), i);
+    return k == it->second.begin() ? none : *(k - 1);
+}
+int LabelIndex::uses(const std::string &name) const {
+    std::map<std::string, int>::const_iterator it = named.find(name);
+    return it == named.end() ? 0 : it->second;
+}
 
 // Every line takes the registers live at the end of its block: a label or a
 // directive opens a block, a branch closes one, a call reads its arguments
@@ -1181,11 +1211,12 @@ void hoistInvariants(std::vector<Line> &v) {
         if (isLabel(v[i])) labels.insert(labelName(v[i]));
         for (std::size_t o = 0; o < v[i].ops.size(); o++) named.insert(v[i].ops[o]);
     }
+    LabelIndex index;
     for (std::size_t i = 0; i < v.size(); i++) {
         if (!v[i].instr || v[i].mnem != "B" || v[i].pred.empty() || !labels.count(v[i].ops[0])) continue;
-        std::size_t h = i; int uses = 0;
-        for (std::size_t k = 0; k < i; k++) if (isLabel(v[k]) && labelName(v[k]) == v[i].ops[0]) h = k;
-        for (std::size_t k = 0; k < v.size(); k++) if (v[k].instr) for (std::size_t o = 0; o < v[k].ops.size(); o++) if (v[k].ops[o] == v[i].ops[0]) uses++;
+        index.refresh(v);
+        std::size_t h = index.lastBefore(v[i].ops[0], i, i);
+        const int uses = index.uses(v[i].ops[0]);
         if (h == i || uses != 1 || h == 0 || !v[h - 1].instr || v[h - 1].mnem != "B" || v[h - 1].pred.empty()) continue;
         // The body may leave by a conditional branch to a label outside it - an exit - and by nothing else.
         bool ok = true;
@@ -1335,11 +1366,12 @@ void inductionPointers(std::vector<Line> &v) {
         if (isLabel(v[i])) labels.insert(labelName(v[i]));
         for (std::size_t o = 0; o < v[i].ops.size(); o++) named.insert(v[i].ops[o]);
     }
+    LabelIndex index;
     for (std::size_t i = 0; i < v.size(); i++) {
         if (!v[i].instr || v[i].mnem != "B" || v[i].pred.empty() || !labels.count(v[i].ops[0])) continue;
-        std::size_t h = i; int uses = 0;
-        for (std::size_t k = 0; k < i; k++) if (isLabel(v[k]) && labelName(v[k]) == v[i].ops[0]) h = k;
-        for (std::size_t k = 0; k < v.size(); k++) if (v[k].instr) for (std::size_t o = 0; o < v[k].ops.size(); o++) if (v[k].ops[o] == v[i].ops[0]) uses++;
+        index.refresh(v);
+        std::size_t h = index.lastBefore(v[i].ops[0], i, i);
+        const int uses = index.uses(v[i].ops[0]);
         if (h == i || uses != 1 || h == 0) continue;
         // Entered by falling in from the guard's branch over a straight run - the preheader, where the pointers are made.
         std::size_t g = h;
@@ -1469,11 +1501,12 @@ void widenFills(std::vector<Line> &v) {
         if (isLabel(v[i])) labels.insert(labelName(v[i]));
         for (std::size_t o = 0; o < v[i].ops.size(); o++) named.insert(v[i].ops[o]);
     }
+    LabelIndex index;
     for (std::size_t i = 0; i + 1 < v.size(); i++) {
         if (!v[i].instr || v[i].mnem != "B" || v[i].pred.empty() || !labels.count(v[i].ops[0]) || !isLabel(v[i + 1])) continue;
-        std::size_t h = i; int uses = 0;
-        for (std::size_t k = 0; k < i; k++) if (isLabel(v[k]) && labelName(v[k]) == v[i].ops[0]) h = k;
-        for (std::size_t k = 0; k < v.size(); k++) if (v[k].instr) for (std::size_t o = 0; o < v[k].ops.size(); o++) if (v[k].ops[o] == v[i].ops[0]) uses++;
+        index.refresh(v);
+        std::size_t h = index.lastBefore(v[i].ops[0], i, i);
+        const int uses = index.uses(v[i].ops[0]);
         if (h == i || uses != 1 || h == 0) continue;
         std::size_t g = h;
         while (g > 0 && v[g - 1].instr && !isBranch(v[g - 1].mnem)) g--;
@@ -2039,6 +2072,11 @@ Node makeNode(const Line &l, const std::set<std::string> &labels) {
     if (!l.ops.empty()) registersIn(l.ops.back(), dst);
     n.side = dst.empty() ? 0 : sideIndex(dst[0]);
     if (crossings(l) > 0) n.cross = n.side;
+    // the low word of a pair `A5:A4` is the name after the colon
+    if (lowWordFirst(l.mnem) && n.lat > 1 && !l.ops.empty()) {
+        const std::size_t colon = l.ops.back().find(':');
+        if (colon != std::string::npos) n.early = bitOf(l.ops.back().substr(colon + 1));
+    }
     return n;
 }
 
@@ -2103,7 +2141,7 @@ std::vector<Pending> scheduleBlock(std::vector<Node> &nodes, std::ostringstream 
         landing = std::max(landing, in[p].lands);
         for (std::size_t i = 0; i < n; i++) {
             if (nodes[i].reads & in[p].writes) minIssue[i] = std::max(minIssue[i], in[p].lands);
-            if (nodes[i].writes & in[p].writes) minIssue[i] = std::max(minIssue[i], in[p].lands - nodes[i].lat + 1);
+            if (nodes[i].writes & in[p].writes) minIssue[i] = std::max(minIssue[i], in[p].lands - nodes[i].lat + 1 + ((nodes[i].early & in[p].writes) ? 1 : 0));
         }
     }
     for (std::size_t i = 0; i < n; i++) if (nodes[i].branch) branchAt = static_cast<int>(i);
@@ -2114,7 +2152,7 @@ std::vector<Pending> scheduleBlock(std::vector<Node> &nodes, std::ostringstream 
             int d = -1;
             if (a.writes & b.reads) d = std::max(d, (a.writes & ~a.stepped & b.reads) ? a.lat : 1);
             if (a.reads & b.writes) d = std::max(d, std::max(a.store ? 1 : 0, a.late - b.lat + 1));
-            if (a.writes & b.writes) d = std::max(d, std::max(1, a.lat - b.lat + 1));
+            if (a.writes & b.writes) d = std::max(d, std::max(1, a.lat - b.lat + 1 + ((a.writes & b.early) ? 1 : 0)));   // b's low word lands a cycle early
             if (a.mem && b.mem && (a.store || b.store) && mayAlias(a, b)) d = std::max(d, 1);
             if (d >= 0) b.preds.push_back(std::make_pair(static_cast<int>(j), d));
         }

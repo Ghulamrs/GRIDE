@@ -1,0 +1,37 @@
+_open a new file: a descriptor
+_write: 12
+_isatty of a file: 0
+_fstat: 0 a file, size 12, links 1, permissions 666
+_close: 0
+_read (12): h e l l o \n w o r l d \n
+_read at the end: 0
+_lseek to 6: 6
+_read 5 (5): w o r l d
+_lseek: here 11, the end 12, back from it 9
+_dup: another descriptor
+  where it is: 9
+  moved through it: 0
+  the first one reads from there (5): h e l l o
+_dup2 to 20: 0
+  20 reads on (3): \n w o
+_close the first: 0
+  the second still reads (4): r l d \n
+_close the others: 0 0
+_write in text mode: 4
+  _fstat: 0 a file, size 6, links 1, permissions 666
+  the bytes (6): a \r \n b \r \n
+  read in text mode (4): a \n b \n
+_fdopen: a stream
+  fgets (2): a \n
+  fgets (2): b \n
+  fclose: 0
+  written through it (10): 4 2 - f d o p e n \n
+_open _O_EXCL of a file that is there: -1 EEXIST
+_open of a file that is not: -1 ENOENT
+open, dup: 1, lseek 3, read 2, isatty 0, dup2 0
+fdopen: o
+close: 0 0 0
+write appending: 1
+_unlink: 0 0
+_unlink again: -1 ENOENT
+exit 0

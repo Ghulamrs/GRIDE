@@ -71,6 +71,8 @@ std::string firstWord(const std::string& s)
     return w;
 }
 
+struct Chain { size_t begin, end; };   // an identifier chain "A::B<T>" in a declaration head (parseClass)
+
 } // namespace
 
 // ---- token joining -----------------------------------------------------------
@@ -640,7 +642,6 @@ ClassInfo* Parser::parseClass(ClassInfo* owner, Access access, const TemplateInf
     }
 
     // identifier chains in the head: "A::B<T>" counts as one chain
-    struct Chain { size_t begin, end; };
     std::vector<Chain> chains;
     for (size_t i = 0; i < head.size();) {
         if (head[i].type == TokIdentifier || head[i].text == "::") {

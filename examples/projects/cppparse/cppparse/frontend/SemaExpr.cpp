@@ -579,6 +579,8 @@ const Type* Sema::resultOfCall(Symbol* fn)
 
 namespace {
 
+struct Viable { Symbol* fn; std::vector<Conversion> convs; bool exactThis; };   // a candidate of resolveOverload
+
 int compareConversions(TypeTable& types, const Conversion& a, const Conversion& b)
 {
     // negative: a better, positive: b better, 0: indistinguishable
@@ -606,7 +608,6 @@ Symbol* Sema::resolveOverload(const std::vector<Symbol*>& cands, const std::vect
     for (size_t a = firstArg; a < args.size(); ++a) if (!args[a]->semaType) expr(args[a], in);
     for (size_t a = firstArg; a < args.size(); ++a) if (args[a]->semaType && args[a]->semaType->kind == Type::Dependent && !functionNameOf(args[a])) return cands.empty() ? 0 : cands[0];
 
-    struct Viable { Symbol* fn; std::vector<Conversion> convs; bool exactThis; };
     std::vector<Viable> viable;
     // one entity reached twice is one candidate: "using namespace std; printf(...)" finds ::printf directly and
     // again through the using-declaration "using ::printf;" in std
@@ -1549,8 +1550,8 @@ const Type* Sema::exprUnary(cxx::Expr* e, Scope* in)
         std::vector<cxx::Expr*> ops; ops.push_back(e->kids[0]);
         Symbol* f = classOperator(op, e, ops, in, r);
         if (f) { e->semaSym = f; if (r->kind == Type::Reference) e->semaLvalue = true; return r; }
-        error(e->loc, "S109", "no operator" + op + " for " + t->text());
-        return m_types.error();
+        // without an operator! of its own, the class operand of ! is converted to bool (5.3.1/8), as a condition is
+        if (op != "!") { error(e->loc, "S109", "no operator" + op + " for " + t->text()); return m_types.error(); }
     }
     if (op == "*") {
         const Type* v = valueType(e->kids[0]);

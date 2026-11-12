@@ -69,6 +69,9 @@ struct IrIns {
     IrOp a, b;
     // Set by a pass; the run is compacted before it is replayed.
     bool dead = false;
+    // **-g's locations and block labels before it**, carried by it: they split nothing, and one whose instruction a
+    // pass removes passes to the next instruction kept, or to the chunk's tail.
+    std::vector<std::function<void()>> pre;
     // What the instruction does, computed once and kept while it stands:
     // a pass that changes an instruction invalidates it, or refreshes it.
     IrSem sem;
@@ -84,6 +87,7 @@ struct IrChunk {
     bool hasLabel = false;
     std::vector<std::function<void()>> after;   // after the label, before the code
     std::vector<IrIns> ins;
+    std::vector<std::function<void()>> tail;   // -g's, after the code: their instructions were removed
     int fall = -1;            // the chunk fallen into, or -1
     int target = -1;          // a jump's chunk, -1 for none, -2 for one not here
     unsigned gen = 0, kill = 0, liveIn = 0, liveOut = 0;
@@ -106,6 +110,8 @@ public:
 
     // How many instructions the passes removed, for anyone measuring.
     unsigned long removed() const { return removed_; }
+    // Everything handed to it so far - instructions, labels, -g's marks - for a walker measuring what it wrote.
+    std::size_t written() const { return written_; }
     // Whether the function returns a second word in rdx: a ret reads rdx only then.
     void returnUsesRdx(bool yes) { rdxLive_ = yes; }
 
@@ -119,6 +125,7 @@ public:
     void functionEnd(const std::string &name) override;
     void fileEntry(int n, const std::string &name) override;
     void location(int file, int line, int column) override;
+    void blockLabel(const std::string &l) override;
     void predefine(const std::vector<std::string> &names) override;
     void finishText(std::vector<std::string> &chunks) override;
     void preamble(std::ostream &o) override;
@@ -145,6 +152,18 @@ private:
     bool open_ = false;
     std::vector<IrIns> run_;
     unsigned long removed_ = 0;
+    std::size_t written_ = 0;
+    // -g's marks since the last instruction, waiting for the next; and those of removed instructions, for the next kept.
+    std::vector<std::function<void()>> pending_, carry_;
+    void debugMark(std::function<void()> f);
+    // An instruction leaving the run hands its marks on; one staying takes those handed to it.
+    void dropMarks(IrIns &i) { for (std::function<void()> &f : i.pre) carry_.push_back(std::move(f)); i.pre.clear(); }
+    void takeMarks(IrIns &i) {
+        if (carry_.empty()) return;
+        for (std::function<void()> &f : i.pre) carry_.push_back(std::move(f));
+        i.pre.swap(carry_);
+        carry_.clear();
+    }
     // True after a jmp or a ret with no label since: nothing reaches there.
     bool unreachable_ = false;
     // What is live, and whether the flags are, after the run being optimized.

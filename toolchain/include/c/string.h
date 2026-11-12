@@ -64,6 +64,23 @@ char *strtok(char *, const char *);
 
 char *strerror(int);
 
+// **Microsoft's string names** (docs\Runtime_Design.md 9.4, the policy of 2026-11-10): both runtimes define them, as
+// the UCRT does. _strdup's copy is malloc's to free; _stricmp and _strnicmp compare as the "C" locale lowers ASCII;
+// _strlwr and _strrev work in place and answer their argument. Their old spellings, behind POSIX's guard as fileno's
+// is, are grtcompat's on Windows (oldnames.lib's on Microsoft's runtime) and rts6x.lib's on the C6747.
+char *_strdup(const char *);
+int _stricmp(const char *, const char *);
+int _strnicmp(const char *, const char *, size_t);
+char *_strlwr(char *);
+char *_strrev(char *);
+#if defined(__cplusplus) || defined(_POSIX_C_SOURCE) || defined(_POSIX_SOURCE)
+char *strdup(const char *);
+int stricmp(const char *, const char *);
+int strnicmp(const char *, const char *, size_t);
+char *strlwr(char *);
+char *strrev(char *);
+#endif
+
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -23,9 +23,11 @@ long Stream::hostPosition(long end)
     int slot = (int)(f_ - _ftable), count = fillCount_[slot];
     long start = fillAt_[slot];
     // A byte for each character: no fill to measure, a binary stream, or a fill the host did not translate.
-    if (!ahead || count < 0 || end - start == count) return end - ahead;
+    // A character pushed back before the first byte of the file is at 0, as the Microsoft runtime answers (the
+    // runtimes review's finding 11, which grt::tell had put right on Windows alone).
+    if (!ahead || count < 0 || end - start == count) return end - ahead < 0 ? 0L : end - ahead;
     long taken = count - ahead;
-    if (taken <= 0) return start + taken;
+    if (taken <= 0) return start + taken < 0 ? 0L : start + taken;
     // The fill read again up to the next character, into what the program has already taken.
     if (CioChannel::seek(f_->fd, start, CioChannel::FromStart) < 0) return -1L;
     long got = 0;

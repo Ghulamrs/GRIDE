@@ -122,6 +122,11 @@ typedef struct {
 #define GRT_INFINITE 0xFFFFFFFFul
 
 HANDLE GetStdHandle(DWORD which);
+BOOL SetStdHandle(DWORD which, HANDLE h);
+#define GRT_DUPLICATE_SAME_ACCESS 2
+#define GRT_CURRENT_PROCESS ((HANDLE)(long long)-1)
+BOOL DuplicateHandle(HANDLE fromProcess, HANDLE from, HANDLE toProcess, HANDLE *to, DWORD access, BOOL inherit,
+                     DWORD options);
 DWORD GetFileType(HANDLE file);
 BOOL GetConsoleMode(HANDLE console, DWORD *mode);
 BOOL WriteConsoleW(HANDLE console, const WCHAR *text, DWORD count, DWORD *written, void *reserved);
@@ -176,6 +181,7 @@ BOOL GetExitCodeProcess(HANDLE process, DWORD *code);
 
 HANDLE GetProcessHeap(void);
 void *HeapAlloc(HANDLE heap, DWORD flags, unsigned long long size);
+unsigned long long HeapSize(HANDLE heap, DWORD flags, const void *block);
 void *HeapReAlloc(HANDLE heap, DWORD flags, void *block, unsigned long long size);
 BOOL HeapFree(HANDLE heap, DWORD flags, void *block);
 void *VirtualAlloc(void *address, unsigned long long size, DWORD type, DWORD protect);

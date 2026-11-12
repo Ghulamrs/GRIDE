@@ -22,6 +22,11 @@ char *_getcwd(char *buf, int size);
 int _chdir(const char *path);
 int _mkdir(const char *path);
 int _rmdir(const char *path);
+// Their old spellings (docs\Runtime_Design.md 9.4), grtcompat's; the C6747's host has no folders to change.
+#if defined(_WIN32) && (defined(__cplusplus) || defined(_POSIX_C_SOURCE) || defined(_POSIX_SOURCE))
+int chdir(const char *path);
+int rmdir(const char *path);
+#endif
 
 #ifdef __cplusplus
 }

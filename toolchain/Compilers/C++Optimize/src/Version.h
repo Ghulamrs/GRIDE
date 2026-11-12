@@ -303,11 +303,40 @@
 // folds stopped where nothing further down can refuse them, the code they write unchanged. With the runtimes review's
 // fixes: an object with no constructor and a destructor is destroyed at exit, a binary operand calling setjmp is
 // evaluated first on x86-64 Linux, and the driver's own link takes GRIDE's runtime when it is beside the compiler.
-#define CXX1_VERSION      "1.63"
-#define CXX1_SEAL_DATE    "10-11-2026"
-#define CXX1_SEAL_FILE    "cxx1-1.63.dat"
+// 1.64 (2026-11-10): the runtimes review's open items (docs/Runtime_Design.md section 16). -g changes no instruction on
+// x86-64: a call is walked in place under -g, its body on the call's line; what -g alone writes (locations, lexical
+// blocks' labels, the function's begin label) reaches the optimizer as events marked debug, which make no block of
+// the flow graph and stop no pass - so grt's Release libraries carry CodeView, their code the same byte for byte.
+// The C6000 scheduler (C6xSched.cpp, C6xPipe.cpp) is c90's too. The warning "read here and nothing has been assigned
+// to it" counts a local bound to a non-const reference as assigned by the call. -masm=masm: a file may name `dup`,
+// the word given up and its zero fills written out.
+// 1.65 (2026-11-11): two defects the comparison of the 1.63 and 1.64 installations found in both, by building every
+// example. A function declared with a default argument and defined without one was refused - "every parameter after
+// one with a default needs a default of its own" - when the function defined before it had used std::string: a
+// top-level parameter list with no default left the last list read anywhere, an instantiated member's, to be merged
+// into its own (cppparse's PathUtil.cpp, which 1.30 compiled; [dcl.fct.default]/4). And the C6000 scheduler let a
+// double result's low word, which lands a cycle before its high word, reach a register in the same cycle as an earlier
+// load into it - `LDBU *m, A4` then `INTDP A16, A5:A4` - where sim6747 stops (SPRUFE8 3.8.8; the examples' cpp-table
+// at -O2): the write-after-write distance counts the early word, in a block, across blocks and in the pipeliner, for
+// c90 as for cpp11. Conformance set p167 holds both, the second run on the C6747 by RTS6x's c6747.ps1.
+// 1.66 (2026-11-11): the user's LabelIndex in the C6000 loop passes, joined to 1.65's scheduler (it was written on
+// 1.64's). Where each label of the text stands and how many instructions name it are kept in an index, rebuilt when the
+// text has been edited, where hoistInvariants, inductionPointers and widenFills scanned the whole text for every
+// conditional branch and pipelineLoops for every branch; and pipelineLoops leaves a forward conditional branch before
+// asking recognise and recogniseWindow, which both answered "the head is not above". A switch of 16,384 cases took
+// 282 s for the C6747 at -O2 and takes 3 s. The code written is the same: 1,143 sources - the conformance programs,
+// the examples and the runtime probes - give 1.65's C6747 assembly at -O2 byte for byte.
+#define CXX1_VERSION      "1.66"
+#define CXX1_SEAL_DATE    "11-11-2026"
+#define CXX1_SEAL_FILE    "cxx1-1.66.dat"
 
 // The line every run prints first; what it claims is docs/EXCLUSIONS.md's to measure (review of 2026-10-08).
 #define CXX1_BANNER "©2026 G. R. Akhtar - C++03 with C++11 extensions"
+
+// What --version answers, in the one shape every program of the toolchain uses (2026-11-12), so that an IDE's About
+// reads them all alike: `name x.y - what it is`, then the copyright on a line of its own. cpp11's seal and build
+// time follow on theirs.
+#define CXX1_WHAT  "C++03 with C++11 extensions"
+#define CXX1_OWNER "\xC2\xA9" "2026 G. R. Akhtar"
 
 #endif

@@ -4,7 +4,7 @@
 //    ToolchainCheckDialog  Tools > Toolchain Check
 //    ExternalToolsDialog   Tools > External Tools
 //    ShortcutsDialog       Help > Keyboard Shortcuts
-//    AboutDialog           Help > About GRIDE
+//    (Help > About GRIDE is common/AboutBox.h, the box the three outlooks share)
 // =============================================================================
 #pragma once
 #include "OptionsDialog.h"
@@ -362,83 +362,5 @@ namespace Gride { namespace UI {
             list->EndUpdate();
         }
         void OnFilter(Object^ sender, EventArgs^ e) { Fill(); }
-    };
-
-    // -------------------------------------------------------------------------
-    public ref class AboutDialog : public ThemedDialog
-    {
-    public:
-        // cpp11: the program the toolchain resolves to, asked for its version when the box opens, as White's
-        // About asks it - a number written here would be a second copy, and the stale one
-        AboutDialog(String^ settingsPath, String^ cpp11) : ThemedDialog("About GRIDE", 520, 400)
-        {
-            PictureBox^ logo = gcnew PictureBox();
-            logo->Image = IconFactory::AppIcon()->ToBitmap();
-            logo->SizeMode = PictureBoxSizeMode::CenterImage;
-            logo->Size = SD::Size(64, 64);
-            logo->Location = SD::Point(24, 24);
-            Controls->Add(logo);
-
-            Label^ name = gcnew Label();
-            name->Text = "GRIDE";
-            name->Font = gcnew SD::Font("Segoe UI Semibold", 22.0f);
-            name->Location = SD::Point(100, 20);
-            name->AutoSize = true;
-            Controls->Add(name);
-
-            Label^ info = gcnew Label();
-            info->Location = SD::Point(102, 70);
-            info->Size = SD::Size(400, 250);
-            String^ said = AskVersion(cpp11);
-            if (said->Length == 0) said = String::IsNullOrEmpty(cpp11) ? "not found (Tools > Toolchain Check)" : "no answer from " + cpp11;
-            info->Text = String::Format(
-                "Version {0}\n\n"
-                "A 3-language, 4-target integrated development environment.\n\n"
-                "Languages:  C90 / C++11 / Shalimar\n"
-                "cpp11:      {3}\n"
-                "Targets:    Windows (MASM/LINK) / Linux / macOS / TMS320C6747\n"
-                "DSP tools:  ASM6x / LNK6x / RTS6747 / VM6747 / SIM6747\n"
-                "Opens:      CCS 7.4 / 5.5 projects, Visual Studio solutions (read-only)\n\n"
-                ".NET Framework {1}\n"
-                "Settings:   {2}",
-                System::Reflection::Assembly::GetExecutingAssembly()->GetName()->Version->ToString(3), Environment::Version, settingsPath, said);
-            Controls->Add(info);
-
-            Button^ ok = AddButton("OK");
-            ok->DialogResult = WF::DialogResult::OK;
-            ok->Tag = "accent";
-            AcceptButton = ok;
-            CancelButton = ok;
-        }
-
-    private:
-        // the program's own words for `--version`: its banner without the copyright, then the version line cpp11
-        // writes beneath it ("C++03 with C++11 extensions, Version 1.30, sealed 23-10-2026"); empty when it cannot run
-        static String^ AskVersion(String^ exe)
-        {
-            if (String::IsNullOrEmpty(exe) || !File::Exists(exe)) return String::Empty;
-            try
-            {
-                System::Diagnostics::ProcessStartInfo^ si = gcnew System::Diagnostics::ProcessStartInfo(exe, "--version");
-                si->UseShellExecute = false; si->CreateNoWindow = true; si->RedirectStandardOutput = true; si->RedirectStandardInput = true;
-                si->StandardOutputEncoding = System::Text::Encoding::UTF8;
-                System::Diagnostics::Process^ p = System::Diagnostics::Process::Start(si);
-                p->StandardInput->Close();
-                String^ out = p->StandardOutput->ReadToEnd();
-                if (!p->WaitForExit(5000)) { try { p->Kill(); } catch (Exception^) { } return String::Empty; }
-                String^ banner = String::Empty;
-                String^ version = String::Empty;
-                for each (String^ raw in out->Split(gcnew array<wchar_t>{ L'\r', L'\n' }, StringSplitOptions::RemoveEmptyEntries))
-                {
-                    String^ line = raw->Trim();
-                    if (banner->Length == 0) banner = line;
-                    else if (version->Length == 0 && line->StartsWith("Version ")) version = line;
-                }
-                int owner = banner->IndexOf(" - ");
-                if (banner->Length > 0 && banner[0] == L'\u00A9' && owner > 0) banner = banner->Substring(owner + 3);
-                return version->Length == 0 ? banner : banner + ", " + version;
-            }
-            catch (Exception^) { return String::Empty; }
-        }
     };
 }}

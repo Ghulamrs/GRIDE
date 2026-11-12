@@ -5,6 +5,7 @@
 #include "product.h"
 #include "settings.h"
 #include "toolchain.h"
+#include "../../common/Editors.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -20,7 +21,9 @@ namespace about {
 
 const char* name() { return product::kName; }
 
-const char* version() { return "1.0"; }
+// The number is common\Editors.h's, where the three editors' numbers are kept once and the About box they share
+// reads them. It is also the name of this editor's former settings folder, "GRIDE 1.0".
+const char* version() { return GRIDE_WHITE_VERSION; }
 
 namespace {
 
@@ -69,6 +72,10 @@ std::string cell(const std::string& program) {
     std::string stem = program;
     if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, ".exe") == 0) stem.resize(stem.size() - 4);
     if (answer.empty()) return stem + " - not beside this program";
+    // Since 2026-11-12 every program of the toolchain names itself on its first line - "cpp11 1.66 - a C++
+    // compiler: ..." - and such an answer is the row as it stands. The window's About is common\AboutBox.h now,
+    // the box the three outlooks share; these lines remain for gride_about's other callers.
+    if (answer.compare(0, stem.size() + 1, stem + " ") == 0) return answer;
     return stem + " - " + answer;
 }
 

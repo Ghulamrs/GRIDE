@@ -13,8 +13,8 @@
 #ifndef _CXX1_SYS_TYPES_H
 #define _CXX1_SYS_TYPES_H
 
-#ifndef _WIN32
-#error "<sys/types.h> is here for the x86_64-windows target only"
+#if !defined(_WIN32) && !defined(__TMS320C6X__)
+#error "<sys/types.h> is here for the x86_64-windows and tms6747 targets only"
 #endif
 
 typedef unsigned int _dev_t;     // a drive number

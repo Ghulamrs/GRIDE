@@ -1,0 +1,10 @@
+fopen("r"): opened, errno 0
+fopen("rb"): opened, errno 0
+fopen("r+b"): opened, errno 0
+fopen("rb+"): opened, errno 0
+fopen("r+b+"): null, errno EINVAL
+fopen("rbb"): null, errno EINVAL
+fopen("r++"): null, errno EINVAL
+fopen("q"): null, errno EINVAL
+fopen("rw"): null, errno EINVAL
+exit 0

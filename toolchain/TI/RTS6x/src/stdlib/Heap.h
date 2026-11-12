@@ -19,6 +19,8 @@ public:
     static void *allocateZeroed(size_t count, size_t size);
     static void *resize(void *p, size_t n);
     static void release(void *p);
+    // What a block p the heap gave may hold: its whole size less the header (_msize).
+    static size_t usable(void *p) { return blockOf(p)->size - Header; }
 
 private:
     // Each block starts with this: its whole size, header included, a multiple of 8; and, while it

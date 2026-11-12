@@ -1652,19 +1652,30 @@ void Parser::noteUnsetLocal(const Local &l, std::size_t pos) {
     src_.warn(pos, "'" + l.name + "' is read here and nothing has been assigned to it");
 }
 
+// **A local bound to a non-const reference parameter is written by the call**, or may be, as `&x` may: it is an
+// assignment from here on, so `if (special(x, result)) return result;` reads what the call left. A const reference
+// is left to the end of the statement as before - a read the call may make, and nothing this can follow.
 void Parser::noteUnsetArguments(const std::vector<ExprPtr> &args, const std::vector<const Type *> &params) {
     if (unsetArguments_.empty()) return;
     for (std::size_t i = 0; i < args.size(); i++) {
-        if (i < params.size() && params[i] != nullptr && params[i]->isReference()) continue;
+        const Type *param = i < params.size() ? params[i] : nullptr;
+        const bool byReference = param != nullptr && param->isReference();
+        if (byReference && param->referent()->isConst()) continue;
         const Expr *e = args[i].get();
-        while (const Cast *c = dynamic_cast<const Cast *>(e)) e = &c->value();
+        for (;;) {
+            if (const Cast *c = dynamic_cast<const Cast *>(e)) { e = &c->value(); continue; }
+            if (const Unary *u = dynamic_cast<const Unary *>(e)) {
+                if (byReference && u->op() == '&') { e = &u->operand(); continue; }
+            }
+            break;
+        }
         const Var *v = dynamic_cast<const Var *>(e);
         if (v == nullptr || !v->isLocal()) continue;
         const std::map<std::string, std::size_t>::iterator at = unsetArguments_.find(v->name());
         const Local *l = at == unsetArguments_.end() ? nullptr : findLocal(v->name());
         if (l == nullptr || !l->unset) continue;
         l->unset = false;
-        src_.warn(at->second, "'" + l->name + "' is read here and nothing has been assigned to it");
+        if (!byReference) src_.warn(at->second, "'" + l->name + "' is read here and nothing has been assigned to it");
         unsetArguments_.erase(at);
     }
 }

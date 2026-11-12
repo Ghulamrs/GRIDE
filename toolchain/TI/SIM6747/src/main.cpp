@@ -101,7 +101,8 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (a == "--version") {
-            std::printf("\xc2\xa9" "2026 G. R. Akhtar - SIM6747 (C6747 simulator) 1.3\n");
+            // as every program of the toolchain answers it: its name, its number and what it is, then the copyright
+            std::printf("sim6747 1.3 - TMS320C6747 simulator, runs .out\n\xc2\xa9" "2026 G. R. Akhtar\n");
             return 0;
         }
         if (isDirectory(a)) {

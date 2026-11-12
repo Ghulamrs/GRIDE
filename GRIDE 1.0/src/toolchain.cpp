@@ -316,7 +316,9 @@ std::string includeFlags(const Toolchain& tool, ToolchainKind kind) {
     std::string flags;
     for (size_t i = 0; i < tool.includes.size(); ++i) flags += flag + quote(tool.includes[i]);
     if (kind == ToolCc1 && !tool.lib.empty()) flags += flag + quote(tool.lib);
-    if (kind == ToolCxx1 && !tool.include.empty()) flags += flag + quote(tool.include);
+    // cpp11 is not handed its own headers: it finds them beside itself (include\c++, \c, \win, or the earlier
+    // include\), and says no warning of a header found there - but -I comes first, and through it the same
+    // <limits> read as the project's and warned six times of its infinities. GRIDEd and GRIDE 2.0 give none either.
     return flags;
 }
 
@@ -937,8 +939,8 @@ const char* const kMicrosoftRefused =
 
 // Microsoft's, by name through LIB: the Debug build's own where _DEBUG asks for them.
 std::string microsoftCrt(Configuration config) {
-    return config == ConfigDebug ? "libcmtd.lib libucrtd.lib libvcruntimed.lib kernel32.lib legacy_stdio_definitions.lib libcpmtd.lib"
-                                 : "libcmt.lib libucrt.lib libvcruntime.lib kernel32.lib legacy_stdio_definitions.lib libcpmt.lib";
+    return config == ConfigDebug ? "libcmtd.lib libucrtd.lib libvcruntimed.lib kernel32.lib legacy_stdio_definitions.lib oldnames.lib libcpmtd.lib"
+                                 : "libcmt.lib libucrt.lib libvcruntime.lib kernel32.lib legacy_stdio_definitions.lib oldnames.lib libcpmt.lib";
 }
 
 }

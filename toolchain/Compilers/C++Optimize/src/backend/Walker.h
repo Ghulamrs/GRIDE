@@ -12,6 +12,10 @@ class Source;
 // Whether a body reads or writes an lvalue of volatile type anywhere: such a function is written past
 // the optimizer by every backend, and never walked in place in a caller's.
 bool touchesVolatile(const Node &n);
+// Whether a body calls `_alloca` (Call::isAlloca): its stack pointer moves while it runs, and it is never walked
+// in place. And whether it catches anything: a catch resumes with the stack pointer at the frame's floor.
+bool callsAlloca(const Node &n);
+bool catchesHere(const Node &n);
 
 class Walker : public CodeGen {
 public:
@@ -67,6 +71,8 @@ protected:
     virtual void defineLabel(const std::string &l) = 0;
     // Where a Microsoft frame's exception state changes; see Spelling::stateLabel.
     virtual void defineStateLabel(const std::string &l) { defineLabel(l); }
+    // A lexical block's label under -g (Spelling::blockLabel).
+    virtual void defineBlockLabel(const std::string &l) { defineLabel(l); }
     virtual void jump(const std::string &l) = 0;
     virtual void branchIfZero(const std::string &l) = 0;
     virtual void branchIfNotZero(const std::string &l) = 0;

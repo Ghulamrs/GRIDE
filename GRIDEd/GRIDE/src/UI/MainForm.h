@@ -385,6 +385,7 @@ namespace Gride { namespace UI {
         void HelpShortcuts();
         void HelpReleaseNotes();
         void HelpAbout();
+        String^ FindProgram(String^ fileName);
 
         // ================================================= MainForm.Build.cpp
         bool StartBuild(BuildAction action, List<GrideProject^>^ projects, String^ singleFile);

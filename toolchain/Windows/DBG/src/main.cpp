@@ -1709,7 +1709,7 @@ int main(int argc, char** argv)
     int a = 1;
     for (; a < argc; a++) {
         std::string w = argv[a];
-        if (w == "--version" || w == "-version") { say("gride-dbg %s - GRIDE's debugger for x86_64-windows programs (Win32 debug API, dbghelp)\n", GRIDE_DBG_VERSION); return 0; }
+        if (w == "--version" || w == "-version") { say("gride-dbg %s - GRIDE's Windows x64 debugger\n\xc2\xa9" "2026 G. R. Akhtar\n", GRIDE_DBG_VERSION); return 0; }
         if (w == "-y" && a + 1 < argc) { symbols = argv[++a]; continue; }
         break;
     }

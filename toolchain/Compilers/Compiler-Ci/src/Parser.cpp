@@ -1601,8 +1601,13 @@ ExprPtr Parser::finishCall(const std::string &name, ExprPtr callee,
         if (args[i]->type()->isStructOrUnion())
             argSlots[i] = allocateFrameSlot(args[i]->type());
 
-    ExprPtr n(new Call(name, std::move(callee), std::move(args), variadic, slot,
-                       named, std::move(argSlots)));
+    // **`_alloca` and `alloca` are the compiler's own**, as cl's are: <malloc.h> declares `void *_alloca(size_t)` and
+    // spells alloca as it, and each backend lowers the call where it stands (docs\Runtime_Design.md 9.4).
+    const bool stackBlock = callee == nullptr && args.size() == 1 && returns->isPointer() &&
+                            (name == "_alloca" || name == "alloca");
+    Call *call = new Call(name, std::move(callee), std::move(args), variadic, slot, named, std::move(argSlots));
+    if (stackBlock) { call->setAlloca(); bodyCallsAlloca_ = true; }
+    ExprPtr n(call);
     n->setType(returns);
     return n;
 }
@@ -2894,7 +2899,10 @@ void Parser::topLevel(Program &program) {
     variadicBody_ = variadic;
 
     atFunctionBody_ = true;
+    bodyCallsAlloca_ = false;
+    const std::size_t bodyFrom = at_;
     StmtPtr body = block();
+    const bool touches = touchesVolatile(bodyFrom, at_);
     resolveGotos();
     variadicBody_ = false;
 
@@ -2905,11 +2913,48 @@ void Parser::topLevel(Program &program) {
                                          variadic, regSaveSlot, d.pos,
                                          std::move(fnVars_)));
     program.functions.back().setBlocks(std::move(blocks_));
+    program.functions.back().setTouchesVolatile(touches);
+    program.functions.back().setCallsAlloca(bodyCallsAlloca_);
+}
+
+// **What may be volatile, by the tokens**, since the types do not say: a declaration - the tokens between two of
+// `;`, `{` and `}` - that writes `volatile` gives all its names, and so does every declaration inside the braces it
+// opens and the one that follows their close (`typedef volatile struct { int ctl; } Regs;` gives ctl and Regs). It
+// says too much, never too little: a name it gives that is also used for something plain costs that function its
+// scheduling, not its correctness.
+void Parser::collectVolatileNames() {
+    std::vector<bool> region(1, false);
+    std::vector<std::size_t> names;
+    bool marked = false, afterClose = false;
+    for (std::size_t k = 0; k < tokens_.size() && tokens_[k].kind != TokenKind::End; k++) {
+        const Token &t = tokens_[k];
+        if (t.kind == TokenKind::Keyword && t.text == "volatile") { marked = true; continue; }
+        if (t.kind == TokenKind::Ident) { names.push_back(k); continue; }
+        if (t.kind != TokenKind::Punct || !(t.is(";") || t.is("{") || t.is("}"))) continue;
+        const bool take = marked || region.back() || afterClose;
+        if (take) for (std::size_t n : names) volatileNames_.insert(tokens_[n].text);
+        names.clear();
+        afterClose = false;
+        if (t.is("{")) region.push_back(take);
+        else if (t.is("}")) { afterClose = region.back(); if (region.size() > 1) region.pop_back(); }
+        marked = false;
+    }
+}
+
+// Whether tokens [from, to) - a function's body - write `volatile` or name what may be volatile.
+bool Parser::touchesVolatile(std::size_t from, std::size_t to) const {
+    for (std::size_t k = from; k < to && k < tokens_.size(); k++) {
+        const Token &t = tokens_[k];
+        if (t.kind == TokenKind::Keyword && t.text == "volatile") return true;
+        if (t.kind == TokenKind::Ident && volatileNames_.count(t.text) != 0) return true;
+    }
+    return false;
 }
 
 Program Parser::parse() {
     Program program;
     current_ = &program;
+    collectVolatileNames();
     while (peek().kind != TokenKind::End)
         topLevel(program);
     if (program.functions.empty())

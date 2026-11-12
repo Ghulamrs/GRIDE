@@ -1,0 +1,7 @@
+local's static is there
+main
+a trivially made object destroyed
+a trivially made object destroyed
+the object with a constructor destroyed
+a trivially made object destroyed
+exit 0

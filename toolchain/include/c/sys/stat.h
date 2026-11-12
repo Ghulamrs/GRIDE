@@ -74,9 +74,19 @@ struct stat {
 #define S_IEXEC  _S_IEXEC
 
 // 0 and the struct filled, or -1 and errno set.
+#if defined(_WIN32)
 int _stat64i32(const char *path, struct _stat64i32 *buf);
 _GRIDE_STATIC_INLINE int stat(const char *path, struct stat *buf) {
     return _stat64i32(path, (struct _stat64i32 *)buf);
+}
+#endif
+// An open descriptor's (docs\Runtime_Design.md 9.4), both runtimes': _fstat is the UCRT's macro for the exported
+// _fstat64i32, and fstat its inline, as stat is. On the C6747 the host tells a file's size and nothing more: the
+// times are 0.
+int _fstat64i32(int fd, struct _stat64i32 *buf);
+#define _fstat _fstat64i32
+_GRIDE_STATIC_INLINE int fstat(int fd, struct stat *buf) {
+    return _fstat64i32(fd, (struct _stat64i32 *)buf);
 }
 
 #ifdef __cplusplus

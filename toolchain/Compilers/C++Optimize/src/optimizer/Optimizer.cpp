@@ -43,11 +43,12 @@ void Optimizer::instruction(const std::string &m, int operands, const Op *a, con
     hold(std::move(e));
 }
 
-void Optimizer::event(std::function<void(Spelling &)> call) {
+void Optimizer::event(std::function<void(Spelling &)> call, bool debug) {
     if (!inFunction_) { call(under_); return; }
     Entry e;
     e.kind = Entry::Event;
     e.event = std::move(call);
+    e.debug = debug;
     hold(std::move(e));
 }
 
@@ -245,10 +246,15 @@ void Optimizer::fileEntry(int n, const std::string &name) {
     event([=](Spelling &s) { s.fileEntry(n, name); });
 }
 void Optimizer::location(int file, int line, int column) {
-    event([=](Spelling &s) { s.location(file, line, column); });
+    event([=](Spelling &s) { s.location(file, line, column); }, true);
 }
-void Optimizer::funcletLinesBegin() { event([](Spelling &s) { s.funcletLinesBegin(); }); }
-void Optimizer::funcletLinesEnd() { event([](Spelling &s) { s.funcletLinesEnd(); }); }
+// **A lexical block's label is an event, not a label**: nothing jumps to it, and as a label it would end a block of the
+// flow graph and keep a jump from being threaded through it - code -g alone would change.
+void Optimizer::blockLabel(const std::string &l) {
+    event([=](Spelling &s) { s.defLabel(l); }, true);
+}
+void Optimizer::funcletLinesBegin() { event([](Spelling &s) { s.funcletLinesBegin(); }, true); }
+void Optimizer::funcletLinesEnd() { event([](Spelling &s) { s.funcletLinesEnd(); }, true); }
 void Optimizer::globl(const std::string &name) { event([=](Spelling &s) { s.globl(name); }); }
 void Optimizer::weakDefinition(const std::string &name) {
     event([=](Spelling &s) { s.weakDefinition(name); });

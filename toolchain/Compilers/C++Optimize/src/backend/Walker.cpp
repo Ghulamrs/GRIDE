@@ -11,6 +11,8 @@ namespace {
 class VolatileScan final : public Visitor {
 public:
     bool seen = false;
+    bool alloca = false;     // an `_alloca` (Call::isAlloca)
+    bool catches = false;    // a `try` with a handler: Microsoft's catch, or an Itanium row with types
     void note(const Expr &n) { if (n.type() != nullptr && n.type()->isVolatile()) seen = true; }
     void visit(const Num &) override {}
     void visit(const Var &n) override { note(n); }
@@ -20,6 +22,7 @@ public:
     void visit(const Continue &) override {}
     void visit(const FuncletLeave &) override {}
     void visit(const Call &n) override {
+        if (n.isAlloca()) alloca = true;
         if (n.callee() != nullptr) n.callee()->accept(*this);
         for (const ExprPtr &a : n.args()) a->accept(*this);
     }
@@ -54,6 +57,7 @@ public:
     void visit(const Case &n) override { n.body().accept(*this); }
     void visit(const Label &n) override { n.body().accept(*this); }
     void visit(const Try &n) override {
+        if (!n.handlers().empty() || !n.typeIndices().empty()) catches = true;
         for (const StmtPtr &s : n.body()) s->accept(*this);
         if (n.hasPad()) n.pad().accept(*this);
         if (n.cleanup() != nullptr) n.cleanup()->accept(*this);
@@ -67,6 +71,18 @@ bool touchesVolatile(const Node &n) {
     VolatileScan scan;
     n.accept(scan);
     return scan.seen;
+}
+
+bool callsAlloca(const Node &n) {
+    VolatileScan scan;
+    n.accept(scan);
+    return scan.alloca;
+}
+
+bool catchesHere(const Node &n) {
+    VolatileScan scan;
+    n.accept(scan);
+    return scan.catches;
 }
 
 void Walker::markLine(const Stmt &n) { markLine(n.pos()); }
@@ -115,7 +131,7 @@ void Walker::openBlock(int scope) {
     std::size_t before = emittedSize();
     blocks_[scope].begin = label("blk.b", scope);
     blocks_[scope].funclet = funcletNo_;
-    defineLabel(blocks_[scope].begin);
+    defineBlockLabel(blocks_[scope].begin);
     notCode_ += emittedSize() - before;
     Mark m;
     m.size = emittedSize();
@@ -133,7 +149,7 @@ void Walker::closeBlock(int scope) {
 
     std::size_t before = emittedSize();
     blocks_[scope].end = label("blk.e", scope);
-    defineLabel(blocks_[scope].end);
+    defineBlockLabel(blocks_[scope].end);
     notCode_ += emittedSize() - before;
 
     if (!code) {

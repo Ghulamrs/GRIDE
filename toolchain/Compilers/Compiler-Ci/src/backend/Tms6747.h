@@ -42,6 +42,8 @@ public:
 
     using Walker::visit;
     void run(const Program &program) override;
+    // -O1 and above: each function's code through cpp11's C6000 scheduler (C6xSched.cpp, compiled in from its folder).
+    void setOptimize(int level) override { optimize_ = level; }
     void emitLoc(int file, int line, int column) override;
 
     void visit(const Num &) override;
@@ -74,6 +76,8 @@ private:
     // function that calls saves B3, and one that loads the callee-saved
     // argument registers (A10/B10/A12/B12, arguments 7-10) saves those too.
     bool hasCall_ = false;
+    int stackBytes_ = 0;                      // under the frame's floor: pushes and open call areas, in the body
+    void genAlloca(const Call &n);            // B15 -= n rounded to 8; A4 = the block, above what is pushed
     bool usesSavedArgRegs_ = false;
     bool usesSavedPairRegs_ = false;   // A11/B11/A13/B13, written by a 64-bit argument in A10-B12
     std::vector<std::string> savedRegs() const;
@@ -141,6 +145,7 @@ private:
     void emitScope(const Function &fn, int scope);
     bool declaresAnything(const Function &fn, int scope) const;
     void emitFunction(const Function &fn);
+    int optimize_ = 0;
     // -g: every type a variable names, described once at the file's end (emitTypes) for the debugger
     std::vector<const Type *> debugTypes_;
     void noteType(const Type *t);

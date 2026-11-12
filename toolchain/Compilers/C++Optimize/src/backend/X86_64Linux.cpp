@@ -1147,7 +1147,40 @@ X86_64Linux::Placement X86_64Linux::placeCall(const Call &n) const {
     return placeArguments(types, n.hasThis(), returnsThroughPointer(n));
 }
 
+// **`_alloca(n)`, lowered where it stands** (docs\Runtime_Design.md 9.4). The frame is addressed from rbp and
+// the epilogue takes rsp back from rbp, so the function's own slots do not move; what is addressed from rsp is the
+// outgoing area at the floor - the shadow space and the stack arguments a call stores there, its size fixed before
+// the body is walked - and the words this function has pushed below it, the values of an expression in progress
+// and the arguments of a call being built. rsp moves down by n rounded to 16 (so the call alignment holds), the
+// pushed words are copied down with it, and the block is the n bytes above them and a fresh outgoing area: its top
+// is where the old outgoing area ended, which nothing reads once rsp has left it. Windows probes the pages first
+// through __chkstk, as a frame of a page does (rax the size; only r10, r11 and the flags change), asked for a page
+// more than the block: grt's and the UCRT's touch a page at a time and stop short of a last part-page, which a frame
+// leaves to its next call's push but a run of small blocks nothing touches would not - the next call could then land
+// past the guard page. So the lowest page touched is below the new rsp, as a frame's next push would be.
+void X86_64Linux::genAlloca(const Call &n) {
+    if (inFunclet_) unsupported("_alloca in a catch block or a cleanup");
+    n.args()[0]->accept(*this);
+    a_->ins("add", imm(15), reg("%rax"));
+    a_->ins("and", imm(-16), reg("%rax"));
+    if (target_.microsoftNames()) {
+        a_->ins("add", imm(4096), reg("%rax"));
+        if (optimizing()) optimizer_->callArguments(opt::bit(opt::RAX));
+        a_->ins("call", lbl("__chkstk"));
+        a_->ins("sub", imm(4096), reg("%rax"));
+    }
+    const int pushed = 8 * (floorDepth_ + depth_);
+    if (pushed > 0) a_->ins("mov", reg("%rsp"), reg("%rcx"));
+    a_->ins("sub", reg("%rax"), reg("%rsp"));
+    for (int k = 0; k < pushed; k += 8) {
+        a_->ins("mov", mem(k, "%rcx"), reg("%rdx"));
+        a_->ins("mov", reg("%rdx"), mem(k, "%rsp"));
+    }
+    a_->ins("lea", mem(pushed + outgoing_, "%rsp"), reg("%rax"));
+}
+
 void X86_64Linux::visit(const Call &n) {
+    if (n.isAlloca()) { genAlloca(n); return; }
     bool byRef = abi_.aggregatesByReference;
     bool sret = returnsThroughPointer(n);
     const bool msThisFirst = sret && abi_.positional && n.hasThis();
@@ -1515,6 +1548,7 @@ void X86_64Linux::visit(const VaStart &n) {
 
 void X86_64Linux::defineLabel(const std::string &l) { a_->defLabel(l); }
 void X86_64Linux::defineStateLabel(const std::string &l) { a_->stateLabel(l); }
+void X86_64Linux::defineBlockLabel(const std::string &l) { a_->blockLabel(l); }
 void X86_64Linux::jump(const std::string &l) { a_->ins("jmp", lbl(l)); }
 void X86_64Linux::branchIfZero(const std::string &l) {
     a_->ins("cmp", immText("0"), reg("%rax"));
@@ -1679,6 +1713,7 @@ namespace { std::vector<const Call *> callsIn(const Node &n, std::vector<const C
 // walked in place may make any call at all.
 bool X86_64Linux::mayWriteArea(const Expr &e) const {
     for (const Call *c : callsIn(e)) {
+        if (c->isAlloca()) return true;
         const int words = placeCall(*c).stackWords;
         if (words > 0 || inlineTarget(*c, words) != nullptr) return true;
     }
@@ -1704,6 +1739,10 @@ void X86_64Linux::emit(const Function &fn) {
         }
     if (realign_ > 0 && fn.hasLandingPads() && usesFunclets())
         unsupported("an over-aligned local in a function with a try or a local with a destructor");
+    // **A Windows catch resumes with rsp at the establisher frame**, the floor before any `_alloca`, where the
+    // next call would write over the blocks; an Itanium landing pad gets the call site's rsp back.
+    if (usesFunclets() && callsAlloca(fn.body()) && catchesHere(fn.body()))
+        unsupported("_alloca in a function with a catch");
     // **A function that reads or writes a volatile lvalue is written past the optimizer as well**, and
     // walks no callee in place: the passes do not ask the qualifier, and could keep a volatile read in a
     // register or drop it. The rest of the file keeps its -O (1.34 compiled the whole of it without).
@@ -1755,7 +1794,7 @@ void X86_64Linux::emit(const Function &fn) {
         dwarfFnAt_ = dwarfFns_.size();
         dwarfFns_.push_back(d);
         resetBlocks(fn.blocks());
-        a_->defLabel(d.begin);
+        a_->blockLabel(d.begin);    // the debug records' alone: an event to the optimizer, as a block's label is
     } else if (fn.hasLandingPads() && !usesFunclets()) {
         // Call-site table origin, debug or not (not for a funclet target)
         a_->defLabel(".Lfunc.begin." + fn.symbol());
@@ -2060,7 +2099,6 @@ const Function *X86_64Linux::inlineTarget(const Call &n, int stackSlots) const {
     if (known == volatileBodies_.end())
         known = volatileBodies_.insert(std::make_pair(&callee, touchesVolatile(callee.body()))).first;
     if (known->second) { opt::noteDecline("inline-callee-volatile", site); return nullptr; }
-    if (lineSource()) { opt::noteDecline("inline-site-debug-info", site); return nullptr; }
     if (inPlace_) { opt::noteDecline("inline-site-inside-inlined-body", site); return nullptr; }
     if (stackSlots != 0) { opt::noteDecline("inline-site-stack-arguments", site); return nullptr; }
     const bool reserved = current_->hasLandingPads() && usesFunclets();
@@ -2071,7 +2109,9 @@ const Function *X86_64Linux::inlineTarget(const Call &n, int stackSlots) const {
     return &callee;
 }
 
-bool X86_64Linux::inlining() const { return inliner_ && !lineSource() && realign_ == 0 && !volatileHere_; }
+// **-g changes no instruction** (1.63): a call is walked in place under -g as it is without, its body carrying the
+// call's line and no line of its own (walkInPlace), so a Release library can have CodeView at no cost.
+bool X86_64Linux::inlining() const { return inliner_ && realign_ == 0 && !volatileHere_; }
 
 // The callee's walk borrows the caller's state for its own, and gives it
 // back; its frame the optimizer moves below the caller's.
@@ -2084,10 +2124,16 @@ void X86_64Linux::walkInPlace(const Function &fn) {
     returnLabel_ = label("inline", nextLabel());
     optimizer_->jumpOnly(returnLabel_);
     inPlace_ = true;
+    // **The body walked in place is on the call's line**, under -g: no line of its own and none of its blocks,
+    // whose numbers are the callee's scopes and not this function's - the walk -g leaves the code as it found it.
+    const Source *lines = lineSource();
+    const std::string dir = compDir();
+    setLineSource(nullptr, dir);
     optimizer_->inlineBegin(current_->frameSize(), fn.frameSize(), scalarsOf(fn));
     receiveParameters(fn);
     walkBody(fn);
     optimizer_->inlineEnd();
+    setLineSource(lines, dir);
     inPlace_ = false;
     floorDepth_ -= depth;
     depth_ = depth;

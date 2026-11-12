@@ -57,6 +57,7 @@ public:
     void ins(const std::string &m, const Op &a, const Op &b) override;
     void defLabel(const std::string &l) override;
     void stateLabel(const std::string &l) override;
+    void blockLabel(const std::string &l) override;
 
     void functionBegin(const std::string &name, bool exported, bool mergeable) override;
     void prologue(int frameSize, const std::string &lsda, int outgoing, int realign) override;
@@ -130,7 +131,7 @@ private:
     void instruction(const std::string &m, int operands, const Op *a, const Op *b);
     // A call that is not an instruction: held in its place inside a function,
     // passed on at once outside one.
-    void event(std::function<void(Spelling &)> call);
+    void event(std::function<void(Spelling &)> call, bool debug = false);
     void improve(opt::Function &fn);
     void flush();
     void replay(const opt::Stream &s);

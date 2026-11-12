@@ -973,7 +973,7 @@ bool Driver::link() {
                 std::fprintf(stderr, "%s: linking against GRIDE's runtime in %s\n", program_.c_str(), dir.c_str());
         } else {
             command += " libcmt.lib libcpmt.lib libucrt.lib libvcruntime.lib kernel32.lib"
-                       " legacy_stdio_definitions.lib";
+                       " legacy_stdio_definitions.lib oldnames.lib";
         }
     } else {
         command = shellQuote(hostCompiler());
@@ -1120,8 +1120,9 @@ bool Driver::parseArguments(int argc, char **argv) {
             // Printed on stdout, unlike the banner: a version somebody asked
             // for is the answer to the command, not an aside beside it.
             // __DATE__ and __TIME__ are the build machine's local clock, whose zone is not known here.
-            std::printf("%s\nVersion %s, sealed %s\nBuilt %s, the build machine's local time\n", CXX1_BANNER,
-                        CXX1_VERSION, CXX1_SEAL_DATE, buildStamp().c_str());
+            // The first line names the program and its number, as every program of the toolchain does (Version.h).
+            std::printf("%s %s - %s\n%s\nSealed %s\nBuilt %s, the build machine's local time\n", program::kName,
+                        CXX1_VERSION, CXX1_WHAT, CXX1_OWNER, CXX1_SEAL_DATE, buildStamp().c_str());
             std::exit(0);
         } else if (std::strncmp(argv[i], "-rts=", 5) == 0 && argv[i][5] != '\0') {
             rtsChoice_ = argv[i] + 5;

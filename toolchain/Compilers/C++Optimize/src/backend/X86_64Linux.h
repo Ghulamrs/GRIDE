@@ -205,6 +205,7 @@ private:
     void emitLoc(int file, int line, int column) override { a_->location(file, line, column); }
     void defineLabel(const std::string &l) override;
     void defineStateLabel(const std::string &l) override;
+    void defineBlockLabel(const std::string &l) override;
     void jump(const std::string &l) override;
     void branchIfZero(const std::string &l) override;
     void branchIfNotZero(const std::string &l) override;
@@ -327,8 +328,11 @@ private:
     // whole call placed - what visit(Call) and the outgoing area both ask.
     bool returnsThroughPointer(const Call &n) const;
     Placement placeCall(const Call &n) const;
-    // Whether `e` may call at the floor and write the outgoing area
+    // Whether `e` may call at the floor and write the outgoing area - or move the floor, by an `_alloca`
     bool mayWriteArea(const Expr &e) const;
+    // `_alloca(n)`: rsp moves down by n rounded to 16, probed first on Windows, and the block sits above the
+    // outgoing area and whatever this function has pushed, both of which move down with rsp.
+    void genAlloca(const Call &n);
 };
 
 std::vector<bool> classifyEightbytes(const Type *t, const Target &target);

@@ -47,9 +47,13 @@ protected:
     // Whether a closing brace has a line of its own - a loop's jump back, a function's
     // epilogue - as cl /Zi gives it. CodeView's line tables only; DWARF's are as they were.
     virtual bool marksClosingBrace() const { return false; }
+    // Whether the walk goes through the optimizer (-O1 and above): -g then adds no instruction of its own.
+    virtual bool optimizing() const { return false; }
     void markClosingBrace(const Stmt &body);
 
     virtual void defineLabel(const std::string &l) = 0;
+    // A lexical block's label under -g (Spelling::blockLabel).
+    virtual void defineBlockLabel(const std::string &l) { defineLabel(l); }
     virtual void jump(const std::string &l) = 0;
     virtual void branchIfZero(const std::string &l) = 0;
     virtual void branchIfNotZero(const std::string &l) = 0;

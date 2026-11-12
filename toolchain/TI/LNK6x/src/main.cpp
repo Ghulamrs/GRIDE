@@ -103,8 +103,8 @@ int main(int argc, char **argv)
     Link lk;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
-        // As cpp11, asm6x and vm6747 answer it: the banner seal.json names, and the version.
-        if (a == "--version") { printf("\xc2\xa9" "2026 G. R. Akhtar - lnk6x 1.2, a TMS320C6000 linker\n"); return 0; }
+        // As every program of the toolchain answers it: its name, its number and what it is, then the copyright.
+        if (a == "--version") { printf("lnk6x 1.2 - TMS320C6000 linker, TI ELF\n\xc2\xa9" "2026 G. R. Akhtar\n"); return 0; }
         if (a == "-o" && i + 1 < argc)      { lk.opt.out = argv[++i]; continue; }
         if (starts(a, "--output_file="))    { lk.opt.out = a.substr(14); continue; }
         if (a == "-m" && i + 1 < argc)      { lk.opt.map = argv[++i]; continue; }

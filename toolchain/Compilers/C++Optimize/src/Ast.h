@@ -267,6 +267,10 @@ public:
     // return pointer second. A lowered member call needs this to be told apart.
     bool hasThis() const { return hasThis_; }
     void setHasThis(bool t) { hasThis_ = t; }
+    // **`_alloca(n)` and `alloca(n)` are the compiler's own** (docs\Runtime_Design.md 9.4): nothing is
+    // called - the stack pointer moves by n rounded up, and the block's address is the value.
+    bool isAlloca() const { return alloca_; }
+    void setAlloca() { alloca_ = true; }
     void accept(Visitor &v) const override { v.visit(*this); }
 private:
     std::string name_;
@@ -278,6 +282,7 @@ private:
     int namedArgs_;
     std::vector<int> argSlots_;
     bool hasThis_ = false;
+    bool alloca_ = false;
 };
 
 class Postfix final : public Expr {

@@ -390,9 +390,7 @@ private:
     int                        m_staticCount;
     int                        m_guardCount;    // guarded static locals so far in the function (cl's $TSS<n>)
     std::map<std::string, int> m_labels;           // goto labels of the current function -> block
-    std::vector<std::set<std::string> > m_handlerLabels;   // the labels inside each catch handler being generated
     cxx::Decl*                 m_functionTryDef;   // a constructor or destructor whose body is a function-try-block (0: none)
-    static void collectLabels(const cxx::Stmt* s, std::set<std::string>& out);
 
     IrFunction*                m_out;
     sema::Symbol*              m_fn;

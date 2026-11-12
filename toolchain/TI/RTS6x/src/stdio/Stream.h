@@ -39,6 +39,8 @@ public:
 
     // Opening: path in mode into slot, or into a free one when slot is null; null on failure.
     static FILE *open(const char *path, const char *mode, FILE *slot);
+    // _fdopen's: a stream over the open descriptor fd, in mode, in a free slot; null and errno on failure.
+    static FILE *adopt(int fd, const char *mode);
     // The host file closed, the buffer freed, a temporary file removed, the slot freed: 0 or EOF.
     int close();
     // The name tmpfile gives the file behind slot i, written into name (at least 24 bytes).

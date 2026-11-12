@@ -218,6 +218,10 @@ public:
     int argSlot(std::size_t i) const {
         return i < argSlots_.size() ? argSlots_[i] : 0;
     }
+    // **`_alloca(n)` and `alloca(n)` are the compiler's own** (docs\Runtime_Design.md 9.4): nothing is
+    // called - the stack pointer moves by n rounded up, and the block's address is the value.
+    bool isAlloca() const { return alloca_; }
+    void setAlloca() { alloca_ = true; }
     void accept(Visitor &v) const override { v.visit(*this); }
 private:
     std::string name_;
@@ -227,6 +231,7 @@ private:
     int resultSlot_;
     int namedArgs_;
     std::vector<int> argSlots_;
+    bool alloca_ = false;
 };
 
 class Postfix final : public Expr {
@@ -499,6 +504,14 @@ public:
 
     const std::vector<int> &blocks() const { return blocks_; }
     void setBlocks(std::vector<int> b) { blocks_ = std::move(b); }
+
+    // **Whether the body may touch volatile storage** (Parser::collectVolatileNames): c90's types do not keep the
+    // qualifier, so the C6000 scheduler, which reorders memory accesses, leaves such a function as -O0 wrote it.
+    bool touchesVolatile() const { return volatile_; }
+    void setTouchesVolatile(bool v) { volatile_ = v; }
+    // Whether the body calls `_alloca` (Call::isAlloca): its stack pointer moves while it runs.
+    bool callsAlloca() const { return alloca_; }
+    void setCallsAlloca(bool a) { alloca_ = a; }
 private:
     std::string name_;
     const Type *returns_;
@@ -512,6 +525,8 @@ private:
     std::size_t pos_;
     std::vector<Local> locals_;
     std::vector<int> blocks_;
+    bool volatile_ = false;
+    bool alloca_ = false;
 };
 
 struct GlobalPiece {

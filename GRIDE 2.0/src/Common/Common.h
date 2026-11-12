@@ -4,6 +4,7 @@
 //  JSON (DataContractJsonSerializer, built into .NET 4.8), paths, text files,
 //  explicit Win32 P/Invoke (no windows.h, avoids WinForms name clashes).
 // ============================================================================
+#include "../../../common/Editors.h"
 
 using namespace System;
 using namespace System::IO;
@@ -49,7 +50,7 @@ namespace Gride
     {
     public:
         literal String^ Name    = "GRIDE 2.0";
-        literal String^ Version = "2.0.0";
+        literal String^ Version = GRIDE_GREY_VERSION;   // common\Editors.h: the three editors' numbers, once
     };
 
     // Makes a literal a String^ (needed inside ?: where literals would decay to char*).

@@ -218,14 +218,6 @@ void IrGen::unsupported(int line, const std::string& what)
     if (std::find(m_unsupported.begin(), m_unsupported.end(), m) == m_unsupported.end()) m_unsupported.push_back(m);   // once per line
 }
 
-// the labels defined inside statement s
-void IrGen::collectLabels(const cxx::Stmt* s, std::set<std::string>& out)
-{
-    if (!s) return;
-    if (s->kind == cxx::Stmt::Label) out.insert(s->label);
-    for (size_t i = 0; i < s->kids.size(); ++i) collectLabels(s->kids[i], out);
-}
-
 // MSVC's conversion to a virtual base: the vbptr's table holds the base's distance from the vbptr
 int IrGen::toBase(int addr, Symbol* derived, Symbol* base, int line)
 {
@@ -4200,8 +4192,6 @@ void IrGen::stmt(cxx::Stmt* s)
         return;
     }
     case cxx::Stmt::Goto: {
-        if (!m_handlerLabels.empty() && !m_handlerLabels.back().count(s->label))
-            unsupported(line, "a goto out of a catch handler ('" + s->label + "') is not supported yet by --compile6");
         std::map<std::string, JumpState>::const_iterator lab = m_labelStates.find(s->label);
         if (lab != m_labelStates.end()) { gotoExit(jumpState(m_block, line), lab->second, s->label); return; }
         // forward: the scopes left are known at the label; this block leaves them then
@@ -4320,14 +4310,9 @@ void IrGen::stmt(cxx::Stmt* s)
                     IrInst st = make(IrInst::StoreLocal, refT, h->loc.line); st.args.push_back(IrOperand::local(slot, oldType(refT))); st.args.push_back(IrOperand::temp(ev, oldType(m_semaTypes.pointer(ct)))); emit(st);
                 }
             }
-            {
-                // a goto out of a handler would skip the release of its exception: refused (S132)
-                std::set<std::string> labels;
-                collectLabels(h->kids[0], labels);
-                m_handlerLabels.push_back(labels);
-            }
+            // a goto out of the handler leaves its marker with a catchend and destroys its objects (gotoExit), as a
+            // return or a break does
             stmt(h->kids[0]);
-            m_handlerLabels.pop_back();
             // 15.3/16: reaching the end of a handler of a constructor's or destructor's function-try-block
             // rethrows (as a "throw;" there: the handler's objects are destroyed by its landing pad)
             if (functionTry && !terminated()) emit(make(IrInst::Throw, m_semaTypes.basic(sema::Type::Void), h->loc.line));
@@ -4939,7 +4924,7 @@ void IrGen::prologue(Symbol* fn)
     m_unwindId = m_tryCount++;
     m_tryStack.push_back(m_unwindId);
     m_scopeTry.clear(); m_deferRegions = 0; m_pads.clear();
-    m_cleanups.clear(); m_scopes.clear(); m_scopeIds.clear(); m_temps.clear(); m_flagged.clear(); m_dtorParts.clear(); m_labels.clear(); m_handlerLabels.clear(); m_labelStates.clear(); m_pendingGotos.clear(); m_staticCount = 0; m_guardCount = 0;
+    m_cleanups.clear(); m_scopes.clear(); m_scopeIds.clear(); m_temps.clear(); m_flagged.clear(); m_dtorParts.clear(); m_labels.clear(); m_labelStates.clear(); m_pendingGotos.clear(); m_staticCount = 0; m_guardCount = 0;
     if (m_out->hasThis && fn->thisAdjust != 0) {
         // called with the address of the vfptr whose table first holds it (MSVC's this adjustor): back to the object
         const sema::Type* tp = m_semaTypes.pointer(m_semaTypes.classType(fn->ownerClass));

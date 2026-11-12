@@ -63,12 +63,16 @@ protected:
     virtual void writeDebug(const std::vector<DwarfFunction> &fns,
                             const std::vector<DwarfGlobal> &globals);
     virtual std::string debugFileName(const std::string &name) const { return name; }
+    // Whether a frame of a page or more is probed through __chkstk: the COFF and MASM spellings, which Windows runs.
+    virtual bool probesStack() const { return false; }
 
     std::string out_;
-    // Measured after the IR has written out, so the count is of real text.
-    std::size_t emittedSize() override { opt_.flush(); return out_.size(); }
+    // **Measured without writing the IR out**: the text so far and a count of what the optimizer holds. A flush here
+    // cut the function at every line -g marks, and the passes saw a statement at a time (1.63's -g, the same code).
+    std::size_t emittedSize() override { return out_.size() + opt_.written(); }
     // **The IR in front of whichever spelling the target chose**, and only
     // when asked: at -O0 the walker speaks to the spelling directly.
+    bool optimizing() const override { return a_ == &opt_; }
     void setOptimize(int level) override {
         if (level < 1) return;
         opt_.wrap(a_, level);
@@ -92,6 +96,7 @@ private:
     std::string returnLabel_;
     void emitLoc(int file, int line, int column) override { a_->location(file, line, column); }
     void defineLabel(const std::string &l) override;
+    void defineBlockLabel(const std::string &l) override { a_->blockLabel(l); }
     void jump(const std::string &l) override;
     void branchIfZero(const std::string &l) override;
     void branchIfNotZero(const std::string &l) override;
@@ -115,6 +120,8 @@ private:
     void emitGlobal(const Global &g, Segment seg);
     void push();
     void pop(const char *into);
+    // `_alloca(n)`: rsp moves down by n rounded to 16, the pushed words with it, and the block sits above them.
+    void genAlloca(const Call &n);
     void pushF();
     void popF(const char *into);
 

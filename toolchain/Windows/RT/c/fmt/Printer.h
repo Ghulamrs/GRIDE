@@ -392,11 +392,13 @@ private:
 class MemoryOut {
 public:
     enum { Wide = 0 };
-    MemoryOut(char *dst, size_t capacity) : next_(dst), room_(0), count_(0), capacity_(capacity)
+    // whole: Microsoft's _snprintf, every one of capacity bytes for the text and the NUL only where room is left.
+    MemoryOut(char *dst, size_t capacity, bool whole = false)
+        : next_(dst), room_(0), count_(0), capacity_(capacity), whole_(whole)
     {
         if (capacity != 0) {
-            size_t most = (size_t)-1 - (size_t)dst;
-            room_ = capacity - 1 < most ? capacity - 1 : most;
+            size_t most = (size_t)-1 - (size_t)dst, room = whole ? capacity : capacity - 1;
+            room_ = room < most ? room : most;
         }
     }
     void put(char c) { if (room_) { *next_++ = c; room_--; } count_++; }
@@ -418,11 +420,12 @@ public:
         room_ -= k;
         count_ += n;
     }
-    int finish() { if (capacity_ != 0) *next_ = 0; return (int)count_; }
+    int finish() { if (capacity_ != 0 && (!whole_ || count_ < capacity_)) *next_ = 0; return (int)count_; }
 
 private:
     char *next_;
     size_t room_, count_, capacity_;
+    bool whole_;
 };
 
 // A FILE's characters for a wide format, as the Microsoft runtime's wide printf writes a stream: in text mode a
@@ -490,6 +493,9 @@ private:
 // family's, to a stream and into swprintf's memory.
 int printToStream(FILE *f, const char *format, va_list *args);
 int printToMemory(char *dst, size_t capacity, bool snprintf, const char *format, va_list *args);
+// Microsoft's _snprintf and _vsnprintf: at most capacity characters, the NUL only where there is room, the count
+// when the text fit and -1 when it did not.
+int printToMemoryWhole(char *dst, size_t capacity, const char *format, va_list *args);
 int wprintToStream(FILE *f, const wchar_t *format, va_list *args);
 int wprintToMemory(wchar_t *dst, size_t capacity, const wchar_t *format, va_list *args);
 

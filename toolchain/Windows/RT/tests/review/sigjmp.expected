@@ -1,0 +1,3 @@
+signal: SIGSEGV caught, longjmp'd out with 7
+done
+exit 0

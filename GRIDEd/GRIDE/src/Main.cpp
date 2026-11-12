@@ -4,12 +4,13 @@
 // =============================================================================
 #include "pch.h"
 #include "UI/MainForm.h"
+#include "../../../common/Editors.h"
 
 using namespace Gride::UI;
 
 // GRIDE's version, which Help > About GRIDE shows (and the Help's Versions list): the Black outlook, 1.5 - between
-// White's 1.0 and Grey's 2.0
-[assembly: System::Reflection::AssemblyVersionAttribute("1.5.0.0")];
+// White's 1.0 and Grey's 2.0. The number is common\Editors.h's, where the three editors' numbers are kept once.
+[assembly: System::Reflection::AssemblyVersionAttribute(GRIDE_BLACK_VERSION ".0")];
 
 namespace Gride {
 

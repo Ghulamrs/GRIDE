@@ -8,5 +8,16 @@
     "target": "cpp-sampleext",
     "groups": ["Sources"]
   },
-  "toolchain": "auto"
+  "toolchain": "auto",
+  "configurations": {
+    "Debug|Windows": {
+      "outDir": "out/Debug/Win",
+      "objDir": "obj/Debug/Win",
+      "defines": ["DEBUG"],
+      "includeDirs": ["inc"],
+      "libDirs": [],
+      "libs": [],
+      "optimise": "O0"
+    }
+  }
 }

@@ -5,6 +5,7 @@
 // and read by the software pipeliner in C6xPipe.cpp.
 
 #include <cstdint>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -46,6 +47,7 @@ struct Node {
     std::uint64_t stepped = 0;          // the address register a `*R++` or `*R--` access writes, in E1 rather than at its latency
     int lat = 1;
     int late = 0;                       // the cycles after issue its sources are still read, and its unit held
+    std::uint64_t early = 0;            // the register a double result lands in one cycle before its latency: its low word
     unsigned units = 0;                 // a bitmask of UL, US, UD, UM; 0 for a form the table does not know
     int side = -1;                      // 0 A, 1 B, -1 either (a branch to a label)
     int cross = -1;                     // the cross path used, by the side that reads: 0 1X, 1 2X, -1 none
@@ -73,6 +75,7 @@ bool startsWith(const std::string &s, const char *p);
 bool endsWith(const std::string &s, const char *p);
 int delaySlots(const std::string &m);
 int lateReads(const std::string &m);
+bool lowWordFirst(const std::string &m);
 Line parse(const std::string &raw);
 Line make(const std::string &mnem, const std::string &a, const std::string &b = "", const std::string &c = "");
 Line rebuilt(const std::string &mnem, const std::vector<std::string> &ops, const std::string &pred = "");
@@ -100,6 +103,21 @@ struct LivenessHeld {
     LivenessHeld(const std::vector<Line> &v, const char *pass);
     ~LivenessHeld();
     const char *outer;
+};
+// **Where each label of a text stands and how many instructions name it**, for the loop passes that ask it of every
+// conditional branch: asked by scanning the text, a switch's chain of 16384 compares took minutes. Like the liveness, a
+// cache of one text, rebuilt by refresh where the text has been edited since.
+struct LabelIndex {
+    void refresh(const std::vector<Line> &v);
+    // The last line before i that is the label name; none where there is no such line.
+    std::size_t lastBefore(const std::string &name, std::size_t i, std::size_t none) const;
+    // How many operands of the instructions are the label name: 0 for a name no line labels.
+    int uses(const std::string &name) const;
+    const Line *data = nullptr;
+    std::size_t size = 0;
+    std::uint64_t edits = ~0ull;
+    std::map<std::string, std::vector<std::size_t> > at;
+    std::map<std::string, int> named;
 };
 int accessSize(const std::string &m);
 std::string renamed(const std::string &op, const std::string &from, const std::string &to);

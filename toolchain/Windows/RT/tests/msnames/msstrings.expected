@@ -1,0 +1,20 @@
+_strdup: "Hello, world" fresh
+_strdup(""): ""
+_strdup(NULL): null
+_stricmp: 0 -1 1 -1 -1
+_stricmp values: -1 25 -2
+_strnicmp: 0 -1 0 -1
+_strlwr: "mixed 123 @[`{" same 1
+_strrev: "fedcba" "edcba" ""
+_itoa: 0 -12345 ffffffff 11111111 -2147483648 20000000000 21i3v9 1z141y5
+_snprintf fits: 5 bytes: 4 2 - a b \0 # # #
+_snprintf exact: 5 bytes: a b c d e # #
+_snprintf over: -1 bytes: a b c d e # #
+_snprintf none: -1 bytes: # #
+_snprintf empty: 0
+_vsnprintf over: -1 bytes: a b c d e f # #
+_vsnprintf fits: 4 bytes: 3 . 1 4 \0 #
+strdup: plain
+stricmp: 0 strnicmp: 0
+strlwr: old names strrev: seman dlo itoa: -77
+exit 0

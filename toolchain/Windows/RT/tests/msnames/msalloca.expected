@@ -1,0 +1,12 @@
+untouched: 200 blocks, then a call: 650, last intact 1
+loop: 24 blocks, intact 1, 8-aligned 1, apart 1
+calls: twelve 4874, block intact 1, copy "a block whose size strlen gave"
+calls: nested 943, block intact 1
+inside: last argument 764978682
+inside: a middle argument 1941642567
+inside: an operand -1402214189
+inside: the first block intact 1
+recursion: 560337836
+large: 500000 bytes, sum 1599303297
+alloca(0): a pointer
+exit 0

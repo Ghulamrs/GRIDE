@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <iterator>
 #include <map>
 
 IrOp IrOp::from(const Op &o) {
@@ -595,12 +596,15 @@ IrChunk &Optimizer::chunk() {
 }
 
 void Optimizer::add(IrIns &&i) {
+    written_++;
     // Nothing reaches here: the last chunk ended in a jump or a return and no
     // label has been defined since.
     if (unreachable_ && level_ >= 1) {
         removed_++;
         return;
     }
+    i.pre.swap(pending_);
+    pending_.clear();
     bool ends = endsRun(i.m);
     bool leaves = i.m == "jmp" || i.m == "ret";
     chunk().ins.push_back(std::move(i));
@@ -626,8 +630,11 @@ void Optimizer::ins(const std::string &m, const Op &a, const Op &b) {
 }
 
 void Optimizer::defLabel(const std::string &l) {
+    written_++;
     if (chunks_.empty() && level_ < 1) { under_->defLabel(l); return; }
     chunks_.push_back(IrChunk());
+    chunks_.back().before.swap(pending_);
+    pending_.clear();
     chunks_.back().label = l;
     chunks_.back().hasLabel = true;
     open_ = true;
@@ -721,13 +728,15 @@ void Optimizer::replay() {
         for (std::function<void()> &f : c.before) f();
         if (c.hasLabel) under_->defLabel(c.label);
         for (std::function<void()> &f : c.after) f();
-        for (const IrIns &i : c.ins) {
+        for (IrIns &i : c.ins) {
+            for (std::function<void()> &f : i.pre) f();
             switch (i.operands) {
             case 0: under_->ins(i.m); break;
             case 1: under_->ins(i.m, i.a.view()); break;
             default: under_->ins(i.m, i.a.view(), i.b.view()); break;
             }
         }
+        for (std::function<void()> &f : c.tail) f();
     }
     chunks_.clear();
     open_ = false;
@@ -737,6 +746,11 @@ void Optimizer::replay() {
 // stay inside the function: what is held is optimized - twice, since a chunk
 // that reads less leaves less live for the ones before it - and written out.
 void Optimizer::flush() {
+    if (!pending_.empty()) {
+        if (chunks_.empty()) for (std::function<void()> &f : pending_) f();
+        else for (std::function<void()> &f : pending_) chunks_.back().tail.push_back(std::move(f));
+        pending_.clear();
+    }
     if (level_ >= 1 && !chunks_.empty()) {
         connect();
         for (int round = 0; round < 2; round++) {
@@ -748,6 +762,10 @@ void Optimizer::flush() {
                 initFlags_ = c.flagsOut;
                 optimize();
                 run_.swap(c.ins);
+                if (!carry_.empty()) {
+                    c.tail.insert(c.tail.begin(), std::make_move_iterator(carry_.begin()), std::make_move_iterator(carry_.end()));
+                    carry_.clear();
+                }
             }
         }
     }
@@ -785,8 +803,11 @@ void Optimizer::optimize() {
 void Optimizer::compact() {
     kept_.clear();
     kept_.reserve(run_.size());
-    for (IrIns &i : run_)
-        if (!i.dead) kept_.push_back(std::move(i));
+    for (IrIns &i : run_) {
+        if (i.dead) { dropMarks(i); continue; }
+        takeMarks(i);
+        kept_.push_back(std::move(i));
+    }
     run_.swap(kept_);
 }
 
@@ -822,6 +843,7 @@ void Optimizer::peephole() {
         if (isMov64(i) && i.a.kind == Op::Reg && i.b.kind == Op::Reg &&
             i.a.text == i.b.text && is64Gpr(i.a.text)) {
             removed_++;
+            dropMarks(i);
             continue;
         }
         if (!kept.empty() && isMemToReg(i)) {
@@ -829,6 +851,7 @@ void Optimizer::peephole() {
             // mov %r, m ; mov m, %r: the reload reads back what %r still holds.
             if (isRegToMem(p) && p.a.text == i.b.text && p.b.same(i.a)) {
                 removed_++;
+                dropMarks(i);
                 continue;
             }
             // mov m, %r ; mov m, %r: the second load reads what the first did,
@@ -836,6 +859,7 @@ void Optimizer::peephole() {
             if (isMemToReg(p) && p.a.same(i.a) && p.b.text == i.b.text &&
                 i.a.text.find(i.b.text) == std::string::npos) {
                 removed_++;
+                dropMarks(i);
                 continue;
             }
         }
@@ -857,6 +881,7 @@ void Optimizer::peephole() {
         if (!kept.empty() && isStackOp(i, "pop") && isStackOp(kept.back(), "push")) {
             IrIns &p = kept.back();
             if (p.a.text == i.a.text) {
+                dropMarks(p);
                 kept.pop_back();
                 removed_ += 2;
             } else {
@@ -866,8 +891,10 @@ void Optimizer::peephole() {
                 p.semValid = false;
                 removed_++;
             }
+            dropMarks(i);
             continue;
         }
+        takeMarks(i);
         kept.push_back(std::move(i));
     }
     run_.swap(kept);
@@ -1545,7 +1572,17 @@ void Optimizer::prologue(int frameSize) { interrupt(); under_->prologue(frameSiz
 void Optimizer::functionEnd(const std::string &name) { interrupt(); under_->functionEnd(name); }
 void Optimizer::fileEntry(int n, const std::string &name) { interrupt(); under_->fileEntry(n, name); }
 void Optimizer::location(int file, int line, int column) {
-    event([this, file, line, column]() { under_->location(file, line, column); });
+    debugMark([this, file, line, column]() { under_->location(file, line, column); });
+}
+void Optimizer::blockLabel(const std::string &l) {
+    debugMark([this, l]() { under_->defLabel(l); });
+}
+// **-g's marks wait for the instruction after them** and ride on it (IrIns::pre): an event began a chunk, and -g one
+// at every statement, so the passes saw less under -g than without it.
+void Optimizer::debugMark(std::function<void()> f) {
+    written_++;
+    if (chunks_.empty()) { f(); return; }
+    pending_.push_back(std::move(f));
 }
 void Optimizer::predefine(const std::vector<std::string> &names) { interrupt(); under_->predefine(names); }
 void Optimizer::finishText(std::vector<std::string> &chunks) { interrupt(); under_->finishText(chunks); }

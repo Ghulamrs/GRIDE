@@ -3,6 +3,7 @@
 #include "../Source.h"
 
 #include "../Ast.h"
+#include "../../../C++Optimize/src/optimizer/C6xSched.h"
 
 #include <cctype>
 #include <cstdio>
@@ -120,6 +121,8 @@ static std::string tiExternals(const std::string &text) {
         if (cut != std::string::npos) line.erase(cut);
         size_t first = line.find_first_not_of(" \t");
         if (first == std::string::npos) continue;
+        // In a packet (the scheduler's `||`, -O1 and above): an instruction, not a label - as cpp11's reads it.
+        if (line.compare(0, 2, "||") == 0) { line = "\t" + line.substr(2); first = 1; }
         bool label = first == 0;
         if (line[first] == '[') {                                   // a predicate
             cut = line.find(']', first);
@@ -142,10 +145,11 @@ static std::string tiExternals(const std::string &text) {
         const std::string &m = words[k];
         bool declares = m == ".global" || m == ".weak" || m == ".def" || m == ".ref" || m == ".bss";
         if (declares) { if (k + 1 < words.size()) defined.insert(words[k + 1]); continue; }
-        if (m[0] == '.' && m != ".word") continue;
+        if (m[0] == '.' && m != ".word" && m != ".ulong" && m != ".half") continue;
         for (size_t w = k + 1; w < words.size(); w++) {
             const std::string &t = words[w];
-            if (std::isdigit(static_cast<unsigned char>(t[0]))) continue;
+            if (std::isdigit(static_cast<unsigned char>(t[0])) || t[0] == '$') continue;   // a number, an operator
+            if (t[0] == '.') continue;                              // a functional unit the scheduler named (.S2)
             if ((t[0] == 'A' || t[0] == 'B') && t.size() <= 3 && t.size() > 1 &&
                 std::isdigit(static_cast<unsigned char>(t[1])) && (t.size() == 2 || std::isdigit(static_cast<unsigned char>(t[2]))))
                 continue;                                           // a register
@@ -180,6 +184,7 @@ void Tms6747::regAdd(const char *base, int off, const char *dst) {
 // ones go through a B-file scratch so the ADD/SUB stays on one register file.
 void Tms6747::spAdjust(int delta) {
     if (delta == 0) return;
+    stackBytes_ -= delta;
     int m = delta < 0 ? -delta : delta;
     const char *op = delta < 0 ? "SUB" : "ADD";
     if (m <= 31) {
@@ -229,10 +234,12 @@ void Tms6747::copyBlock(int size, const char *from, const char *to, int align) {
 }
 
 void Tms6747::push() {
+    stackBytes_ += 8;
     out_ << "\tSUB\tB15, 8, B15\n";
     out_ << "\tSTW\tA4, *B15\n";
 }
 void Tms6747::pop(const char *reg) {
+    stackBytes_ -= 8;
     out_ << "\tLDW\t*B15, " << reg << "\n\tNOP\t4\n";
     out_ << "\tADD\tB15, 8, B15\n";
 }
@@ -254,11 +261,13 @@ std::string Tms6747::pairOf(const char *reg) {
 // is already 8 bytes and B15 stays 8-aligned, which STDW and LDDW need.
 void Tms6747::pushValue(const Type *t) {
     if (!isWide(t) && !inPairWide(t)) { push(); return; }
+    stackBytes_ += 8;
     out_ << "\tSUB\tB15, 8, B15\n";
     out_ << "\tSTDW\tA5:A4, *B15\n";
 }
 void Tms6747::popValue(const Type *t, const char *reg) {
     if (!isWide(t) && !inPairWide(t)) { pop(reg); return; }
+    stackBytes_ -= 8;
     out_ << "\tLDDW\t*B15, " << pairOf(reg) << "\n\tNOP\t4\n";
     out_ << "\tADD\tB15, 8, B15\n";
 }
@@ -828,10 +837,31 @@ void Tms6747::wideCast(const Type *from, const Type *to) {
     else     narrowInt(to);
 }
 
+// **`_alloca(n)`, lowered where it stands** (docs\Runtime_Design.md 9.4). The frame is addressed from A15 and the
+// epilogue takes B15 back from A15, so the function's own slots do not move; what is addressed from B15 is what the
+// body has pushed or opened for a call being built - every call opens its own area, the word its callee saves A15 in
+// at the bottom. B15 moves down by n rounded to 8, those words are copied down with it, and the block is the n bytes
+// above them, its top at the frame's floor.
+void Tms6747::genAlloca(const Call &n) {
+    n.args()[0]->accept(*this);
+    out_ << "\tADD\tA4, 7, A4\n\tAND\t-8, A4, A4\n\tMV\tA4, B0\n";
+    const int pushed = stackBytes_;
+    if (pushed > 0) out_ << "\tMV\tB15, B1\n";
+    out_ << "\tSUB\tB15, B0, B15\n";
+    if (pushed > 0) {
+        out_ << "\tMV\tB15, B2\n";
+        for (int k = 0; k < pushed; k += 4)
+            out_ << "\tLDW\t*B1, A4\n\tNOP\t4\n\tSTW\tA4, *B2\n\tADD\tB1, 4, B1\n\tADD\tB2, 4, B2\n";
+    }
+    out_ << "\tMV\tB15, A4\n";
+    addOffset(pushed);
+}
+
 // A call under the C6000 EABI: arguments left to right into A4, B4, A6, B6, A8, B8, A10, B10,
 // A12, B12, the eleventh onward above the reserved word at *B15, B3 built by hand, five NOPs
 // after the branch, the result in A4. A variadic callee's last named argument and everything after it go on the stack so va_start can step from one to the next.
 void Tms6747::visit(const Call &n) {
+    if (n.isAlloca()) { genAlloca(n); return; }
     const std::vector<ExprPtr> &args = n.args();
     bool pair = inPair(n.type());
     bool sret = n.type()->isStructOrUnion() && !pair;
@@ -1278,6 +1308,7 @@ void Tms6747::emitFunction(const Function &fn) {
     labelPrefix_ = "L." + fn.name() + ".";
     returnLabel_ = "L.return." + fn.name();
     hasCall_ = false;
+    stackBytes_ = 0;
     usesSavedArgRegs_ = false;
     usesSavedPairRegs_ = false;
 
@@ -1323,8 +1354,16 @@ void Tms6747::emitFunction(const Function &fn) {
     markLine(fn.pos());                                   // -g: the function's own line, as cl6x's first .dwpsn names it
     emitVariables(fn);
 
+    // **-O1 and above: the function's code, prologue to return, through cpp11's C6000 scheduler** - the NOPs that pad
+    // every latency taken out and the instructions packed in parallel to the hazards that remain - which takes the
+    // serial text this backend writes as it takes cpp11's (docs\Runtime_Design.md section 16, the scoping). Not a
+    // function that may touch volatile storage: the scheduler reorders memory accesses and asks no qualifier.
+    const bool schedule = optimize_ > 0 && !fn.touchesVolatile();
+    std::string head = out_.str();
+    out_.str(std::string());
+
     int frame = align8(fn.frameSize());
-    bool needFrame = frame > 0 || hasCall_ || !fn.params().empty() || sretSlot_ != 0;
+    bool needFrame = frame > 0 || hasCall_ || !fn.params().empty() || sretSlot_ != 0 || fn.callsAlloca();
     std::vector<std::string> saved = savedRegs();
     if (needFrame) {
         out_ << "\tSTW\tA15, *B15\n";               // in the caller's word
@@ -1344,6 +1383,9 @@ void Tms6747::emitFunction(const Function &fn) {
         out_ << "\tLDW\t*A15, A15\n\tNOP\t4\n";      // the caller's FP, last
     }
     out_ << "\tB\tB3\n\tNOP\t5\n";
+    const std::string code = out_.str();
+    out_.str(std::string());
+    out_ << head << (schedule ? c6xSchedule(code, optimize_) : code);
     // TI's index entry for every function: any return address on the stack.
     char word[16];
     std::snprintf(word, sizeof word, "0x%08x", unwindWord(needFrame));

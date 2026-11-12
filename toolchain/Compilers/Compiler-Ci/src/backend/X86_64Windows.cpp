@@ -81,6 +81,7 @@ private:
         return codeViewPath(compDir(), name);
     }
     bool marksClosingBrace() const override { return true; }
+    bool probesStack() const override { return true; }
 
     const Target &coffTarget_;
     CoffSpelling coff_;

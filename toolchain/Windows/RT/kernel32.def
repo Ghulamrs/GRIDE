@@ -7,6 +7,8 @@ LIBRARY KERNEL32.dll
 EXPORTS
     ; grt: files and handles
     GetStdHandle
+    SetStdHandle
+    DuplicateHandle
     GetFileType
     GetConsoleMode
     WriteConsoleW
@@ -48,6 +50,7 @@ EXPORTS
     GetProcessHeap
     HeapAlloc
     HeapReAlloc
+    HeapSize
     HeapFree
     VirtualAlloc
     VirtualProtect

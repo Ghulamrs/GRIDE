@@ -328,6 +328,13 @@ int printToMemory(char *dst, size_t capacity, bool snprintf, const char *format,
     return n;
 }
 
+int printToMemoryWhole(char *dst, size_t capacity, const char *format, va_list *args)
+{
+    MemoryOut out(dst, capacity, true);
+    int n = Printer<MemoryOut>(out, args).run(format);
+    return n >= 0 && (size_t)n <= capacity ? n : -1;
+}
+
 void WideStreamOut::drain()
 {
     if (at_ != 0 && grt::putCall(f_, stage_, (unsigned)at_) < 0) failed_ = true;

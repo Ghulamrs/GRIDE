@@ -1981,3 +1981,5 @@ p165	p165	te01_typeid_of_a_pointer_to_member	pos	output	0
 p166	p166	nh01_a_pointer_handler_catches_a_thrown_nullptr	pos	own	0	cl lets a thrown nullptr past every pointer handler and the program ends; [except.handle]/3 matches them, and sim6747 agrees
 p166	p166	nh02_throwing_every_kind_of_pointer	pos	output	0	
 p166	p166	va01_structs_through_the_ellipsis	pos	output	0	
+p167	p167	da01_a_definition_after_a_function_that_used_a_string	pos	output	0	
+p167	p167	wl04_an_int_made_double_after_a_byte_is_loaded	pos	output	0	

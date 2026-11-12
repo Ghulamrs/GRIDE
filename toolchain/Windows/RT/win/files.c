@@ -483,6 +483,87 @@ int _setmode(int fd, int mode)
     return old;
 }
 
+/* the handle behind fd, for _fstat (stat.c): 0 with errno EBADF when it is not open */
+HANDLE __grt_handle(int fd)
+{
+    struct Descriptor *d = grt_open_descriptor(fd);
+    return d ? d->handle : 0;
+}
+
+/* descriptor fd itself, claimed for _dup2 when it is free: its block made if it has none; 0 with errno ENOMEM */
+static struct Descriptor *grt_reserve(int fd)
+{
+    struct Descriptor *d = 0;
+    int b = fd / BLOCK, held = __grt_threads;
+    if (held) AcquireSRWLockExclusive(&table);
+    if (!blocks[b])
+        blocks[b] = (struct Descriptor *)HeapAlloc(GetProcessHeap(), GRT_HEAP_ZERO_MEMORY, BLOCK * sizeof(struct Descriptor));
+    if (blocks[b]) {
+        d = &blocks[b][fd % BLOCK];
+        if (d->mode == 0) d->mode = CLAIMED;
+        else d = 0;
+    } else
+        errno = ENOMEM;
+    if (held) ReleaseSRWLockExclusive(&table);
+    return d;
+}
+
+/* a duplicate of d's handle for this process, inheritable as the UCRT makes it; 0 with errno set */
+static HANDLE grt_duplicate(struct Descriptor *d)
+{
+    HANDLE h = 0;
+    if (!DuplicateHandle(GRT_CURRENT_PROCESS, d->handle, GRT_CURRENT_PROCESS, &h, 0, 1, GRT_DUPLICATE_SAME_ACCESS)) {
+        __grt_set_errno_from(GetLastError());
+        return 0;
+    }
+    return h;
+}
+
+/* Spec: Microsoft C runtime, _dup - a second descriptor, the lowest free from 3, on a duplicate of fd's handle, in
+   fd's mode: it, or -1 with errno EBADF (fd not open) or EMFILE. */
+int _dup(int fd)
+{
+    int held, to;
+    HANDLE h;
+    struct Descriptor *d = grt_take(fd, &held), *t;
+    if (!d) return -1;
+    h = grt_duplicate(d);
+    if (!h) { grt_give(d, held); return -1; }
+    to = grt_free_descriptor();
+    if (to < 0) { CloseHandle(h); grt_give(d, held); return -1; }
+    t = grt_slot_of(to);
+    grt_bind(t, h, d->mode);
+    t->append = d->append;
+    grt_give(d, held);
+    return to;
+}
+
+/* Spec: Microsoft C runtime, _dup2 - descriptor to made a duplicate of fd, closed first if it was open; a standard
+   one (0, 1, 2) becomes Windows' standard handle too, as the UCRT makes it. 0, or -1 with errno EBADF. */
+int _dup2(int fd, int to)
+{
+    int held, mode, append;
+    HANDLE h;
+    struct Descriptor *d, *t;
+    if (to < 0 || to >= GRT_DESCRIPTORS) { errno = EBADF; return -1; }
+    d = grt_take(fd, &held);
+    if (!d) return -1;
+    if (fd == to) { grt_give(d, held); return 0; }
+    h = grt_duplicate(d);
+    mode = d->mode;
+    append = d->append;
+    grt_give(d, held);
+    if (!h) return -1;
+    t = grt_slot_of(to);
+    if (t && grt_is_open(t)) __grt_close(to);
+    t = grt_reserve(to);
+    if (!t) { CloseHandle(h); if (errno != ENOMEM) errno = EBADF; return -1; }
+    grt_bind(t, h, mode);
+    t->append = append;
+    if (to <= 2) SetStdHandle(to == 0 ? GRT_STD_INPUT : to == 1 ? GRT_STD_OUTPUT : GRT_STD_ERROR, h);
+    return 0;
+}
+
 /* Spec: Microsoft C runtime, _isatty - non-zero when the descriptor is a character device (NUL included) */
 int _isatty(int fd)
 {

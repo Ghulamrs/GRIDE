@@ -2,9 +2,7 @@
 #define _STDARG_H
 
 #include <_gride.h>
-#ifdef _GRIDE_C99_LIBRARY
-#include <stddef.h>  // size_t, for vsnprintf
-#endif
+#include <stddef.h>  // size_t, for vsnprintf and Microsoft's _vsnprintf (C90's too)
 
 // Everything here is the C library, so it is named the way C names it.
 // Without this the compiler would give every declaration below a C++
@@ -86,6 +84,9 @@ typedef __va_list_tag va_list[1];
 int vprintf(const char *, va_list);
 int vfprintf(void *, const char *, va_list);
 int vsprintf(char *, const char *, va_list);
+/* Microsoft's: at most n characters, the NUL only where there is room for it, and -1 when the text did not fit
+   (docs\Runtime_Design.md 9.4) - not vsnprintf, which always ends the text and answers its whole length. */
+int _vsnprintf(char *, size_t, const char *, va_list);
 #ifdef _GRIDE_C99_LIBRARY
 int vsnprintf(char *, size_t, const char *, va_list);
 int vscanf(const char *, va_list);

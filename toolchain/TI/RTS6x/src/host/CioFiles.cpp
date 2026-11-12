@@ -23,8 +23,13 @@ int CioChannel::open(const char *path, unsigned flags)
 
 int CioChannel::close(int fd)
 {
+    // A descriptor that shares its host descriptor (_dup) lets go of its name alone.
+    if (DescriptorModes::shared(fd)) {
+        DescriptorModes::closed(fd);
+        return 0;
+    }
     unsigned char params[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-    put16(params, (unsigned)fd);
+    put16(params, (unsigned)DescriptorModes::host(fd));
     request(Close, params, 0, 0);
     int result = answer16();
     if (result == 0) DescriptorModes::closed(fd);
@@ -35,7 +40,7 @@ int CioChannel::read(int fd, char *bytes, unsigned count)
 {
     unsigned char params[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
     if (count > DataCapacity) count = DataCapacity;
-    put16(params, (unsigned)fd);
+    put16(params, (unsigned)DescriptorModes::host(fd));
     put16(params + 2, count);
     request(Read, params, 0, 0);
     unsigned got = get16(_CIOBUF_ + 4);
@@ -48,7 +53,7 @@ int CioChannel::read(int fd, char *bytes, unsigned count)
 long CioChannel::seek(int fd, long offset, Origin origin)
 {
     unsigned char params[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-    put16(params, (unsigned)fd);
+    put16(params, (unsigned)DescriptorModes::host(fd));
     put32(params + 2, (unsigned)offset);
     put16(params + 6, (unsigned)origin);
     request(Lseek, params, 0, 0);

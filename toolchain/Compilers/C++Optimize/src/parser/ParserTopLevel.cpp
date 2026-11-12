@@ -961,9 +961,16 @@ void Parser::topLevel(Program &program) {
     for (std::size_t i = 0; i < defaults.size(); i++)
         if (defaults[i] != 0) sawDefault = true;
     // Checked against the earlier declarations' defaults where they meet ([dcl.fct.default]/4, R8).
+    // **A list with no default hands on none** (1.65): pendingDefaults_ was left as it stood, and what stood
+    // there was the last parameter list parameterTypes read - one of std::string's members, say, instantiated
+    // in the function before. declare() merged that into this function's own defaults: `void g(int depth = 0);`
+    // then `void h() { std::string t; }` then `void g(int depth) { }` was refused as a default followed by a
+    // parameter without one (cppparse's PathUtil.cpp, which 1.30 compiled).
     if (sawDefault) {
         pendingDefaultsAt_ = d.pos;
         pendingDefaults_ = defaults;
+    } else {
+        pendingDefaults_.clear();
     }
 
 

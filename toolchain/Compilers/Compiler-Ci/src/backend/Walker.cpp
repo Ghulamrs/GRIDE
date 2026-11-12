@@ -52,7 +52,7 @@ void Walker::openBlock(int scope) {
     if (static_cast<std::size_t>(scope) >= blocks_.size()) return;
     std::size_t before = emittedSize();
     blocks_[scope].begin = label("blk.b", scope);
-    defineLabel(blocks_[scope].begin);
+    defineBlockLabel(blocks_[scope].begin);
     notCode_ += emittedSize() - before;
     Mark m;
     m.size = emittedSize();
@@ -70,7 +70,7 @@ void Walker::closeBlock(int scope) {
 
     std::size_t before = emittedSize();
     blocks_[scope].end = label("blk.e", scope);
-    defineLabel(blocks_[scope].end);
+    defineBlockLabel(blocks_[scope].end);
     notCode_ += emittedSize() - before;
 
     if (!code) {
@@ -133,8 +133,9 @@ void Walker::visit(const For &n) {
         branchIfZero(label("end", id));
     }
     n.body().accept(*this);
-    // cl's loop jumps back from the brace, so the brace gets an instruction of its own here.
-    if (lines_ != nullptr && marksClosingBrace() && dynamic_cast<const Block *>(&n.body()) != nullptr) {
+    // cl's loop jumps back from the brace, so the brace gets an instruction of its own here - at -O0, where the code is
+    // the source's; under -O the brace's line goes on the step, so that -g changes no instruction (1.63).
+    if (lines_ != nullptr && marksClosingBrace() && !optimizing() && dynamic_cast<const Block *>(&n.body()) != nullptr) {
         markClosingBrace(n.body());
         jump(label("step", id));
     }

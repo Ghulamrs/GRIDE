@@ -247,6 +247,17 @@ Microsoft, POSIX, GRIDE).
 <GRIDE>\share\ccs\  CCS's option tables (today lib\ccs: data, neither header nor library)
 ```
 
+**`printf6x.lib` and `printf6xd.lib` are names, not a second printf** (decided 2026-11-10, on the runtimes review's
+finding). TI's CCS ships its formatted output as a library of its own, and a CCS project links it by name. Here
+`printf6x.members` lists the 25 members of `rts6x.lib` that make up formatted output (`host\`, `stdio\Format*`, the
+digit writers, `fprintf`, `printf`, `sprintf`, `wprintf`, `ftable`, the division helpers, `memcpy`, `memset`, `strlen`),
+and `Rts6xVariant` packs those objects a second time, plus `eh-none\pr3.obj`, a stub personality the real unwinder
+never calls, and - since 2026-11-12 - `boot\version.obj`, which holds the two libraries' own lines, `RTS6x 1.2 - ...`
+and `printf6x 1.2 - ...`: printf6x is made of RTS6x's objects, so it is numbered with RTS6x and the two move together. Each member is byte for byte the same as its `rts6x.lib` copy, so a program gets the same code whichever
+library the linker reads first, and the pair cannot link a program alone (no `_c_int00`). They exist so that a CCS
+project's link line, and toolchain.json's "when printf" entry, find the names they expect. cpp11's own driver links
+`rts6x.lib` alone. No code depends on them, and no change is planned.
+
 A compiler is given its include folders in this order: cpp11 gets `include\c++`, `include\c`,
 `include\win`; c90 gets `include\c`, `include\win`.
 
@@ -322,8 +333,11 @@ The sequence, modelled on vcruntime's `exe_common.inl` (read for the order, not 
    `_seh_filter_exe` does; otherwise it goes on to Windows. Ctrl+C reaches SIGINT through
    `SetConsoleCtrlHandler`, on the thread Windows starts for it.
 7. `exit`: the `atexit` list, last registered first (one list for C's functions and C++'s destructors, as
-   Microsoft keeps it), then the `.CRT$XP*` pre-terminators and `.CRT$XT*` terminators, then every stream
-   flushed and closed, then `ExitProcess`. `quick_exit` runs the `at_quick_exit` list and nothing else.
+   Microsoft keeps it), then every stream flushed and closed, then `ExitProcess`. `quick_exit` runs the
+   `at_quick_exit` list and nothing else. Microsoft's `.CRT$XP*` pre-terminators and `.CRT$XT*` terminators have no
+   markers and are not run: no GRIDE compiler writes an entry there (cpp11 places nothing in a section of its
+   choosing, and C++ destructors go through `atexit`), and a link with cl's objects takes Microsoft's runtime (13.1).
+   Struck from this step on 2026-11-10, where the runtimes review found the design naming tables nothing builds.
 8. `abort`, `_exit`, `_Exit`: section 4.3; no `atexit` and no flush.
 
 GRIDE's link orders an output section's contributions by the name after `$`. So the markers in
@@ -447,12 +461,18 @@ A variadic function's floating-point arguments are passed in both registers, so 
 
 ### 9.3 CodeView for the runtime, and stepping into it
 - The Debug variants are compiled with `-g`, so a Debug program's PDB carries the runtime's functions and
-  lines and gride-dbg can show them and step into them. The Release variants are not: under `-g` cpp11
-  inlines nothing (`inlineTarget` declines every site, "inline-site-debug-info") and c90 writes about a sixth
-  more instructions (a comparison set into a register and tested again, more moves). Built with `-g` (e423505)
-  the Release runtime took fgets from 0.96 to 1.24 of Microsoft's time, sscanf from 1.28 to 1.45 (integers) and
-  1.21 to 1.36 (floats), and printf of floats from 1.45 to 1.59 (`bench\results.md`). The Release variants get
-  CodeView back once both compilers write the same code with `-g` as without, as cl does with /Zi.
+  lines and gride-dbg can show them and step into them. **Since 2026-11-10 the Release variants are too**
+  (`-O2 -g -DNDEBUG=1`, and shmrt.lib `-O2 -g`), because cpp11 and c90 now write the same instructions with
+  `-g` as without, as cl does with /Zi. Every member of the six Release libraries is the earlier build's outside
+  `.debug$S` and `.debug$T`, and those sections are in the same members as the Debug variants'. Before that,
+  under `-g` cpp11 inlined nothing ("inline-site-debug-info") and c90 wrote about a sixth more instructions, and
+  a Release runtime built with `-g` (e423505) took fgets from 0.96 to 1.24 of Microsoft's time, sscanf from 1.28
+  to 1.45 (integers) and 1.21 to 1.36 (floats), and printf of floats from 1.45 to 1.59 (`bench\results.md`).
+  The causes, and what cpp11 1.63 and c90 do now, are in section 16 ("Release CodeView").
+  What -O2's code gives a debugger is what cl's /O2 /Zi gives it: lines and function names exact, a body
+  walked in place shown on its call's line, and a local the optimizer keeps in a register shown from its frame
+  slot. The C6747's `rts6x.lib` still has no DWARF: cpp11 and c90 refuse `-g` with `-O` for tms6747, the C6000
+  scheduler not yet carrying a source position through its packets.
 - **Stepping is the user's choice.** gride-dbg's step filter is by `module!name` today. A statically linked
   runtime is in the program's own module, and once its sources are installed it "has source". So the filter
   becomes one by **source path**: code whose source lies under the runtime's source folder is stepped over
@@ -469,6 +489,66 @@ One C header set (section 5.2), checked at build time against the catalogue (sec
 function is declared by the headers its entry names, at the level it names, and nothing public is declared
 that is not in the catalogue. A test program that references every function the shipped headers declare
 must link against GRIDE's runtime alone (section 11.8).
+
+**Microsoft's and POSIX's names (the policy, decided by the user on 2026-11-10).** The runtimes review found the
+headers a strict subset of Microsoft's: a program written for MSVC that calls `_strdup` or `_open` compiled for
+neither runtime. "Both runtimes" (5.2) means GRIDE's two: **grt and RTS6x**, so a name taken here is declared for
+x86_64-windows and tms6747 alike and defined by both, and on Windows the UCRT has it too, so it links on
+Microsoft's runtime as well. The rules:
+- **The underscore name is the definition**, declared in the header Microsoft declares it in (`<io.h>`,
+  `<string.h>`, `<stdio.h>`, `<stdlib.h>`, `<malloc.h>`, `<process.h>`, `<direct.h>`, `<sys/stat.h>`) and
+  defined by grtc or grtwin and by `rts6x.lib`. Its behaviour is the UCRT's, probed first, as every name here has
+  been (11.2): `_snprintf` answers -1 and writes no NUL when the text does not fit, `_itoa` writes a sign in base 10
+  alone, and so on. **Recorded deviations**: `_msize` answers a block's usable size, at least the size asked for
+  (a 10-byte block's is 16 on grt's Release heap, whose blocks carry no header to say more, and RTS6x's block less
+  its header), where the UCRT answers the size asked for; grt's Debug heap answers that size, as Microsoft's debug
+  heap does. Where the UCRT's invalid-parameter handler ends the program, grt fails fast as it does for a null
+  pointer it is given (`_msize`, `_snprintf`'s buffer, `_putenv`); for the rest (`_aligned_malloc` with an alignment
+  that is no power of two, `_itoa` in radix 40) both runtimes answer null or an empty text with EINVAL, as RTS6x,
+  which has no such handler, does for the null pointers too.
+- **The plain POSIX spelling** (`strdup`, `open`, `chdir`, `getpid` ...) is declared beside it behind the POSIX guard
+  `fileno` already has (`__cplusplus`, `_POSIX_C_SOURCE` or `_POSIX_SOURCE`), as the UCRT declares its old names. It
+  is defined where Microsoft keeps it: in **grtcompat** on Windows, as `oldnames.lib` holds it for the UCRT, and in
+  `rts6x.lib` on the C6747, where no old-names library exists; grt's build leaves RTS6x's plain-name files out
+  (`rts6x-c.sources`). GRIDE's link line for Microsoft's runtime takes **`oldnames.lib`** (toolchain.json's
+  `hostCrt`), so a program using the plain names links there too.
+- **On the C6747** the descriptor functions go through the C$$IO$$ host channel, whose commands are those very
+  calls (`open`, `close`, `read`, `write`, `lseek`, `unlink`), over RTS6x's descriptor table; `_isatty` is true of a
+  descriptor bound to the host's console (0, 1, 2 until reopened); `_getpid` answers 1, the one program there is;
+  `_putenv` keeps its own table in front of the host's environment. The host names a descriptor by the number the
+  target chose, so `_dup` and `_dup2` make a second name for the same host descriptor (`DescriptorModes`' aliases),
+  which closes at the host when its last name does. What the host cannot say is not said: `_fstat` gives a file's
+  size and no times (0), `_O_TEMPORARY` and `_open`'s permission argument are not kept, `_O_EXCL` asks the host
+  whether the file is there first, and any refusal is ENOENT. `_chdir`, `_rmdir` and their old names are Windows'
+  alone: the host has no folders to change.
+- **On Windows** `_open` maps Microsoft's `_O_` flags onto grt's descriptors, which take the host channel's
+  numbering, and makes every file it creates writable (`_S_IWRITE` not looked at); `_dup2` onto 0, 1 or 2 sets
+  Windows' standard handle too, as the UCRT does. `dup` is a word MASM reserves: a file that names it gives the
+  word up, and c90 and cpp11 then write its zero fills without `DUP` (2026-11-10).
+- **`alloca` and `_alloca`** are the compilers' own: cpp11 and c90 lower a call to either into a stack allocation,
+  on both targets (the UCRT has no such function either: cl lowers it). `<malloc.h>` declares
+  `void *_alloca(size_t)` and `#define alloca _alloca`, as the UCRT does, and a call to either name with C linkage is
+  lowered where it stands (2026-11-10). Every frame is addressed from its frame pointer (rbp, A15) and every epilogue
+  takes the stack pointer back from it, so what moves is only what is addressed from the stack pointer: the outgoing
+  area at the floor (cpp11's shadow space and stack arguments on Windows, the 8 bytes cpp11 keeps for a callee's A15
+  word at -O1 and -O2 on the C6747) and the words the function has pushed below it - an expression's values, a call's
+  arguments half built. The stack pointer moves down by the size rounded to 16 (8 on the C6747), the pushed words are
+  copied down with it, and the block is the bytes above them and a fresh outgoing area, its top where the old area
+  ended; the size of that area is fixed before the body is walked. On Windows `__chkstk` probes the pages first,
+  asked for a page more than the block, so the lowest page touched is below the new rsp (grt's and the UCRT's stop
+  short of a last part-page, which a run of small untouched blocks would otherwise leave). A function that calls it is
+  never walked in place (CPP11_DECLINES: `inline-callee-alloca`). **Refused**: in a function with a catch, on Windows
+  and the C6747, whose catch resumes with the stack pointer at the frame's floor (a cleanup leaves the function, and
+  is allowed); and on arm64-darwin. **No catalogue entry**: an entry names the library that defines it under its link
+  name, which the build and the completeness test check, and no library defines these - as no entry names
+  `<stdarg.h>`'s `va_start` or `offsetof`. `tests\msnames\msalloca.c` (c90) and `msalloca.cpp` (cpp11, the same
+  source) give the UCRT's transcript on both runtimes and on the C6747.
+- **The first cut** (2026-11-10): `_open`, `_close`, `_read`, `_write`, `_lseek`, `_dup`, `_dup2`, `_isatty`,
+  `_unlink`, `_fdopen`, `_fstat`, with `_chdir` and `_rmdir`, which grt had; `_strdup`, `_stricmp`, `_strnicmp`,
+  `_snprintf`, `_vsnprintf`, `_itoa`, `_strlwr`, `_strrev`; `_getpid`, `_putenv`, `_msize`, `_aligned_malloc`,
+  `_aligned_free`; `alloca`; and the plain spelling of each that has one. **Left out**: the `_s` functions (Annex K
+  and Microsoft's own, a family of their own, with the invalid-parameter handler they assume) and the rest of the
+  review's list, each to be taken by these rules when a program asks for it.
 
 ### 9.5 Data the compilers' code reaches
 `stdout` is `__acrt_iob_func(1)` and `errno` is `*_errno()`, so FILE's layout is private and can change
@@ -1110,7 +1190,7 @@ Left for stage 2 by the numbers there (Microsoft's static CRT = 1):
   - `args.cpp`, in a folder and on a file past the ANSI code page: asked in `main` and in a constructor, argv opens the file and every string is the exact UTF-8; not asked, byte for byte the UCRT's.
   - `console.cpp` under `screen.c`, on a hidden console: the screen read back, and lines typed at it, one of them the name of a file it then makes. Not asked, the same screen as the UCRT's. The console's code pages are the same before and after. `console.expected` was written from the source, not from a run. Its U+FFFD is the character past one UTF-16 unit, which `ReadConsoleOutputCharacterW` answers for it whoever wrote it, the console's own echo too. `getchar`'s bytes show it arrived whole.
   - **A program that does not ask** (a check of this work, not a committed test): `args.cpp` and `console.cpp` linked with the libraries from before this work and with these give the same bytes and the same screen, with names and typed text past the ANSI code page.
-  - **The rest**, on cpp11 1.61, the build checks clean: every probe at -O2 and -O0, on the release and the debug libraries, with `exitnow`'s known difference on the debug libraries on Microsoft's run alone; `filing.ps1` 198 of 198, `threads.ps1` 30 of 30, `debug.ps1`, the completeness test 301 of 301, and `tests\shalimar\access.ps1` 76 of 76 over both. cpp11's conformance suite passes 1,038 of 1,040 at each level. `cmath_c99_names` differs as before. `op11_recursion_tail` recurses 100,000 deep and overflows the default 1 MB stack, on main's tools without this work too, and passes with `/STACK:8388608`.
+  - **The rest**, on cpp11 1.61, the build checks clean: every probe at -O2 and -O0, on the release and the debug libraries, with `exitnow`'s known difference on the debug libraries on Microsoft's run alone; `filing.ps1` 198 of 198, `threads.ps1` 30 of 30, `debug.ps1`, the completeness test 301 of 301, and `tests\shalimar\access.ps1` 76 of 76 over both. cpp11's conformance suite passes 1,038 of 1,040 at each level. `cmath_c99_names` differs as before. `op11_recursion_tail` timed out, on main's tools without this work too, which was Windows Error Reporting's time and not a verdict ("A case that ends in a fault", below).
 
 **One member to a wrapper (2026-11-05).** Stage 4's `runtime\Wrappers.cpp` was one library member for 33 functions, so a program borrowing `labs` linked `atof`, `setlocale`, `remove`, `time` and the rest with it. It is 33 files now, one function each, in `runtime\wrappers\`.
 - **Files, not one source compiled 33 times.** Each of the four builds already takes one source to a member. cl compiles a list in one process, `WindowsLibrary` takes a folder and the C6747's lines run a file at a time, while a single source would need a process and a define for each function, in cl's two lines, cpp11's two and a new mode of `WindowsLibrary`. shc.vcxproj's lists and grt.vcxproj's `SourceDirs` take the folder whole, so a wrapper the catalogue adds needs no project changed. A file includes only the headers its own function names.
@@ -1140,7 +1220,7 @@ Left for stage 2 by the numbers there (Microsoft's static CRT = 1):
 - **cpp11's gate**, no version bump: all 1,040 valid cases pass at each level, all 888 invalid ones are refused, census 1,781 of 1,781, nothing regressed against 1.61's freeze. On GRIDE's runtime 1,039 pass at each level, and the one that differs from Microsoft's is `cmath_c99_names`, by its known 1 ulp.
 - **Decided, and not done.** A failed `assert` in a windows program writes to stderr, in the spirit of decision 8, where Microsoft's runtime asks in a dialog and then exits 3, and with no handles nothing is seen before it ends; the dialog would need user32 and a test that presses a button. GRIDE's engine still passes `/subsystem:console` first, so a windows project sets `/subsystem:windows` in its link flags; there is no Options setting for it. `_environ`, `_wenviron`, `_wgetenv`, `_pgmptr`, `_wcmdln` and `DllMain` are not added. Not run on this work: both example sets, the debugging exercise and any entry but `main` under gride-dbg, the benchmarks, the Setup test, GRIDE 2.0 and 1.0, and GRIDEd's Debug configuration, which builds the same libraries.
 
-**What the runtimes review found, put right (2026-11-05).** Fable 5.1's review (`runtimes critical review - Fable 5.1.md`,
+**What the runtimes review found, put right (2026-11-05).** Fable 5.1's review (`docs\reviews\runtimes critical review - Fable 5.1.md`,
 at b97ce82 and again at 1.62) read the six libraries as cpp11's clients and tested them from a clean clone. Each finding
 is one change here; the review's probe programs show each before and after.
 - **The `atexit` list grows** (RTS6x's `exit\Termination`). It was an array of 64 entries (4,096 on Windows) and `add`
@@ -1220,6 +1300,120 @@ is one change here; the review's probe programs show each before and after.
   subsection in 40 of 40 members, `msvc\shmrtd.lib` in 41 of 41, `shmrt6xd.lib` DWARF in 39 of 40 (`shm_c_system` is
   empty there). Not rebuilt: the solution's Debug configuration, which builds the same libraries from the same
   project files. cpp11's `Version.h` stays 1.62 for its lane's next release.
+
+**A case that ends in a fault (2026-11-05).** `conformance.ps1` said "grt timeout, msvc pass" for `op11_recursion_tail` at both levels during the UTF-8 work. That was read as a failure and put down to the stack. It was neither.
+- **The overflow is the expected end.** `cases.tsv` records the exit code -1073741571 (0xC00000FD) and the case's `.expected` is empty, both frozen from cl at 1.30, and cl 14.52.36725 with the suite's flags still ends that way. "pass" in `baseline.tsv` means that end, so `/STACK:8388608` is no fix: the program then exits 0 and prints four lines, which the suite calls "differs". `down(100000)` cannot fit in 1 MB while it recurses: the least x64 frame is 16 bytes, which is 1.6 MB, and cpp11 writes 64 at -O0 and 80 at -O2.
+- **No change caused it.** The program ended the same way throughout. The verdict turned on whether Windows Error Reporting had done with it inside the harness's 20 seconds. The Application log holds 34 reports on this case, each timed from its fault event (1000) to its report event (1001): 3.6 to 13.6 s on 11-04, then 37.4, 25.0 and 33.0 s at 12:39, 12:40 and 12:44 on 11-05, and 4.7 s at 12:54 on the same tools. `ex18_terminate_on_uncaught_exit_code`, the suite's other case that ends in a fault, took 38.2 s at 12:48. The 154 faults the log held took 3.3 to 38.2 s. Why the time swings was not traced.
+- **The time is Windows Error Reporting's, not grt's.** The same programs, started with `SEM_NOGPFAULTERRORBOX` in the error mode they inherit, stay off that path and give the same exit codes:
+
+| Program | Reported | Not reported | Exit code |
+|---|---|---|---|
+| `op11_recursion_tail`, cpp11 on grt | 4.6 to 36.5 s | 14 to 48 ms | 0xC00000FD |
+| the same objects on Microsoft's CRT | 5.3 to 7.6 s | 25 to 40 ms | 0xC00000FD |
+| the same source by cl, `/EHsc /O2 /MT /permissive-` | 3.9 to 7.1 s | 15 to 21 ms | 0xC00000FD |
+| a write through a null pointer, cpp11 on grt | 6.4 to 39.1 s | 13 to 22 ms | 0xC0000005 |
+| `ex18_terminate_on_uncaught_exit_code`, cpp11 on grt | 3.6 to 3.9 s | 115 ms | 0xC0000409 |
+
+- `WerFault.exe` ran in every reported row, and among the others only for the fail-fast, briefly. Stack depth has no part in it: the shallow fault took the longest. All that grt does at a fault is inside the third column, since `__grt_unhandled` passes anything but a C++ exception to Windows' own filter.
+- **The change.** `conformance.ps1` sets that mode in each shard (`SetErrorMode(0x8003)`), for its own programs: no setting of the machine changes, and `cases.tsv` and `baseline.tsv` stay as they are. A second try, as `run-conformance.ps1` gives a timeout, would not cure it, since a run alone took 36.5 s, and a longer limit would only wait for the report.
+- **Checked.** The whole suite twice on the changed harness, with no report from any of its programs. The second run gives 1,039 of 1,040 at each level, and the one that differs from Microsoft's is `cmath_c99_names`, as before. Both cases that end in a fault pass at both levels. The first run also said `lex06_pp_cplusplus` differs at -O0: its output was right and `$p.ExitCode` came back empty, for a program that exits normally. The cause was not found. The case passed alone and in the second run, and its program, started the harness's way in six shards, gave an exit code 3,600 times of 3,600, half with this mode and half without.
+- **Left.** `run-conformance.ps1`, cpp11's gate, still waits for the report, with its second try. And the case tests less than its comment says: `down` is its first call, so `isEven`, `withDtor` and `fibPair` run on none of the three, and changing that means changing the frozen suite.
+
+**An optimiser for c90's C6000 code: the scoping (2026-11-10).** The runtimes review's first finding left c90 writing
+`-O0`'s code at `-O2` for tms6747; since 84d8621 it says so (`Driver.cpp`: "-O2 is not yet written for tms6747").
+Whether cpp11's C6000 work can serve it:
+- **What cpp11 has is two things.** Its tms6747 backend (`backend\Tms6747.cpp`) plans registers before it writes:
+  parameters, locals and the globals a function uses kept in registers, a frame only where one is needed, slots
+  addressed `*-A15(n)`. Then `c6xSchedule(text, level)` (`optimizer\C6xSched.cpp`, `C6xPipe.cpp`, `C6xModel.h`,
+  4,567 lines) takes one function's `-O0`-shaped text - serial, every latency padded with NOPs - and packs it:
+  the NOPs removed, instructions in parallel to the hazards that remain, loops software-pipelined. The scheduler
+  is a text-to-text pass with no tie to cpp11's IR: it includes only the C++ library and its own model.
+- **c90's tms6747 text has the shape it takes.** c90 and cpp11 share the backend's lineage: the same prologue
+  (`STW A15, *B15`, `MV B15, A15`), the same labels (`L$f$begin0`, `L$return$f`), the same serial, padded code
+  around `.c6xabi.exidx`. c90 differs in reaching a slot through `MVKL`/`MVKH`/`SUB` where cpp11 writes
+  `*-A15(n)`, and in a comparison's `CMPEQ`/`XOR` pair.
+- **Measured** (the demo's `sieve.c`, c90 `-O0`, each function from its label to its `.c6xabi.exidx` passed through
+  `c6xSchedule(text, 2)` by a 33-line driver built against cpp11's three files, then asm6x, lnk6x with `rts6x.lib`
+  and `sim6747 --run -c`): the same output, **21,879 cycles against 48,731** (2.2 times faster, 762 lines to 345);
+  cpp11 `-O2` on the same source as C++ takes 12,445.
+- **So the work is two stages.** **A**: c90's tms6747 backend calls `c6xSchedule` per function at `-O1` and above,
+  the three files compiled into c90 from cpp11's folder (one source, as `catalogue.json` is one), and the warning
+  goes. Its gate: every c90-compiled program GRIDE3 runs on the C6747 (the demo, RTS6x's C tests, Shalimar's
+  access tests over `shmrt6x`) at `-O0` and `-O2` under sim6747 giving the same output, and the scheduler's own
+  self-checks (`CPP11_C6XLIVECHECK`) quiet on c90's text; the risks are idioms c90 writes and cpp11 does not, which
+  the scheduler was never shown. **B**: c90's backend addresses slots `*-A15(n)` and plans registers as cpp11's
+  does - the larger part of the remaining 1.8 times, and a port of `Tms6747.cpp`'s planner rather than a reuse.
+- **Decided** (the user, 2026-11-10): A now; B stays scoped.
+- **Stage A, done (2026-11-10).** c90's `Tms6747::emitFunction` hands each function's code, prologue to return,
+  to `c6xSchedule` at `-O1` and above; `C6xSched.cpp` and `C6xPipe.cpp` are compiled into c90 from cpp11's folder
+  (`cc1.vcxproj`), one source for both. The warning is gone. c90's types do not keep `volatile`, so the parser
+  marks a function from its tokens (`Parser::collectVolatileNames`): one whose body writes `volatile`, or names
+  anything a declaration with `volatile` gives - its own names, every name in the braces it opens and the
+  declarator after them (`typedef volatile struct { unsigned ctl; } Regs;`) - is left as `-O0` wrote it. It says
+  too much rather than too little. The gate: the repository's 12 C programs that run on the C6747 (the demo's
+  sieve, `examples\programs`, the c-bank, c-demo, c-example, c-stats, CCS Hello and showcase projects, grt's
+  sort and divide probes) print the same at `-O0` and `-O2` under sim6747, with `CPP11_C6XLIVECHECK` quiet.
+  sieve takes 21,469 cycles (48,731 at `-O0`) and sort 3.46 G (7.71 G); a program that spends its time in printf
+  gains little, `rts6x.lib` being cpp11's and optimised already. `-O0`'s text is unchanged. c90's `tiExternals`
+  then learnt to read the scheduler's `||` lines, which it had taken for labels (a symbol first named in a packet got
+  no `.ref`), as cpp11's copy reads them.
+
+**The runtimes review's open items, and its probes kept (2026-11-10, branch `gride/runtimes-review-2`).** What the
+entry of 2026-11-05 left, each its own commit:
+- **The review itself** is in the repository now: `docs\reviews\` holds it, cpp11's 1.25 review and 1.30 verification,
+  and the design's draft 0.5, with a README. The branch carries cpp11 1.63 (the user's Sample14A and the cppparse
+  example, released on `GIT Test`'s main as 414363d), merged in first.
+- **cpp11's out-parameter warning**: "'x' is read here and nothing has been assigned to it" counts a local bound to
+  a non-const reference as assigned by the call, so the five RTS6x files compile silently (`diagnostics\dg09`).
+- **Release CodeView** (9.3): cpp11 and c90 write the same instructions with `-g` as without - cpp11 walks a call
+  in place under `-g`, and what `-g` alone writes reaches its optimizer as events marked debug, which make no block
+  and stop no pass; c90 no longer flushes its optimizer at every line it marks, and carries a line on the
+  instruction after it. grt's Release set and `shmrt.lib` take `-g`: every member is the earlier build's outside
+  `.debug$S` and `.debug$T`. `rts6x.lib` stays without DWARF: `-g` with `-O` is still refused for tms6747.
+- **`.CRT$XP*` and `.CRT$XT*`** struck from section 7's step 7, nothing writing them; **printf6x** recorded in 5.3 as
+  CCS's name over rts6x's own members.
+- **c90's C6000 code is optimised**, stage A of the scoping above: cpp11's scheduler, one source for both compilers.
+- **Microsoft's and POSIX's names** (9.4, the policy the user decided): four batches on both runtimes - the strings
+  (`_strdup` .. `_vsnprintf`), the heap (`<malloc.h>`: `_msize`, `_aligned_malloc`, `_aligned_free`), the process
+  (`<process.h>`'s `_getpid`, `_putenv`) and the descriptors (`_open` .. `_fstat`, `_fdopen`), each with its old
+  spelling: grtcompat's on Windows, RTS6x's `src\oldnames` on the C6747, `oldnames.lib` on every link line for
+  Microsoft's runtime. The C6747's descriptors may share a host descriptor (`_dup`). The catalogue has 359 entries,
+  348 names done for x86_64-windows and 219 for tms6747. Found on the way and put right: GRIDE's librarian took
+  `HeapSize` in a .def for the `HEAPSIZE` statement (statements are case-sensitive); c90 and cpp11 could not name
+  `dup` under `-masm=masm` beside a zero fill (the word is given up, the fills written out), and c90 defined such a
+  word as `$name` where cpp11 kept it; RTS6x's own POSIX `close` (`stdio\close.cpp`), which grtc compiled too and no
+  entry named, gives way to the old name over `_close`. Each name was probed on the UCRT first:
+  `tests\msnames\` holds the transcripts, which grt and the C6747 give back.
+- **The review's probes are tests**: `tests\review\review.ps1` (Windows: 5,000 atexit registrations, 65 statics, a
+  trivially made static's destructor, ftell after ungetc at 0, longjmp out of a SIGSEGV handler in C++ against the
+  UCRT; fopen's invalid modes on GRIDE's runtimes alone, where the UCRT ends the program; the Debug heap's 100 x 10 MB)
+  and RTS6x's first test folder, `toolchain\TI\RTS6x\tests` (`c6747.ps1` over sim6747, the same sources where they
+  run there, with `deep(200)` on the 1 MB stack and `map<string, int>::operator[]`; `completeness.ps1`, the
+  catalogue's tms6747 names linked). They found the review's findings 11 and 12 still in RTS6x, which grt does not
+  use for them: ftell after ungetc at the start answered -1, and fopen took "r+b+"; both put right.
+- **Recorded, not changed**: once a byte pushed back at the start of a file is read again, the UCRT calls the position
+  1 and both of GRIDE's runtimes 0 (the next byte puts all at 1); `_msize` answers a block's usable size (9.4).
+- **`alloca` and `_alloca`** (9.4), split out and done after (branch `gride/alloca-intrinsic`): cpp11 and c90 lower
+  them on x86_64-windows and tms6747, and `<malloc.h>` declares them. `tests\msnames\msalloca` is the same as the
+  UCRT's transcript on grt at -O2, -O1, -O0 and over the debug libraries, from both compilers, and on the C6747 at
+  -O0, -O1 and -O2 and over rts6xd (RTS6x's `tests.list`); grt's and RTS6x's libraries are the earlier build's byte
+  for byte; cpp11's conformance suite without a regression.
+- **Left**: Release DWARF for the C6747 (the scheduler's
+  source positions). c90's stage B (registers planned as cpp11 plans them). c90's version, still 1.3 with an
+  optimiser it did not have. cpp11's `tiExternals` still declares a unit name (`.ref .S2`), which asm6x accepts.
+- **The checks** (cpp11 1.64, GRIDEd's Release and Debug configurations both built): the Release libraries of the
+  two configurations are the same outside `.debug$S` and `.debug$T` (grtc 278, grtcxx 21 and shmrt 39 members;
+  their CodeView names each configuration's own include folder, as the Debug variants' always has), the rest byte for
+  byte. The UCRT probes (`names`, `exitnow`, `quickexit`, `divide`, `rethrow`, `perthread`, `printf`, `sort`,
+  `strings`, `wide`, the five `signals` ones) at -O2, -O0 and on the debug libraries the same as their transcripts,
+  `exitnow` on the debug libraries on Microsoft's run alone excepted, as recorded; completeness 348 of 348 and 4 of 4;
+  `threads.ps1` 30 of 30; `debug.ps1`; `start.ps1` 36 of 36; `math99.ps1` every line at both levels; `utf8.ps1` with
+  and without the debug libraries; `access.ps1` 76 of 76 over the release and the debug runtimes; `review.ps1` 30 of
+  30; RTS6x's `c6747.ps1` 22 of 22 and 11 of 11 over rts6xd, its completeness 219 of 219; the toolchain demo on both
+  configurations; cpp11's conformance suite, 1,093 of 1,093 valid cases at -O0 and -O2 and 889 of 889 ill-formed
+  ones refused, no regression against 1.63's baseline, and 9 of 9 diagnostics cases. **Not completed on this machine**: `filing.ps1`, whose clean-up between sections finds `bin2`
+  (where `system()` has just run a copied `cmd.exe`) held by another process, with the libraries from before these
+  changes as well; and `ctrlc.cpp`, whose hidden console receives no Ctrl+C here on Microsoft's runtime either.
 
 ---
 

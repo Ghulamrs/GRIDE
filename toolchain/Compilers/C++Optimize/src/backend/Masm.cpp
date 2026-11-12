@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -86,7 +87,7 @@ bool writtenAsKeyword(const std::string &lower) {
         "r8","r9","r10","r11","r12","r13","r14","r15",
         "cs","ds","es","fs","gs","ss","flat","rip",
         "byte","word","dword","qword","tbyte","oword","ptr","offset",
-        "proc","endp","segment","ends","public","extern","externdef","end","align","dup",
+        "proc","endp","segment","ends","public","extern","externdef","end","align",
         "label","db","dw","dd","dq","dt",
         "add","and","call","cdq","cmp","cqo","dec","imul","inc","ja","jae","jb","jbe","je",
         "jg","jge","jl","jle","jmp","jne","jno","jnp","jns","jnz","jo","jp","js","jz","lea",
@@ -921,7 +922,48 @@ void MasmSpelling::predefine(const std::vector<std::string> &names) {
 // **`div` named a symbol is no instruction in this file** (1.30): NOKEYWORD gives the word up for the
 // whole file, so every `div reg` and `idiv reg` the code generator wrote becomes its bytes - F7 /6 and
 // F7 /7 on the register, REX.W for a 64-bit one and REX.B for r8-r15 - and keeps the text as a comment.
+// **`dup` named a symbol** (2026-11-10, Microsoft's names - `dup` is POSIX's for _dup): NOKEYWORD gives the word up
+// for the file, as it gives `div` up, so a zero fill this spelling wrote as `DB n DUP (0)` - or `(?)` in .DATA? - is
+// written out instead, 32 bytes to a line. Only a file that names dup pays for it.
+static void expandDupFills(std::vector<std::string> &chunks, const std::set<std::string> &unreserved)
+{
+    bool given = false;
+    for (const std::string &u : unreserved) {
+        std::string lower;
+        for (char c : u) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (lower == "dup") given = true;
+    }
+    if (!given) return;
+    for (std::string &text : chunks) {
+        std::string out;
+        std::size_t at = 0;
+        while (at < text.size()) {
+            std::size_t nl = text.find('\n', at);
+            const std::size_t end = nl == std::string::npos ? text.size() : nl + 1;
+            const std::string line = text.substr(at, end - at);
+            at = end;
+            const std::size_t d = line.find(" DUP (");
+            const std::size_t db = d == std::string::npos ? std::string::npos : line.rfind("DB ", d);
+            if (db == std::string::npos) { out += line; continue; }
+            const std::string head = line.substr(0, db);
+            long long n = std::atoll(line.substr(db + 3, d - db - 3).c_str());
+            const char *fill = line.compare(d + 6, 1, "?") == 0 ? "?" : "0";
+            bool first = true;
+            while (n > 0) {
+                const long long k = n > 32 ? 32 : n;
+                out += first ? head : std::string("  ");
+                out += "DB ";
+                for (long long i = 0; i < k; i++) { if (i != 0) out += ','; out += fill; }
+                out += '\n';
+                n -= k;
+                first = false;
+            }
+        }
+        text.swap(out);
+    }
+}
 void MasmSpelling::finishText(std::vector<std::string> &chunks) {
+    expandDupFills(chunks, unreserved_);
     bool given[2] = { false, false };
     for (const std::string &u : unreserved_) {
         const std::string lower = lowered(u);

@@ -926,7 +926,36 @@ void X86_64Linux::visit(const Binary &n) {
     a_->ins("movzbq", reg("%al"), reg("%rax"));
 }
 
+// **`_alloca(n)`, lowered where it stands** (docs\Runtime_Design.md 9.4). The frame is addressed from rbp and the
+// epilogue takes rsp back from rbp, so the function's own slots do not move; what is addressed from rsp is what this
+// function has pushed below its frame - an expression's values in progress, a call's arguments, padding and shadow
+// space - every word of it counted by depth_. rsp moves down by n rounded to 16 (depth_'s parity, which the calls'
+// alignment is taken from, stays), the pushed words are copied down with it, and the block is the n bytes above them,
+// its top where the frame's floor is. Where frames are probed, the pages are probed first through __chkstk (rax the
+// size; only r10, r11 and the flags change), asked for a page more than the block: grt's and the UCRT's touch a page
+// at a time and stop short of a last part-page, which a frame leaves to its next call's push but a run of small
+// blocks nothing touches would not. So the lowest page touched is below the new rsp, as a frame's next push would be.
+void X86_64Linux::genAlloca(const Call &n) {
+    n.args()[0]->accept(*this);
+    a_->ins("add", imm(15), reg("%rax"));
+    a_->ins("and", imm(-16), reg("%rax"));
+    if (probesStack()) {
+        a_->ins("add", imm(4096), reg("%rax"));
+        a_->ins("call", lbl("__chkstk"));
+        a_->ins("sub", imm(4096), reg("%rax"));
+    }
+    const int pushed = 8 * depth_;
+    if (pushed > 0) a_->ins("mov", reg("%rsp"), reg("%rcx"));
+    a_->ins("sub", reg("%rax"), reg("%rsp"));
+    for (int k = 0; k < pushed; k += 8) {
+        a_->ins("mov", mem(k, "%rcx"), reg("%rdx"));
+        a_->ins("mov", reg("%rdx"), mem(k, "%rsp"));
+    }
+    a_->ins("lea", mem(pushed, "%rsp"), reg("%rax"));
+}
+
 void X86_64Linux::visit(const Call &n) {
+    if (n.isAlloca()) { genAlloca(n); return; }
     std::vector<std::vector<bool> > isSse;
     std::vector<std::vector<int> > slot;
     std::vector<bool> onStack;

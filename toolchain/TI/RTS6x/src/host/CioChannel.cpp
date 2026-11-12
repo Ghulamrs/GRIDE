@@ -2,6 +2,7 @@
 // answer's first parameter the count written, 0xFFFF for a refusal (sim6747 src/C6xHost.cpp).
 
 #include "CioChannel.h"
+#include "DescriptorModes.h"
 
 namespace rts6x {
 
@@ -37,7 +38,7 @@ int CioChannel::write(int fd, const char *bytes, unsigned count)
     while (done < count) {
         unsigned chunk = count - done < DataCapacity ? count - done : (unsigned)DataCapacity;
         unsigned char params[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-        put16(params, (unsigned)fd);
+        put16(params, (unsigned)DescriptorModes::host(fd));
         put16(params + 2, chunk);
         request(Write, params, bytes + done, chunk);
         unsigned wrote = get16(_CIOBUF_ + 4);

@@ -46,3 +46,32 @@ Not copied: the tool trees' tests\, docs\, examples\, demo\, review probes, orac
 (release seals), Makefiles, CMakeLists, .xcodeproj / .xcworkspace, the tools' own .sln and build-vs.cmd /
 check-vs.cmd / generate.py, RTS6x's build.cmd (its steps are Toolchain.targets now), README / CLAUDE.md of the
 tool repositories, .git*, and every build output (build\, x64\, obj\).
+
+## Versions (2026-11-12)
+
+Every program answers `--version` in one shape: its name, its number and what it is in four words on the first line,
+the copyright on the second (cpp11 adds its seal date and build time). Every runtime library holds a line of the same
+shape, which nothing in a program names. Help > About of the three editors (`common\AboutBox.h`) shows these lines as
+they are answered, so the words are written once, in the tool.
+
+| component | number | where the number is written | the line |
+|---|---|---|---|
+| cpp11 | 1.66 | Compilers\C++Optimize\src\Version.h | `cpp11 1.66 - C++03 with C++11 extensions` |
+| c90 | 1.3 | Compilers\Compiler-Ci\src\Driver.cpp, `cc1Version` | `c90 1.3 - ISO C 90 compiler` |
+| shalimar, shmrt | 1.3 | Compilers\Compiler-Si\runtime\ShalimarVersion.h | `shalimar 1.3 - the Shalimar language compiler`, `shmrt 1.3 - the Shalimar run-time library` (Runtime.cpp, `shm_runtime_version`) |
+| c2s | 1.2 | Compilers\Converter-C2S\src\main.cpp | `c2s 1.2 - C and Shalimar converter` |
+| masm | 1.0 | Windows\MASM\src\main.cpp, `MASM_VERSION` | `masm 1.0 - x64 assembler, MASM syntax` |
+| link | 1.0 | Windows\LINK\src\main.cpp, `LINK_VERSION` | `link 1.0 - x64 linker and librarian` |
+| gride-dbg | 1.1 | Windows\DBG\src\main.cpp, `GRIDE_DBG_VERSION` | `gride-dbg 1.1 - GRIDE's Windows x64 debugger` |
+| grt | 1.0 | Windows\RT\c\version.cpp, `__grt_version` (in grtc.lib, grtcd.lib) | `grt 1.0 - GRIDE's Windows x64 run-time` |
+| asm6x | 1.4 | TI\ASM6x\src\main.cpp | `asm6x 1.4 - TMS320C6000 assembler, TI ELF` |
+| lnk6x | 1.2 | TI\LNK6x\src\main.cpp | `lnk6x 1.2 - TMS320C6000 linker, TI ELF` |
+| sim6747 | 1.3 | TI\SIM6747\src\main.cpp | `sim6747 1.3 - TMS320C6747 simulator, runs .out` |
+| vm6747 | 1.1 | TI\VM6747\src\main.cpp | `vm6747 1.1 - TMS320C6000 emulator, runs assembly` |
+| RTS6x, printf6x | 1.2 | TI\RTS6x\src\boot\version.s, `__rts6x_version` and `__printf6x_version` (a member of both libraries) | `RTS6x 1.2 - TMS320C6747 run-time support library`, `printf6x 1.2 - RTS6x's formatted output library` |
+| ar6x (a build tool, not installed) | 1.0 | TI\RTS6x\tools\ar6x\ar6x.cpp | `ar6x 1.0 - TMS320C6000 archiver, TI libraries` |
+
+How a number is given: a part built from another's sources is numbered with it and moves with it - shmrt with
+shalimar, printf6x with RTS6x - and a part with a source tree of its own has a number of its own. masm, link and grt
+came without one (masm, link and the Shalimar runtime were copied in on 2026-10-16 with no `--version`; grt was
+written here from 2026-10-23) and start at 1.0. The banner a compiler prints before a compile is unchanged.

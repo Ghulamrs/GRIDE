@@ -1,0 +1,15 @@
+# RTS6x tests on the C6747 (c6747.ps1): sources from the repository root, each with a .c6747.expected or .expected
+toolchain/Windows/RT/tests/msnames/msstrings.c
+toolchain/Windows/RT/tests/msnames/msheap.c
+toolchain/Windows/RT/tests/msnames/msprocess.c
+toolchain/Windows/RT/tests/msnames/msfiles.c
+toolchain/Windows/RT/tests/msnames/msalloca.c
+toolchain/Windows/RT/tests/msnames/msalloca.cpp
+toolchain/Windows/RT/tests/review/atexitcap.c
+toolchain/Windows/RT/tests/review/statics65.cpp
+toolchain/Windows/RT/tests/review/trivdtor.cpp
+toolchain/Windows/RT/tests/review/ungetcftell.c
+toolchain/Windows/RT/tests/review/fopenmodes.c
+toolchain/TI/RTS6x/tests/review/deep200.c
+toolchain/TI/RTS6x/tests/review/mapstring.cpp
+toolchain/Compilers/C++Optimize/tests/conformance/pos/p167/p167/wl04_an_int_made_double_after_a_byte_is_loaded.cpp

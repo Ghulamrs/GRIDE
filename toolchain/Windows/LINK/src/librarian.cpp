@@ -282,7 +282,9 @@ bool read_def(const std::string &path, std::string &dll, std::vector<Export> &ex
             i = j;
         }
         if (w.empty()) continue;
-        std::string key = upper(w[0]);
+        // Statements are case-sensitive, as Microsoft's module-definition rules have them: `HeapSize`, the export
+        // grt's _msize asks for, is a name and not HEAPSIZE (2026-11-10).
+        const std::string key = w[0];
         if (key == "LIBRARY" || key == "NAME") {
             in_exports = false;
             if (w.size() > 1) dll = w[1];

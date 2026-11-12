@@ -17,6 +17,7 @@
 #include "../Build/ProgramRunner.h"
 #include "DebugPanes.h"
 #include "HelpFiles.h"
+#include "../../../common/AboutBox.h"
 
 using namespace System::Collections::Concurrent;
 using System::Threading::CancellationTokenSource;
@@ -3175,52 +3176,39 @@ namespace Gride
                 "Middle-click a tab to close it. Double-click an error to jump to it.");
         }
 
+        // The box the three outlooks share (common/AboutBox.h): the compilers, the other tools, the runtime group, the editors. Nothing
+        // of the toolchain is written here: every program is asked for its version as the box opens, and every
+        // runtime library read for its own.
         void OnAbout(Object^ sender, EventArgs^ e)
         {
-            // cpp11 is asked for its version when the box opens, as White's About asks it: a number written
-            // here would be a second copy, and the stale one
-            ToolDefinition^ cpp11 = settings->GetTool(ToolIds::CompilerCpp11);
-            String^ exe = cpp11 == nullptr ? nullptr : cpp11->ResolvedPath();
-            String^ said = AskVersion(exe);
-            if (said->Length == 0) said = exe == nullptr ? "not found (Tools > Options > Toolchains)" : "no answer from " + exe;
-            Ui::Info(this, String::Format(
-                "{0}  (version {1})\n\n"
-                "A 3-language, 4-target integrated development environment.\n\n"
-                "Languages:  C90 / C++11 / Shalimar\n"
-                "cpp11:  {2}\n"
-                "Targets:  Windows (MASM/LINK) / Linux / macOS / TMS320C6747\n"
-                "Debuggers:  gride-dbg / sim6747 / vm6747\n"
-                "Opens:  CCS 7.4 / 5.5 projects, Visual Studio solutions (read-only)\n\n"
-                ".NET Framework 4.8", AppInfo::Name, AppInfo::Version, said));
+            GrideAbout::AboutInfo^ info = gcnew GrideAbout::AboutInfo();
+            info->Outlook = "Grey";
+            info->Find = gcnew GrideAbout::ProgramFinder(this, &MainForm::FindProgram);
+            info->Icon = this->Icon;
+            // the box's colours are this outlook's own: its window's grey, and the blue of the strip above its panes
+            info->Back = this->BackColor;
+            info->Fore = this->ForeColor;
+            info->Accent = Color::FromArgb(0, 122, 204);
+            info->AccentFore = Color::White;
+            GrideAbout::AboutBox::Open(this, info);
         }
 
-        // the program's own words for `--version`: its banner without the copyright, then the version line cpp11
-        // writes beneath it ("C++03 with C++11 extensions, Version 1.30, sealed 23-10-2026"); empty when it cannot run
-        static String^ AskVersion(String^ exe)
+        // the program a build would run under that file name: the tool Tools > Options > Toolchains binds to it,
+        // found as a build finds it; nullptr for a name no tool has, or a tool that is nowhere
+        String^ FindProgram(String^ fileName)
         {
-            if (String::IsNullOrEmpty(exe) || !File::Exists(exe)) return String::Empty;
-            try
+            array<String^>^ bound = gcnew array<String^>{
+                "c90.exe", ToolIds::CompilerC90, "cpp11.exe", ToolIds::CompilerCpp11, "shalimar.exe", ToolIds::CompilerShalimar,
+                "c2s.exe", ToolIds::ConvertCToShalimar, "masm.exe", ToolIds::WinAssembler, "link.exe", ToolIds::WinLinker,
+                "gride-dbg.exe", ToolIds::WinOwnDebugger, "asm6x.exe", ToolIds::TmsAssembler, "lnk6x.exe", ToolIds::TmsLinker,
+                "sim6747.exe", ToolIds::TmsSim, "vm6747.exe", ToolIds::TmsSimulator };
+            for (int i = 0; i + 1 < bound->Length; i += 2)
             {
-                System::Diagnostics::ProcessStartInfo^ si = gcnew System::Diagnostics::ProcessStartInfo(exe, "--version");
-                si->UseShellExecute = false; si->CreateNoWindow = true; si->RedirectStandardOutput = true; si->RedirectStandardInput = true;
-                si->StandardOutputEncoding = System::Text::Encoding::UTF8;
-                System::Diagnostics::Process^ p = System::Diagnostics::Process::Start(si);
-                p->StandardInput->Close();
-                String^ out = p->StandardOutput->ReadToEnd();
-                if (!p->WaitForExit(5000)) { try { p->Kill(); } catch (Exception^) { } return String::Empty; }
-                String^ banner = String::Empty;
-                String^ version = String::Empty;
-                for each (String^ raw in out->Split(gcnew array<wchar_t>{ L'\r', L'\n' }, StringSplitOptions::RemoveEmptyEntries))
-                {
-                    String^ line = raw->Trim();
-                    if (banner->Length == 0) banner = line;
-                    else if (version->Length == 0 && line->StartsWith("Version ")) version = line;
-                }
-                int owner = banner->IndexOf(" - ");
-                if (banner->Length > 0 && banner[0] == L'©' && owner > 0) banner = banner->Substring(owner + 3);
-                return version->Length == 0 ? banner : banner + ", " + version;
+                if (String::Compare(bound[i], fileName, StringComparison::OrdinalIgnoreCase) != 0) continue;
+                ToolDefinition^ t = settings->GetTool(bound[i + 1]);
+                return t == nullptr ? nullptr : t->ResolvedPath();
             }
-            catch (Exception^) { return String::Empty; }
+            return nullptr;
         }
 
         // ============================================================ drag & drop, closing

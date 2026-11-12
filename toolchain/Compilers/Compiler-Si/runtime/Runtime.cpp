@@ -7,6 +7,13 @@
 
 #include <cstdio>
 
+#include "ShalimarVersion.h"
+
+// The runtime's own name and number, in every library built from this file - shmrt[d].lib over grt and over
+// Microsoft's, shmrt6x[d].lib - in the shape the toolchain's programs answer --version in, so that an IDE's About
+// reads it out of the library (2026-11-12). shalimar's number: the compiler and its runtime are one release.
+extern "C" const char shm_runtime_version[] = "shmrt " SHALIMAR_VERSION " - the Shalimar run-time library";
+
 namespace shm {
 namespace {
 

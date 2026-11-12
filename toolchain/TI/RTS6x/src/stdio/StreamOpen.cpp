@@ -6,6 +6,7 @@
 #include <errno.h>
 #include "Stream.h"
 #include "../host/CioChannel.h"
+#include "../host/DescriptorModes.h"
 #include "../misc/ErrorNumber.h"
 #include "../exit/Termination.h"
 
@@ -26,9 +27,11 @@ bool Stream::parseMode(const char *mode, unsigned &host, unsigned &own)
 {
     bool update = false, binary = false;
     if (!mode[0]) return false;
+    // As the Microsoft runtime reads a mode, and grt (the runtimes review's finding 12): one + and one b, or the mode
+    // is invalid ("r+b+", "rbb").
     for (const char *p = mode + 1; *p; p++) {
-        if (*p == '+') update = true;
-        else if (*p == 'b') binary = true;
+        if (*p == '+') { if (update) return false; update = true; }
+        else if (*p == 'b') { if (binary) return false; binary = true; }
         else return false;
     }
     switch (mode[0]) {
@@ -64,6 +67,30 @@ FILE *Stream::open(const char *path, const char *mode, FILE *slot)
     slot->fd = fd;
     slot->buf = slot->pos = slot->bufend = slot->buff_stop = 0;
     slot->flags = Open | own | (host & CioChannel::Binary ? Binary : 0);
+    Stream(slot).forgetFill();
+    Termination::closeStreamsWith(closeAll);
+    return slot;
+}
+
+FILE *Stream::adopt(int fd, const char *mode)
+{
+    unsigned host, own;
+    if (mode == 0 || !parseMode(mode, host, own)) {
+        ErrorNumber::set(EINVAL);
+        return 0;
+    }
+    int m = DescriptorModes::modeOf(fd);
+    if (m == 0) {
+        ErrorNumber::set(EBADF);
+        return 0;
+    }
+    FILE *slot = 0;
+    for (int i = FirstFree; !slot && i < RTS6X_FTABLE_COUNT; i++)
+        if (!(_ftable[i].flags & Open)) slot = &_ftable[i];
+    if (!slot) return 0;
+    slot->fd = fd;
+    slot->buf = slot->pos = slot->bufend = slot->buff_stop = 0;
+    slot->flags = Open | own | (m == DescriptorModes::Binary ? Binary : 0);
     Stream(slot).forgetFill();
     Termination::closeStreamsWith(closeAll);
     return slot;

@@ -183,6 +183,45 @@ static void grt_clear(struct _stat64i32 *s)
     s->st_atime = s->st_mtime = s->st_ctime = 0;
 }
 
+HANDLE __grt_handle(int fd);
+
+/* Spec: Microsoft C runtime, _fstat64i32 (<sys/stat.h>'s _fstat and fstat) - an open descriptor's kind, size and
+   times: a disk file's as grt_by_handle reads them, its mode _S_IFREG with read, and write unless read-only, for all
+   three, st_dev and st_rdev 0; a character device _S_IFCHR and a pipe _S_IFIFO, st_dev and st_rdev the descriptor.
+   0, or -1 with errno EBADF and the struct zeroed. A null struct fails fast. */
+int _fstat64i32(int fd, struct _stat64i32 *buf)
+{
+    GRT_FILE_INFORMATION i;
+    DWORD type, waiting;
+    HANDLE h;
+    if (!buf) __grt_fail_fast();
+    grt_clear(buf);
+    h = __grt_handle(fd);
+    if (!h) return -1;
+    type = GetFileType(h) & ~(DWORD)GRT_FILE_TYPE_REMOTE;
+    buf->st_nlink = 1;
+    if (type == GRT_FILE_TYPE_CHAR || type == GRT_FILE_TYPE_PIPE) {
+        buf->st_mode = (unsigned short)(type == GRT_FILE_TYPE_CHAR ? S_IFCHR : S_IFIFO);
+        buf->st_dev = buf->st_rdev = (unsigned)fd;
+        if (type == GRT_FILE_TYPE_PIPE && PeekNamedPipe(h, 0, 0, 0, &waiting, 0)) buf->st_size = (long)waiting;
+        return 0;
+    }
+    if (type != GRT_FILE_TYPE_DISK || !GetFileInformationByHandle(h, &i)) {
+        grt_clear(buf);
+        errno = EBADF;
+        return -1;
+    }
+    buf->st_mode = (unsigned short)(S_IFREG | ((i.dwFileAttributes & GRT_FILE_ATTRIBUTE_READONLY) ? S_IREAD : S_IREAD | S_IWRITE));
+    buf->st_mode |= (unsigned short)((buf->st_mode & 0700) >> 3);
+    buf->st_mode |= (unsigned short)((buf->st_mode & 0700) >> 6);
+    buf->st_mtime = grt_stat_time(&i.ftLastWriteTime, 0);
+    buf->st_atime = grt_stat_time(&i.ftLastAccessTime, buf->st_mtime);
+    buf->st_ctime = grt_stat_time(&i.ftCreationTime, buf->st_mtime);
+    if (i.nFileSizeHigh != 0 || i.nFileSizeLow > 2147483647ul) { grt_clear(buf); errno = EOVERFLOW; return -1; }
+    buf->st_size = (long)i.nFileSizeLow;
+    return 0;
+}
+
 int _stat64i32(const char *path, struct _stat64i32 *buf)
 {
     WCHAR *wide;

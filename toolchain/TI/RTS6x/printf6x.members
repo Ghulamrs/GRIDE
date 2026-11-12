@@ -1,3 +1,4 @@
+src/boot/version.s
 src/eh-none/pr3.s
 src/helpers/divi.s
 src/helpers/divu.s

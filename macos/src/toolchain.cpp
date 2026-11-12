@@ -792,7 +792,7 @@ Recipe linkRecipe(const Toolchain& tool, const std::vector<std::string>& objects
                      " /nologo /subsystem:console" +
                      (config == ConfigDebug ? std::string(" /DEBUG") : std::string()) +
                      " /out:" + quote(program) + named + crt +
-                     " kernel32.lib legacy_stdio_definitions.lib";
+                     " kernel32.lib legacy_stdio_definitions.lib oldnames.lib";
 #else
 
     recipe.command = quote(linkerNameFor(false, withCpp)) +

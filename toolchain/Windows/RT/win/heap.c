@@ -119,6 +119,13 @@ void *realloc(void *block, size_t size)
     return q;
 }
 
+/* Microsoft's _msize (docs\Runtime_Design.md 9.4): the size asked for, from the header, as the debug heap answers */
+size_t _msize(void *block)
+{
+    if (!block) __grt_fail_fast();
+    return *(size_t *)grt_heap_base(block);
+}
+
 #else
 
 #define SMALL 4096
@@ -284,6 +291,18 @@ void *realloc(void *block, size_t size)
     for (i = 0; i < (size_t)(classSize[c] >> 3); i++) p[i] = q[i];
     free(block);
     return p;
+}
+
+/* Microsoft's _msize (docs\Runtime_Design.md 9.4): the block's usable size - its class's, or the process heap's
+   HeapSize - at least what was asked for, where the UCRT answers what was asked for: a block carries no header here
+   to say it. A null block fails fast, as the UCRT's invalid parameter does. */
+size_t _msize(void *block)
+{
+    int c;
+    if (!block) __grt_fail_fast();
+    c = grt_heap_class(block);
+    if (c >= 0) return classSize[c];
+    return (size_t)HeapSize(grt_process_heap(), 0, block);
 }
 
 #endif

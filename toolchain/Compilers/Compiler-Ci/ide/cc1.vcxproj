@@ -80,6 +80,9 @@
     <ClCompile Include="..\src\backend\Spelling.cpp" />
     <ClCompile Include="..\src\backend\Tms6747.cpp" />
     <ClCompile Include="..\src\backend\Walker.cpp" />
+    <!-- cpp11's C6000 scheduler, one source for both compilers: c90's tms6747 -O1 and -O2 -->
+    <ClCompile Include="..\..\C++Optimize\src\optimizer\C6xSched.cpp" />
+    <ClCompile Include="..\..\C++Optimize\src\optimizer\C6xPipe.cpp" />
     <ClCompile Include="..\src\backend\X86_64Linux.cpp" />
     <ClCompile Include="..\src\backend\X86_64Windows.cpp" />
   </ItemGroup>

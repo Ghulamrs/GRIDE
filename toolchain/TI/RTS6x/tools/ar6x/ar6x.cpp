@@ -263,7 +263,7 @@ std::vector<std::string> expand(char **first, char **last)
 int main(int argc, char **argv)
 {
     if (argc >= 2 && std::strcmp(argv[1], "--version") == 0) {
-        std::printf("\xc2\xa9" "2026 G. R. Akhtar - ar6x 1.0, a TMS320C6000 archiver\n");
+        std::printf("ar6x 1.0 - TMS320C6000 archiver, TI libraries\n\xc2\xa9" "2026 G. R. Akhtar\n");
         return 0;
     }
     if (argc == 3 && std::strcmp(argv[1], "-t") == 0) return list(argv[2]);

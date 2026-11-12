@@ -47,6 +47,10 @@ namespace Gride
         ErrorParser()
         {
             RegexOptions o = RegexOptions::IgnoreCase | RegexOptions::CultureInvariant;
+            // A line's leading blanks are taken whole - (?>\s*) - and never shared with the file group that follows:
+            // a compiler's caret line is a thousand blanks and a '^' (cpp11 under a long source line), and blanks
+            // two parts of a pattern can both take are tried every way between them, which took LINK's shape
+            // 8 s a line (cubic) and held a build 50 s. The file is trimmed after, so it loses nothing.
             custom = gcnew Dictionary<String^, Regex^>();
             builtIn = gcnew array<Regex^>{
                 // TI asm6x:   "main.asm", ERROR!   at line 5: [E0002] Illegal mnemonic specified
@@ -54,20 +58,20 @@ namespace Gride
                 // TI:   "main.c", line 12: error #20: identifier "x" is undefined
                 gcnew Regex(R"RX(^\s*"(?<file>[^"]+)",\s*line\s+(?<line>\d+)(?:\s*\(col\.\s*(?<col>\d+)\))?\s*:\s*(?<sev>fatal error|error|warning|remark)\s*(?:#(?<code>[\w-]+))?\s*:?\s*(?<msg>.*)$)RX", o),
                 // MSVC / MASM:   C:\src\a.asm(12) : error A2008: syntax error
-                gcnew Regex(R"RX(^\s*(?<file>(?:[A-Za-z]:)?[^:(]+?)\((?<line>\d+)(?:,(?<col>\d+))?\)\s*:\s*(?<sev>fatal error|error|warning)\s*(?<code>[A-Za-z]+\d+)?\s*:\s*(?<msg>.*)$)RX", o),
+                gcnew Regex(R"RX(^(?>\s*)(?<file>(?:[A-Za-z]:)?[^:(]+?)\((?<line>\d+)(?:,(?<col>\d+))?\)\s*:\s*(?<sev>fatal error|error|warning)\s*(?<code>[A-Za-z]+\d+)?\s*:\s*(?<msg>.*)$)RX", o),
                 // GCC / Clang style:   src/a.c:12:5: error: expected ';'
-                gcnew Regex(R"RX(^\s*(?<file>(?:[A-Za-z]:)?[^:]+):(?<line>\d+):(?:(?<col>\d+):)?\s*(?<sev>fatal error|error|warning|note)\s*:\s*(?<msg>.*)$)RX", o),
-                // LINK : fatal error LNK1104: cannot open file 'x.lib'
-                gcnew Regex(R"RX(^\s*(?<file>(?:[A-Za-z]:)?[^:]*?)\s*:\s*(?<sev>fatal error|error|warning)\s+(?<code>[A-Za-z]+\d+)\s*:\s*(?<msg>.*)$)RX", o),
+                gcnew Regex(R"RX(^(?>\s*)(?<file>(?:[A-Za-z]:)?[^:]+):(?<line>\d+):(?:(?<col>\d+):)?\s*(?<sev>fatal error|error|warning|note)\s*:\s*(?<msg>.*)$)RX", o),
+                // LINK : fatal error LNK1104: cannot open file 'x.lib'   (the blanks before the colon go to the file, trimmed after)
+                gcnew Regex(R"RX(^(?>\s*)(?<file>(?:[A-Za-z]:)?[^:]*):\s*(?<sev>fatal error|error|warning)\s+(?<code>[A-Za-z]+\d+)\s*:\s*(?<msg>.*)$)RX", o),
                 // RIDE's masm:   bad.s: line 3: unknown instruction 'BOGUS'
-                gcnew Regex(R"RX(^\s*(?<file>(?:[A-Za-z]:)?[^:]+\.(?:s|asm|S)):\s+line\s+(?<line>\d+):\s*(?<msg>.*)$)RX", RegexOptions::CultureInvariant),
+                gcnew Regex(R"RX(^(?>\s*)(?<file>(?:[A-Za-z]:)?[^:]+\.(?:s|asm|S)):\s+line\s+(?<line>\d+):\s*(?<msg>.*)$)RX", RegexOptions::CultureInvariant),
                 // error: something / warning #10247-D: something
-                gcnew Regex(R"RX(^\s*>*\s*(?<sev>fatal error|error|warning)\s*(?<code>#?[\w-]*)\s*:\s*(?<msg>.*)$)RX", o)
+                gcnew Regex(R"RX(^(?>\s*>*\s*)(?<sev>fatal error|error|warning)\s*(?<code>#?[\w-]*)\s*:\s*(?<msg>.*)$)RX", o)
             };
             shalimar = gcnew Regex(R"RX(^Error: line (?<line>\d+):\s*(?<msg>.*)$)RX", RegexOptions::CultureInvariant);
             // shalimar compiling a program's other files names each one ("shalimar: also compiled linalg.shl"): output too
             banner = gcnew Regex(R"RX(^(c90|cpp11|shalimar|shc|cc1|cxx1): (compilation completed successfully|also compiled ))RX", o);
-            location = gcnew Regex(R"RX(^\s*(?<file>[^:(]*(?::[\\/][^:(]*)?)(?::(?<line>\d+)(?::(?<col>\d+))?:|\((?<line>\d+)(?:,(?<col>\d+))?\)\s*:))RX", RegexOptions::CultureInvariant);
+            location = gcnew Regex(R"RX(^(?>\s*)(?<file>[^:(]*(?::[\\/][^:(]*)?)(?::(?<line>\d+)(?::(?<col>\d+))?:|\((?<line>\d+)(?:,(?<col>\d+))?\)\s*:))RX", RegexOptions::CultureInvariant);
         }
 
         // a compiler announcing itself, naming the other files it compiled, or saying it is done: output, never a message

@@ -123,6 +123,9 @@ public:
     virtual void defLabel(const std::string &l) = 0;
     // **A label where a Microsoft frame's exception state changes.** The runtime reads the state at a return address, so a call must not end exactly on one; the spellings that serve that runtime pad it (cl's npad 1).
     virtual void stateLabel(const std::string &l) { defLabel(l); }
+    // **A lexical block's begin or end under -g**, which debug records name and nothing jumps to; the optimizer holds it
+    // as an event, so that it changes no code.
+    virtual void blockLabel(const std::string &l) { defLabel(l); }
 
     virtual void functionBegin(const std::string &name, bool exported,
                                bool mergeable = false) = 0;

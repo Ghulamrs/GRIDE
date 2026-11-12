@@ -1,0 +1,13 @@
+# The runtimes review's probes that found defects (review.ps1): a kind, then a source in this folder.
+ucrt atexitcap.c
+ucrt statics65.cpp
+ucrt trivdtor.cpp
+ucrt ungetcftell.c
+ucrt sigjmp.cpp
+grt fopenmodes.c
+debug debugheap10mb.c
+# Microsoft's names (docs\Runtime_Design.md 9.4), which the policy of 2026-11-10 brought: the UCRT's transcripts.
+ucrt ../msnames/msstrings.c
+ucrt ../msnames/msheap.c
+ucrt ../msnames/msprocess.c
+ucrt ../msnames/msfiles.c

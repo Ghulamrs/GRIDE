@@ -61,7 +61,7 @@ try {
     if ($ms) {
         $env:LIB = $ms
         Tool link @('/nologo', "/out:$work\$name-msvc.exe", "$work\$name.obj", "libcmt$d.lib", "libucrt$d.lib",
-                    "libvcruntime$d.lib", 'kernel32.lib', 'legacy_stdio_definitions.lib')
+                    "libvcruntime$d.lib", 'kernel32.lib', 'legacy_stdio_definitions.lib', 'oldnames.lib')
     }
 } finally { $env:LIB = $saved }
 

@@ -3,6 +3,7 @@
 // =============================================================================
 #include "../pch.h"
 #include "MainForm.h"
+#include "../../../../common/AboutBox.h"
 
 namespace Gride { namespace UI {
 
@@ -427,25 +428,42 @@ namespace Gride { namespace UI {
             "===============================\r\n\r\n"
             "* Visual Studio's shell and keys, or White's key set (Tools > Options > Environment > Keyboard)\r\n"
             "* Workspaces (.grws) of GRIDE projects (.pro), CCS 7.4 / 5.5 projects and Visual Studio solutions\r\n"
-            "* GRIDE's toolchain beside GRIDE.exe, as toolchain.json defines it: c90, cpp11 1.30, shalimar, c2s,\r\n"
+            "* GRIDE's toolchain beside GRIDE.exe, as toolchain.json defines it: c90, cpp11, shalimar, c2s,\r\n"
             "  masm, link, gride-dbg, asm6x, lnk6x, sim6747, vm6747, with RTS6x, GRIDE's Windows runtime and the\r\n"
-            "  Shalimar runtimes\r\n"
+            "  Shalimar runtimes - Help > About GRIDE asks each for its version\r\n"
             "* GRIDE's debuggers: sim6747 and vm6747 on the C6747, gride-dbg (else cdb) on Windows, a Shalimar program's own session\r\n"
             "* F1: the Help the three outlooks (Black, Grey, White) share\r\n";
         TextDialog^ dlg = gcnew TextDialog("Release Notes", text);
         dlg->ShowDialog(this);
     }
 
+    // The box the three outlooks share (common/AboutBox.h): the compilers, the other tools, the runtime group, the editors. Nothing of
+    // the toolchain is written here: every program is asked for its version as the box opens, and every runtime
+    // library read for its own.
     void MainForm::HelpAbout()
     {
-        // the cpp11 a build would run: the first toolchain that resolves it (every target names the same program)
-        String^ cpp11 = nullptr;
+        GrideAbout::AboutInfo^ info = gcnew GrideAbout::AboutInfo();
+        info->Outlook = "Black";
+        info->Find = gcnew GrideAbout::ProgramFinder(this, &MainForm::FindProgram);
+        info->Icon = IconFactory::AppIcon();
+        // the box's colours are this outlook's own: the theme its windows wear now
+        Gride::UI::Theme^ worn = ThemeManager::Current;
+        info->Back = worn->Panel;
+        info->Fore = worn->Text;
+        info->Accent = worn->Accent;
+        info->AccentFore = worn->AccentText;
+        GrideAbout::AboutBox::Open(this, info);
+    }
+
+    // the program a build would run under that file name: the first toolchain that resolves it (every target names
+    // the same programs), or nullptr
+    String^ MainForm::FindProgram(String^ fileName)
+    {
         for each (ToolchainSettings^ tc in settings->Toolchains)
         {
-            String^ p = tc->Resolve(tc->CompilerCpp11);
-            if (!String::IsNullOrEmpty(p) && File::Exists(p)) { cpp11 = p; break; }
+            String^ p = tc->Resolve(fileName);
+            if (!String::IsNullOrEmpty(p) && File::Exists(p)) return p;
         }
-        AboutDialog^ dlg = gcnew AboutDialog(settings->FilePath, cpp11);
-        dlg->ShowDialog(this);
+        return nullptr;
     }
 }}

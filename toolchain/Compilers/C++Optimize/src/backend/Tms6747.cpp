@@ -439,9 +439,11 @@ void Tms6747::openArea(int area, bool stackArgs) {
     int a = optimize_ > 0 && !stackArgs && pushDepth_ == 0 ? 0 : area;
     areas_.push_back(a);
     spAdjust(-a);
+    stackMoved(a);
 }
 void Tms6747::closeArea() {
     spAdjust(areas_.back());
+    stackMoved(-areas_.back());
     areas_.pop_back();
 }
 
@@ -449,11 +451,13 @@ void Tms6747::closeArea() {
 // callee saves A15 in - free, so a call under it needs no area; a pair fills the slot and counts.
 void Tms6747::push() {
     if (spillPush(false)) return;
+    stackMoved(8);
     out_ << "\tSUB\tB15, 8, B15\n";
     out_ << (optimize_ > 0 ? "\tSTW\tA4, *+B15(4)\n" : "\tSTW\tA4, *B15\n");
 }
 void Tms6747::pop(const char *reg) {
     if (spillPop(false, reg)) return;
+    stackMoved(-8);
     out_ << "\tLDW\t" << (optimize_ > 0 ? "*+B15(4)" : "*B15") << ", " << reg << "\n\tNOP\t4\n";
     out_ << "\tADD\tB15, 8, B15\n";
 }
@@ -610,6 +614,7 @@ void Tms6747::pushValue(const Type *t) {
     if (!isWide(t) && !inPairWide(t)) { push(); return; }
     if (spillPush(true)) return;
     pushDepth_++;
+    stackMoved(8);
     out_ << "\tSUB\tB15, 8, B15\n";
     out_ << "\tSTDW\tA5:A4, *B15\n";
 }
@@ -617,6 +622,7 @@ void Tms6747::popValue(const Type *t, const char *reg) {
     if (!isWide(t) && !inPairWide(t)) { pop(reg); return; }
     if (spillPop(true, reg)) return;
     pushDepth_--;
+    stackMoved(-8);
     out_ << "\tLDDW\t*B15, " << pairOf(reg) << "\n\tNOP\t4\n";
     out_ << "\tADD\tB15, 8, B15\n";
 }
@@ -1671,10 +1677,33 @@ void Tms6747::wideCast(const Type *from, const Type *to) {
     else     narrowInt(to);
 }
 
+// **`_alloca(n)`, lowered where it stands** (docs\Runtime_Design.md 9.4). The frame is addressed from A15 and the
+// epilogue takes B15 back from A15, so the function's own slots do not move; what is addressed from B15 is what this
+// function has pushed or opened for a call being built, and at -O1 and -O2 the 8 bytes the frame keeps at its floor for
+// the word a callee saves A15 in (kept whenever the body calls `_alloca`; at -O0 every call opens an area of its own).
+// B15 moves down by n rounded to 8, the pushed words are copied down with it, and the block is the n bytes above them
+// and a fresh floor: its top is where the old floor ended, which nothing reads once B15 has left it.
+void Tms6747::genAlloca(const Call &n) {
+    allocaHere_ = true;
+    n.args()[0]->accept(*this);
+    out_ << "\tADD\tA4, 7, A4\n\tAND\t-8, A4, A4\n\tMV\tA4, B0\n";
+    const int pushed = stackBytes_;
+    if (pushed > 0) out_ << "\tMV\tB15, B1\n";
+    out_ << "\tSUB\tB15, B0, B15\n";
+    if (pushed > 0) {
+        out_ << "\tMV\tB15, B2\n";
+        for (int k = 0; k < pushed; k += 4)
+            out_ << "\tLDW\t*B1, A4\n\tNOP\t4\n\tSTW\tA4, *B2\n\tADD\tB1, 4, B1\n\tADD\tB2, 4, B2\n";
+    }
+    out_ << "\tMV\tB15, A4\n";
+    addOffset(pushed + (optimize_ > 0 ? 8 : 0));
+}
+
 // A call under the C6000 EABI: ten word arguments in registers, the rest
 // above the reserved word at *B15, B3 built by hand, B + NOP 5, result in A4.
 // A variadic callee takes its last named argument onward on the stack.
 void Tms6747::visit(const Call &n) {
+    if (n.isAlloca()) { genAlloca(n); return; }
     const std::vector<ExprPtr> &args = n.args();
     bool pair = inPair(n.type());
     bool sret = n.type()->isStructOrUnion() && !pair;
@@ -2150,6 +2179,8 @@ void Tms6747::walkBody(const Function &fn) {
     resetLabels();
     clearCallSites();
     hasCall_ = false;
+    allocaHere_ = false;
+    stackBytes_ = 0;
     usesSavedArgRegs_ = false;
     usesSavedPairRegs_ = false;
     loopDepth_ = 0;
@@ -2301,6 +2332,9 @@ void Tms6747::emitFunction(const Function &fn) {
     labelPrefix_ = "L." + fn.symbol() + ".";
     returnLabel_ = "L.return." + fn.symbol();
     functionOf_ = &fn;
+    // **A landing pad sets B15 from the frame as it stands**, the floor before any `_alloca`, where the next call
+    // would write over the blocks: a cleanup leaves the function, but a catch goes on in it.
+    if (callsAlloca(fn.body()) && catchesHere(fn.body())) unsupported("_alloca in a function with a catch");
 
     sretSlot_ = fn.sretSlot();
     sretShift_ = sretSlot_ != 0 && hiddenInA4(fn.returns()) ? 1 : 0;
@@ -2383,7 +2417,7 @@ void Tms6747::emitFunction(const Function &fn) {
     std::vector<std::string> saved = savedRegs();
     // A leaf whose parameters and locals are all in registers needs no frame at all.
     bool needFrame = frame > 0 || hasCall_ || (optimize_ > 0 ? paramInFrame_ : !fn.params().empty()) || sretSlot_ != 0 ||
-                     saved.size() > 1 || fn.hasLandingPads() || fn.isVariadic();
+                     saved.size() > 1 || fn.hasLandingPads() || fn.isVariadic() || allocaHere_;
     // An odd:even pair saved side by side on an 8-aligned word (A15 is the caller's B15, 8-aligned) goes
     // in one STDW and comes back in one LDDW - one round trip to memory where there were two.
     auto pairAt = [&](std::size_t k) -> bool {
@@ -2398,7 +2432,7 @@ void Tms6747::emitFunction(const Function &fn) {
             if (pairAt(k)) { out_ << "\tSTDW\t" << saved[k] << ":" << saved[k + 1] << ", *-A15(" << 4 * (k + 1) << ")\n"; k++; continue; }
             out_ << "\tSTW\t" << saved[k] << ", *-A15(" << 4 * k << ")\n";
         }
-        spAdjust(-(saveBytes_ + frame + (optimize_ > 0 && (hasCall_ || fn.hasLandingPads()) ? 8 : 0)));
+        spAdjust(-(saveBytes_ + frame + (optimize_ > 0 && (hasCall_ || fn.hasLandingPads() || allocaHere_) ? 8 : 0)));
     }
     // The globals the planner gave a register: their addresses formed once, here, for the whole body.
     for (std::map<std::string, std::string>::const_iterator g = globalReg_.begin(); g != globalReg_.end(); ++g)

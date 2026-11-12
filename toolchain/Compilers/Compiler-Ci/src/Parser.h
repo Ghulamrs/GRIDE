@@ -4,6 +4,7 @@
 #include "Lexer.h"
 #include "Type.h"
 
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -87,6 +88,11 @@ private:
 
     const Source &src_;
     std::vector<Token> tokens_;
+    // Every name a declaration that says `volatile` gives, and every name inside a struct, union or body such a
+    // declaration opens or closes: what a function may reach volatile storage by (Function::touchesVolatile).
+    std::set<std::string> volatileNames_;
+    void collectVolatileNames();
+    bool touchesVolatile(std::size_t from, std::size_t to) const;
     TypeTable &types_;
     const Target &target_;
 
@@ -108,6 +114,7 @@ private:
         return size > structReturnLimit_;
     }
     bool variadicBody_ = false;
+    bool bodyCallsAlloca_ = false;   // the function body being parsed calls `_alloca` (Function::callsAlloca)
 
     std::size_t at_ = 0;
 

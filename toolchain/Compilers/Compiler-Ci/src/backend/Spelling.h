@@ -110,6 +110,9 @@ public:
     virtual void ins(const std::string &m, const Op &a, const Op &b) = 0;
 
     virtual void defLabel(const std::string &l) = 0;
+    // **A lexical block's begin or end under -g**, which the debug records name and nothing jumps to; the optimizer
+    // carries it as it carries a location, so that it changes no code.
+    virtual void blockLabel(const std::string &l) { defLabel(l); }
 
     virtual void functionBegin(const std::string &name, bool exported) = 0;
     virtual void prologue(int frameSize) = 0;

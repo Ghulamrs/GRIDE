@@ -13,7 +13,8 @@
 namespace {
 
 // The family's banner, numbered with the group rather than on its own: c2s runs a particular cc1 and shc as oracles, so its number moves with theirs (CLAUDE.md, "The version number").
-const char *kVersion = "\xC2\xA9""2026 G. R. Akhtar - C and Shalimar, either way 1.2";
+// What --version answers, in the shape every program of the toolchain uses (2026-11-12): its name, its number and what it is, then the copyright on a line of its own.
+const char *kVersion = "c2s 1.2 - C and Shalimar converter\n\xC2\xA9""2026 G. R. Akhtar";
 
 const int kOk = 0;
 const int kRefused = 1;

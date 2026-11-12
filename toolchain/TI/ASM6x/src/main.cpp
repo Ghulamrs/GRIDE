@@ -82,7 +82,7 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) output = argv[++i];
         else if (strcmp(argv[i], "--compress") == 0) compress = true;
         else if (strcmp(argv[i], "--no_compress") == 0) compress = false;
-        else if (strcmp(argv[i], "--version") == 0) { printf("\xc2\xa9" "2026 G. R. Akhtar - asm6x 1.4, a TMS320C6000 assembler writing TI ELF\n"); return 0; }
+        else if (strcmp(argv[i], "--version") == 0) { printf("asm6x 1.4 - TMS320C6000 assembler, TI ELF\n\xc2\xa9" "2026 G. R. Akhtar\n"); return 0; }   // name, number and what it is, then the copyright: every program's shape
         else if (argv[i][0] == '-') return usage();
         else if (!expand(argv[i], inputs)) { fprintf(stderr, "asm6x: no file matches %s\n", argv[i]); return 2; }
     }
