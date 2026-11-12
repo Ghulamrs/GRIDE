@@ -2791,6 +2791,7 @@ Parser::instantiate(const TemplateDecl &decl,
     sp.values = values;
     sp.start = decl.afterParams;
     sp.pos = pos;
+    sp.chain = src_.instantiations();
     sp.depth = instantiationDepth_ + 1;
     refuseInstantiationDepth(decl.name, sp.depth, pos);
     specializations_.push_back(sp);
@@ -2949,6 +2950,8 @@ void Parser::instantiatePending() {
             // settles is one round long; the depth, not the round, is what bounds it.
             const int wasDepth = instantiationDepth_;
             instantiationDepth_ = sp.depth;
+            const ChainOf asked(src_, sp.chain);
+            const InChain chain(src_, sp.pos, sp.display.empty() ? sp.key.substr(0, sp.key.find_first_of("@#")) : sp.display);
 
             const std::size_t resume = at_;
             // **An instantiated definition has vague linkage** - [basic.link] and [temp.spec]: the
@@ -5116,6 +5119,7 @@ const Type *Parser::instantiateClassWith(const TemplateDecl &decl, const std::ve
         ~Reading() { --*n; }
     };
     std::unique_ptr<Reading> reading(new Reading(&classesInstantiating_));
+    const InChain chain(src_, pos, tag);
     const Type *made = partial
         ? structOrUnionSpecifier(Kind::Struct, false)
         : specifiers(&sc, &quals);
@@ -5165,6 +5169,7 @@ const Type *Parser::instantiateClassWith(const TemplateDecl &decl, const std::ve
     }
     sp.start = decl.afterParams;
     sp.pos = pos;
+    sp.chain = src_.instantiations();
     sp.isClass = true;
     sp.bodies = bodies;
     // Its member bodies, replayed later, ask from one deeper than the body that asked for the class.

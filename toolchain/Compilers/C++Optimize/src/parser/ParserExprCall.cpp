@@ -793,6 +793,8 @@ ExprPtr Parser::completeCall(const std::string &name, const std::string &symbol,
             src_.fail(pos, "'main' cannot be called - [basic.start.main]/3 forbids using it within the program");
         mainUses_.push_back(pos);
     }
+    if (callee == nullptr && symbol == "__cxx1_flag_exchange") current_->usesFlagExchange = true;
+    noteUnsetArguments(args, params);
     // **A member class of a class template returned by the call is instantiated here** - [expr.call]/11 wants a
     // class prvalue complete, and `bits[3] = true` then finds bitset<N>::reference's operator=.
     if (returns != nullptr) realizeMemberClass(returns->isReference() ? returns->referent() : returns, true);

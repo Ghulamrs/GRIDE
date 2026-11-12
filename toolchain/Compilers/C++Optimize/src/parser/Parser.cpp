@@ -945,6 +945,12 @@ Parser::FunctionState Parser::captureFunctionState() const {
     s.handlerResumeLabel = handlerResumeLabel_;
     s.handlerResumePtr = handlerResumePtr_;
     s.handlerResumeSel = handlerResumeSel_;
+    s.tryChainLabel = tryChainLabel_;
+    s.tryChainPointerSlot = tryChainPointerSlot_;
+    s.tryChainSelectorSlot = tryChainSelectorSlot_;
+    s.tryChainAliveFrom = tryChainAliveFrom_;
+    s.tryBodySegments = tryBodySegments_;
+    s.tryBodySerial = tryBodySerial_;
     s.mayThrow = mayThrow_;
     s.conditionDecl = conditionDecl_;
     s.conditionName = conditionName_;
@@ -1014,6 +1020,12 @@ void Parser::restoreFunctionState(const FunctionState &s) {
     handlerResumeLabel_ = s.handlerResumeLabel;
     handlerResumePtr_ = s.handlerResumePtr;
     handlerResumeSel_ = s.handlerResumeSel;
+    tryChainLabel_ = s.tryChainLabel;
+    tryChainPointerSlot_ = s.tryChainPointerSlot;
+    tryChainSelectorSlot_ = s.tryChainSelectorSlot;
+    tryChainAliveFrom_ = s.tryChainAliveFrom;
+    tryBodySegments_ = s.tryBodySegments;
+    tryBodySerial_ = s.tryBodySerial;
     mayThrow_ = s.mayThrow;
     conditionDecl_ = s.conditionDecl;
     conditionName_ = s.conditionName;
@@ -1082,6 +1094,12 @@ void Parser::clearFunctionState() {
     handlerResumeLabel_.clear();
     handlerResumePtr_ = 0;
     handlerResumeSel_ = 0;
+    tryChainLabel_.clear();
+    tryChainPointerSlot_ = 0;
+    tryChainSelectorSlot_ = 0;
+    tryChainAliveFrom_ = 0;
+    tryBodySegments_.clear();
+    tryBodySerial_ = -1;
     mayThrow_ = 0;
     conditionDecl_ = false;
     conditionName_.clear();
@@ -1108,6 +1126,7 @@ void Parser::replayInlineBodies(std::vector<PendingBody> mine) {
     try {
     for (std::size_t i = 0; i < mine.size(); i++) {
         at_ = mine[i].start;
+        const ReadingAt reading(this, &memberAt_);
         // A friend's body is written inside the class and belongs outside it,
         // so it is replayed with no owner to supply a `Class::` it must not have.
         inlineOwner_ = mine[i].freeFunction ? std::string() : mine[i].tag;

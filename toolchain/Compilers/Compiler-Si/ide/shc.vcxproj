@@ -132,7 +132,7 @@
          the runtimes with it - once shalimar.exe is built; the target's Inputs/Outputs decide instead -->
     <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
     <ShmRuntimeDir>$(ProjectDir)..\runtime\</ShmRuntimeDir>
-    <ShmCl>/nologo /std:c++14 /W4 /WX /EHsc /permissive- /O2 /D_CRT_SECURE_NO_WARNINGS</ShmCl>
+    <ShmCl>/nologo /std:c++14 /W4 /WX /EHsc /permissive- /D_CRT_SECURE_NO_WARNINGS</ShmCl>
     <ShmCpp11>$(OutDir)cpp11.exe</ShmCpp11>
     <ShmWinDir>$(OutDir)lib\x86_64-windows\msvc\</ShmWinDir>
     <!-- RTS6x's shortest formatting (docs\Runtime_Design.md 14.4), which the build over Microsoft's CRT carries itself -->
@@ -161,18 +161,18 @@
     <RemoveDir Directories="$(OutDir)lib\shmrt-tms6747;$(OutDir)lib\shmrt-tms6747-debug" />
     <Delete Files="$(OutDir)lib\shmrt-x86_64-windows.lib;$(OutDir)lib\shmrt-x86_64-windows-debug.lib" />
     <RunTool Exe="$(ToolchainCl)" WorkingDirectory="$(IntDir)rt" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
-             Arguments="$(ShmCl) /MT /Fo&quot;$(IntDir)rt\\&quot; /c @(ShmRuntime->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ') &quot;$(ShmShortest)&quot;" />
+             Arguments="$(ShmCl) /O2 /MT /Fo&quot;$(IntDir)rt\\&quot; /c @(ShmRuntime->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ') &quot;$(ShmShortest)&quot;" />
     <RunTool Exe="$(ToolchainLib)" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
              Arguments="/nologo /out:&quot;$(ShmWinDir)shmrt.lib&quot; @(ShmRuntime->'&quot;$(IntDir)rt\%(Filename).obj&quot;', ' ') &quot;$(IntDir)rt\_gride_shortest_double.obj&quot;" />
     <RunTool Exe="$(ToolchainCl)" WorkingDirectory="$(IntDir)rtd" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
-             Arguments="$(ShmCl) /MTd /DSHM_DEBUG=1 /Fo&quot;$(IntDir)rtd\\&quot; /c @(ShmRuntimeDebug->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ') &quot;$(ShmShortest)&quot;" />
+             Arguments="$(ShmCl) /Od /Z7 /MTd /DSHM_DEBUG=1 /Fo&quot;$(IntDir)rtd\\&quot; /c @(ShmRuntimeDebug->'&quot;$(ShmRuntimeDir)%(Identity).cpp&quot;', ' ') &quot;$(ShmShortest)&quot;" />
     <RunTool Exe="$(ToolchainLib)" IncludePath="$(IncludePath)" LibPath="$(LibraryPath)" ExePath="$(ExecutablePath)" Quiet="true"
              Arguments="/nologo /out:&quot;$(ShmWinDir)shmrtd.lib&quot; @(ShmRuntimeDebug->'&quot;$(IntDir)rtd\%(Filename).obj&quot;', ' ') &quot;$(IntDir)rtd\_gride_shortest_double.obj&quot;" />
     <Error Condition="!Exists('$(ShmCpp11)')" Text="shc.vcxproj: no cpp11.exe in $(OutDir) - the C6000 runtime is its output; cpp11 is built first in the solution" />
     <!-- each file one cpp11 run, $(ToolchainJobs) at a time (Toolchain.targets' note: 0 one per processor) -->
     <ItemGroup>
       <ShmCpp11Run Include="@(ShmRuntime->'-S -arch tms6747 -nologo -O2 &quot;$(ShmRuntimeDir)%(Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt\%(Filename).s&quot;')" />
-      <ShmCpp11Run Include="@(ShmRuntimeDebug->'-S -arch tms6747 -nologo -O0 -DSHM_DEBUG=1 &quot;$(ShmRuntimeDir)%(Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt-debug\%(Filename).s&quot;')" />
+      <ShmCpp11Run Include="@(ShmRuntimeDebug->'-S -arch tms6747 -nologo -O0 -g -DSHM_DEBUG=1 &quot;$(ShmRuntimeDir)%(Identity).cpp&quot; -o &quot;$(Shm6xDir)shmrt-debug\%(Filename).s&quot;')" />
     </ItemGroup>
     <RunTools Exe="$(ShmCpp11)" Runs="@(ShmCpp11Run)" Jobs="$(ToolchainJobs)" Quiet="true" />
   </Target>

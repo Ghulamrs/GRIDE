@@ -26,6 +26,32 @@ const char* const kPuncts[] = {
     "{", "}", "[", "]", "#", "(", ")", ";", ":", "?", ".", "+", "-", "*", "/", "%", "^", "&", "|", "~", "!", "=", "<", ">", ",", 0
 };
 
+// 2.3/1: the character a trigraph stands for, 0 when "??" plus c is none
+char trigraph(char c)
+{
+    switch (c) {
+    case '=': return '#';  case '/': return '\\'; case '\'': return '^';
+    case '(': return '[';  case ')': return ']';  case '!': return '|';
+    case '<': return '{';  case '>': return '}';  case '-': return '~';
+    default:  return 0;
+    }
+}
+
+// 2.5: the alternative tokens and the digraphs with their primary tokens. A token written either way is the primary
+// token with PpToken::alt set, so the parser sees one spelling and # and -E give back the one written (2.5/2)
+struct AltToken { const char* alt; const char* primary; };
+const AltToken kAltTokens[] = {
+    {"and", "&&"}, {"bitor", "|"}, {"or", "||"}, {"xor", "^"}, {"compl", "~"}, {"bitand", "&"},
+    {"and_eq", "&="}, {"or_eq", "|="}, {"xor_eq", "^="}, {"not", "!"}, {"not_eq", "!="},
+    {"<:", "["}, {":>", "]"}, {"<%", "{"}, {"%>", "}"}, {"%:", "#"}, {"%:%:", "##"}, {0, 0}
+};
+
+const char* primaryOf(const std::string& word)
+{
+    for (int k = 0; kAltTokens[k].alt; ++k) if (word == kAltTokens[k].alt) return kAltTokens[k].primary;
+    return 0;
+}
+
 PpToken makeTok(PpToken::Kind k, const std::string& text, int file, int line)
 {
     PpToken t; t.kind = k; t.text = text; t.file = file; t.line = line; return t;
@@ -36,7 +62,7 @@ PpToken makeTok(PpToken::Kind k, const std::string& text, int file, int line)
 
 void ppLex(const std::string& source, int fileIndex, std::vector<PpToken>& out)
 {
-    // phase 1/2: remove line splices, remembering the line of every remaining character
+    // phase 1/2: replace the trigraphs, remove line splices, remembering the line of every remaining character
     std::string src;
     std::vector<int> lineOf;
     src.reserve(source.size());
@@ -44,11 +70,18 @@ void ppLex(const std::string& source, int fileIndex, std::vector<PpToken>& out)
     int line = 1;
     for (size_t i = 0; i < source.size(); ++i) {
         char c = source[i];
-        if (c == '\\' && i + 1 < source.size() && (source[i + 1] == '\n' || (source[i + 1] == '\r' && i + 2 < source.size() && source[i + 2] == '\n'))) {
-            i += source[i + 1] == '\r' ? 2 : 1;
+        size_t len = 1;                                          // source characters c stands for
+        if (c == '?' && i + 2 < source.size() && source[i + 1] == '?') {
+            const char r = trigraph(source[i + 2]);
+            if (r) { c = r; len = 3; }
+        }
+        if (c == '\\' && i + len < source.size() && (source[i + len] == '\n' || (source[i + len] == '\r' && i + len + 1 < source.size() && source[i + len + 1] == '\n'))) {
+            const size_t newline = source[i + len] == '\r' ? 2 : 1;
+            i += len - 1 + newline;
             ++line;
             continue;
         }
+        i += len - 1;
         if (c == '\r') continue;
         src += c;
         lineOf.push_back(line);
@@ -83,6 +116,9 @@ void ppLex(const std::string& source, int fileIndex, std::vector<PpToken>& out)
             t.kind = PpToken::Ident;
             // L"..." and L'...'
             if (pos - s == 1 && c == 'L' && pos < n && (src[pos] == '"' || src[pos] == '\'')) { c = src[pos]; goto literal; }
+            // and, or, not, bitand...: the primary token, spelled as written (2.5/2)
+            const char* primary = primaryOf(src.substr(s, pos - s));
+            if (primary) { t.kind = PpToken::Punct; t.alt = true; t.text = primary; out.push_back(t); space = false; bol = false; continue; }
         } else if (isdigit(static_cast<unsigned char>(c)) || (c == '.' && pos + 1 < n && isdigit(static_cast<unsigned char>(src[pos + 1])))) {
             ++pos;
             while (pos < n) {
@@ -100,6 +136,22 @@ void ppLex(const std::string& source, int fileIndex, std::vector<PpToken>& out)
             if (pos < n && src[pos] == q) ++pos;
             t.kind = q == '"' ? PpToken::String : PpToken::Char;
         } else {
+            // the digraphs <: :> <% %> %: %:%: (2.5/1). A "<::" followed by neither ':' nor '>' is "<" "::", the
+            // reading C++11 adopted: no valid C++98 program has "<:" ":" there
+            const char* primary = 0;
+            size_t dlen = 0;
+            const char c1 = pos + 1 < n ? src[pos + 1] : 0;
+            if (c == '<' && c1 == ':') {
+                const bool scope = pos + 2 < n && src[pos + 2] == ':' && !(pos + 3 < n && (src[pos + 3] == ':' || src[pos + 3] == '>'));
+                if (!scope) { primary = "["; dlen = 2; }
+            }
+            else if (c == '<' && c1 == '%') { primary = "{"; dlen = 2; }
+            else if (c == ':' && c1 == '>') { primary = "]"; dlen = 2; }
+            else if (c == '%' && c1 == '>') { primary = "}"; dlen = 2; }
+            else if (c == '%' && c1 == ':') {
+                if (pos + 3 < n && src[pos + 2] == '%' && src[pos + 3] == ':') { primary = "##"; dlen = 4; } else { primary = "#"; dlen = 2; }
+            }
+            if (primary) { pos += dlen; t.kind = PpToken::Punct; t.alt = true; t.text = primary; out.push_back(t); space = false; bol = false; continue; }
             bool found = false;
             for (int k = 0; kPuncts[k]; ++k) {
                 size_t len = std::string(kPuncts[k]).size();
@@ -116,10 +168,16 @@ void ppLex(const std::string& source, int fileIndex, std::vector<PpToken>& out)
 }
 
 
+std::string PpToken::spelling() const
+{
+    if (alt) for (int k = 0; kAltTokens[k].alt; ++k) if (text == kAltTokens[k].primary) return kAltTokens[k].alt;
+    return text;
+}
+
 std::string PpMacro::bodyText() const
 {
     std::string s;
-    for (size_t i = 0; i < body.size(); ++i) { if (i && body[i].space) s += ' '; s += body[i].text; }
+    for (size_t i = 0; i < body.size(); ++i) { if (i && body[i].space) s += ' '; s += body[i].spelling(); }
     return s;
 }
 
@@ -712,7 +770,7 @@ void Preprocessor::stringize(const std::vector<PpToken>& toks, PpToken& out) con
     std::string s;
     for (size_t i = 0; i < toks.size(); ++i) {
         if (i && toks[i].space) s += ' ';
-        const std::string& x = toks[i].text;
+        const std::string x = toks[i].spelling();     // "<:" and "and" as written (2.5/2)
         if (toks[i].kind == PpToken::String || toks[i].kind == PpToken::Char) {
             for (size_t c = 0; c < x.size(); ++c) { if (x[c] == '"' || x[c] == '\\') s += '\\'; s += x[c]; }
         } else s += x;
@@ -815,7 +873,7 @@ std::string Preprocessor::text() const
             newline = true;
         }
         if (!newline && t.space && !s.empty() && s[s.size() - 1] != '\n') s += ' ';
-        s += t.text;
+        s += t.spelling();
     }
     if (!s.empty() && s[s.size() - 1] != '\n') s += '\n';
     return s;

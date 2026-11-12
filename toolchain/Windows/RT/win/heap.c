@@ -32,10 +32,9 @@ static HANDLE grt_process_heap(void)
 
 #define HEADER 32           /* the block's size first, its front guard in the last four bytes */
 
-static void grt_heap_fill(unsigned char *p, int value, size_t n)
-{
-    while (n--) *p++ = (unsigned char)value;
-}
+/* win\fill.asm: rep stosb, where a byte loop compiled at -O0 took a 1 GB block twelve seconds to fill */
+void __grt_fill(void *p, int value, size_t n);
+#define grt_heap_fill(p, value, n) __grt_fill((p), (value), (n))
 
 static int grt_heap_guarded(const unsigned char *p)
 {

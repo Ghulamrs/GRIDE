@@ -548,6 +548,7 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
         // direct base as written, a virtual one as met, then those behind it.
         static void of(const Type *t, std::vector<const Type *> &out,
                        std::vector<Access> &how, Access through) {
+            if (!t->hasVirtualBase()) return;     // nothing behind it, and a chain of bases asks at every class
             const std::vector<const Type::BaseSpec *> bs = t->directBases();
             for (std::size_t i = 0; i < bs.size(); i++) {
                 Access a = (bs[i]->access == Access::Private ||
@@ -625,6 +626,8 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
     const std::size_t ownFrom = members.size();
 
     while (!peek().is("}")) {
+        const ReadingAt reading(this, &memberAt_);
+        if (consume(";")) continue;     // a member-declaration of nothing, which [class.mem]'s grammar allows
         if (peek().kind == TokenKind::End) src_.fail(pos, "unclosed '{'");
 
         // **A member function template.**
@@ -1345,7 +1348,7 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
                 continue;
             }
             // [dcl.stc]/4: a static data member may be thread_local; nothing else in a class may.
-            refuseThreadLocalHere(mquals.isThreadLocal, d.pos);
+            refuseThreadLocalHere(mquals.isThreadLocal || mquals.threadLocalAsStatic, d.pos);
 
             if (peek().is(":")) {
                 std::size_t cpos = peek().pos;
@@ -1906,6 +1909,31 @@ const Type *Parser::structOrUnionSpecifier(Kind kind, bool isClass) {
             for (const MsVftable &t : msVftables(type))
                 for (const VSlot &s : t.slots)
                     if (s.pure) type->setAbstract(true);
+        // On Itanium too, a later base's table is not merged into this class's: its pure virtual stays unless
+        // this class or another base overrides it. A destructor always has an overrider.
+        const auto overrides = [](const VSlot &a, const VSlot &pure) {
+            return !a.pure && a.name == pure.name && a.params == pure.params && a.constThis == pure.constThis &&
+                   a.volatileThis == pure.volatileThis && a.refThis == pure.refThis;
+        };
+        for (const Type::BaseSpec &one : type->bases()) {
+            if (target_.microsoftNames() || !one.direct) continue;
+            for (const VSlot &s : vtables_[one.type->unqualified()->tag()]) {
+                if (!s.pure || s.name == "~") continue;
+                bool taken = false;
+                for (const VSlot &mine : vtables_[tag]) taken = taken || overrides(mine, s);
+                if (const std::vector<std::size_t> *own = overloadsOf(tag + "::" + s.name))
+                    for (std::size_t k : *own) {
+                        const Signature &f = functions_[k];
+                        taken = taken || (f.owner == tag && f.params == s.params && f.constThis == s.constThis &&
+                                          f.volatileThis == s.volatileThis && f.refThis == s.refThis);
+                    }
+                for (const Type::BaseSpec &other : type->bases())
+                    if (other.direct && other.type != one.type)
+                        for (const VSlot &theirs : vtables_[other.type->unqualified()->tag()])
+                            taken = taken || overrides(theirs, s);
+                if (!taken) type->setAbstract(true);
+            }
+        }
     }
     // A class with a virtual base needs a table though it has no virtual
     // function: the table is where the offset to that base is kept.
@@ -2331,17 +2359,16 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
         if (peek().is("static"))  { storageClass(StorageStatic); continue; }
         if (peek().is("extern"))  { storageClass(StorageExtern); continue; }
         // [dcl.stc]/4: `thread_local`, beside `static` or `extern` or alone. The C6000 has no
-        // thread storage at all - cl6x 8.2.2 knows no such word - so it is refused there by name.
+        // thread storage at all - cl6x 8.2.2 knows no such word - and runs one thread, so there the
+        // object is the one static copy (Qualifiers::threadLocalAsStatic).
         if (peek().is("thread_local")) {
-            if (!target_.hasThreadStorage())
-                src_.fail(peek().pos, "'thread_local' is not supported yet on " + std::string(target_.name()) +
-                                      ": TI's cl6x has no thread-local storage, and a program for the "
-                                      "C6000 is one thread");
-            if (quals->isThreadLocal || *storage == StorageRegister || *storage == StorageTypedef)
+            if (quals->isThreadLocal || quals->threadLocalAsStatic || *storage == StorageRegister ||
+                *storage == StorageTypedef)
                 src_.fail(peek().pos, "'thread_local' is a second storage class in this declaration, which has "
                                       "at most one - and 'thread_local' only beside 'static' or 'extern', [dcl.stc]/1");
             at_++;
-            quals->isThreadLocal = true;
+            if (target_.hasThreadStorage()) quals->isThreadLocal = true;
+            else                            quals->threadLocalAsStatic = true;
             continue;
         }
         if (peek().is("typedef")) { storageClass(StorageTypedef); continue; }

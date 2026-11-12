@@ -875,6 +875,11 @@ bool Driver::parseArguments(int argc, char **argv) {
                              "as cpp11 writes it; compile with -g alone\n", argv[0]);
         return false;
     }
+    // The C6000 generator has no optimiser yet: it writes the same code at -O2 as at -O0. Said once, so that a
+    // Release build is not taken for an optimised one in silence.
+    if (optimize_ > 0 && std::strcmp(backend_->name(), "tms6747") == 0)
+        std::fprintf(stderr, "%s: warning: -O%d is not yet written for tms6747 - the code is -O0's\n",
+                     argv[0], optimize_);
     if (debug_ && !backend_->emitsLineTable()) {
         std::fprintf(stderr,
                      "%s: -g asks where each line of C went, and this compiler "

@@ -447,10 +447,11 @@ public:
                     out.push_back(&b[i]);
         return out;
     }
+    // A class records every virtual base behind it as its own, so no walk goes down its bases.
     bool hasVirtualBase() const {
         const std::vector<BaseSpec> &b = bases();
         for (std::size_t i = 0; i < b.size(); i++)
-            if (b[i].isVirtual || b[i].type->hasVirtualBase()) return true;
+            if (b[i].isVirtual) return true;
         return false;
     }
     // **A vptr is not the same question as `polymorphic`.**
@@ -740,6 +741,8 @@ public:
     virtual bool resumeTakesException() const { return true; }
     // **Whether `__cxa_get_exception_ptr` exists** - TI's runtime copies from what `__cxa_begin_catch` returns.
     virtual bool hasGetExceptionPtr() const { return true; }
+    // **Whether `__cxa_bad_typeid` exists** - TI's runtime has none, so `typeid(*p)` does not test p there.
+    virtual bool hasBadTypeid() const { return true; }
     // **What `__cxa_begin_catch` returns for a thrown pointer**: the pointer's value on the hosts, the exception object's address on TI's runtime.
     virtual bool beginCatchReturnsObject() const { return false; }
     // **Who checks `throw(T...)`**: a filter in the frame's own pads on the hosts, the descriptor TI's personality reads.

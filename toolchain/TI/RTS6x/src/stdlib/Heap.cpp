@@ -1,7 +1,9 @@
 // Spec: ISO C 7.20.3.1-4. malloc(0) gives a unique pointer (7.20.3/1 allows either); realloc of a
 // null pointer is malloc, to 0 frees; calloc refuses a count times size that overflows size_t.
 
+#include <errno.h>
 #include "Heap.h"
+#include "../misc/ErrorNumber.h"
 #include "../string/Memory.h"
 
 namespace rts6x {
@@ -26,7 +28,8 @@ void Heap::start()
 void *Heap::allocate(size_t n)
 {
     if (!started_) start();
-    if (n > (size_t)-1 - Header - 7) return 0;
+    // No memory: errno ENOMEM, as the hosts' libraries set it, so a program can say why.
+    if (n > (size_t)-1 - Header - 7) { ErrorNumber::set(ENOMEM); return 0; }
     size_t need = needed(n);
     for (Block **link = &free_; *link; link = &(*link)->next) {
         Block *b = *link;
@@ -42,13 +45,14 @@ void *Heap::allocate(size_t n)
         }
         return payload(b);
     }
+    ErrorNumber::set(ENOMEM);
     return 0;
 }
 
 void *Heap::allocateZeroed(size_t count, size_t size)
 {
     unsigned long long total = (unsigned long long)count * size;
-    if (total > (unsigned long long)(size_t)-1) return 0;
+    if (total > (unsigned long long)(size_t)-1) { ErrorNumber::set(ENOMEM); return 0; }
     void *p = allocate((size_t)total);
     if (p) Memory::fill(p, 0, (size_t)total);
     return p;

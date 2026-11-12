@@ -291,9 +291,21 @@
 // `vector<int>` with nothing bringing it here and `k::Box<int>` for a Box k has not are refused, two using-directives
 // finding two templates are ambiguous; using-declarations of class templates; `::X<int>` and `::g(1)`. Release links
 // by docs/Build_Policy.md: 7.45 MB to 4.73 MB.
-#define CXX1_VERSION      "1.61"
-#define CXX1_SEAL_DATE    "04-11-2026"
-#define CXX1_SEAL_FILE    "cxx1-1.61.dat"
+// 1.62 (2026-11-05): the other three targets and Phase 8. By the Fable lane: every program with <iostream> compiles on
+// the Itanium targets again, -O2 is -O2 on the C6747 and arm64-darwin past a header's `volatile`, wide file streams go
+// through codecvt, Annex B's quantities are tested at the limit, IMPLEMENTATION-DEFINED.md. Three C6000 -O2 miscompiles
+// that -O2 reached; the scheduler and a chain of bases in time linear in the program. atomic_flag lock-free on all four
+// targets. Every error in a file, warnings, the instantiation chain. `typeid` of a pointer to member and delegation
+// under virtual bases on Itanium, a null pointer under `typeid`, a class abstract through a later base; on Windows a
+// pointer handler catches a thrown nullptr and every kind of pointer is thrown; va_arg of a class on all four.
+// 1.63 (2026-11-10): the user's Sample14A - the C6000 passes in time linear in a block (MVKL/MVKH folded, copies
+// forwarded and dropped in one pass each, a push and pop kept in A16-A31 found by lookup) and the x86-64 address
+// folds stopped where nothing further down can refuse them, the code they write unchanged. With the runtimes review's
+// fixes: an object with no constructor and a destructor is destroyed at exit, a binary operand calling setjmp is
+// evaluated first on x86-64 Linux, and the driver's own link takes GRIDE's runtime when it is beside the compiler.
+#define CXX1_VERSION      "1.63"
+#define CXX1_SEAL_DATE    "10-11-2026"
+#define CXX1_SEAL_FILE    "cxx1-1.63.dat"
 
 // The line every run prints first; what it claims is docs/EXCLUSIONS.md's to measure (review of 2026-10-08).
 #define CXX1_BANNER "©2026 G. R. Akhtar - C++03 with C++11 extensions"

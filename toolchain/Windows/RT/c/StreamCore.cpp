@@ -360,6 +360,8 @@ long long tell(FILE *f)
     if (here < 0) return -1;
     if (f->flags & Pending) here += (long long)(f->pos - f->buf);
     else here -= (long long)(f->bufend - f->pos);
+    // A character pushed back before the first byte of the file: the Microsoft runtime answers 0, not an error.
+    if (here < 0) here = 0;
     return here;
 }
 

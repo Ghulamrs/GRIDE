@@ -1,0 +1,4 @@
+; second.def - a second import library of KERNEL32.dll for second.c, beside grt's kernel32.lib
+LIBRARY KERNEL32.dll
+EXPORTS
+    GetConsoleCP

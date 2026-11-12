@@ -63,7 +63,10 @@
             p.Start(); p.BeginOutputReadLine(); p.BeginErrorReadLine(); p.WaitForExit();
             var imp = Quiet ? Microsoft.Build.Framework.MessageImportance.Low : Microsoft.Build.Framework.MessageImportance.Normal;
             Log.LogMessage(imp, "> \"" + Exe + "\" " + Arguments);
-            foreach (var l in lines) Log.LogMessage(p.ExitCode != 0 ? Microsoft.Build.Framework.MessageImportance.High : imp, l);
+            // a warning is shown whatever Quiet says: a compiler that went on without -O2 says so this way
+            foreach (var l in lines)
+                Log.LogMessage(p.ExitCode != 0 || l.IndexOf("warning", StringComparison.OrdinalIgnoreCase) >= 0
+                               ? Microsoft.Build.Framework.MessageImportance.High : imp, l);
             if (p.ExitCode != 0) Log.LogError(Path.GetFileName(Exe) + " exited with " + p.ExitCode + " (" + Arguments + ")");
         }
         // (the task factory ends the fragment with return !Log.HasLoggedErrors)
@@ -195,6 +198,7 @@ public class Rts6xVariant : Task
             {
                 Directory.CreateDirectory(asm);
                 var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+                var warnings = new System.Collections.Concurrent.ConcurrentBag<string>();
                 System.Threading.Tasks.Parallel.ForEach(sources, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Jobs > 0 ? Jobs : Environment.ProcessorCount }, f =>
                 {
                     string args = "-S -arch tms6747 -nologo " + Flags + " \"-I" + internalDir + "\" \"" + f + "\" -o \"" +
@@ -202,6 +206,7 @@ public class Rts6xVariant : Task
                     string output;
                     int rc = Exec(Cpp11, args, out output);
                     if (rc != 0) failures.Add("cpp11 exited with " + rc + " (" + args + ")" + Environment.NewLine + output);
+                    else if (output.Length > 0) warnings.Add(Path.GetFileName(f) + ": " + output);
                 });
                 if (!failures.IsEmpty)
                 {
@@ -209,6 +214,8 @@ public class Rts6xVariant : Task
                     Log.LogError("rts6x: cpp11 refused something in " + d);
                     return false;
                 }
+                // what the compiler said of a file it did compile - a warning that it left -O2 out, say - is a build warning
+                foreach (string w in warnings.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) Log.LogWarning("rts6x: " + w);
                 if (!Run(Asm6x, "\"" + Path.Combine(asm, "*.s") + "\" -o \"" + obj + "\"")) return false;
             }
             if (Directory.GetFiles(d, "*.s").Length > 0 &&
@@ -397,6 +404,7 @@ public class WindowsLibrary : Task
         catch (Exception e) { Log.LogError(e.Message); return false; }
         string includes = string.Join(" ", Split(IncludeDirs).Select(d => "\"-I" + d.TrimEnd('\\') + "\""));
         var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var warnings = new System.Collections.Concurrent.ConcurrentBag<string>();
         System.Threading.Tasks.Parallel.ForEach(units, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Jobs > 0 ? Jobs : Environment.ProcessorCount }, u =>
         {
             string src = u.Item1, obj = u.Item2, output;
@@ -409,15 +417,19 @@ public class WindowsLibrary : Task
                 string cc = ext == ".c" ? C90 : Cpp11;
                 string args = "-S \"" + src + "\" -o \"" + asm + "\" -arch x86_64-windows -masm=masm -nologo " + (Flags ?? "") + " " + includes;
                 if (Exec(cc, args, out output) != 0) { failures.Add(Path.GetFileName(cc) + " " + args + Environment.NewLine + output); return; }
+                if (output.Length > 0) warnings.Add(Path.GetFileName(src) + ": " + output);
             }
             string margs = "-t x64 \"" + asm + "\" -o \"" + obj + "\"";
             if (Exec(Masm, margs, out output) != 0) failures.Add("masm " + margs + Environment.NewLine + output);
+            else if (output.Length > 0) warnings.Add(Path.GetFileName(asm) + ": " + output);
         });
         if (!failures.IsEmpty)
         {
             foreach (string f in failures.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) Log.LogError(f);
             return false;
         }
+        // what a compiler or masm said of a file it did take is a build warning, not a secret of the task's
+        foreach (string w in warnings.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) Log.LogWarning(Path.GetFileName(Library) + ": " + w);
         string list = Path.Combine(ObjDir, Path.GetFileNameWithoutExtension(Library) + ".objs");
         File.WriteAllLines(list, units.Select(u => "\"" + u.Item2 + "\""));
         Directory.CreateDirectory(Path.GetDirectoryName(Library));

@@ -31,7 +31,13 @@ extern "C" {
 // C90 requires HUGE_VAL to be a positive double, and permits it to be infinite.
 // 1e400 has no finite double to round to, so it folds to +inf here exactly as
 // it does under gcc - which was checked rather than assumed before writing it.
+// In C++ a builtin, as gcc's and clang's is: past its type's range a literal is ill-formed, [lex.fcon]/1,
+// and cpp11 says so of one in a program; the macro must not be taken for one.
+#ifdef __cplusplus
+#define HUGE_VAL __builtin_huge_val()
+#else
 #define HUGE_VAL 1e400
+#endif
 
 #ifdef _GRIDE_C99_LIBRARY
 #define HUGE_VALF ((float)HUGE_VAL)

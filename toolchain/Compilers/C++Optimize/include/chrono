@@ -23,7 +23,8 @@ extern "C" int QueryPerformanceFrequency(long long *frequency);
 extern "C" void GetSystemTimePreciseAsFileTime(unsigned long long *hundredNanosecondsSince1601);
 #elif defined(__linux__) || defined(__APPLE__)
 struct timespec_ { long long tv_sec; long tv_nsec; };
-extern "C" int clock_gettime(int clock, timespec_ *now);
+// Declared as <__threads> declares it, since <thread> reads both and a C function has one type.
+extern "C" int clock_gettime(int clock, void *now);
 #endif
 }  // namespace __cxx1_os
 

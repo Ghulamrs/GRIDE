@@ -25,6 +25,7 @@ public:
     Kind wcharType() const override { return Kind::UShort; }   // 16-bit and unsigned: TI, measured
     bool resumeTakesException() const override { return false; }   // __cxa_end_cleanup(), measured from cl6x
     bool hasGetExceptionPtr() const override { return false; }     // not in rts6740_elf_eh.lib
+    bool hasBadTypeid() const override { return false; }           // nor in RTS6x
     bool beginCatchReturnsObject() const override { return true; } // the object's address for a pointer too, measured on TI's simulator
     bool specInTable() const override { return true; }      // an FESD with the types, as cl6x writes
     int stackAlign() const override { return 8; }
@@ -48,6 +49,7 @@ public:
     bool emitsLineTable(Syntax) const override { return true; }
     // The C6747 runs one program and no threads, so this implementation of C++11 for it is freestanding.
     bool hosted() const override { return false; }
+    bool optimizesAroundVolatile() const override { return true; }
 private:
     Tms6747Target target_;
 };

@@ -350,13 +350,12 @@ void Parser::layoutOneVtable(VtableGroup &g, const Type *x, int xAt,
             if (viaVbase) {
                 const std::string want = slots[i].name == "~$deleting"
                                        ? std::string("~") : slots[i].name;
-                // vcallEntries files a slot under the class that brought
-                // it in: one x inherits from its primary base is that base's,
-                // so look down x's primary chain (basic_ios's destructor).
+                // vcallEntries filed the slot under the class of x's primary chain that added it:
+                // basic_ios's destructor sits in ios_base's range of its table.
                 const Type *owner = x;
-                for (const Type *p = owner->primaryBase();
-                     p != nullptr && i < vtables_[p->tag()].size(); p = owner->primaryBase())
-                    owner = p;
+                while (owner->primaryBase() != nullptr &&
+                       i < vtables_[owner->primaryBase()->tag()].size())
+                    owner = owner->primaryBase();
                 std::size_t idx = vcalls.size();
                 for (std::size_t k = 0; k < vcalls.size() && idx == vcalls.size(); k++)
                     if (vcalls[k].cls == owner && vcalls[k].name == want &&

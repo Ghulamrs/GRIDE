@@ -778,7 +778,7 @@ void Parser::synthesizeCompleteCtor(const Type *type,
                                     bool isInline, std::size_t pos,
                                     int copyArg, bool moving,
                                     std::map<std::string,
-                                        std::vector<ExprPtr> > *vbaseArgs) {
+                                        std::vector<ExprPtr> > *vbaseArgs, bool delegating) {
     const std::string &cls = type->tag();
     const Type *self = types_.pointerTo(type);
 
@@ -804,8 +804,9 @@ void Parser::synthesizeCompleteCtor(const Type *type,
                          static_cast<std::size_t>(copyArg) < argSlots.size())
                       ? argSlots[copyArg] : -1;
     std::vector<int> builtBase;
-    std::vector<StmtPtr> body = virtualBaseCalls(type, thisSlot, true, pos,
-                                                 srcSlot, moving, vbaseArgs, &builtBase);
+    // A delegating constructor's target builds them, in the C1 it reaches through its entry.
+    std::vector<StmtPtr> body;
+    if (!delegating) body = virtualBaseCalls(type, thisSlot, true, pos, srcSlot, moving, vbaseArgs, &builtBase);
 
     // Then C2, which builds everything else - the non-virtual bases, the
     // members, and the body the user wrote.
@@ -862,6 +863,71 @@ void Parser::synthesizeCompleteCtor(const Type *type,
     current_->functions.back().setSymbol(c1);
     current_->functions.back().setHasLandingPads(guarded);
     if (isInline) current_->functions.back().setInline(true);
+    showMemberAs(current_->functions.back(), type, localOf(cls));
+    closeFrame(savedFrame);
+}
+
+// **The entry a delegating constructor calls** where the class has virtual bases: it has one `this` and one list of
+// arguments and must be its target's C1 for a complete object and its target's C2 for a base. A complete object's
+// C1 hands down the class's own VTT and a base's the part of a larger one, so the VTT says which this is.
+void Parser::synthesizeDelegationEntry(const Type *type, const DelegationEntry &d, std::size_t pos) {
+    const std::string &cls = type->tag();
+    const Type *self = types_.pointerTo(type);
+    const FrameSave savedFrame = openFrame();
+    const int thisSlot = allocateFrameSlot(self);
+    const int vttSlot = allocateFrameSlot(vttType());
+    std::vector<Param> params;
+    params.push_back(Param{ self, thisSlot });
+    params.push_back(Param{ vttType(), vttSlot });
+    std::vector<int> slots;
+    for (std::size_t i = 0; i < d.params.size(); i++) {
+        const Type *held = d.params[i]->isReference() ? types_.pointerTo(d.params[i]->referent()) : d.params[i];
+        slots.push_back(allocateFrameSlot(held));
+        params.push_back(Param{ held, slots[i] });
+    }
+    // One call of either constructor: this, the VTT if it takes one, and the arguments as they came.
+    const auto calling = [&](const std::string &symbol, bool withVtt) {
+        ExprPtr me(Var::local("this", thisSlot));
+        me->setType(self);
+        std::vector<ExprPtr> args;
+        args.push_back(std::move(me));
+        std::vector<const Type *> ps;
+        ps.push_back(self);
+        if (withVtt) {
+            ExprPtr vtt(Var::local(".vtt", vttSlot));
+            vtt->setType(vttType());
+            args.push_back(std::move(vtt));
+            ps.push_back(vttType());
+        }
+        for (std::size_t i = 0; i < d.params.size(); i++) {
+            ExprPtr a(Var::local("a", slots[i]));
+            if (d.params[i]->isReference()) {
+                a->setType(types_.pointerTo(d.params[i]->referent()));
+                ExprPtr obj(new Unary('*', std::move(a)));
+                obj->setType(d.params[i]->referent());
+                if (d.params[i]->isRValueReference()) obj->setXvalue();
+                a = std::move(obj);
+            } else {
+                a->setType(d.params[i]);
+            }
+            args.push_back(std::move(a));
+            ps.push_back(d.params[i]);
+        }
+        return StmtPtr(new ExprStmt(completeCall(cls, symbol, nullptr, types_.get(Kind::Void), ps, false, pos, std::move(args))));
+    };
+    ExprPtr vtt(Var::local(".vtt", vttSlot));
+    vtt->setType(vttType());
+    ExprPtr own(new Cast(vttType(), vttOfClass(type, 0)));
+    own->setType(vttType());
+    ExprPtr complete(new Binary(BinOp::Eq, std::move(vtt), std::move(own)));
+    complete->setType(types_.intType());
+    std::vector<StmtPtr> body;
+    body.push_back(StmtPtr(new If(std::move(complete), calling(d.c1, false), calling(d.c2, true))));
+    current_->functions.push_back(Function(cls + "::entry", types_.get(Kind::Void), std::move(params),
+                                           StmtPtr(new Block(std::move(body))), alignTo(frameSize_, 16), false, 0,
+                                           false, 0, pos, std::vector<::Local>()));
+    current_->functions.back().setSymbol(d.entry);
+    current_->functions.back().setInline(true);
     showMemberAs(current_->functions.back(), type, localOf(cls));
     closeFrame(savedFrame);
 }
@@ -1777,6 +1843,8 @@ std::string Parser::typeInfoSymbolFor(const Type *t, std::size_t pos,
     std::string name;
     if (itaniumTypeInfoName(u, &name, why)) return name;
     if (u->isPointer()) return emitPointerTypeInfo(u, pos, why);
+    // Before the class below: a pointer to a member function wears the shape of a struct.
+    if (u->isMemberPointer() || u->isMemberFunctionPointer()) return emitMemberPointerTypeInfo(u, pos, why);
     if (u->isEnumeration()) return emitEnumTypeInfo(u, pos, why);
 
     if (u->isStructOrUnion() && !u->tag().empty()) {
@@ -1822,6 +1890,66 @@ std::string Parser::emitEnumTypeInfo(const Type *e, std::size_t pos,
     return ti;
 }
 
+// **A function's type_info is a `__function_type_info`** - [ABI 2.9.5]: the vptr and the name,
+// emitted weak beside the pointer's that needs it; `typeid(int (*)(int))` and std::function's target.
+std::string Parser::emitFunctionTypeInfo(const Type *fn, std::string *why) {
+    std::string fspelt;
+    if (!itaniumTypeSpelling(fn, &fspelt, why)) return std::string();
+    const std::string inner = "_ZTI" + fspelt;
+    for (std::size_t i = 0; i < current_->globals.size(); i++)
+        if (current_->globals[i].symbol == inner) return inner;
+    const std::string fts = "_ZTS" + fspelt;
+    std::vector<GlobalPiece> fletters;
+    for (std::size_t i = 0; i <= fspelt.size(); i++)
+        fletters.push_back(GlobalPiece{ static_cast<int>(i), 1,
+                                        i < fspelt.size() ? fspelt[i] : 0, std::string() });
+    const Type *fchars = types_.arrayOf(types_.get(Kind::Char),
+                                        static_cast<long long>(fspelt.size() + 1));
+    current_->globals.push_back(Global{ fts, fts, fchars, std::move(fletters),
+                                        true, false, true, std::string(), true });
+    const int fw = pointerBytes();
+    std::vector<GlobalPiece> fpieces;
+    fpieces.push_back(GlobalPiece{ 0, fw, 2 * fw, "_ZTVN10__cxxabiv120__function_type_infoE" });
+    fpieces.push_back(GlobalPiece{ fw, fw, 0, fts });
+    const Type *fword = types_.pointerTo(types_.get(Kind::Void));
+    current_->globals.push_back(Global{ inner, inner, types_.arrayOf(fword, 2), std::move(fpieces),
+                                        true, false, true, std::string(), true });
+    return inner;
+}
+
+// **A pointer to member's is a `__pointer_to_member_type_info`** - [ABI 2.9.5]: what a pointer's holds and then the
+// class. The pointee of a pointer to a const member function is the `KFvvE` the function's own type spells.
+std::string Parser::emitMemberPointerTypeInfo(const Type *ptr, std::size_t pos, std::string *why) {
+    const Type *plain = ptr->unqualified();
+    std::string spelt;
+    if (!itaniumTypeSpelling(plain, &spelt, why)) return std::string();
+    const std::string ti = "_ZTI" + spelt;
+    for (std::size_t i = 0; i < current_->globals.size(); i++)
+        if (current_->globals[i].symbol == ti) return ti;
+    const Type *member = plain->pointee();
+    const std::string inner = member->isFunction() ? emitFunctionTypeInfo(member, why)
+                                                   : typeInfoSymbolFor(member, pos, why);
+    if (inner.empty()) return std::string();
+    const std::string context = typeInfoSymbolFor(plain->enclosing(), pos, why);
+    if (context.empty()) return std::string();
+    const std::string ts = "_ZTS" + spelt;
+    std::vector<GlobalPiece> letters;
+    for (std::size_t i = 0; i <= spelt.size(); i++)
+        letters.push_back(GlobalPiece{ static_cast<int>(i), 1, i < spelt.size() ? spelt[i] : 0, std::string() });
+    const Type *chars = types_.arrayOf(types_.get(Kind::Char), static_cast<long long>(spelt.size() + 1));
+    current_->globals.push_back(Global{ ts, ts, chars, std::move(letters), true, false, true, std::string(), true });
+    const int w = pointerBytes();
+    std::vector<GlobalPiece> pieces;
+    pieces.push_back(GlobalPiece{ 0, w, 2 * w, "_ZTVN10__cxxabiv129__pointer_to_member_type_infoE" });
+    pieces.push_back(GlobalPiece{ w, w, 0, ts });
+    pieces.push_back(GlobalPiece{ 2 * w, 4, (member->isConst() ? 1 : 0) | (member->isVolatile() ? 2 : 0), std::string() });
+    pieces.push_back(GlobalPiece{ 3 * w, w, 0, inner });
+    pieces.push_back(GlobalPiece{ 4 * w, w, 0, context });
+    const Type *word = types_.pointerTo(types_.get(Kind::Void));
+    current_->globals.push_back(Global{ ti, ti, types_.arrayOf(word, 5), std::move(pieces), true, false, true, std::string(), true });
+    return ti;
+}
+
 // **A pointer's type_info is a `__pointer_type_info`** - [ABI 2.9.5]: vptr,
 // name, the pointee's cv-qualifiers as flags, the pointee's own type_info.
 // One to a fundamental type - `_ZTIPi`, `_ZTIPKc` - is the library's.
@@ -1829,21 +1957,17 @@ std::string Parser::emitPointerTypeInfo(const Type *ptr, std::size_t pos,
                                         std::string *why) {
     const Type *pointee = ptr->pointee();
     const Type *plain = pointee->unqualified();
-    if (plain->isFunction() || plain->isMemberPointer() || plain->isMemberFunctionPointer()) {
-        *why = "a pointer to a function has no type_info this compiler can "
-               "emit - '" + ptr->describe() + "' would need a "
-               "__function_type_info for what it points at";
-        return std::string();
-    }
     std::string spelt;
     if (!itaniumTypeSpelling(ptr, &spelt, why)) return std::string();
-    const bool builtin = itaniumBuiltinCode(plain->kind()) != nullptr;
+    // The library has a fundamental type's, its pointer's and its const pointer's; a volatile pointee's is made here.
+    const bool builtin = itaniumBuiltinCode(plain->kind()) != nullptr && !pointee->isVolatile();
     if (builtin) return "_ZTI" + spelt;                   // the library's
 
     const std::string ti = "_ZTI" + spelt;
     for (std::size_t i = 0; i < current_->globals.size(); i++)
         if (current_->globals[i].symbol == ti) return ti;
-    const std::string inner = typeInfoSymbolFor(plain, pos, why);
+    std::string inner;
+    inner = plain->isFunction() ? emitFunctionTypeInfo(plain, why) : typeInfoSymbolFor(plain, pos, why);
     if (inner.empty()) return std::string();
 
     const std::string ts = "_ZTS" + spelt;
@@ -3735,19 +3859,44 @@ StmtPtr Parser::baseDestructorCall(const Type *cls, std::size_t which, int thisS
 }
 
 // [except.ctor]/2: a delegating constructor's object is complete once its target returns.
+// Its virtual bases go with it where it is the complete object; as a base they are the most derived class's, which
+// is unwinding too. The flag says which on cl's ABI and the VTT on Itanium, as it did on the way in.
 StmtPtr Parser::selfDestructorCall(const Type *cls, int thisSlot, std::size_t pos) {
     const Signature *dtor = destructorOf(cls);
     markUsed(dtor);
-    std::string symbol = dtor->symbol;
-    if (!target_.microsoftNames()) itaniumDestructorName(cls->tag(), cls, false, &symbol);
     const Type *self = types_.pointerTo(cls);
-    ExprPtr me(Var::local("this", thisSlot));
-    me->setType(self);
-    std::vector<ExprPtr> args;
-    args.push_back(std::move(me));
-    const std::vector<const Type *> params(1, self);
-    return StmtPtr(new ExprStmt(completeCall(cls->tag(), symbol, nullptr, types_.get(Kind::Void),
-                                             params, false, pos, std::move(args), false, 0)));
+    const auto calling = [&](const std::string &symbol, bool withVtt) {
+        ExprPtr me(Var::local("this", thisSlot));
+        me->setType(self);
+        std::vector<ExprPtr> args;
+        args.push_back(std::move(me));
+        std::vector<const Type *> params(1, self);
+        if (withVtt) {
+            ExprPtr vtt(Var::local(".vtt", vttSlot_));
+            vtt->setType(vttType());
+            args.push_back(std::move(vtt));
+            params.push_back(vttType());
+        }
+        return StmtPtr(new ExprStmt(completeCall(cls->tag(), symbol, nullptr, types_.get(Kind::Void),
+                                                 params, false, pos, std::move(args), false, 0)));
+    };
+    std::string d2 = dtor->symbol;
+    if (!target_.microsoftNames()) itaniumDestructorName(cls->tag(), cls, false, &d2);
+    if (!cls->hasVirtualBase()) return calling(d2, false);
+    if (target_.microsoftNames()) {
+        ExprPtr complete(Var::local(".initVBases", msVbInitSlot_));
+        complete->setType(types_.intType());
+        return StmtPtr(new If(std::move(complete), calling(vbaseDestructorSymbol(cls->tag()), false), calling(d2, false)));
+    }
+    std::string d1;
+    itaniumDestructorName(cls->tag(), cls, true, &d1);
+    ExprPtr vtt(Var::local(".vtt", vttSlot_));
+    vtt->setType(vttType());
+    ExprPtr own(new Cast(vttType(), vttOfClass(cls, 0)));
+    own->setType(vttType());
+    ExprPtr complete(new Binary(BinOp::Eq, std::move(vtt), std::move(own)));
+    complete->setType(types_.intType());
+    return StmtPtr(new If(std::move(complete), calling(d1, false), calling(d2, true)));
 }
 
 StmtPtr Parser::guardConstruction(std::vector<StmtPtr> steps, std::vector<Alive> done,
@@ -4930,7 +5079,8 @@ const Parser::Signature *Parser::keyFunction(const std::string &tag) const {
     std::map<std::string, std::vector<VSlot> >::const_iterator vt = vtables_.find(tag);
     for (std::size_t i = 0; i < functions_.size(); i++) {
         const Signature &f = functions_[i];
-        if (f.owner != tag || !f.isVirtual || f.implicit || f.inlineBody) continue;
+        // A deleted function is defined where it is declared, so no unit is the one that defines it.
+        if (f.owner != tag || !f.isVirtual || f.implicit || f.inlineBody || f.deleted) continue;
         bool pure = false;
         if (vt != vtables_.end())
             for (std::size_t k = 0; k < vt->second.size(); k++)
@@ -6497,7 +6647,7 @@ void Parser::parameterTypes(std::vector<const Type *> &params, bool &variadic) {
         const Type *pt = specifiers(&psc, &pquals);
         Declared pd = parameterDeclarator(pt);
         if (peek().is("(")) pd.type = functionTypeParameter(pd.type);
-        refuseThreadLocalHere(pquals.isThreadLocal, pd.pos);
+        refuseThreadLocalHere(pquals.isThreadLocal || pquals.threadLocalAsStatic, pd.pos);
         if (mentionsDeduced(pd.type))
             src_.fail(pd.pos, "a parameter's type cannot be deduced - `auto` "
                               "there is C++14, and this compiler is C++11");

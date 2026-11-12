@@ -1111,7 +1111,6 @@ Left for stage 2 by the numbers there (Microsoft's static CRT = 1):
   - `console.cpp` under `screen.c`, on a hidden console: the screen read back, and lines typed at it, one of them the name of a file it then makes. Not asked, the same screen as the UCRT's. The console's code pages are the same before and after. `console.expected` was written from the source, not from a run. Its U+FFFD is the character past one UTF-16 unit, which `ReadConsoleOutputCharacterW` answers for it whoever wrote it, the console's own echo too. `getchar`'s bytes show it arrived whole.
   - **A program that does not ask** (a check of this work, not a committed test): `args.cpp` and `console.cpp` linked with the libraries from before this work and with these give the same bytes and the same screen, with names and typed text past the ANSI code page.
   - **The rest**, on cpp11 1.61, the build checks clean: every probe at -O2 and -O0, on the release and the debug libraries, with `exitnow`'s known difference on the debug libraries on Microsoft's run alone; `filing.ps1` 198 of 198, `threads.ps1` 30 of 30, `debug.ps1`, the completeness test 301 of 301, and `tests\shalimar\access.ps1` 76 of 76 over both. cpp11's conformance suite passes 1,038 of 1,040 at each level. `cmath_c99_names` differs as before. `op11_recursion_tail` recurses 100,000 deep and overflows the default 1 MB stack, on main's tools without this work too, and passes with `/STACK:8388608`.
-- **Found on the way, for link's owner:** a program linked with a second import library of KERNEL32.dll crashes: as it starts when that library comes before the runtime's, at the first call through it when it comes last. `tests\utf8\utf8.ps1` makes one import library for `screen.c` to avoid it.
 
 **One member to a wrapper (2026-11-05).** Stage 4's `runtime\Wrappers.cpp` was one library member for 33 functions, so a program borrowing `labs` linked `atof`, `setlocale`, `remove`, `time` and the rest with it. It is 33 files now, one function each, in `runtime\wrappers\`.
 - **Files, not one source compiled 33 times.** Each of the four builds already takes one source to a member. cl compiles a list in one process, `WindowsLibrary` takes a folder and the C6747's lines run a file at a time, while a single source would need a process and a define for each function, in cl's two lines, cpp11's two and a new mode of `WindowsLibrary`. shc.vcxproj's lists and grt.vcxproj's `SourceDirs` take the folder whole, so a wrapper the catalogue adds needs no project changed. A file includes only the headers its own function names.
@@ -1140,6 +1139,87 @@ Left for stage 2 by the numbers there (Microsoft's static CRT = 1):
 - **The tests.** `tests\start\start.ps1` runs six probes, each entry by c90 and by cpp11, at -O2, at -O0 and over the debug libraries, each byte-identical to the UCRT's transcript. Each program starts itself once per row through `CreateProcessW`, so that a child's command line, environment, show command and handles are exact: spaces, tabs, quotes and backslashes, an empty command line, non-ASCII text, 21 arguments, a return, `exit`, falling off the end, a fault reaching a handler, and no handles at all. `probe.ps1` no longer passes `/subsystem:console`, so link takes it from the object. The link table is 36 of 36. The completeness test links 304 of 304 names and starts 4 of 4 entries. Every earlier probe at -O2 and -O0, threads 30 of 30, `filing.ps1` 198 of 198 lines, `debug.ps1`, `math99.ps1` at both levels, `utf8.ps1` and `access.ps1` 76 of 76 over the release and the debug runtimes are unchanged, and the build's LibraryClosed, FrameCheck and CatalogueCheck pass.
 - **cpp11's gate**, no version bump: all 1,040 valid cases pass at each level, all 888 invalid ones are refused, census 1,781 of 1,781, nothing regressed against 1.61's freeze. On GRIDE's runtime 1,039 pass at each level, and the one that differs from Microsoft's is `cmath_c99_names`, by its known 1 ulp.
 - **Decided, and not done.** A failed `assert` in a windows program writes to stderr, in the spirit of decision 8, where Microsoft's runtime asks in a dialog and then exits 3, and with no handles nothing is seen before it ends; the dialog would need user32 and a test that presses a button. GRIDE's engine still passes `/subsystem:console` first, so a windows project sets `/subsystem:windows` in its link flags; there is no Options setting for it. `_environ`, `_wenviron`, `_wgetenv`, `_pgmptr`, `_wcmdln` and `DllMain` are not added. Not run on this work: both example sets, the debugging exercise and any entry but `main` under gride-dbg, the benchmarks, the Setup test, GRIDE 2.0 and 1.0, and GRIDEd's Debug configuration, which builds the same libraries.
+
+**What the runtimes review found, put right (2026-11-05).** Fable 5.1's review (`runtimes critical review - Fable 5.1.md`,
+at b97ce82 and again at 1.62) read the six libraries as cpp11's clients and tested them from a clean clone. Each finding
+is one change here; the review's probe programs show each before and after.
+- **The `atexit` list grows** (RTS6x's `exit\Termination`). It was an array of 64 entries (4,096 on Windows) and `add`
+  answered -1 to the rest, which cpp11's initialisers never read: the 65th namespace-scope object with a destructor on
+  the C6747 was never destroyed, and nothing said so. It is a static first chunk of 64 and a chunk from `malloc` each
+  time the last is full. 5,000 `atexit` registrations run on Windows (before: 4,095), 65 static objects are all
+  destroyed on sim6747 (before: 64, and the program's own `atexit` refused).
+- **cpp11 registers the destructor of a static object whose constructor is trivial** (`ParserTopLevel.cpp`,
+  `ParserStmt.cpp`, `ParserInit.cpp`'s `buildStaticConstruction`). `struct G { ~G(); } g;` at namespace scope, or
+  `static G g;` in a function, was never destroyed on any target: no constructor, so no initialiser, so no
+  registration. Without an initialiser such an object now takes the dynamic-initialisation path for the registration
+  alone. Both runtimes and sim6747 print the destructor's line.
+- **The Debug heap fills with `rep stosb`** (`win\fill.asm`, `__grt_fill`), where `heap.c`'s byte loop compiled by c90
+  at -O0 took 12.6 s to fill a 1 GB block (Microsoft's debug heap 1.1 s). Now 100 × `malloc`/`free` of 10 MB take
+  339 ms (were 11,600; Microsoft's 1,077), 1 GB 556 ms (12,624; 1,096), `calloc` of 256 MB 103 ms (3,058; 431). grtwin
+  cannot call grtc's `memset`, being the layer below it, so the fill is its own.
+- **`_exit`** is declared by `<stdlib.h>` under `_WIN32` and defined by grtc (`c\exit.cpp`, what `_Exit` does); the
+  catalogue has it at the Microsoft level, 315 entries. A program calling it linked on Microsoft's runtime alone.
+- **`ftell` after `ungetc` at the start of a file answers 0**, as the UCRT does, where it answered -1 (`grt::tell`
+  clamps a position the pushed-back byte took below zero).
+- **`fopen` refuses a mode with a second `+` or a second of `b` and `t`** (`"r+b+"`, `"rbt"`), as the UCRT does; it
+  opened the file. An invalid mode still answers NULL and EINVAL here where the UCRT fails fast: a recorded deviation,
+  kept, since the lenient answer is the C standard's and the fast fail is Microsoft's invalid-parameter policy.
+- **RTS6x's `malloc`, `calloc` and `realloc` set `errno` to ENOMEM** when they answer null (`stdlib\Heap.cpp`), as the
+  hosts' libraries do; on the C6747 `errno` stayed 0.
+- **cpp11's own driver links GRIDE's runtime when it is installed beside the compiler** (`lib\x86_64-windows\grtc.lib`,
+  `Driver.cpp`): the five layered libraries and `kernel32.lib` by path, the `d` variants under `-g`, no LIB; Microsoft's
+  static CRT through LIB as before where the runtime is not there. `cpp11 hello.cpp -o hello.exe` with LIB empty now
+  builds a program importing KERNEL32.dll alone (before: `link: libcmt.lib: cannot open`). The 8 MB stack stays.
+- **The Debug Shalimar runtimes carry lines**: `shmrtd.lib` over grt and `lib\tms6747\shmrt-debug` are compiled with
+  `-g` (shc.vcxproj, grt.vcxproj), and the cl-built `msvc\shmrtd.lib` with `/Od /Z7` instead of `/O2`, so "Step into
+  GRIDE's runtime" has somewhere to stop in a Shalimar program as it has in a C one.
+- **The build tasks show the compilers' warnings** (`Toolchain.targets`: `Rts6xVariant`, `WindowsLibrary`, `RunTool`
+  under `Quiet`). A warning on a file that compiled - cpp11's "compiled without -O2" of the releases before 1.62, which
+  reached `rts6x.lib`'s `BadAlloc` and `shmrt6x.lib`'s `Console` and `Failure` - was logged by no one. The first build
+  with them showed two things: cl's D9025 on the Debug Shalimar runtime, whose line said `/O2` and then `/Od` (the
+  `/O2` now sits on the Release line alone), and cpp11 1.62's "'x' is read here and nothing has been assigned to it" on
+  five RTS6x files (`LogarithmNatural`, `LogarithmBinary`, `LogarithmCommon`, `Formatter`, `FloatTextDecimal`), each
+  a variable the call before it fills through a reference (`if (special(x, result)) return result;`) - the warning
+  does not see an out-parameter as an assignment, which is cpp11's to refine; the code is right.
+- **c90 says that it has no optimiser for tms6747**: `-O2` for that target warns once, "the code is -O0's", where it
+  compiled the same code as `-O0` in silence (`sieve.c`: 762 identical lines). The optimiser itself is not written.
+- **The C6747's link defaults are a 1 MB stack and a 16 MB heap** (toolchain.json's `ti-link` in GRIDEd and GRIDE 2.0,
+  GRIDE 1.0's `compile.cpp`, the demo), where they were 16 KB and 1 MB of a 64 MB RAM: two hundred recursive calls with
+  256-byte frames corrupted memory (sim6747 then stopped on an undefined instruction) and 64 blocks of 16,000 bytes
+  filled the heap. A CCS project's own sizes still win.
+- **`RTS6X_REFERENCE` left grt's flags**: it selected nothing, the `*-reference.cpp` files being taken out by the
+  `.sources` lists.
+- **cpp11 calls a function that returns twice with nothing parked** (`X86_64Linux.cpp`, `visit(Binary)`): in
+  `if ((r = setjmp(jb)) == 0)` the right operand was pushed before the call and read back after longjmp's second
+  return, by which time the calls made since had written over it, so a C++ program longjmping out of a SIGSEGV handler
+  went round for ever on both runtimes where the same C did not (c90 had the rule since its own setjmp work). The
+  operand that calls setjmp is evaluated first.
+- **Three byte differences the hang had hidden**, found once that probe ran to its end: `strftime`'s `%c` on Windows
+  zero-padded the day where the UCRT pads it with a space (`%e` on every target now, `time\TimeFormatter.cpp`; the
+  branch came from an earlier reading); `_gmtime64`, `_localtime64` and `_mktime64` refused a time before 1970 where
+  the UCRT takes one down to twelve hours before (`_MIN_LOCAL_TIME`), so `gmtime(-1)` answered null (`c\time64.cpp`,
+  the bound moved; the weekday is the calendar's, a Wednesday, where the UCRT says Thursday); `fmod(x, 0)` answered the
+  negative quiet NaN where the UCRT answers the positive one (`math\RemainderTruncated.cpp`; an infinite x keeps the
+  negative). Two more differences in that probe are its own: `strerror` and `setlocale` answer one buffer on the UCRT,
+  and the UCRT accepts `de_DE`, which 6 refuses on purpose.
+- **Not a defect after all**: the review's finding that the Debug build of masm.exe writes a `.debug$S` four bytes
+  shorter than the Release build's. The four bytes are the object's own path in its S_OBJNAME record, which differs by
+  configuration (`build\Debug\obj\...` against `build\Release\obj\...`) and nothing else; the two solution
+  configurations' Debug variants differ in paths alone.
+- **Left**: an optimiser for c90's C6000 code; the ~180 Microsoft and POSIX names the headers do not declare, of which
+  only `_exit` is added here; CodeView in the Release variants, which waits on cpp11 writing the same code with `-g`.
+- The checks, on a clean Release rebuild of a clone at 5220ffd with everything in: the review's probes on both runtimes
+  and on sim6747, each difference it found now gone; the completeness test, 304 of 304 names and 4 of 4 entries; the
+  UCRT probes at -O2, -O0 and on the debug libraries, the same as their transcripts on both runtimes (`exitnow` on the
+  debug libraries on Microsoft's run alone excepted, as recorded); `threads.ps1` 10 of 10, `filing.ps1`, `debug.ps1`,
+  `start.ps1` (36 of 36), `math99.ps1` at both levels, `utf8.ps1` with and without the debug libraries, `access.ps1`
+  76 of 76 over the release and over the debug runtimes, the toolchain demo in Release and in Debug; and cpp11's
+  conformance suite on the rebuilt compiler, 1,091 of 1,091 valid cases at each level and 889 of 889 invalid ones
+  refused, no regression against 1.62's baseline (two `differs` of the first run were the clone's path length, 260
+  characters to the suite's two longest `.expected` names; both pass from a shorter path). `shmrtd.lib` has a lines
+  subsection in 40 of 40 members, `msvc\shmrtd.lib` in 41 of 41, `shmrt6xd.lib` DWARF in 39 of 40 (`shm_c_system` is
+  empty there). Not rebuilt: the solution's Debug configuration, which builds the same libraries from the same
+  project files. cpp11's `Version.h` stays 1.62 for its lane's next release.
 
 ---
 

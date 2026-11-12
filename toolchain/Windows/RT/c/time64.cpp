@@ -1,8 +1,9 @@
 // Spec: ISO C 7.23 with the Microsoft runtime's 64-bit time_t, as cpp11's <time.h> declares it: _time64,
 // _gmtime64, _localtime64, _mktime64, _ctime64 and _difftime64 (time, gmtime and the rest are inline
 // over them there), and clock. The calendar is RTS6x's (time\Calendar.cpp); local time is Windows'
-// (time.c). The runtime's range: 1970-01-01 to 3000-12-31 23:59:59 - outside it a null pointer or -1,
-// errno EINVAL.
+// (time.c). The runtime's range: twelve hours before 1970-01-01 (the Microsoft runtime's _MIN_LOCAL_TIME, so that
+// a local time on the first day converts) to 3000-12-31 23:59:59 - outside it a null pointer or -1, errno EINVAL.
+// (The UCRT names 1969-12-31 a Thursday; the calendar here says Wednesday, which it was.)
 
 #include <errno.h>
 #include <time.h>
@@ -11,6 +12,7 @@
 
 namespace {
 
+const long long earliest = -43200LL;      // 1969-12-31 12:00:00 UTC
 const long long latest = 32535215999LL;   // 3000-12-31 23:59:59 UTC
 
 thread_local struct tm result;     // gmtime's and localtime's, one for each thread as the Microsoft runtime's
@@ -38,7 +40,7 @@ extern "C" double _difftime64(time_t end, time_t start)
 
 extern "C" struct tm *_gmtime64(const time_t *t)
 {
-    if (!t || *t < 0 || *t > latest) { errno = EINVAL; return 0; }
+    if (!t || *t < earliest || *t > latest) { errno = EINVAL; return 0; }
     rts6x::Calendar::breakDown(*t, &result);
     return &result;
 }
@@ -46,7 +48,7 @@ extern "C" struct tm *_gmtime64(const time_t *t)
 extern "C" struct tm *_localtime64(const time_t *t)
 {
     int fields[9];
-    if (!t || *t < 0 || *t > latest || !__grt_local_fields(*t, fields)) { errno = EINVAL; return 0; }
+    if (!t || *t < earliest || *t > latest || !__grt_local_fields(*t, fields)) { errno = EINVAL; return 0; }
     fill(fields, &result);
     return &result;
 }
@@ -60,7 +62,7 @@ extern "C" time_t _mktime64(struct tm *tm)
     int fields[9] = { normal.tm_sec, normal.tm_min, normal.tm_hour, normal.tm_mday, normal.tm_mon, normal.tm_year,
                       normal.tm_wday, normal.tm_yday, tm->tm_isdst };
     long long t = __grt_from_local(fields, tm->tm_isdst);
-    if (t < 0 || t > latest) { errno = EINVAL; return -1; }
+    if (t < earliest || t > latest) { errno = EINVAL; return -1; }
     int local[9];
     if (__grt_local_fields(t, local)) fill(local, tm);
     return (time_t)t;

@@ -1,8 +1,10 @@
 // Pp.hpp - version 6: a C++98 preprocessor.
 //
-// Translation phases 1-4: line splices, comments, pp-tokens, directives and
-// macro expansion. One Preprocessor handles one translation unit and touches
-// nothing shared, so translation units can be preprocessed in parallel.
+// Translation phases 1-4: trigraphs, line splices, comments, pp-tokens (the
+// digraphs and the alternative tokens and, or, not... as their primary tokens,
+// their spelling kept for # and -E), directives and macro expansion. One
+// Preprocessor handles one translation unit and touches nothing shared, so
+// translation units can be preprocessed in parallel.
 //
 //   #include "x" / <x> / MACRO    search: the including file's directory (quoted form), then -I dirs
 //   #define / #undef               object-like and function-like macros, # and ## operators,
@@ -39,8 +41,10 @@ struct PpToken {
     bool                     bol;      // first token on its line
     std::vector<std::string> hide;     // macro names that must not expand this token again
     int                      pack;     // #pragma pack value in force where the token was output (0: the default)
-    PpToken() : kind(End), file(0), line(0), space(false), bol(false), pack(0) {}
+    bool                     alt;      // written as an alternative token or digraph (2.5): text is the primary spelling
+    PpToken() : kind(End), file(0), line(0), space(false), bol(false), pack(0), alt(false) {}
     bool is(const char* s) const { return text == s; }
+    std::string spelling() const;     // the spelling written: "and" for an alt "&&", "<:" for an alt "["
 };
 
 struct PpMacro {

@@ -298,6 +298,8 @@ void computeLiveness(std::vector<Line> &v) {
 // a non-instruction, a CALLP or B, or a line using reg can answer.
 int deadAt(const std::vector<Line> &v, std::size_t i, std::size_t j, const std::string &reg) {
     if (!v[j].instr) return isLabel(v[j]) && (v[i].liveOut & bitOf(reg)) == 0 ? 1 : 0;
+    // A line that does not spell the register neither reads nor writes it, and this question is asked of every line.
+    if (!isBranch(v[j].mnem) && v[j].raw.find(reg) == std::string::npos) return -1;
     std::vector<std::string> reads, writes;
     readsAndWrites(v[j], reads, writes);
     if (has(reads, reg)) return 0;
@@ -1248,8 +1250,12 @@ void hoistInvariants(std::vector<Line> &v) {
                     readsAndWrites(v[body[k]], r2, w2);
                     if (has(w2, d)) { if (k < first) first = k; if (k > b && k < next) next = k; }
                 }
+                // A branch reads its predicate, and no branch is in `body`: an exit before the first write, the back edge
+                // and the exits after this one read d as surely as a line of the body does.
+                auto branchReads = [&](std::size_t k) { std::vector<std::string> r2, w2; readsAndWrites(v[k], r2, w2); return has(r2, d); };
                 bool early = false;
                 for (std::size_t k = 0; k < first; k++) { std::vector<std::string> r2, w2; readsAndWrites(v[body[k]], r2, w2); if (has(r2, d)) early = true; }
+                for (std::size_t e = 0; e < exits.size(); e++) if (exits[e] < body[first] && branchReads(exits[e])) early = true;
                 if (early && next == body.size()) continue;                        // this value reaches the next turn
                 if (next < body.size() && (v[body[next]].mnem == "MVKH" || v[body[next]].mnem == "ADDK")) continue;
                 // The web renamed to f: every reader rebuilt, the next writer's sources too; false where a
@@ -1257,6 +1263,9 @@ void hoistInvariants(std::vector<Line> &v) {
                 auto renameWeb = [&](const std::string &f, bool apply) -> bool {
                     Line own = l; own.ops.back() = f;                          // the hoisted instruction's own form
                     if (crossings(rebuilt(own.mnem, own.ops)) > 1 || unitsFor(rebuilt(own.mnem, own.ops)) == 0) return false;
+                    const std::size_t webEnd = next < body.size() ? body[next] : i + 1;
+                    for (std::size_t e = 0; e < exits.size(); e++) if (exits[e] > body[b] && exits[e] < webEnd && branchReads(exits[e])) return false;
+                    if (next == body.size() && branchReads(i)) return false;
                     for (std::size_t k = b + 1; k <= next && k < body.size(); k++) {
                         if (gone[k] || (pair && k == b + 1)) continue;
                         Line &u = v[body[k]];
@@ -1604,7 +1613,7 @@ bool foldScaledIndex(std::vector<Line> &v, std::size_t i, const std::set<std::st
             std::vector<std::string> r3, w3;
             readsAndWrites(v[k], r3, w3);
             const bool access = v[k].pred.empty() && v[k].ops.size() == 2 && (isLoad(v[k].mnem) || isStore(v[k].mnem));
-            if (has(w3, u.R) || has(w3, T) || has(w3, I)) { if (!(access && isLoad(v[k].mnem) && v[k].ops[1] == u.R && !has(w3, T) && !has(w3, I))) break; }
+            if (has(w3, u.R) || has(w3, T) || has(w3, I)) { if (!(access && isLoad(v[k].mnem) && v[k].ops[1] == u.R && has(r3, u.U) && !has(w3, T) && !has(w3, I))) break; }
             if (!has(r3, u.U) && !has(w3, u.U)) continue;
             if (!access) break;
             const std::size_t m = isStore(v[k].mnem) ? 1 : 0;
@@ -1707,7 +1716,7 @@ void foldAddressing(std::vector<Line> &v) {
                 std::vector<std::string> r2, w2;
                 readsAndWrites(v[j], r2, w2);
                 const bool access = v[j].pred.empty() && v[j].ops.size() == 2 && (isLoad(v[j].mnem) || isStore(v[j].mnem));
-                if (has(w2, R) && !(access && isLoad(v[j].mnem) && v[j].ops[1] == R)) break;   // a load into R reads R first
+                if (has(w2, R) && !(access && isLoad(v[j].mnem) && v[j].ops[1] == R && has(r2, T))) break;   // the load through *T into R reads R first; any other leaves R a new value
                 if (!has(r2, T) && !has(w2, T)) continue;
                 const Line &u = v[j];
                 if (access) {
@@ -2110,32 +2119,24 @@ std::vector<Pending> scheduleBlock(std::vector<Node> &nodes, std::ostringstream 
             if (d >= 0) b.preds.push_back(std::make_pair(static_cast<int>(j), d));
         }
     }
-    // A node's height: its latency, or the longest edge-plus-height after it.
-    // Edges run forward, so walking back each height is final before it is
-    // handed on: one pass over the edges, where the old search was cubic.
+    // Every edge is taken once, from its later end, whose height is settled by then. A block is thousands of lines in a
+    // large initializer and every line that touches a register has an edge to every earlier one that does: what asks
+    // the edges again for each node, or each cycle, is minutes.
     for (std::size_t i = 0; i < n; i++) nodes[i].height = nodes[i].lat;
-    for (std::size_t k = n; k-- > 0;) {
-        const Node &b = nodes[k];
-        for (std::size_t e = 0; e < b.preds.size(); e++) {
-            Node &a = nodes[static_cast<std::size_t>(b.preds[e].first)];
-            a.height = std::max(a.height, b.preds[e].second + b.height);
+    std::vector<std::vector<std::pair<int, int> > > follows(n);   // (later node, the least distance in cycles)
+    std::vector<int> unmet(n, 0), earliest(n, 0);                 // the edges not yet issued, and the cycle those issued allow
+    for (std::size_t i = n; i-- > 0;) {
+        for (std::size_t e = 0; e < nodes[i].preds.size(); e++) {
+            const std::pair<int, int> &edge = nodes[i].preds[e];
+            Node &a = nodes[static_cast<std::size_t>(edge.first)];
+            a.height = std::max(a.height, edge.second + nodes[i].height);
+            if (a.branch) continue;
+            follows[static_cast<std::size_t>(edge.first)].push_back(std::make_pair(static_cast<int>(i), edge.second));
+            unmet[i]++;
         }
     }
-    // A node is ready when every predecessor but a branch is issued and the last of their distances has passed. Kept per
-    // node - the predecessors still waiting, and the cycle the issued ones allow - and brought up to date as each issues,
-    // rather than every edge of every node asked again each cycle (cycles times edges: cubic on a long block).
-    std::vector<int> waiting(n, 0), earliest(n, 0);
-    std::vector<std::vector<std::pair<int, int> > > succs(n);   // (later node, distance), for each node a later one waits on
-    for (std::size_t i = 0; i < n; i++) {
-        const Node &x = nodes[i];
-        for (std::size_t e = 0; e < x.preds.size(); e++) {
-            const std::size_t j = static_cast<std::size_t>(x.preds[e].first);
-            const Node &y = nodes[j];
-            if (y.branch) continue;
-            if (y.issue < 0) { waiting[i]++; succs[j].push_back(std::make_pair(static_cast<int>(i), x.preds[e].second)); }
-            else earliest[i] = std::max(earliest[i], y.issue + x.preds[e].second);
-        }
-    }
+    std::vector<std::size_t> waiting;                             // not yet issued, in order: the first of the greatest height wins
+    for (std::size_t i = 0; i < n; i++) if (!nodes[i].branch) waiting.push_back(i);
     std::vector<Packet> cycles;
     std::size_t left = n - (branchAt >= 0 ? 1 : 0);
     for (int c = 0; left > 0; c++) {
@@ -2143,23 +2144,24 @@ std::vector<Pending> scheduleBlock(std::vector<Node> &nodes, std::ostringstream 
         for (;;) {
             Packet &p = cycles[static_cast<std::size_t>(c)];   // taken afresh: holding a unit may grow the vector
             int best = -1;
-            for (std::size_t i = 0; i < n; i++) {
+            std::size_t bestAt = 0;
+            for (std::size_t w = 0; w < waiting.size(); w++) {
+                const std::size_t i = waiting[w];
                 Node &x = nodes[i];
-                if (x.issue >= 0 || x.branch || c < minIssue[i]) continue;
-                if (waiting[i] > 0 || earliest[i] > c || !fits(p, x)) continue;
-                if (best < 0 || x.height > nodes[static_cast<std::size_t>(best)].height) best = static_cast<int>(i);
+                if (unmet[i] != 0 || c < earliest[i] || c < minIssue[i] || !fits(p, x)) continue;
+                if (best < 0 || x.height > nodes[static_cast<std::size_t>(best)].height) { best = static_cast<int>(i); bestAt = w; }
             }
             if (best < 0) break;
+            waiting.erase(waiting.begin() + static_cast<long>(bestAt));
             Node &chosen = nodes[static_cast<std::size_t>(best)];
             chosen.issue = c;
+            for (std::size_t e = 0; e < follows[static_cast<std::size_t>(best)].size(); e++) {
+                const std::pair<int, int> &edge = follows[static_cast<std::size_t>(best)][e];
+                unmet[static_cast<std::size_t>(edge.first)]--;
+                earliest[static_cast<std::size_t>(edge.first)] = std::max(earliest[static_cast<std::size_t>(edge.first)], c + edge.second);
+            }
             add(p, chosen);
             left--;
-            const std::vector<std::pair<int, int> > &after = succs[static_cast<std::size_t>(best)];
-            for (std::size_t s = 0; s < after.size(); s++) {
-                const std::size_t k = static_cast<std::size_t>(after[s].first);
-                waiting[k]--;
-                earliest[k] = std::max(earliest[k], c + after[s].second);
-            }
             // A DP instruction holds its unit on its side - each it might be given - for its late cycles, and a crossed pair the cross path.
             for (int k = 1; k <= chosen.late; k++) {
                 while (static_cast<int>(cycles.size()) <= c + k) cycles.push_back(Packet());

@@ -276,6 +276,10 @@ void Optimizer::dataSym(const std::string &sym, long long off) {
     event([=](Spelling &s) { s.dataSym(sym, off); });
 }
 void Optimizer::noteHasEh(bool yes) { event([=](Spelling &s) { s.noteHasEh(yes); }); }
+void Optimizer::flagExchange() {
+    event([](Spelling &s) { s.flagExchange(); });
+}
+
 void Optimizer::initialiserEntry(const std::string &fn, bool dsoHandle) {
     event([=](Spelling &s) { s.initialiserEntry(fn, dsoHandle); });
 }

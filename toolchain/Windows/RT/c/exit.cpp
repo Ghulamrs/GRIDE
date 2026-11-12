@@ -49,3 +49,9 @@ extern "C" void quick_exit(int status)
     while (quickCount > 0) quickFunctions[--quickCount]();
     _Exit(status);
 }
+
+// The Microsoft runtime's _exit (<stdlib.h> and <process.h> there): what C99's _Exit does.
+extern "C" void _exit(int status)
+{
+    _Exit(status);
+}

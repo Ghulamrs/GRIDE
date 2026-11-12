@@ -12,7 +12,10 @@ double Remainder::truncated(double x, double y)
     unsigned long long ux = MathBits::of(x), uy = MathBits::of(y);
     if (MathBits::isNaN(ux)) return x;
     if (MathBits::isNaN(uy)) return y;
-    if (MathBits::isInfinite(ux) || MathBits::isZero(uy)) return MathError::domain();
+    // A zero y answers the positive quiet NaN on the Microsoft runtime ("nan", measured: fmod(-1, 0)), an infinite x
+    // its negative one ("-nan(ind)"); EDOM both ways.
+    if (MathBits::isZero(uy)) return MathError::domainC99();
+    if (MathBits::isInfinite(ux)) return MathError::domain();
     if (MathBits::isInfinite(uy) || MathBits::isZero(ux)) return x;
     if ((ux & MathBits::magnitudeMask()) < (uy & MathBits::magnitudeMask())) return x;
     UnpackedFloat a(ux, FloatFormat::binary64()), b(uy, FloatFormat::binary64());

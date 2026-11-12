@@ -44,6 +44,8 @@ bool Parser::linkageSpecification() {
 }
 
 void Parser::topLevel(Program &program) {
+    const ReadingAt reading(this, &declAt_);
+    if (consume(";")) return;     // [dcl.dcl]: an empty-declaration
     noreturnAt_ = 0;
     // `namespace N { ... }` - a scope that qualifies what is declared in it, and nothing else.
     // Everything inside is read by this same function, so a namespace nests, may be reopened,
@@ -245,7 +247,7 @@ void Parser::topLevel(Program &program) {
     if (sc == StorageTypedef) {
         do {
             Declared td = declarator(base);
-            refuseThreadLocalHere(quals.isThreadLocal, td.pos);
+            refuseThreadLocalHere(quals.isThreadLocal || quals.threadLocalAsStatic, td.pos);
             typedefFunctionSuffix(td);
             // **A typedef at namespace scope is keyed by its qualified name**, the way a class's tag is.
             const std::string key = namespacePrefix() + td.name;
@@ -525,8 +527,14 @@ void Parser::topLevel(Program &program) {
                 const Type *each = arrayClass != nullptr ? arrayClass : d.type;
                 const bool aggregate = isAggregateClass(each) && destructorOf(each) == nullptr &&
                                        bracedInitialiserAhead();
+                // A class with no constructor and a destructor is built by nothing, and is still destroyed at
+                // exit ([basic.start.term]), so without an initialiser it takes this path for the registration alone.
+                const bool destroyedOnly = arrayClass == nullptr && d.type->isStructOrUnion() &&
+                                           !d.type->tag().empty() && !hasConstructors(d.type->tag()) &&
+                                           destructorOf(d.type->unqualified()) != nullptr &&
+                                           !peek().is("=") && !peek().is("(") && !peek().is("{");
                 if ((arrayClass != nullptr ||
-                     hasConstructors(d.type->tag())) &&
+                     hasConstructors(d.type->tag()) || destroyedOnly) &&
                     sc != StorageExtern && !aggregate) {
                     const std::string gname =
                         (namespaceStack_.empty() || cLinkage_ > 0)
@@ -795,7 +803,7 @@ void Parser::topLevel(Program &program) {
         return;
     }
 
-    refuseThreadLocalHere(quals.isThreadLocal, d.pos);
+    refuseThreadLocalHere(quals.isThreadLocal || quals.threadLocalAsStatic, d.pos);
     // `auto f(int a) -> decltype(a)`, C++11: the return type is read after the parameters,
     // which are in scope for it by then, [dcl.fct]/2 and [basic.scope.param].
     const bool trailingArrow = trailingArrowAhead();
@@ -2358,7 +2366,11 @@ void Parser::topLevel(Program &program) {
     if (!splitC1.empty())
         synthesizeCompleteCtor(memberOf, params, splitC1, splitC2,
                                program.functions.back().isInline(), d.pos,
-                               -1, false, &baseArgs);
+                               -1, false, &baseArgs, delegates);
+    for (std::size_t i = 0; i < delegationEntries_.size(); i++)
+        if (delegationEntriesMade_.insert(delegationEntries_[i].entry).second)
+            synthesizeDelegationEntry(memberOf, delegationEntries_[i], d.pos);
+    delegationEntries_.clear();
     if (!splitD1.empty())
         synthesizeCompleteDtor(memberOf, splitD1, splitD2,
                                program.functions.back().isInline(), d.pos);
@@ -2617,19 +2629,25 @@ StmtPtr Parser::delegatingCall(const Declared &d, const Type *cls, std::vector<E
     std::vector<const Type *> params;
     params.push_back(self);
     // **A class with a virtual base**: the target builds them where this ctor
-    // would - cl hands on the most-derived flag; Itanium's C2 calls the
-    // target's C2 with its VTT, C1 standing in only if its list names none.
+    // would - cl hands on the most-derived flag; on Itanium the call is to the
+    // entry picking the target's C1 or C2 by the VTT (synthesizeDelegationEntry),
+    // and this constructor's own C1 builds nothing.
     std::string symbol = chosen.symbol;
     if (cls->hasVirtualBase() && !target_.microsoftNames()) {
-        if (!chosen.defined || virtualBaseInitialisers_.count(chosen.symbol) != 0)
-            src_.fail(pos, "this delegating constructor of a class with a virtual base delegates to one " +
-                           std::string(chosen.defined ? "whose list initialises a virtual base"
-                                                      : "not defined before it") +
-                           ", and that is not supported yet on this target");
         const std::map<std::string, std::string>::const_iterator c2 = constructorC2_.find(chosen.symbol);
         const std::size_t c1 = symbol.find("C1E");
         if (c2 != constructorC2_.end()) symbol = c2->second;
         else if (c1 != std::string::npos) symbol.replace(c1, 3, "C2E");
+        const std::size_t at = symbol.find("C2");
+        if (at != std::string::npos) {
+            DelegationEntry entry;
+            entry.c1 = chosen.symbol;
+            entry.c2 = symbol;
+            entry.params = chosen.params;
+            symbol.replace(at, 2, "C4");
+            entry.entry = symbol;
+            delegationEntries_.push_back(entry);
+        }
         if (takesVtt(cls)) {
             ExprPtr vtt(Var::local(".vtt", vttSlot_));
             vtt->setType(vttType());

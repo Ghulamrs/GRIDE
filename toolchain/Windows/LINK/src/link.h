@@ -114,8 +114,10 @@ struct Module {
     std::vector<Symbol>  syms;
     u32  compid;
     bool from_archive;
-    int  lib;                    /* the input the member came from, in search order; -1 for an object */
-    Module() : compid(0), from_archive(false), lib(-1) {}
+    int  lib;                    /* the input the member came from, in search order; -1 for an object;
+                                    for a member of an import library, the first input to give its DLL */
+    int  dll;                    /* a member of an import library: its DLL, numbered as they were first taken; else -1 */
+    Module() : compid(0), from_archive(false), lib(-1), dll(-1) {}
 };
 
 struct OutSection {

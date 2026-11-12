@@ -89,6 +89,7 @@ public:
     void dataSym(const std::string &sym, long long off) override;
     void dataBytes(const std::string &bytes) override;
 
+    void flagExchange() override;
     void predefine(const std::vector<std::string> &names) override;
     void initialiserEntry(const std::string &fn, bool dsoHandle) override;
     // A `div` or `idiv` given up as a keyword is still an instruction here: written as its bytes (1.30).

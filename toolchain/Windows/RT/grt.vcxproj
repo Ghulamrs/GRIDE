@@ -18,7 +18,7 @@
                               directory, structured exceptions, the end
     kernel32.lib              the import library kernel32.def names, written by link /LIB /DEF
     shmrt.lib       the Shalimar runtime (Compiler-Si\runtime) over them, by cpp11 -O2
-    shmrtd.lib      and its debugging build (-O0 -DSHM_DEBUG=1, the session in Debug.cpp)
+    shmrtd.lib      and its debugging build (-O0 -g -DSHM_DEBUG=1, the session in Debug.cpp, lines for gride-dbg)
   Each is checked as it is built: every name defined once across the layers, each library's undefined names
   defined in itself or below it, only grtwin reaching kernel32, nothing left undefined but the program's own entry
   (LibraryClosed),
@@ -67,8 +67,8 @@
     <GrtLibDir>$(OutDir)lib\x86_64-windows\</GrtLibDir>
     <GrtRts6x>$(ProjectDir)..\..\TI\RTS6x\src\</GrtRts6x>
     <GrtShalimar>$(ProjectDir)..\..\Compilers\Compiler-Si\runtime\</GrtShalimar>
-    <GrtFlags>-O2 -DNDEBUG=1 -DRTS6X_REFERENCE=1</GrtFlags>
-    <GrtDebugFlags>-O0 -g -DGRT_DEBUG=1 -DRTS6X_REFERENCE=1</GrtDebugFlags>
+    <GrtFlags>-O2 -DNDEBUG=1</GrtFlags>
+    <GrtDebugFlags>-O0 -g -DGRT_DEBUG=1</GrtDebugFlags>
     <GrtIncludes>$(ProjectDir)internal;$(GrtRts6x)</GrtIncludes>
     <GrtLayers>$(GrtLibDir)grtstart.lib;$(GrtLibDir)grtcompat.lib;$(GrtLibDir)grtcxx.lib;$(GrtLibDir)grtc.lib;$(GrtLibDir)grtwin.lib;$(GrtLibDir)kernel32.lib</GrtLayers>
     <GrtDebugLayers>$(GrtLibDir)grtstartd.lib;$(GrtLibDir)grtcompatd.lib;$(GrtLibDir)grtcxxd.lib;$(GrtLibDir)grtcd.lib;$(GrtLibDir)grtwind.lib;$(GrtLibDir)kernel32.lib</GrtDebugLayers>
@@ -147,7 +147,7 @@
                     Sources="$(GrtShalimar)Failure.cpp;$(GrtShalimar)Numbers.cpp;$(GrtShalimar)Array.cpp;$(GrtShalimar)Console.cpp;$(GrtShalimar)Runtime.cpp;$(GrtShalimar)Borrow.cpp"
                     Library="$(GrtLibDir)shmrt.lib" />
     <WindowsLibrary Jobs="$(ToolchainJobs)" C90="$(GrtC90)" Cpp11="$(GrtCpp11)" Masm="$(GrtMasm)" Link="$(GrtLink)" ObjDir="$(IntDir)shmrtd"
-                    Flags="-O0 -DSHM_DEBUG=1" IncludeDirs="$(GrtShalimar)"
+                    Flags="-O0 -g -DSHM_DEBUG=1" IncludeDirs="$(GrtShalimar)"
                     SourceDirs="$(GrtShalimar)wrappers"
                     Sources="$(GrtShalimar)Failure.cpp;$(GrtShalimar)Numbers.cpp;$(GrtShalimar)Array.cpp;$(GrtShalimar)Console.cpp;$(GrtShalimar)Runtime.cpp;$(GrtShalimar)Borrow.cpp;$(GrtShalimar)Debug.cpp"
                     Library="$(GrtLibDir)shmrtd.lib" />

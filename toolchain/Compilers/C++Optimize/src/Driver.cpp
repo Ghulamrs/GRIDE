@@ -118,6 +118,83 @@ static bool directoryHas(const std::string &dir, const char *name) {
     return probe.good();
 }
 
+namespace {
+// **The construct that begins at `pos` taken out of the text**, an empty one left where it stood: a statement to its
+// `;` or its closing brace - with the `else` or `catch` that belongs to it - or a declaration, a class's to the `;`
+// after it. What a declaration there would have introduced is told to `src`. False where nothing can be taken.
+bool takeOut(std::vector<Token> &tokens, std::size_t pos, const Source &src) {
+    std::size_t i = 0;
+    while (i < tokens.size() && tokens[i].kind != TokenKind::End && tokens[i].pos < pos) i++;
+    if (i >= tokens.size() || tokens[i].kind == TokenKind::End || tokens[i].pos != pos) return false;
+    const bool toSemicolon = tokens[i].is("struct") || tokens[i].is("class") || tokens[i].is("union") ||
+                             tokens[i].is("enum") || tokens[i].is("typedef");
+    int depth = 0;
+    std::size_t last = i;
+    for (;; last++) {
+        const Token &t = tokens[last];
+        if (t.kind == TokenKind::End) { last--; break; }
+        if (t.is("(") || t.is("[") || t.is("{")) { depth++; continue; }
+        if (t.is(")") || t.is("]") || t.is("}")) {
+            if (depth == 0) { if (last == i) return false; last--; break; }   // what holds it ended first
+            depth--;
+            if (depth != 0 || !t.is("}")) continue;
+            const Token &n = tokens[last + 1];
+            if (n.is(";")) { last++; break; }
+            if (!toSemicolon && !n.is("else") && !n.is("catch") && !n.is("while") && !n.is(",") && !n.is("{")) break;
+            continue;
+        }
+        if (depth == 0 && t.is(";")) break;
+    }
+    // `int x = wrong;`: x is what the rest of the function goes on to name.
+    depth = 0;
+    for (std::size_t k = i; k < last; k++) {
+        const Token &t = tokens[k];
+        if (t.is("(") || t.is("[") || t.is("{")) depth++;
+        else if (t.is(")") || t.is("]") || t.is("}")) depth--;
+        else if (depth == 0 && k > i && t.kind == TokenKind::Ident) {
+            const Token &b = tokens[k - 1], &n = tokens[k + 1];
+            if ((b.kind == TokenKind::Ident || b.kind == TokenKind::Keyword || b.is("*") || b.is("&") || b.is(">")) &&
+                (n.is("=") || n.is(";") || n.is(",") || n.is("(") || n.is("{") || n.is("[")))
+                src.quieten(t.text);
+        }
+    }
+    Token empty = tokens[i];
+    empty.kind = TokenKind::Punct;
+    empty.text = ";";
+    tokens.erase(tokens.begin() + static_cast<long>(i) + 1, tokens.begin() + static_cast<long>(last) + 1);
+    tokens[i] = empty;
+    return true;
+}
+}   // namespace
+
+// **Every error, not only the first.** A parser that has failed holds nothing worth going on with, so the file is
+// read again by a new one without the construct that failed, each reading saying the next error. A compile that
+// succeeds never comes here. It stops where nothing can be taken out - a failure with no statement or declaration
+// of the program's around it - or at twenty errors; the error already said is what fails the compile.
+void Driver::reportTheRest(const Source &src, const std::vector<Token> &tokens, std::size_t failedAt, const Target &target) {
+    const int kMostErrors = 20;
+    std::vector<Token> now = tokens;
+    std::size_t taken = Parser::npos();
+    for (int reading = 0; reading < 2 * kMostErrors; reading++) {
+        if (failedAt == Parser::npos() || failedAt == taken || !takeOut(now, failedAt, src)) return;
+        taken = failedAt;
+        src.clearFailed();
+        TypeTable types;
+        Parser next(src, now, types, target, backend_->abi());
+        try {
+            (void)next.parse();
+            return;
+        } catch (const CompileFailed &) {
+            if (!src.failed()) return;
+            failedAt = next.failedAt();
+        }
+        if (src.errorsReported() >= kMostErrors) {
+            std::fprintf(stderr, "%s: too many errors, stopping\n", src.files().front().c_str());
+            return;
+        }
+    }
+}
+
 // **Where the standard headers are, asked in the order a release wants.**
 void Driver::standardIncludeDirectories(const std::string &argv0) {
     const char *envCxx = std::getenv(program::env("INCLUDE").c_str());
@@ -713,10 +790,11 @@ bool Driver::assembleObjects() {
 
 // The linker command file lnk6x needs: one flat memory for the C6747 and
 // every section the compilers and TI's runtime write placed in it - the same
-// file RIDE and VM6747's tests link with.
+// file RIDE and VM6747's tests link with. **An 8 MB stack, as the other three targets give**: 16 KB
+// put a 100,000-deep recursion into the sections below it (op11 of the suite).
 static const char *const kTiLinkCommands =
     "--rom_model\n"
-    "--stack_size=0x4000\n"
+    "--stack_size=0x800000\n"
     "--heap_size=0x100000\n"
     "MEMORY\n"
     "{\n"
@@ -879,9 +957,24 @@ bool Driver::link() {
         for (const std::string &o : objects) command += " " + shellQuote(o);
         for (const std::string &o : alreadyObjects_) command += " " + shellQuote(o);
 
-        // libcpmt holds std::set_new_handler and get_new_handler, and no other static library does.
-        command += " libcmt.lib libcpmt.lib libucrt.lib libvcruntime.lib kernel32.lib"
-                   " legacy_stdio_definitions.lib";
+        // **GRIDE's runtime when it is installed beside this program** (lib\x86_64-windows\grtc.lib,
+        // docs\Runtime_Design.md 13.1): its five layered libraries and kernel32.lib by path, the d variants under
+        // -g, and no LIB to find - so a program built here runs where there is no Visual Studio, as one built by
+        // GRIDE does. Else Microsoft's static CRT through LIB: libcpmt holds std::set_new_handler and
+        // get_new_handler, and no other static library does.
+        const std::string grtc = besideProgram(program_, "lib\\x86_64-windows\\grtc.lib");
+        if (!grtc.empty()) {
+            const std::string dir = grtc.substr(0, grtc.size() - std::strlen("grtc.lib"));
+            const char *variant = debug_ ? "d" : "";
+            static const char *const layers[] = { "grtstart", "grtcompat", "grtcxx", "grtc", "grtwin" };
+            for (const char *layer : layers) command += " " + shellQuote(dir + layer + variant + ".lib");
+            command += " " + shellQuote(dir + "kernel32.lib");
+            if (!quiet_)
+                std::fprintf(stderr, "%s: linking against GRIDE's runtime in %s\n", program_.c_str(), dir.c_str());
+        } else {
+            command += " libcmt.lib libcpmt.lib libucrt.lib libvcruntime.lib kernel32.lib"
+                       " legacy_stdio_definitions.lib";
+        }
     } else {
         command = shellQuote(hostCompiler());
 
@@ -1055,7 +1148,9 @@ bool Driver::parseArguments(int argc, char **argv) {
     }
 
     // C++ first, then C.
+    const std::size_t givenDirectories = searchPath_.size();
     standardIncludeDirectories(argv[0]);
+    systemPath_.assign(searchPath_.begin() + static_cast<long>(givenDirectories), searchPath_.end());
 
     if (inputs.empty()) { usage(argv[0]); return false; }
 
@@ -1224,8 +1319,15 @@ bool Driver::compile(const Job &job) {
     auto t2 = Clock::now();
 
     const std::vector<Token> probeTokens = tokens;
+    src.setSystemDirectories(systemPath_);
     Parser parser(src, std::move(tokens), types, target, backend_->abi());
-    Program program = parser.parse();
+    Program program;
+    try {
+        program = parser.parse();
+    } catch (const CompileFailed &) {
+        if (src.failed()) reportTheRest(src, probeTokens, parser.failedAt(), target);
+        throw;
+    }
     // **[temp.res]/8-10: what a template the program never instantiates says wrong of itself** - made with
     // `int` and with `double` for its type parameters, each in a parser of its own; a failure both readings
     // meet in the same words at the same place, in a statement that names nothing dependent, is reported.
@@ -1254,7 +1356,8 @@ bool Driver::compile(const Job &job) {
 
     // **A file that writes `volatile` is compiled without -O**, said as a
     // `file:line:col: warning:` at the first one (the passes do not ask it);
-    // where the backend skips such functions one by one (x86_64), it keeps -O.
+    // where the backend skips such functions one by one (x86_64, arm64,
+    // tms6747), it keeps -O.
     const bool downgrade = program.usesVolatile && !backend_->optimizesAroundVolatile();
     const int level = downgrade ? 0 : optimize_;
     if (optimize_ > 0 && downgrade) {

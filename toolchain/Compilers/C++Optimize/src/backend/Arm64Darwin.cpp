@@ -447,10 +447,13 @@ void Arm64Darwin::visit(const VaStart &n) {
 
 void Arm64Darwin::visit(const VaArg &n) {
     n.list().accept(*this);
+    const int size = n.type()->size(target_);
+    const bool whole = n.type()->isStructOrUnion() && size <= 16;
+    const bool copied = n.type()->isStructOrUnion() && size > 16;
     out_ << "  ldr x1, [x0]\n";
-    out_ << "  add x2, x1, #8\n";
+    out_ << "  add x2, x1, #" << (whole ? alignTo(size, 8) : 8) << "\n";
     out_ << "  str x2, [x0]\n";
-    out_ << "  mov x0, x1\n";
+    out_ << (copied ? "  ldr x0, [x1]\n" : "  mov x0, x1\n");
     load(n.type());
 }
 
@@ -769,8 +772,17 @@ void Arm64Darwin::visit(const Call &n) {
         else                                       dest.push_back(abi_.intRegs[p.firstReg]);
     }
 
+    // Darwin keeps every variadic argument on the stack: a word each, but a struct up to 16 bytes in as many words as
+    // it takes, and a larger one as the address of a copy.
     int variadicBase = alignTo(plan.stackBytes, 8);
-    int extraBytes = alignTo(variadicBase + static_cast<int>(extra) * 8, 16);
+    std::vector<int> extraAt(extra, 0);
+    int extraEnd = variadicBase;
+    for (std::size_t k = 0; k < extra; k++) {
+        const Type *t = args[named + k]->type();
+        extraAt[k] = extraEnd;
+        extraEnd += t->isStructOrUnion() && t->size(target_) <= 16 ? alignTo(t->size(target_), 8) : 8;
+    }
+    int extraBytes = alignTo(extraEnd, 16);
     if (extraBytes > 0) {
         movImm("x9", extraBytes);
         out_ << "  sub sp, sp, x9\n";
@@ -784,14 +796,23 @@ void Arm64Darwin::visit(const Call &n) {
     }
     for (std::size_t k = 0; k < extra; k++) {
         const ExprPtr &a = args[named + k];
-
-        if (a->type()->isStructOrUnion())
-            unsupported("a struct passed through '...'");
         a->accept(*this);
-        if (a->type()->isFloating())
-            out_ << "  str d0, [sp, #" << (variadicBase + k * 8) << "]\n";
-        else
-            out_ << "  str x0, [sp, #" << (variadicBase + k * 8) << "]\n";
+        if (a->type()->isStructOrUnion()) {
+            const int size = a->type()->size(target_);
+            if (size <= 16) {
+                out_ << "  add x11, sp, #" << extraAt[k] << "\n";
+                copyBlock(size, "x0", "x11");
+            } else {
+                localIn("x1", n.argSlot(named + k));
+                copyBlock(size, "x0", "x1");
+                localIn("x9", n.argSlot(named + k));
+                out_ << "  str x9, [sp, #" << extraAt[k] << "]\n";
+            }
+        } else if (a->type()->isFloating()) {
+            out_ << "  str d0, [sp, #" << extraAt[k] << "]\n";
+        } else {
+            out_ << "  str x0, [sp, #" << extraAt[k] << "]\n";
+        }
     }
 
     if (n.callee() != nullptr) {
@@ -1126,10 +1147,14 @@ void Arm64Darwin::emitFunction(const Function &fn) {
         out_ << "  .cfi_offset w19, -32\n";
         opt::noteDecline("realigned-frame-no-peephole", fn.symbol());
     }
+    // **A function that reads or writes a volatile lvalue is written past the peephole as well**, its
+    // locals left in the frame: neither asks the qualifier, and a volatile access must stay a memory access.
+    volatileHere_ = optimize_ > 0 && touchesVolatile(fn.body());
+    if (volatileHere_) opt::noteDecline("volatile-no-peephole", fn.symbol());
     // An optimized frame keeps room below its locals for the callee-saved registers a promoted local takes.
     const int locals = alignTo(fn.frameSize(), 16);
-    const bool promote = optimize_ > 0 && realign_ == 0 && locals + kCalleeArea <= 65535;
-    if (optimize_ > 0 && !promote) opt::noteDecline("arm64-frame-too-large-no-promotion", fn.symbol());
+    const bool promote = optimize_ > 0 && realign_ == 0 && !volatileHere_ && locals + kCalleeArea <= 65535;
+    if (optimize_ > 0 && !promote && !volatileHere_) opt::noteDecline("arm64-frame-too-large-no-promotion", fn.symbol());
     int frame = locals + (promote ? kCalleeArea : 0);
     if (realign_ > 0) frame = top_ = alignTo(locals, realign_);
     if (realign_ > 0) {
@@ -1217,7 +1242,7 @@ void Arm64Darwin::emitFunction(const Function &fn) {
     std::vector<std::string> saved;
     const Type *ret = fn.returns();
     const bool resultInX = ret != nullptr && !ret->isVoid() && !ret->isFloating();
-    const std::string body = a64Peephole(out_.str(), realign_ > 0 ? 0 : optimize_, promote ? &saved : nullptr, resultInX);
+    const std::string body = a64Peephole(out_.str(), realign_ > 0 || volatileHere_ ? 0 : optimize_, promote ? &saved : nullptr, resultInX);
     out_.str(std::string());
     out_ << head;
     // Each register a promoted local took is saved below the locals, where the unwinder is told to find it.
@@ -1301,6 +1326,10 @@ void Arm64Darwin::run(const Program &program) {
 
     emitData(program);
     for (const Function &fn : program.functions) emitFunction(fn);
+    // atomic_flag's exchange, private to the file: the pair retried until nothing came between its two halves.
+    if (program.usesFlagExchange)
+        out_ << "  .section __TEXT,__text,regular,pure_instructions\n  .p2align 2\n___cxx1_flag_exchange:\n"
+                "  ldaxrb w2, [x0]\n  stlxrb w3, w1, [x0]\n  cbnz w3, ___cxx1_flag_exchange\n  mov w0, w2\n  ret\n";
     emitTlsWrappers(program);
     // Measured from clang: the init function's address in __mod_init_func.
     if (!program.initFunction.empty())

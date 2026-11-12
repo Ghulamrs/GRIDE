@@ -56,11 +56,7 @@ function Compile([string]$source) {
     Tool masm @('-t', 'x64', "$work\$name.s", '-o', "$work\$name.obj")
 }
 foreach ($source in 'args.cpp', 'console.cpp', 'screen.c') { Compile $source }
-# screen.exe's import library is kernel32.def's names and screen.def's together: GRIDE's link gives a program calling
-# through a second import library of KERNEL32.dll an import table that crashes at the first call
-$names = @(Get-Content (Join-Path $here 'screen.def') | Where-Object { $_ -match '^\s+\w' })
-Set-Content "$work\screen.def" (@(Get-Content (Join-Path $here '..\..\kernel32.def')) + $names) -Encoding ASCII
-Tool link @('/LIB', "/DEF:$work\screen.def", "/OUT:$work\screen.lib")
+Tool link @('/LIB', "/DEF:$here\screen.def", "/OUT:$work\screen.lib")
 
 $d = if ($DebugRuntime) { 'd' } else { '' }
 $grt = @(@('grtstart', 'grtcompat', 'grtcxx', 'grtc', 'grtwin') | ForEach-Object { Join-Path $Libs "$_$d.lib" }) + (Join-Path $Libs 'kernel32.lib')
@@ -69,7 +65,7 @@ try {
     $env:LIB = ''
     Tool link (@('/nologo', '/subsystem:console', "/out:$work\args-grt.exe", "$work\args.obj") + $grt)
     Tool link (@('/nologo', '/subsystem:console', "/out:$work\console-grt.exe", "$work\console.obj") + $grt)
-    Tool link (@('/nologo', '/subsystem:console', "/out:$work\screen.exe", "$work\screen.obj") + ($grt | Where-Object { $_ -notmatch 'kernel32' }) + "$work\screen.lib")
+    Tool link (@('/nologo', '/subsystem:console', "/out:$work\screen.exe", "$work\screen.obj") + $grt + "$work\screen.lib")
     $ms = MicrosoftLib
     if ($ms) {
         $env:LIB = $ms

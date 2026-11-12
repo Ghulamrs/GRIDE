@@ -175,6 +175,8 @@ bool Parser::namesOwnMember(const std::string &name) {
 }
 
 ExprPtr Parser::lambdaExpression() {
+    // Its body writes what it captures, and when it runs is the program's to say.
+    for (const Local &l : locals_) l.unset = false;
     const std::size_t pos = peek().pos;
     const std::size_t lamAt = at_;
     const Nesting deep(this, pos, "lambda");

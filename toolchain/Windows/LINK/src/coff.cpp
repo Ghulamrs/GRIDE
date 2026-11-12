@@ -147,7 +147,8 @@ bool coff_read(const u8 *p, size_t n, const std::string &name, Module &m, std::s
         Symbol &s = m.syms[i];
         s.name    = sym_name(sp, strtab, strsize);
         s.value   = rd32(sp + 8);
-        s.section = (short)rd16(sp + 12);
+        /*  Unsigned below the reserved numbers: an object past 32,767 sections is not a negative one. */
+        s.section = rd16(sp + 12) >= 0xFF00 ? (int)(short)rd16(sp + 12) : (int)rd16(sp + 12);
         s.type    = rd16(sp + 14);
         s.storage = sp[16];
         s.naux    = sp[17];

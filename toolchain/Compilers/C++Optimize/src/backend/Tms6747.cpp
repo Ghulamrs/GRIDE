@@ -1194,7 +1194,9 @@ bool Tms6747::immediateBinary(const Binary &n) {
         if (ucst) code = std::string(n.op() == BinOp::Shl ? "\tSHL" : sign ? "\tSHR" : "\tSHRU") + "\tA4, " + std::to_string(k) + ", A4\n";
         break;
     case BinOp::Eq: case BinOp::Ne: case BinOp::Lt: case BinOp::Gt: case BinOp::Le: case BinOp::Ge: {
-        if (sign ? !small : !ucst) break;
+        // CMPEQ and the signed compares take scst5; CMPGTU and CMPLTU take ucst4 - 0 to 15, not 31.
+        const bool equality = n.op() == BinOp::Eq || n.op() == BinOp::Ne;
+        if (equality || sign ? !small : !(k >= 0 && k <= 15)) break;
         // x < k is k > x, x > k is k < x; <= and >= are their opposites negated.
         const bool lt = n.op() == BinOp::Lt || n.op() == BinOp::Ge, gt = n.op() == BinOp::Gt || n.op() == BinOp::Le;
         const char *cmp = lt ? (sign ? "CMPGT" : "CMPGTU") : gt ? (sign ? "CMPLT" : "CMPLTU") : "CMPEQ";
@@ -1806,6 +1808,8 @@ const Function *Tms6747::inlineTarget(const Call &n) const {
     const std::string site = n.symbol() + " in " + (functionOf_ ? functionOf_->symbol() : std::string());
     auto decline = [&](const char *why) { if (!planning_) opt::noteDecline(why, site); return static_cast<const Function *>(nullptr); };
     if (fn.isNoexcept() || !fn.exceptionSpec().empty()) return decline("inline-callee-noexcept");
+    // A callee that touches a volatile lvalue is called: its body is never scheduled into the caller's.
+    if (touchesVolatile(fn.body())) return decline("inline-callee-volatile");
     if (inliner_->size(fn) > (inliner_->leaf(fn) ? kLeafMember : kSmallMember)) return decline("inline-callee-not-small");
     if (fn.params().size() > static_cast<std::size_t>(abi_.intCount)) return decline("inline-site-stack-arguments");
     for (const Param &p : fn.params())
@@ -2283,6 +2287,14 @@ void Tms6747::emitTypes() {
 
 void Tms6747::emitFunction(const Function &fn) {
     resetLabels();
+    // **A function that reads or writes a volatile lvalue is written as at -O0**: neither the scheduler
+    // nor the register planning asks the qualifier, and a volatile access must stay a memory access in
+    // its place. The file keeps its -O for the other functions.
+    const int fileLevel = optimize_;
+    if (optimize_ > 0 && touchesVolatile(fn.body())) {
+        optimize_ = 0;
+        opt::noteDecline("volatile-no-scheduler", fn.symbol());
+    }
     // The symbol, not the name: with C++ linkage that is the mangled name, and
     // two overloads share a name but must not share a label.
     functionName_ = fn.symbol();
@@ -2425,6 +2437,7 @@ void Tms6747::emitFunction(const Function &fn) {
 
     file_ += out_.str();
     out_.str(std::string());
+    optimize_ = fileLevel;
 }
 
 void Tms6747::run(const Program &program) {
@@ -2434,6 +2447,10 @@ void Tms6747::run(const Program &program) {
     file_ += out_.str();
     out_.str(std::string());
     for (const Function &fn : program.functions) emitFunction(fn);
+    // atomic_flag's exchange, private to the file. One CPU, and no interrupt is taken in a branch's delay slots:
+    // the load and the store sit in them. The byte lands in A5 for the last slot.
+    if (program.usesFlagExchange)
+        file_ += "\t.text\n__cxx1_flag_exchange:\n\tLDBU\t*A4, A5\n||\tB\tB3\n\tSTB\tB4, *A4\n\tNOP\t3\n\tMV\tA5, A4\n";
     emitTypes();
     // Dynamic initialisation: the init function's address in .init_array,
     // which the EABI's start-up code - and the VM6747 emulator - walk before

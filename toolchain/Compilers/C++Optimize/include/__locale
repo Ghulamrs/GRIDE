@@ -727,88 +727,10 @@ template <> struct __cxx1_standard_facet<codecvt<char, char, mbstate_t> > {
     static codecvt<char, char, mbstate_t> *make() { return new codecvt<char, char, mbstate_t>(1); }
 };
 
-// wchar_t to the C library's multibyte characters, by wcrtomb and mbrtowc in its current locale - "C".
-template <> class codecvt<wchar_t, char, mbstate_t> : public locale::facet, public codecvt_base,
-                                                     public __cxx1_facet_id<codecvt<wchar_t, char, mbstate_t> > {
-public:
-    typedef wchar_t intern_type;
-    typedef char extern_type;
-    typedef mbstate_t state_type;
-    static const int __cxx1_category = locale::ctype;
-    explicit codecvt(size_t refs = 0) : locale::facet(refs) {}
-    result out(mbstate_t &st, const wchar_t *from, const wchar_t *from_end, const wchar_t *&from_next, char *to,
-               char *to_end, char *&to_next) const {
-        return do_out(st, from, from_end, from_next, to, to_end, to_next);
-    }
-    result unshift(mbstate_t &st, char *to, char *to_end, char *&to_next) const { return do_unshift(st, to, to_end, to_next); }
-    result in(mbstate_t &st, const char *from, const char *from_end, const char *&from_next, wchar_t *to,
-              wchar_t *to_end, wchar_t *&to_next) const {
-        return do_in(st, from, from_end, from_next, to, to_end, to_next);
-    }
-    int encoding() const noexcept { return do_encoding(); }
-    bool always_noconv() const noexcept { return do_always_noconv(); }
-    int length(mbstate_t &st, const char *from, const char *end, size_t max) const { return do_length(st, from, end, max); }
-    int max_length() const noexcept { return do_max_length(); }
-
-protected:
-    ~codecvt() {}
-    virtual result do_out(mbstate_t &st, const wchar_t *from, const wchar_t *from_end, const wchar_t *&from_next,
-                          char *to, char *to_end, char *&to_next) const {
-        result r = ok;
-        while (from != from_end) {
-            char buf[MB_LEN_MAX];
-            mbstate_t keep = st;
-            const size_t n = std::wcrtomb(buf, *from, &st);
-            if (n == static_cast<size_t>(-1)) { r = error; break; }
-            if (n > static_cast<size_t>(to_end - to)) { st = keep; r = partial; break; }
-            std::memcpy(to, buf, n);
-            to += n;
-            ++from;
-        }
-        from_next = from;
-        to_next = to;
-        return r;
-    }
-    virtual result do_unshift(mbstate_t &, char *to, char *, char *&to_next) const {
-        to_next = to;
-        return noconv;
-    }
-    virtual result do_in(mbstate_t &st, const char *from, const char *from_end, const char *&from_next, wchar_t *to,
-                         wchar_t *to_end, wchar_t *&to_next) const {
-        result r = ok;
-        while (from != from_end && to != to_end) {
-            wchar_t w = 0;
-            const size_t n = std::mbrtowc(&w, from, static_cast<size_t>(from_end - from), &st);
-            if (n == static_cast<size_t>(-1)) { r = error; break; }
-            if (n == static_cast<size_t>(-2)) { r = partial; from = from_end; break; }
-            *to++ = w;
-            from += n == 0 ? 1 : n;
-        }
-        if (r == ok && from != from_end) r = partial;
-        from_next = from;
-        to_next = to;
-        return r;
-    }
-    virtual int do_encoding() const noexcept { return MB_CUR_MAX == 1 ? 1 : 0; }
-    virtual bool do_always_noconv() const noexcept { return false; }
-    virtual int do_length(mbstate_t &st, const char *from, const char *end, size_t max) const {
-        const char *p = from;
-        for (size_t k = 0; k < max && p != end; k++) {
-            wchar_t w;
-            const size_t n = std::mbrtowc(&w, p, static_cast<size_t>(end - p), &st);
-            if (n == static_cast<size_t>(-1) || n == static_cast<size_t>(-2)) break;
-            p += n == 0 ? 1 : n;
-        }
-        return static_cast<int>(p - from);
-    }
-    virtual int do_max_length() const noexcept { return static_cast<int>(MB_CUR_MAX); }
-};
-template <> struct __cxx1_standard_facet<codecvt<wchar_t, char, mbstate_t> > {
-    static const bool is = true;
-    static codecvt<wchar_t, char, mbstate_t> *make() { return new codecvt<wchar_t, char, mbstate_t>(1); }
-};
-
-// char16_t (UTF-16) and char32_t (UTF-32) to UTF-8, [locale.codecvt]/3.
+// The wide execution character set to the narrow one, [locale.codecvt]/3: char16_t (UTF-16), char32_t
+// (UTF-32) and wchar_t (UTF-16 where it is 2 bytes, UTF-32 where 4) to UTF-8, on every target and in every
+// locale this library makes - the C library's mbrtowc is not asked, so a program's wide streams read and
+// write the same bytes everywhere.
 template <class C> class __cxx1_utf8_codecvt : public locale::facet, public codecvt_base {
 public:
     typedef C intern_type;
@@ -897,6 +819,18 @@ protected:
         return static_cast<int>(p - from);
     }
     virtual int do_max_length() const noexcept { return 4; }
+};
+template <> class codecvt<wchar_t, char, mbstate_t> : public __cxx1_utf8_codecvt<wchar_t>,
+                                                     public __cxx1_facet_id<codecvt<wchar_t, char, mbstate_t> > {
+public:
+    explicit codecvt(size_t refs = 0) : __cxx1_utf8_codecvt<wchar_t>(refs) {}
+
+protected:
+    ~codecvt() {}
+};
+template <> struct __cxx1_standard_facet<codecvt<wchar_t, char, mbstate_t> > {
+    static const bool is = true;
+    static codecvt<wchar_t, char, mbstate_t> *make() { return new codecvt<wchar_t, char, mbstate_t>(1); }
 };
 template <> class codecvt<char16_t, char, mbstate_t> : public __cxx1_utf8_codecvt<char16_t>,
                                                       public __cxx1_facet_id<codecvt<char16_t, char, mbstate_t> > {

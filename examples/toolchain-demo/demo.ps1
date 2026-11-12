@@ -87,7 +87,7 @@ $sieve = Join-Path $here 'sieve.c'
 $shapes = Join-Path $here 'shapes.cpp'
 
 # the linker command file GRIDE writes for a C6747 build (toolchain.json, linkerCommandFiles.ti-link)
-@('--rom_model', '--stack_size=0x4000', '--heap_size=0x100000', 'MEMORY', '{', '    RAM : origin = 0xC0000000, length = 0x04000000', '}',
+@('--rom_model', '--stack_size=0x100000', '--heap_size=0x1000000', 'MEMORY', '{', '    RAM : origin = 0xC0000000, length = 0x04000000', '}',
   'SECTIONS', '{', '    .text        > RAM', '    .const       > RAM', '    .data        > RAM', '    .bss         > RAM',
   '    .far         > RAM', '    .fardata     > RAM', '    .neardata    > RAM', '    .rodata      > RAM', '    .cinit       > RAM',
   '    .init_array  > RAM', '    .switch      > RAM', '    .cio         > RAM', '    .stack       > RAM', '    .sysmem      > RAM',

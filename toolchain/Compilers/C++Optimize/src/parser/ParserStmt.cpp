@@ -96,6 +96,7 @@ void Parser::checkOneDeducedType(const Type *&first, const Type *now,
 
 StmtPtr Parser::declaration() {
     std::size_t pos = peek().pos;
+    const ReadingAt reading(this, &stmtAt_);
     // `[[x]] n = 2;` reaches here, atDeclarationStart taking any `[[`: past them it is a statement.
     const bool attributed = peek().is("[") && peekAt(1).is("[");
     if (attributed && !attributedDeclarationAhead()) {
@@ -105,6 +106,7 @@ StmtPtr Parser::declaration() {
     }
     StmtPtr s = declarationBody();
     if (s) s->setPos(pos);
+    forgetUnsetArguments();
     return s;
 }
 
@@ -115,7 +117,7 @@ StmtPtr Parser::declarationBody() {
     noreturnAt_ = 0;
     const Type *base = specifiers(&sc, &quals);
     // [dcl.stc]/4: a block-scope thread_local has static storage whether or not `static` is written.
-    if (quals.isThreadLocal && sc == StorageNone) sc = StorageStatic;
+    if ((quals.isThreadLocal || quals.threadLocalAsStatic) && sc == StorageNone) sc = StorageStatic;
     const ThreadLocalObject tlo(this, quals.isThreadLocal);
 
     if (peek().is(";")) {
@@ -134,7 +136,7 @@ StmtPtr Parser::declarationBody() {
     if (sc == StorageTypedef) {
         do {
             Declared td = declarator(base);
-            refuseThreadLocalHere(quals.isThreadLocal, td.pos);
+            refuseThreadLocalHere(quals.isThreadLocal || quals.threadLocalAsStatic, td.pos);
             typedefFunctionSuffix(td);
             // [dcl.typedef]/2: a typedef may redeclare the same type (C's
             // `typedef struct S S;`); only another type in this block is an
@@ -294,8 +296,15 @@ StmtPtr Parser::declarationBody() {
             }
         }
 
-        if (d.type->isStructOrUnion() && !d.type->tag().empty() &&
-            hasConstructors(d.type->tag()) && !(isAggregateClass(d.type) && bracedInitialiserAhead())) {
+        // A static one of a class with no constructor and a destructor is built by nothing and still destroyed
+        // at exit: without an initialiser it goes the same way, for the registration alone.
+        const bool staticDestroyedOnly = sc == StorageStatic && d.type->isStructOrUnion() &&
+                                         !d.type->tag().empty() && !hasConstructors(d.type->tag()) &&
+                                         destructorOf(d.type->unqualified()) != nullptr &&
+                                         !peek().is("=") && !peek().is("(") && !peek().is("{");
+        if (staticDestroyedOnly ||
+            (d.type->isStructOrUnion() && !d.type->tag().empty() &&
+             hasConstructors(d.type->tag()) && !(isAggregateClass(d.type) && bracedInitialiserAhead()))) {
             // [stmt.dcl]/4: a static one is built the first time control
             // passes through, under a guard, and destroyed at exit.
             if (sc == StorageStatic) {
@@ -618,6 +627,8 @@ StmtPtr Parser::declarationBody() {
         // An initialiser to skip, or a destructor that would run on what was
         // never built: either makes this a declaration no jump may land past.
         locals_[mine].guardsJump = hasInit || destructorOf(d.type) != nullptr;
+        locals_[mine].unset = !hasInit && sc != StorageStatic && sc != StorageExtern && readingProgram() &&
+                              (d.type->isArithmetic() || d.type->isPointer());
         if (hasInit) {
             long long value = 0;
             long double dvalue = 0;
@@ -1354,6 +1365,7 @@ std::string Parser::unwindTarget(int *ptrSlot, int *selSlot) const {
     if (!handlerResumeLabel_.empty()) {
         *ptrSlot = handlerResumePtr_;
         *selSlot = handlerResumeSel_;
+        unwindTargetsAsked_++;
         return handlerResumeLabel_;
     }
     if (!tryChainLabel_.empty()) {
@@ -1598,11 +1610,70 @@ StmtPtr Parser::block(bool functionTry) {
 
 StmtPtr Parser::statement() {
     std::size_t pos = peek().pos;
+    const ReadingAt reading(this, &stmtAt_);
     // An `else if` chain is one statement under another, each arm a level.
     const Nesting deep(this, pos, "statement");
     StmtPtr s = statementBody();
     if (s) s->setPos(pos);
+    forgetUnsetArguments();
     return s;
+}
+
+// **`if (a = b)`**: well-formed, and rarely what was meant; a second pair of parentheses says that it was.
+void Parser::warnAssignmentAsCondition() {
+    int depth = 0;
+    for (std::size_t k = 0;; k++) {
+        const Token &t = peekAt(k);
+        if (t.kind == TokenKind::End) return;
+        if (t.is("(") || t.is("[") || t.is("{")) depth++;
+        else if (t.is(")") || t.is("]") || t.is("}")) { if (depth-- == 0) return; }
+        else if (depth == 0 && t.is("=")) {
+            src_.warn(t.pos, "an assignment as a condition: '==' may have been meant; parentheses around it say it was not");
+            return;
+        }
+    }
+}
+
+// **A local read before anything is written to it**, by the order of the text: the first mention decides. `x =` and
+// `&x` and `>> x` write it, or may; `int &r = x` is such a mention too. A call's argument is left to the call, which
+// knows whether a reference binds it. Whatever a branch or a loop does to that order, a wrong answer can only
+// be a warning, and the worst of them is one on a loop that reads what its last turn wrote.
+void Parser::noteUnsetLocal(const Local &l, std::size_t pos) {
+    if (unevaluated_ > 0 || at_ == 0) return;
+    const Token &before = tokens_[at_ - 1], &after = peekAt(1);
+    const bool bound = at_ >= 3 && before.is("=") && (tokens_[at_ - 3].is("&") || tokens_[at_ - 3].is("&&"));
+    if (after.is("=") || before.is("&") || before.is(">>") || bound) { l.unset = false; return; }
+    const bool held = at_ >= 2 && before.is("(") && (tokens_[at_ - 2].is("if") || tokens_[at_ - 2].is("while") || tokens_[at_ - 2].is("switch"));
+    if (!held && (before.is("(") || before.is(",")) && (after.is(")") || after.is(","))) {
+        unsetArguments_[l.name] = pos;
+        return;
+    }
+    l.unset = false;
+    src_.warn(pos, "'" + l.name + "' is read here and nothing has been assigned to it");
+}
+
+void Parser::noteUnsetArguments(const std::vector<ExprPtr> &args, const std::vector<const Type *> &params) {
+    if (unsetArguments_.empty()) return;
+    for (std::size_t i = 0; i < args.size(); i++) {
+        if (i < params.size() && params[i] != nullptr && params[i]->isReference()) continue;
+        const Expr *e = args[i].get();
+        while (const Cast *c = dynamic_cast<const Cast *>(e)) e = &c->value();
+        const Var *v = dynamic_cast<const Var *>(e);
+        if (v == nullptr || !v->isLocal()) continue;
+        const std::map<std::string, std::size_t>::iterator at = unsetArguments_.find(v->name());
+        const Local *l = at == unsetArguments_.end() ? nullptr : findLocal(v->name());
+        if (l == nullptr || !l->unset) continue;
+        l->unset = false;
+        src_.warn(at->second, "'" + l->name + "' is read here and nothing has been assigned to it");
+        unsetArguments_.erase(at);
+    }
+}
+
+// What no call read by value was bound to a reference, or went where this cannot follow it.
+void Parser::forgetUnsetArguments() {
+    for (const std::pair<const std::string, std::size_t> &a : unsetArguments_)
+        if (const Local *l = findLocal(a.first)) l->unset = false;
+    unsetArguments_.clear();
 }
 
 // A listed type is caught as `catch (T &)` would catch it, [except.spec]/8, and named by no slot.
@@ -1778,14 +1849,6 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
                     src_.fail(d.pos, "a handler cannot catch the abstract class '" + caught->describe() +
                                      "' by value - [except.handle]/1");
             }
-            // A reference to a pointer would bind to what the runtime hands
-            // back for a pointer - the value, not the object - so it is refused.
-            // The Microsoft runtime hands a reference handler the object's address, a pointer's too.
-            if (byRef && caught->isPointer() && !microsoft)
-                src_.fail(d.pos, "catching a pointer by reference - '" +
-                                 d.type->describe() + "' - is not supported "
-                                 "yet: the runtime hands a handler the pointer "
-                                 "itself, so catch it by value");
             // The Itanium type_info is emitted by asking for it, so the Microsoft
             // ABI - which names a type descriptor instead - must not ask.
             std::string why;
@@ -1824,6 +1887,16 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
                 mh.byReference = byRef;
                 // `T *const &` is const as cl flags it, the referent's; `const T *&` the pointee's.
                 mh.constPointer = names.isConst || (caught->isPointer() && constReferent);
+                // [except.handle]/3: a pointer handler matches a thrown nullptr. Microsoft's runtime matches by the
+                // type alone, so the table says it: the null is copied into the pointer as it stands.
+                if (caught->isPointer() && !byRef) {
+                    const Type *nullType = types_.get(Kind::NullPtr);
+                    MicrosoftThrow none;
+                    if (microsoftThrowNames(nullType, nullType->size(target_), &none, &why)) {
+                        finishMicrosoftThrow(none, false);
+                        mh.orNullptr = none.descriptor;
+                    }
+                }
                 if (!caughtName.empty()) {
                     mh.objectSlot = declare(caughtName, declaredType, cpos);
                     locals_.back().isCatchParameter = true;
@@ -1895,7 +1968,24 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
                 ? types_.pointerTo(declaredType->referent())
                 : types_.pointerTo(caught);
             ExprPtr cast;
-            if (byRef) {
+            if (byRef && caught->isPointer() && !target_.beginCatchReturnsObject()) {
+                // **For a pointer the Itanium runtimes hand back its value, not its object** ([ABI 2.5.3]),
+                // so the reference binds to a copy of it held in the frame, as clang's does; TI's hands over
+                // the exception object's address, which the reference binds to below like any other.
+                const std::string heldName = ".ex.held" + std::to_string(refTemps_++);
+                const int heldSlot = allocateFrameSlot(caught);
+                ExprPtr held(Var::local(heldName, heldSlot));
+                held->setType(caught);
+                ExprPtr value(new Cast(caught, std::move(began)));
+                value->setType(caught);
+                ExprPtr store(new Assign(std::move(held), std::move(value)));
+                store->setType(caught);
+                steps.push_back(StmtPtr(new ExprStmt(std::move(store))));
+                ExprPtr again(Var::local(heldName, heldSlot));
+                again->setType(caught);
+                cast.reset(new Unary('&', std::move(again)));
+                cast->setType(slotType);
+            } else if (byRef) {
                 cast.reset(new Cast(slotType, std::move(began)));
                 cast->setType(slotType);
             }
@@ -2027,7 +2117,11 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
         }
         const bool wasCtorHandler = inCtorTryHandler_;
         inCtorTryHandler_ = rethrows;
+        const int askedBefore = unwindTargetsAsked_;
         StmtPtr handlerBody = block();
+        // A local with a destructor declared in the handler named this pad in its cleanup row, whether or
+        // not anything after it can throw: the pad is defined then (e20: `catch (int) { G g; return 0; }`).
+        const bool padNamed = unwindTargetsAsked_ > askedBefore;
         inCtorTryHandler_ = wasCtorHandler;
         // [except.handle]/15: flowing off the end of a constructor's function-try handler rethrows.
         if (rethrows) {
@@ -2041,7 +2135,7 @@ StmtPtr Parser::tryStatement(std::size_t pos, const std::function<StmtPtr()> &bo
         handlerResumeLabel_ = wasHandlerLabel2;
         handlerResumePtr_ = wasHandlerPtr2;
         handlerResumeSel_ = wasHandlerSel2;
-        const bool canThrow = mayThrow_ > throwsBefore;
+        const bool canThrow = mayThrow_ > throwsBefore || padNamed;
         handlerFrom_.pop_back();
         handlerSwitchDepth_.pop_back();
         handlerLoopDepth_.pop_back();
@@ -2721,6 +2815,7 @@ StmtPtr Parser::statementBody() {
         // statement goes inside a block of its own rather than the condition
         // being a bigger expression.
         const bool declares = atConditionDeclaration();
+        if (!declares) warnAssignmentAsCondition();
         std::vector<StmtPtr> setup;
         int scope = -1;
         std::size_t aliveAtEntry = alive_.size();
@@ -2774,6 +2869,7 @@ StmtPtr Parser::statementBody() {
         // afresh each turn - see whileConditionDeclaration. It still needs a
         // scope of its own, or the name would outlive the loop.
         const bool declares = atConditionDeclaration();
+        if (!declares) warnAssignmentAsCondition();
         if (declares && conditionDeclaresObject()) {
             enterScope();
             const int outer = enterBlock();

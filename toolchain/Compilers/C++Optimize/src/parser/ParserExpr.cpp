@@ -8,6 +8,7 @@
 #include "../Source.h"
 
 #include <climits>
+#include <limits>
 #include <cstring>
 
 // The pointer-width integer an offset is computed in: `long` where it is as wide as a pointer, else
@@ -1337,6 +1338,14 @@ ExprPtr Parser::primary(Program *program) {
         if (!memberFirst) return templateCall(program);
     }
 
+    // HUGE_VAL, which a literal could only spell by being out of range.
+    if (peek().is("__builtin_huge_val") && peekAt(1).is("(")) {
+        at_ += 2;
+        expect(")");
+        ExprPtr n(new Num(std::numeric_limits<long double>::infinity()));
+        n->setType(types_.get(Kind::Double));
+        return n;
+    }
     if (peek().is("__builtin_va_start")) {
         std::size_t pos = peek().pos;
         at_++;
@@ -1387,10 +1396,19 @@ ExprPtr Parser::primary(Program *program) {
                            "reaches a variadic function, so va_arg cannot ask "
                            "for it - ask for '" + promotes + "'");
 
-        if (want->isStructOrUnion() || want->isArray())
-            src_.fail(pos, "va_arg of an aggregate is not supported yet");
+        if (want->isArray())
+            src_.fail(pos, "an array decays on its way to a variadic function, so va_arg cannot ask for one");
+        // [expr.call]/7: one with a non-trivial copy or destructor is conditionally-supported, and is not here.
+        if (want->isStructOrUnion() && (want->nonTrivialCopy() || want->hasDestructor()))
+            src_.fail(pos, "'" + want->describe() + "' has a non-trivial copy or destructor, which going through "
+                           "'...' is conditionally-supported by [expr.call]/7, and va_arg does not support it");
 
-        ExprPtr n(new VaArg(std::move(list)));
+        VaArg *read = new VaArg(std::move(list));
+        if (want->isStructOrUnion()) {
+            const long long words = (want->size(target_) + 7) / 8;
+            read->setSlot(allocateFrameSlot(types_.arrayOf(types_.get(Kind::LongLong), words > 0 ? words : 1)));
+        }
+        ExprPtr n(read);
         n->setType(want);
         return n;
     }
@@ -1481,6 +1499,10 @@ ExprPtr Parser::primary(Program *program) {
                              "number. It is refused rather than "
                              "approximated: write it as a 'double', or as a "
                              "hexadecimal float once those arrive");
+        // [lex.fcon]/1: past its type's range a literal is ill-formed; this is that diagnostic.
+        if (t.dvalue > (t.suffixF ? static_cast<long double>(std::numeric_limits<float>::max())
+                                  : static_cast<long double>(std::numeric_limits<double>::max())))
+            src_.warn(t.pos, "this floating constant is outside the range of its type, and is taken as infinity");
         ExprPtr n(new Num(t.dvalue));
         n->setType(types_.get(t.suffixF ? Kind::Float
                             : t.suffixL ? Kind::LongDouble : Kind::Double));
@@ -2002,6 +2024,7 @@ ExprPtr Parser::primary(Program *program) {
         std::size_t pos = peek().pos;
 
         const Local *l = findLocal(name);
+        if (l != nullptr && l->unset) noteUnsetLocal(*l, pos);
         // A bound non-type template parameter hides a member and a namespace's name alike ([temp.local]/6).
         if (l == nullptr && boundValueParams_.count(name) != 0 && !peekAt(1).is("::"))
             if (const EnumConst *e = findEnum(name)) {

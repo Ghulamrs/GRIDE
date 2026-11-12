@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../Source.h"
 #include "../Abi.h"
 #include "../Ast.h"
 #include "../Lexer.h"
@@ -21,6 +22,11 @@ public:
     // **The whole ABI table, not the three fields of it a return happens to
     // need.** They arrived as three positional arguments, which is a thing to get
     // in the wrong order once; the parser and the backends now read one struct.
+    // Where the reading stood when an error ended it - the statement under way, else the member, else the
+    // declaration, in the program's own text - or npos(), where it stood in none.
+    static std::size_t npos() { return static_cast<std::size_t>(-1); }
+    std::size_t failedAt() const { return stmtAt_ != npos() ? stmtAt_ : memberAt_ != npos() ? memberAt_ : declAt_; }
+
     Parser(const Source &src, std::vector<Token> tokens,
            TypeTable &types, const Target &target, const Abi &abi)
         : src_(src), tokens_(std::move(tokens)), types_(types), target_(target),
@@ -70,6 +76,8 @@ private:
         bool byValueByAddress = false;
         // **[stmt.dcl]/3: a jump may not enter this object's scope** - set for an automatic object with an initialiser, a constructor or a destructor, the three things a jump landing past its declaration would skip.
         bool guardsJump = false;
+        // Declared with no initialiser, and neither read nor written yet.
+        mutable bool unset = false;
         // A member of a local anonymous union: its slot is the union's, given back once, by the union.
         bool sharesSlot = false;
         // Which object this is: two locals of one function may share a frame slot once the first's scope has closed.
@@ -735,6 +743,7 @@ private:
         Packs packs;   // same index again
         std::size_t start = 0;              // the template's own tokens
         std::size_t pos = 0;                // where it was first asked for
+        std::vector<Source::Context> chain; // and the instantiations that asked
         // How many replayed bodies deep the request came from: one more than the specialization whose
         // body asked for this one, 1 from the program itself - bounded by kMaxNesting (2026-10-21, fix 5).
         int depth = 1;
@@ -1193,6 +1202,8 @@ private:
 
     // The _ZTI a throw or a catch names, emitting one for a class on the way.
     // Answers empty and fills `why` where this compiler cannot describe it.
+    std::string emitMemberPointerTypeInfo(const Type *ptr, std::size_t pos, std::string *why);
+    std::string emitFunctionTypeInfo(const Type *fn, std::string *why);
     std::string emitPointerTypeInfo(const Type *ptr, std::size_t pos,
                                     std::string *why);
     std::string emitEnumTypeInfo(const Type *e, std::size_t pos, std::string *why);
@@ -1350,6 +1361,9 @@ private:
         bool isInline = false;
         int alignAs = 0;   // `alignas(N)` among the specifiers: the largest, else 0
         bool isThreadLocal = false;   // `thread_local`, [dcl.stc]/4: one object per thread
+        // `thread_local` on a target that runs one thread and has no thread storage (tms6747): the one
+        // copy per thread is the one static copy, so the object gets static storage duration instead.
+        bool threadLocalAsStatic = false;
     };
 
     struct TypedefName {
@@ -1631,7 +1645,12 @@ private:
                                 bool isInline, std::size_t pos,
                                 int copyArg = -1, bool moving = false,
                                 std::map<std::string, std::vector<ExprPtr> >
-                                    *vbaseArgs = nullptr);
+                                    *vbaseArgs = nullptr, bool delegating = false);
+    // What a delegating constructor of a class with virtual bases calls, on Itanium: see delegatingCall.
+    struct DelegationEntry { std::string entry, c1, c2; std::vector<const Type *> params; };
+    std::vector<DelegationEntry> delegationEntries_;
+    std::set<std::string> delegationEntriesMade_;
+    void synthesizeDelegationEntry(const Type *type, const DelegationEntry &d, std::size_t pos);
     // The same split on the way out, and the order reverses with it: D1 calls
     // D2 - which destroys what C2 built - and then destroys the virtual bases.
     void synthesizeCompleteDtor(const Type *type, const std::string &d1,
@@ -1847,6 +1866,13 @@ private:
         std::vector<std::size_t> handlerFrom, tryFrom;
         std::string handlerResumeLabel;
         int handlerResumePtr = 0, handlerResumeSel = 0;
+        // The `try` being read: a body compiled mid-statement inside it has no try of its own, and its
+        // cleanup rows must not name this function's chain.
+        std::string tryChainLabel;
+        int tryChainPointerSlot = 0, tryChainSelectorSlot = 0;
+        std::size_t tryChainAliveFrom = 0;
+        std::vector<Try *> tryBodySegments;
+        int tryBodySerial = -1;
         int mayThrow = 0;
         bool conditionDecl = false;
         std::string conditionName;
@@ -1878,6 +1904,8 @@ private:
     // (256 MB reserved, 25-50 KB a level: 2048, twice [implimits]' 1024).
     static const int kMaxNesting = 2048;
     int nesting_ = 0;
+    // How many constexpr calls may be in flight at once: twice the 512 [implimits] asks, refused by name past it.
+    static const std::size_t kMaxConstexprCalls = 1024;
     struct Nesting {
         Parser *p;
         Nesting(Parser *pp, std::size_t pos, const char *what);
@@ -2330,6 +2358,36 @@ private:
                             std::size_t pos, const std::string &symbol);
     void requireAssignable(const Expr &e, std::size_t pos, const char *what);
     const Local *findLocal(const std::string &name) const;
+
+    // The construct being read, kept where a failure leaves it: back to the one around it on any other way out.
+    bool readingProgram() const { return instantiationDepth_ == 0 && classesInstantiating_ == 0 && !src_.inTrial(); }
+    struct ReadingAt {
+        Parser *p; std::size_t *slot, was;
+        ReadingAt(Parser *parser, std::size_t *at) : p(parser), slot(at), was(*at) { if (p->readingProgram()) *at = p->peek().pos; }
+        ~ReadingAt() { if (!p->src_.failed()) *slot = was; }
+    };
+    std::size_t stmtAt_ = npos(), memberAt_ = npos(), declAt_ = npos();
+    // One level of the instantiation chain said under an error.
+    struct InChain {
+        const Source &s;
+        InChain(const Source &src, std::size_t pos, const std::string &name) : s(src) {
+            s.enterInstantiation(pos, "in the instantiation of '" + name + "' asked for here");
+        }
+        ~InChain() { s.leaveInstantiation(); }
+    };
+    // A specialization read from the queue: under the chain that asked for it, and the one under way again after.
+    struct ChainOf {
+        const Source &s;
+        std::vector<Source::Context> was;
+        ChainOf(const Source &src, const std::vector<Source::Context> &chain) : s(src), was(src.instantiations()) { s.setInstantiations(chain); }
+        ~ChainOf() { s.setInstantiations(std::move(was)); }
+    };
+    // The first mention of a local declared with no initialiser, read or written; see noteUnsetLocal.
+    void noteUnsetLocal(const Local &l, std::size_t pos);
+    void noteUnsetArguments(const std::vector<ExprPtr> &args, const std::vector<const Type *> &params);
+    void forgetUnsetArguments();
+    std::map<std::string, std::size_t> unsetArguments_;
+    void warnAssignmentAsCondition();
     // **A template's own scope has none of the naming function's locals**:
     // held aside while it is read and put back on every way out, with the
     // function's packs and freed frame slots (reused, one overlaid a param).
@@ -2441,6 +2499,9 @@ private:
     std::string handlerResumeLabel_;
     int handlerResumePtr_ = 0;
     int handlerResumeSel_ = 0;
+    // How many regions have asked where to go: a handler whose body cannot throw still defines its pad
+    // when a local's cleanup row inside it named the pad.
+    mutable int unwindTargetsAsked_ = 0;
     // Where an exception leaving this point goes.
     std::string unwindTarget(int *ptrSlot, int *selSlot) const;
     // One temporary of a block, released under its guard by a pad.

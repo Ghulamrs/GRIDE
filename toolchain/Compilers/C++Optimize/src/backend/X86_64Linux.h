@@ -229,6 +229,7 @@ private:
     bool inlining() const;
     int inlineReserve_ = 0;
     void finishChunk();
+    void vaArgClass(const VaArg &n);
     std::string label(const char *kind, int id) const override;
     std::string userLabel(const std::string &name) const override;
     void emitData(const Program &program);

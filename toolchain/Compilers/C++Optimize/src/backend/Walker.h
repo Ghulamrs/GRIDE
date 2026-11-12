@@ -9,6 +9,10 @@
 
 class Source;
 
+// Whether a body reads or writes an lvalue of volatile type anywhere: such a function is written past
+// the optimizer by every backend, and never walked in place in a caller's.
+bool touchesVolatile(const Node &n);
+
 class Walker : public CodeGen {
 public:
     // **What differs between the two Itanium tables, and it is only spelling.**

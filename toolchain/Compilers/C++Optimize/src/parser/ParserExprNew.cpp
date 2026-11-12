@@ -1068,8 +1068,9 @@ ExprPtr Parser::dynamicCastReference(ExprPtr v, const Type *to, std::size_t pos)
     const Type *object = v->type();
     ExprPtr addr(new Unary('&', std::move(v)));
     addr->setType(types_.pointerTo(object));
+    // [expr.unary.noexcept]/3: only the cast that needs a run-time check can throw.
+    if (publicBaseOffset(object->unqualified(), referent->unqualified()) < 0) mayThrow_++;
     if (target_.microsoftNames()) {
-        mayThrow_++;
         ExprPtr obj(new Unary('*', dynamicCastFrom(std::move(addr), ptr, pos, true)));
         obj->setType(referent);
         return obj;
@@ -1889,9 +1890,12 @@ ExprPtr Parser::newExpression(std::size_t pos) {
             countKept.reset(new Assign(kept(), std::move(given)));
             countKept->setType(ct);
             const Type *boolT = types_.get(Kind::Bool);
+            // Compared in the count's own width where that is wider than size_t's - a long long on the
+            // C6747 - since narrowing it first would lose the excess.
+            const Type *wide = ct->size(target_) > sizeT->size(target_) ? unsignedVersion(ct) : sizeT;
             ExprPtr cap(new Num(static_cast<long long>(limit)));
-            cap->setType(sizeT);
-            ExprPtr over(new Binary(BinOp::Gt, convert(kept(), sizeT), std::move(cap)));
+            cap->setType(wide);
+            ExprPtr over(new Binary(BinOp::Gt, convert(kept(), wide), std::move(cap)));
             over->setType(boolT);
             // Below zero, or below the clauses `new T[n]{...}` lists.
             if (ct->isSigned(target_) || !elements.empty()) {
@@ -2772,6 +2776,7 @@ ExprPtr Parser::typeidExpression(std::size_t pos) {
         pendingTemps_ = savedTemps;
         alive_ = savedAlive;
     }
+    if (glvalue && subject->isStructOrUnion() && subject->polymorphic()) mayThrow_++;
     if (glvalue && subject->isStructOrUnion() && subject->polymorphic() && microsoft) {
         // **The Microsoft runtime reads it**: `__RTtypeid(p)` walks the vftable's
         // locator to the descriptor, and throws bad_typeid for a null - measured from
@@ -2804,8 +2809,38 @@ ExprPtr Parser::typeidExpression(std::size_t pos) {
         // The object's first word is the vptr; the type_info pointer sits
         // one word below the address point it holds.
         const Type *chars = types_.pointerTo(types_.get(Kind::Char));
+        const Unary *star = dynamic_cast<const Unary *>(operand.get());
+        const bool throwsOnNull = star != nullptr && star->op() == '*' && target_.hasBadTypeid();
         ExprPtr at(new Unary('&', std::move(operand)));
         at->setType(types_.pointerTo(subject));
+        if (throwsOnNull) {
+            // [expr.typeid]/2: the pointer of `*p` is tested, a null one being `__cxa_bad_typeid()`,
+            // the ABI's routine that throws std::bad_typeid, as clang calls.
+            const Type *ptr = types_.pointerTo(subject);
+            const int slot = allocateFrameSlot(ptr);
+            const std::string temp = ".typeidptr" + std::to_string(newTemps_++);
+            ExprPtr held(Var::local(temp, slot));
+            held->setType(ptr);
+            ExprPtr save(new Assign(std::move(held), std::move(at)));
+            save->setType(ptr);
+            ExprPtr test(Var::local(temp, slot));
+            test->setType(ptr);
+            ExprPtr one(new Num(1LL));
+            one->setType(types_.intType());
+            ExprPtr fail = runtimeCall("__cxa_bad_typeid", types_.get(Kind::Void), std::vector<ExprPtr>());
+            ExprPtr alsoOne(new Num(1LL));
+            alsoOne->setType(types_.intType());
+            ExprPtr failed(new Comma(std::move(fail), std::move(alsoOne)));
+            failed->setType(types_.intType());
+            ExprPtr check(new Conditional(std::move(test), std::move(one), std::move(failed)));
+            check->setType(types_.intType());
+            ExprPtr first(new Comma(std::move(save), std::move(check)));
+            first->setType(types_.intType());
+            ExprPtr again(Var::local(temp, slot));
+            again->setType(ptr);
+            at.reset(new Comma(std::move(first), std::move(again)));
+            at->setType(ptr);
+        }
         ExprPtr vptrAt(new Cast(types_.pointerTo(chars), std::move(at)));
         vptrAt->setType(types_.pointerTo(chars));
         ExprPtr vptr(new Unary('*', std::move(vptrAt)));

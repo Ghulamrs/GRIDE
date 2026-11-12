@@ -1,9 +1,9 @@
 // <atomic> - [atomics]: atomic types, atomic_flag, the free functions and the fences.
 //
-// This compiler emits no interlocked instruction, so every operation takes the program's one lock
-// (<__threads>): each is then indivisible and sequentially consistent, whatever order it is given, and
-// none is lock-free - is_lock_free() says false and the ATOMIC_*_LOCK_FREE macros 0. [atomics.flag]/2's
-// lock-free atomic_flag is the exception this cannot keep; docs/EXCLUSIONS.md names it.
+// Every operation but atomic_flag's takes the program's one lock (<__threads>): each is then indivisible and
+// sequentially consistent, whatever order it is given, and none is lock-free - is_lock_free() says false and
+// the ATOMIC_*_LOCK_FREE macros 0, as [atomics.lockfree] allows. atomic_flag is the type [atomics.flag]/2 wants
+// lock-free: its exchange is a function the backend writes into each file that calls it.
 #ifndef _CXX1_ATOMIC
 #define _CXX1_ATOMIC
 
@@ -282,6 +282,7 @@ _CXX1_ATOMIC_FETCH(fetch_xor)
 #undef _CXX1_ATOMIC_FETCH
 
 // [atomics.flag]
+extern "C" bool __cxx1_flag_exchange(volatile bool *, bool) noexcept;
 typedef struct atomic_flag {
     bool f_;
 
@@ -289,20 +290,10 @@ typedef struct atomic_flag {
     atomic_flag(const atomic_flag &) = delete;
     atomic_flag &operator=(const atomic_flag &) = delete;
     atomic_flag &operator=(const atomic_flag &) volatile = delete;
-    bool test_and_set(memory_order = memory_order_seq_cst) volatile noexcept {
-        __cxx1_os::global_guard g;
-        const bool was = f_;
-        f_ = true;
-        return was;
-    }
-    bool test_and_set(memory_order = memory_order_seq_cst) noexcept {
-        __cxx1_os::global_guard g;
-        const bool was = f_;
-        f_ = true;
-        return was;
-    }
-    void clear(memory_order = memory_order_seq_cst) volatile noexcept { __cxx1_os::global_guard g; f_ = false; }
-    void clear(memory_order = memory_order_seq_cst) noexcept { __cxx1_os::global_guard g; f_ = false; }
+    bool test_and_set(memory_order = memory_order_seq_cst) volatile noexcept { return __cxx1_flag_exchange(&f_, true); }
+    bool test_and_set(memory_order = memory_order_seq_cst) noexcept { return __cxx1_flag_exchange(&f_, true); }
+    void clear(memory_order = memory_order_seq_cst) volatile noexcept { __cxx1_flag_exchange(&f_, false); }
+    void clear(memory_order = memory_order_seq_cst) noexcept { __cxx1_flag_exchange(&f_, false); }
 } atomic_flag;
 
 inline bool atomic_flag_test_and_set(volatile atomic_flag *f) noexcept { return f->test_and_set(); }

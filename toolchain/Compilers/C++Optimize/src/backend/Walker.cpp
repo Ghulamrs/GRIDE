@@ -6,6 +6,69 @@
 
 #include "../Source.h"
 
+namespace {
+// An lvalue of volatile type - a variable, a dereference, a member - read or written here.
+class VolatileScan final : public Visitor {
+public:
+    bool seen = false;
+    void note(const Expr &n) { if (n.type() != nullptr && n.type()->isVolatile()) seen = true; }
+    void visit(const Num &) override {}
+    void visit(const Var &n) override { note(n); }
+    void visit(const StrLit &) override {}
+    void visit(const Goto &) override {}
+    void visit(const Break &) override {}
+    void visit(const Continue &) override {}
+    void visit(const FuncletLeave &) override {}
+    void visit(const Call &n) override {
+        if (n.callee() != nullptr) n.callee()->accept(*this);
+        for (const ExprPtr &a : n.args()) a->accept(*this);
+    }
+    void visit(const VaStart &n) override { n.list().accept(*this); }
+    void visit(const VaArg &n) override { n.list().accept(*this); }
+    void visit(const Assign &n) override { n.target().accept(*this); n.value().accept(*this); }
+    void visit(const Unary &n) override { note(n); n.operand().accept(*this); }
+    void visit(const Binary &n) override { n.lhs().accept(*this); n.rhs().accept(*this); }
+    void visit(const Postfix &n) override { n.target().accept(*this); }
+    void visit(const Cast &n) override { n.value().accept(*this); }
+    void visit(const Comma &n) override { n.left().accept(*this); n.right().accept(*this); }
+    void visit(const Conditional &n) override {
+        n.cond().accept(*this); n.thenArm().accept(*this); n.elseArm().accept(*this);
+    }
+    void visit(const MemberAccess &n) override { note(n); n.object().accept(*this); }
+    void visit(const ExprStmt &n) override { n.expr().accept(*this); }
+    void visit(const Return &n) override { if (n.hasValue()) n.value().accept(*this); }
+    void visit(const Block &n) override { for (const StmtPtr &s : n.body()) s->accept(*this); }
+    void visit(const If &n) override {
+        n.cond().accept(*this); n.thenArm().accept(*this);
+        if (n.elseArm() != nullptr) n.elseArm()->accept(*this);
+    }
+    void visit(const While &n) override { n.cond().accept(*this); n.body().accept(*this); }
+    void visit(const DoWhile &n) override { n.body().accept(*this); n.cond().accept(*this); }
+    void visit(const For &n) override {
+        if (n.init() != nullptr) n.init()->accept(*this);
+        if (n.cond() != nullptr) n.cond()->accept(*this);
+        if (n.step() != nullptr) n.step()->accept(*this);
+        n.body().accept(*this);
+    }
+    void visit(const Switch &n) override { n.cond().accept(*this); n.body().accept(*this); }
+    void visit(const Case &n) override { n.body().accept(*this); }
+    void visit(const Label &n) override { n.body().accept(*this); }
+    void visit(const Try &n) override {
+        for (const StmtPtr &s : n.body()) s->accept(*this);
+        if (n.hasPad()) n.pad().accept(*this);
+        if (n.cleanup() != nullptr) n.cleanup()->accept(*this);
+        for (const MsHandler &h : n.handlers())
+            if (h.body != nullptr) h.body->accept(*this);
+    }
+};
+}
+
+bool touchesVolatile(const Node &n) {
+    VolatileScan scan;
+    n.accept(scan);
+    return scan.seen;
+}
+
 void Walker::markLine(const Stmt &n) { markLine(n.pos()); }
 
 void Walker::markLine(std::size_t pos) {
@@ -466,6 +529,11 @@ void Walker::msTryStatement(const Try &n) {
         leaveFunclet();
         msFuncletRows_.push_back(MsIpRow{ row.funclet, hstate, number, true });
         tb.handlers.push_back(row);
+        if (!h.orNullptr.empty()) {
+            row.descriptor = h.orNullptr;
+            row.constPointer = false;
+            tb.handlers.push_back(row);
+        }
     }
     tb.catchHigh = static_cast<int>(msStates_.size()) - 1;
     msTryBlocks_[tbAt] = tb;
@@ -601,14 +669,15 @@ std::string Walker::lsdaTable(const LsdaSpelling &sp, const std::string &symbol,
         if (c.terminate) {
             if (types.size() < static_cast<std::size_t>(catchAll)) types.resize(static_cast<std::size_t>(catchAll));
             types[static_cast<std::size_t>(catchAll) - 1] = std::string();
-            o += "  .byte " + std::to_string(catchAll) + "\n";
+            o += "  .sleb128 " + std::to_string(catchAll) + "\n";
             o += "  .byte 0\n";
             continue;
         }
+        // The filter is a signed LEB128: one byte to 63, two past it (a try with 256 handlers), and the
+        // specification's negative index likewise; the displacement to the next record stays one byte.
         for (std::size_t k = 0; k < c.types.size(); k++) {
             if (c.types[k].compare(0, 5, "$spec") == 0) {
-                // One byte, as long as the specification table stays under 64.
-                o += "  .byte " + std::to_string(128 + filterOf(c.types[k])) + "\n";
+                o += "  .sleb128 " + std::to_string(filterOf(c.types[k])) + "\n";
                 const bool more = k + 1 < c.types.size() || c.cleanup;
                 o += "  .byte " + std::string(more ? "1" : "0") + "\n";
                 continue;
@@ -618,7 +687,7 @@ std::string Walker::lsdaTable(const LsdaSpelling &sp, const std::string &symbol,
                                        : types.size() + 1;
             if (types.size() < at) types.resize(at);
             types[at - 1] = c.types[k];
-            o += "  .byte " + std::to_string(at) + "\n";
+            o += "  .sleb128 " + std::to_string(at) + "\n";
             const bool more = k + 1 < c.types.size() || c.cleanup;
             o += "  .byte " + std::string(more ? "1" : "0") + "\n";
         }

@@ -145,6 +145,11 @@ public:
         (void)fn; (void)file; (void)line; (void)column; return std::string();
     }
 
+    // **atomic_flag's exchange** - [atomics.flag]/2 wants it lock-free, and a language with no interlocked operation
+    // of its own has it from here: a function private to the file, `bool __cxx1_flag_exchange(volatile bool *, bool)`,
+    // which to the optimizer is a call like any other.
+    virtual void flagExchange() {}
+
     virtual void predefine(const std::vector<std::string> &) {}
     // Every chunk of the file's text, written and in order, before the preamble: what only the whole
     // file decides is spelled here (1.30: MASM's `div` instruction where `div` is a name).
@@ -156,6 +161,8 @@ public:
     // **A definition the linker must fold rather than reject** - an inline
     // function, which may appear in several translation units.
     virtual void weakDefinition(const std::string &name) { (void)name; }
+    // Whether weakDefinition binds the symbol global by itself (ELF's `.weak`), so no globl goes before it.
+    virtual bool weakBindsGlobal() const { return false; }
     virtual void textSection() = 0;
     virtual void rodataSection() = 0;
     // A constant holding addresses, which the loader writes before making it read-only; gcc's .data.rel.ro on ELF.
@@ -226,6 +233,7 @@ public:
     void calleeSaves(const std::vector<SavedReg> &saves) override { saves_ = saves; }
     void globl(const std::string &name) override;
     void weakDefinition(const std::string &name) override;
+    bool weakBindsGlobal() const override { return true; }
     void textSection() override;
     void rodataSection() override;
     void relroSection() override;
@@ -242,6 +250,7 @@ public:
     void dataInt(int size, long long v) override;
     void dataSym(const std::string &s, long long off) override;
     void initialiserEntry(const std::string &fn, bool dsoHandle) override;
+    void flagExchange() override;
 
 protected:
     // How a symbol is written. Identity for GNU-as on ELF and Mach-O.
@@ -266,6 +275,7 @@ public:
     void functionBegin(const std::string &name, bool exported,
                        bool mergeable) override;
     void weakDefinition(const std::string &name) override;
+    bool weakBindsGlobal() const override { return false; }
     void rodataSection() override;
     void relroSection() override { rodataSection(); }
     bool hasRelro() const override { return false; }
@@ -280,6 +290,7 @@ public:
     void functionEnd(const std::string &name) override;
     void noteHasEh(bool yes) override { hasEh_ = yes; }
     void initialiserEntry(const std::string &fn, bool dsoHandle) override;
+    void flagExchange() override;
     void tlsInitialiserEntry(const std::string &fn) override;
     // CodeView's line entries in place of DWARF's - see CodeView.h.
     void fileEntry(int n, const std::string &name) override;

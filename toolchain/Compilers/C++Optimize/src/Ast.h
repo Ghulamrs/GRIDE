@@ -192,9 +192,13 @@ class VaArg final : public Expr {
 public:
     explicit VaArg(ExprPtr list) : list_(std::move(list)) {}
     const Expr &list() const { return *list_; }
+    // Where a class is put back together if it came in pieces, in whole eightbytes; a class type only.
+    int slot() const { return slot_; }
+    void setSlot(int s) { slot_ = s; }
     void accept(Visitor &v) const override { v.visit(*this); }
 private:
     ExprPtr list_;
+    int slot_ = 0;
 };
 
 class Assign final : public Expr {
@@ -537,6 +541,7 @@ struct MsHandler {
     int objectSize = 0;
     bool byReference = false;  // the slot takes the runtime's pointer, not a copy
     bool constPointer = false; // `catch (const T *)`: HT_IsConst, the const off the name
+    std::string orNullptr;     // a pointer handler: nullptr_t's descriptor, a second row to the same funclet
     StmtPtr body;
     std::size_t pos = 0;       // where `catch` is written: the line the funclet's entry is named by under -g (1.29)
 };
@@ -795,6 +800,8 @@ struct Program {
     std::string initFunction;
     // Whether it names __dso_handle, which ELF wants declared hidden.
     bool usesDsoHandle = false;
+    // Whether it calls atomic_flag's exchange, which no library defines: the backend writes it into this file.
+    bool usesFlagExchange = false;
     // **The function that initialises this unit's thread_locals in a thread**, `__tls_init`, which
     // Itanium's `_ZTH` aliases name and the Microsoft CRT runs from .CRT$XDU; empty where none needs one.
     std::string tlsInitFunction;

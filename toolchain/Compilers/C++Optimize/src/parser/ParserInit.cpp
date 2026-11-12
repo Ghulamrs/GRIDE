@@ -1520,6 +1520,14 @@ std::string Parser::atexitHelperName(const std::string &scoped) const {
 std::vector<StmtPtr> Parser::buildStaticConstruction(const Declared &d,
                                                      const std::string &symbol,
                                                      const std::string &helper) {
+    // No constructor to call and no initialiser: the object is its zero-filled storage, and only its
+    // destructor is registered.
+    if (d.type->isStructOrUnion() && !d.type->tag().empty() && !hasConstructors(d.type->tag()) &&
+        !peek().is("=") && !peek().is("(") && !peek().is("{")) {
+        std::vector<StmtPtr> only;
+        registerDestruction(d, symbol, helper, only);
+        return only;
+    }
     if (isInitializerListType(d.type)) staticIlFor_ = symbol;
     CtorInit ci;
     try {

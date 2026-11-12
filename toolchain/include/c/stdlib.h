@@ -111,6 +111,8 @@ wchar_t ***__p___wargv(void);
 #define __argc (*__p___argc())
 #define __argv (*__p___argv())
 #define __wargv (*__p___wargv())
+/* the Microsoft runtime's name for _Exit: the program ends at once, no atexit function run, no stream written */
+void _exit(int);
 #endif
 
 // The quotient and the remainder of one division, returned as a structure. The

@@ -1,0 +1,12 @@
+kernel more user | KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42
+more kernel user | KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42
+kernel user more | KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42
+user kernel more | USER32.dll: AnyPopup GetDesktopWindow; KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount | 42
+more user kernel | KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42
+exit tick more user | KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42
+kernel lower user | KERNEL32.dll: ExitProcess GetTickCount; kernel32.dll: GetConsoleCP GetCurrentProcessId; USER32.dll: AnyPopup GetDesktopWindow | 42
+lower kernel user | kernel32.dll: GetConsoleCP GetCurrentProcessId; KERNEL32.dll: ExitProcess GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42
+kernel upper user | KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42
+upper kernel user | KERNEL32.DLL: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42
+both more | USER32.dll: AnyPopup GetDesktopWindow; KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount | 42
+more both | KERNEL32.dll: ExitProcess GetConsoleCP GetCurrentProcessId GetTickCount; USER32.dll: AnyPopup GetDesktopWindow | 42

@@ -913,7 +913,7 @@ bool copyText(const std::string& from, const std::string& to) {
 std::string tiLinkCmd() {
     return
     std::string("/* one flat memory for the C6747 and every section in it - written by ") + product::kName + " */\n" +
-    "--rom_model\n--stack_size=0x4000\n--heap_size=0x100000\n"
+    "--rom_model\n--stack_size=0x100000\n--heap_size=0x1000000\n"
     "MEMORY\n{\n    RAM : origin = 0xC0000000, length = 0x04000000\n}\n"
     "SECTIONS\n{\n"
     "    .text        > RAM\n    .const       > RAM\n    .data        > RAM\n    .bss         > RAM\n"

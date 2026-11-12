@@ -2,9 +2,9 @@
 // named file through it.
 //
 // A narrow buffer moves bytes with fgetc, ungetc and fwrite, so the C library's own buffering is the only one
-// and a stream and stdio stay in step; a wide one converts each character through the "C" locale's multibyte
-// encoding ([filebuf]/2's codecvt), wcrtomb out and mbrtowc in. The standard streams are filebufs over stdin,
-// stdout and stderr that do not close them.
+// and a stream and stdio stay in step; a wide one converts each character through its locale's
+// codecvt<charT, char, mbstate_t> ([filebuf]/5), the facet imbue() names - UTF-8 in the "C" locale. The
+// standard streams are filebufs over stdin, stdout and stderr that do not close them.
 #ifndef _CXX1_FSTREAM
 #define _CXX1_FSTREAM
 
@@ -35,40 +35,75 @@ inline const char *__cxx1_fopen_mode(ios_base::openmode m) {
     return 0;
 }
 
-// The one character's bytes in and out: identity for char, the multibyte encoding for wider types.
+// The one character's bytes in and out: identity for char; the locale's codecvt for wider types, where a
+// character may be two units (a UTF-16 pair) - the first unit written waits in `pend` for its second, and
+// the second unit read is handed back beside the first.
 template <class C> struct __cxx1_file_chars {
-    static bool put(FILE *f, C c) {
-        char bytes[8];
+    typedef codecvt<C, char, mbstate_t> cvt_type;
+    static bool put(FILE *f, const cvt_type &cvt, C *pend, C c) {
+        C units[2];
+        int n = 0;
+        if (*pend != 0) units[n++] = *pend;
+        units[n++] = c;
+        *pend = 0;
+        char bytes[16];
         mbstate_t st;
         std::memset(&st, 0, sizeof st);
-        const size_t n = std::wcrtomb(bytes, static_cast<wchar_t>(c), &st);
-        if (n == static_cast<size_t>(-1)) return false;
-        return std::fwrite(bytes, 1, n, f) == n;
+        const C *fn = units;
+        char *tn = bytes;
+        const codecvt_base::result r = cvt.out(st, units, units + n, fn, bytes, bytes + sizeof bytes, tn);
+        if (r == codecvt_base::partial && fn == units) { *pend = c; return true; }
+        if (r == codecvt_base::noconv) return std::fwrite(units, sizeof(C), static_cast<size_t>(n), f) == static_cast<size_t>(n);
+        if (r != codecvt_base::ok) return false;
+        const size_t k = static_cast<size_t>(tn - bytes);
+        return std::fwrite(bytes, 1, k, f) == k;
     }
-    static long get(FILE *f, long *bytesRead) {
-        mbstate_t st;
-        std::memset(&st, 0, sizeof st);
-        char b;
-        wchar_t w = 0;
+    // The next character's units into out, their count returned: 0 at the end of the file; a byte the
+    // facet refuses is given as itself, as a narrow buffer would.
+    static int get(FILE *f, const cvt_type &cvt, long *bytesRead, C out[2]) {
+        char bytes[16];
+        int n = 0;
         *bytesRead = 0;
         for (;;) {
             const int c = std::fgetc(f);
-            if (c == EOF) return -1;
-            b = static_cast<char>(c);
+            if (c == EOF) {
+                if (n == 0) return 0;
+                break;
+            }
+            bytes[n++] = static_cast<char>(c);
             ++*bytesRead;
-            const size_t r = std::mbrtowc(&w, &b, 1, &st);
-            if (r == static_cast<size_t>(-2)) continue;
-            if (r == static_cast<size_t>(-1)) return static_cast<unsigned char>(b);
-            return static_cast<long>(w);
+            mbstate_t st;
+            std::memset(&st, 0, sizeof st);
+            const char *fn = bytes;
+            C *tn = out;
+            const codecvt_base::result r = cvt.in(st, bytes, bytes + n, fn, out, out + 2, tn);
+            if (tn != out) {
+                const long took = static_cast<long>(fn - bytes);
+                if (took < n) { std::fseek(f, took - n, SEEK_CUR); *bytesRead = took; }
+                return static_cast<int>(tn - out);
+            }
+            if (r == codecvt_base::noconv) {
+                if (n < static_cast<int>(sizeof(C))) continue;
+                std::memcpy(out, bytes, sizeof(C));
+                return 1;
+            }
+            if (r == codecvt_base::error || n == static_cast<int>(sizeof bytes)) break;
         }
+        if (n > 1) std::fseek(f, 1 - n, SEEK_CUR);
+        *bytesRead = 1;
+        out[0] = static_cast<C>(static_cast<unsigned char>(bytes[0]));
+        return 1;
     }
 };
 template <> struct __cxx1_file_chars<char> {
-    static bool put(FILE *f, char c) { return std::fputc(static_cast<unsigned char>(c), f) != EOF; }
-    static long get(FILE *f, long *bytesRead) {
+    typedef codecvt<char, char, mbstate_t> cvt_type;
+    static bool put(FILE *f, const cvt_type &, char *, char c) { return std::fputc(static_cast<unsigned char>(c), f) != EOF; }
+    static int get(FILE *f, const cvt_type &, long *bytesRead, char out[2]) {
         const int c = std::fgetc(f);
         *bytesRead = c == EOF ? 0 : 1;
-        return c == EOF ? -1 : c;
+        if (c == EOF) return 0;
+        out[0] = static_cast<char>(c);
+        return 1;
     }
 };
 
@@ -80,11 +115,14 @@ public:
     typedef typename Tr::off_type off_type;
     typedef Tr traits_type;
 
-    basic_filebuf() : f_(0), owns_(false), mode_(0), held_(false), last_(0), lastBytes_(0) {}
+    basic_filebuf()
+        : f_(0), owns_(false), mode_(0), held_(false), last_(0), lastBytes_(0), pendIn_(0), pendOut_(0),
+          cvt_(&use_facet<cvt_type>(this->getloc())) {}
     basic_filebuf(const basic_filebuf &) = delete;
     basic_filebuf(basic_filebuf &&rhs)
         : basic_streambuf<C, Tr>(), f_(rhs.f_), owns_(rhs.owns_), mode_(rhs.mode_), held_(rhs.held_), last_(rhs.last_),
-          lastBytes_(rhs.lastBytes_) {
+          lastBytes_(rhs.lastBytes_), pendIn_(rhs.pendIn_), pendOut_(rhs.pendOut_), cvt_(rhs.cvt_) {
+        this->pubimbue(rhs.getloc());
         rhs.f_ = 0;
         rhs.owns_ = false;
     }
@@ -102,6 +140,12 @@ public:
         std::swap(held_, rhs.held_);
         std::swap(last_, rhs.last_);
         std::swap(lastBytes_, rhs.lastBytes_);
+        std::swap(pendIn_, rhs.pendIn_);
+        std::swap(pendOut_, rhs.pendOut_);
+        std::swap(cvt_, rhs.cvt_);
+        const locale mine = this->getloc();
+        this->pubimbue(rhs.getloc());
+        rhs.pubimbue(mine);
     }
 
     bool is_open() const { return f_ != 0; }
@@ -139,11 +183,19 @@ protected:
     // [filebuf.virtuals]: one character at a time through the C library.
     virtual int_type underflow() {
         if (f_ == 0) return Tr::eof();
+        if (!held_ && pendIn_ != 0) {
+            last_ = pendIn_;
+            pendIn_ = 0;
+            lastBytes_ = 0;
+            held_ = true;
+        }
         if (!held_) {
             long bytes = 0;
-            const long c = __cxx1_file_chars<C>::get(f_, &bytes);
-            if (c < 0) return Tr::eof();
-            last_ = Tr::to_char_type(static_cast<int_type>(c));
+            C units[2];
+            const int k = __cxx1_file_chars<C>::get(f_, *cvt_, &bytes, units);
+            if (k == 0) return Tr::eof();
+            last_ = units[0];
+            if (k == 2) pendIn_ = units[1];
             lastBytes_ = bytes;
             held_ = true;
         }
@@ -165,15 +217,16 @@ protected:
         if (f_ == 0) return Tr::eof();
         if (Tr::eq_int_type(c, Tr::eof())) return Tr::not_eof(c);
         unread();
-        return __cxx1_file_chars<C>::put(f_, Tr::to_char_type(c)) ? c : Tr::eof();
+        return __cxx1_file_chars<C>::put(f_, *cvt_, &pendOut_, Tr::to_char_type(c)) ? c : Tr::eof();
     }
     virtual streamsize xsputn(const char_type *s, streamsize n) {
         if (f_ == 0) return 0;
         unread();
         streamsize i = 0;
-        while (i < n && __cxx1_file_chars<C>::put(f_, s[i])) i++;
+        while (i < n && __cxx1_file_chars<C>::put(f_, *cvt_, &pendOut_, s[i])) i++;
         return i;
     }
+    virtual void imbue(const locale &loc) { cvt_ = &use_facet<cvt_type>(loc); }
     virtual int sync() {
         if (f_ == 0) return 0;
         unread();
@@ -192,18 +245,23 @@ protected:
     }
 
 private:
+    typedef typename __cxx1_file_chars<C>::cvt_type cvt_type;
     FILE *f_;
     bool owns_;
     ios_base::openmode mode_;
     bool held_;          // a character looked at and not taken
     char_type last_;
-    long lastBytes_;
+    long lastBytes_;     // its bytes in the file; 0 for the second unit of a pair, whose bytes went with the first
+    char_type pendIn_;   // the second unit of a pair read, not yet given out
+    char_type pendOut_;  // the first unit of a pair written, waiting for its second
+    const cvt_type *cvt_;
 
     // A character looked at and not taken goes back to the file before anything else happens to it.
     void unread() {
         if (!held_) return;
         held_ = false;
-        if (lastBytes_ == 1) std::ungetc(static_cast<unsigned char>(static_cast<char>(last_)), f_);
+        if (lastBytes_ == 0) pendIn_ = last_;
+        else if (lastBytes_ == 1) std::ungetc(static_cast<unsigned char>(static_cast<char>(last_)), f_);
         else std::fseek(f_, -lastBytes_, SEEK_CUR);
     }
 };

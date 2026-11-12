@@ -123,208 +123,279 @@ template <> struct __cxx1_int_arg<long long> { typedef double type; };
 template <> struct __cxx1_int_arg<unsigned long long> { typedef double type; };
 
 inline float acos(float x) { return static_cast<float>(::acos(static_cast<double>(x))); }
-inline long double acos(long double x) { return static_cast<long double>(::acos(static_cast<double>(x))); }
+// The long double overloads compute in long double's own precision: on x86_64-linux, where it is x87's 64-bit
+// significand, through glibc's `l` functions, declared here because <math.h> is C90's; on the other targets
+// long double is double, and the double functions are exact for it.
+#if defined(__linux__)
+extern "C" {
+long double acosl(long double);
+long double asinl(long double);
+long double atanl(long double);
+long double ceill(long double);
+long double cosl(long double);
+long double coshl(long double);
+long double expl(long double);
+long double fabsl(long double);
+long double floorl(long double);
+long double logl(long double);
+long double log10l(long double);
+long double sinl(long double);
+long double sinhl(long double);
+long double sqrtl(long double);
+long double tanl(long double);
+long double tanhl(long double);
+long double truncl(long double);
+long double roundl(long double);
+long double exp2l(long double);
+long double expm1l(long double);
+long double log2l(long double);
+long double log1pl(long double);
+long double logbl(long double);
+long double cbrtl(long double);
+long double asinhl(long double);
+long double acoshl(long double);
+long double atanhl(long double);
+long double erfl(long double);
+long double erfcl(long double);
+long double tgammal(long double);
+long double lgammal(long double);
+long double rintl(long double);
+long double nearbyintl(long double);
+long double atan2l(long double, long double);
+long double fmodl(long double, long double);
+long double powl(long double, long double);
+long double remainderl(long double, long double);
+long double fmaxl(long double, long double);
+long double fminl(long double, long double);
+long double fdiml(long double, long double);
+long double hypotl(long double, long double);
+long double copysignl(long double, long double);
+long double nextafterl(long double, long double);
+long double nexttowardl(long double, long double);
+long double fmal(long double, long double, long double);
+int ilogbl(long double);
+long lroundl(long double);
+long long llroundl(long double);
+long lrintl(long double);
+long long llrintl(long double);
+long double frexpl(long double, int *);
+long double ldexpl(long double, int);
+long double scalbnl(long double, int);
+long double scalblnl(long double, long);
+long double modfl(long double, long double *);
+long double remquol(long double, long double, int *);
+int __fpclassifyl(long double);
+int __signbitl(long double);
+int __isnanl(long double);
+int __isinfl(long double);
+int __finitel(long double);
+}
+#define _CXX1_LDBL(fn) ::fn##l
+#else
+#define _CXX1_LDBL(fn) ::fn
+#endif
+inline long double acos(long double x) { return static_cast<long double>(_CXX1_LDBL(acos)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type acos(T x) { return ::acos(static_cast<double>(x)); }
 inline float asin(float x) { return static_cast<float>(::asin(static_cast<double>(x))); }
-inline long double asin(long double x) { return static_cast<long double>(::asin(static_cast<double>(x))); }
+inline long double asin(long double x) { return static_cast<long double>(_CXX1_LDBL(asin)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type asin(T x) { return ::asin(static_cast<double>(x)); }
 inline float atan(float x) { return static_cast<float>(::atan(static_cast<double>(x))); }
-inline long double atan(long double x) { return static_cast<long double>(::atan(static_cast<double>(x))); }
+inline long double atan(long double x) { return static_cast<long double>(_CXX1_LDBL(atan)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type atan(T x) { return ::atan(static_cast<double>(x)); }
 inline float ceil(float x) { return static_cast<float>(::ceil(static_cast<double>(x))); }
-inline long double ceil(long double x) { return static_cast<long double>(::ceil(static_cast<double>(x))); }
+inline long double ceil(long double x) { return static_cast<long double>(_CXX1_LDBL(ceil)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type ceil(T x) { return ::ceil(static_cast<double>(x)); }
 inline float cos(float x) { return static_cast<float>(::cos(static_cast<double>(x))); }
-inline long double cos(long double x) { return static_cast<long double>(::cos(static_cast<double>(x))); }
+inline long double cos(long double x) { return static_cast<long double>(_CXX1_LDBL(cos)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type cos(T x) { return ::cos(static_cast<double>(x)); }
 inline float cosh(float x) { return static_cast<float>(::cosh(static_cast<double>(x))); }
-inline long double cosh(long double x) { return static_cast<long double>(::cosh(static_cast<double>(x))); }
+inline long double cosh(long double x) { return static_cast<long double>(_CXX1_LDBL(cosh)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type cosh(T x) { return ::cosh(static_cast<double>(x)); }
 inline float exp(float x) { return static_cast<float>(::exp(static_cast<double>(x))); }
-inline long double exp(long double x) { return static_cast<long double>(::exp(static_cast<double>(x))); }
+inline long double exp(long double x) { return static_cast<long double>(_CXX1_LDBL(exp)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type exp(T x) { return ::exp(static_cast<double>(x)); }
 inline float fabs(float x) { return static_cast<float>(::fabs(static_cast<double>(x))); }
-inline long double fabs(long double x) { return static_cast<long double>(::fabs(static_cast<double>(x))); }
+inline long double fabs(long double x) { return static_cast<long double>(_CXX1_LDBL(fabs)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type fabs(T x) { return ::fabs(static_cast<double>(x)); }
 inline float floor(float x) { return static_cast<float>(::floor(static_cast<double>(x))); }
-inline long double floor(long double x) { return static_cast<long double>(::floor(static_cast<double>(x))); }
+inline long double floor(long double x) { return static_cast<long double>(_CXX1_LDBL(floor)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type floor(T x) { return ::floor(static_cast<double>(x)); }
 inline float log(float x) { return static_cast<float>(::log(static_cast<double>(x))); }
-inline long double log(long double x) { return static_cast<long double>(::log(static_cast<double>(x))); }
+inline long double log(long double x) { return static_cast<long double>(_CXX1_LDBL(log)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type log(T x) { return ::log(static_cast<double>(x)); }
 inline float log10(float x) { return static_cast<float>(::log10(static_cast<double>(x))); }
-inline long double log10(long double x) { return static_cast<long double>(::log10(static_cast<double>(x))); }
+inline long double log10(long double x) { return static_cast<long double>(_CXX1_LDBL(log10)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type log10(T x) { return ::log10(static_cast<double>(x)); }
 inline float sin(float x) { return static_cast<float>(::sin(static_cast<double>(x))); }
-inline long double sin(long double x) { return static_cast<long double>(::sin(static_cast<double>(x))); }
+inline long double sin(long double x) { return static_cast<long double>(_CXX1_LDBL(sin)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type sin(T x) { return ::sin(static_cast<double>(x)); }
 inline float sinh(float x) { return static_cast<float>(::sinh(static_cast<double>(x))); }
-inline long double sinh(long double x) { return static_cast<long double>(::sinh(static_cast<double>(x))); }
+inline long double sinh(long double x) { return static_cast<long double>(_CXX1_LDBL(sinh)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type sinh(T x) { return ::sinh(static_cast<double>(x)); }
 inline float sqrt(float x) { return static_cast<float>(::sqrt(static_cast<double>(x))); }
-inline long double sqrt(long double x) { return static_cast<long double>(::sqrt(static_cast<double>(x))); }
+inline long double sqrt(long double x) { return static_cast<long double>(_CXX1_LDBL(sqrt)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type sqrt(T x) { return ::sqrt(static_cast<double>(x)); }
 inline float tan(float x) { return static_cast<float>(::tan(static_cast<double>(x))); }
-inline long double tan(long double x) { return static_cast<long double>(::tan(static_cast<double>(x))); }
+inline long double tan(long double x) { return static_cast<long double>(_CXX1_LDBL(tan)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type tan(T x) { return ::tan(static_cast<double>(x)); }
 inline float tanh(float x) { return static_cast<float>(::tanh(static_cast<double>(x))); }
-inline long double tanh(long double x) { return static_cast<long double>(::tanh(static_cast<double>(x))); }
+inline long double tanh(long double x) { return static_cast<long double>(_CXX1_LDBL(tanh)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type tanh(T x) { return ::tanh(static_cast<double>(x)); }
 inline float trunc(float x) { return static_cast<float>(::trunc(static_cast<double>(x))); }
-inline long double trunc(long double x) { return static_cast<long double>(::trunc(static_cast<double>(x))); }
+inline long double trunc(long double x) { return static_cast<long double>(_CXX1_LDBL(trunc)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type trunc(T x) { return ::trunc(static_cast<double>(x)); }
 inline float round(float x) { return static_cast<float>(::round(static_cast<double>(x))); }
-inline long double round(long double x) { return static_cast<long double>(::round(static_cast<double>(x))); }
+inline long double round(long double x) { return static_cast<long double>(_CXX1_LDBL(round)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type round(T x) { return ::round(static_cast<double>(x)); }
 inline float exp2(float x) { return static_cast<float>(::exp2(static_cast<double>(x))); }
-inline long double exp2(long double x) { return static_cast<long double>(::exp2(static_cast<double>(x))); }
+inline long double exp2(long double x) { return static_cast<long double>(_CXX1_LDBL(exp2)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type exp2(T x) { return ::exp2(static_cast<double>(x)); }
 inline float expm1(float x) { return static_cast<float>(::expm1(static_cast<double>(x))); }
-inline long double expm1(long double x) { return static_cast<long double>(::expm1(static_cast<double>(x))); }
+inline long double expm1(long double x) { return static_cast<long double>(_CXX1_LDBL(expm1)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type expm1(T x) { return ::expm1(static_cast<double>(x)); }
 inline float log2(float x) { return static_cast<float>(::log2(static_cast<double>(x))); }
-inline long double log2(long double x) { return static_cast<long double>(::log2(static_cast<double>(x))); }
+inline long double log2(long double x) { return static_cast<long double>(_CXX1_LDBL(log2)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type log2(T x) { return ::log2(static_cast<double>(x)); }
 inline float log1p(float x) { return static_cast<float>(::log1p(static_cast<double>(x))); }
-inline long double log1p(long double x) { return static_cast<long double>(::log1p(static_cast<double>(x))); }
+inline long double log1p(long double x) { return static_cast<long double>(_CXX1_LDBL(log1p)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type log1p(T x) { return ::log1p(static_cast<double>(x)); }
 inline float logb(float x) { return static_cast<float>(::logb(static_cast<double>(x))); }
-inline long double logb(long double x) { return static_cast<long double>(::logb(static_cast<double>(x))); }
+inline long double logb(long double x) { return static_cast<long double>(_CXX1_LDBL(logb)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type logb(T x) { return ::logb(static_cast<double>(x)); }
 inline float cbrt(float x) { return static_cast<float>(::cbrt(static_cast<double>(x))); }
-inline long double cbrt(long double x) { return static_cast<long double>(::cbrt(static_cast<double>(x))); }
+inline long double cbrt(long double x) { return static_cast<long double>(_CXX1_LDBL(cbrt)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type cbrt(T x) { return ::cbrt(static_cast<double>(x)); }
 inline float asinh(float x) { return static_cast<float>(::asinh(static_cast<double>(x))); }
-inline long double asinh(long double x) { return static_cast<long double>(::asinh(static_cast<double>(x))); }
+inline long double asinh(long double x) { return static_cast<long double>(_CXX1_LDBL(asinh)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type asinh(T x) { return ::asinh(static_cast<double>(x)); }
 inline float acosh(float x) { return static_cast<float>(::acosh(static_cast<double>(x))); }
-inline long double acosh(long double x) { return static_cast<long double>(::acosh(static_cast<double>(x))); }
+inline long double acosh(long double x) { return static_cast<long double>(_CXX1_LDBL(acosh)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type acosh(T x) { return ::acosh(static_cast<double>(x)); }
 inline float atanh(float x) { return static_cast<float>(::atanh(static_cast<double>(x))); }
-inline long double atanh(long double x) { return static_cast<long double>(::atanh(static_cast<double>(x))); }
+inline long double atanh(long double x) { return static_cast<long double>(_CXX1_LDBL(atanh)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type atanh(T x) { return ::atanh(static_cast<double>(x)); }
 inline float erf(float x) { return static_cast<float>(::erf(static_cast<double>(x))); }
-inline long double erf(long double x) { return static_cast<long double>(::erf(static_cast<double>(x))); }
+inline long double erf(long double x) { return static_cast<long double>(_CXX1_LDBL(erf)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type erf(T x) { return ::erf(static_cast<double>(x)); }
 inline float erfc(float x) { return static_cast<float>(::erfc(static_cast<double>(x))); }
-inline long double erfc(long double x) { return static_cast<long double>(::erfc(static_cast<double>(x))); }
+inline long double erfc(long double x) { return static_cast<long double>(_CXX1_LDBL(erfc)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type erfc(T x) { return ::erfc(static_cast<double>(x)); }
 inline float tgamma(float x) { return static_cast<float>(::tgamma(static_cast<double>(x))); }
-inline long double tgamma(long double x) { return static_cast<long double>(::tgamma(static_cast<double>(x))); }
+inline long double tgamma(long double x) { return static_cast<long double>(_CXX1_LDBL(tgamma)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type tgamma(T x) { return ::tgamma(static_cast<double>(x)); }
 inline float lgamma(float x) { return static_cast<float>(::lgamma(static_cast<double>(x))); }
-inline long double lgamma(long double x) { return static_cast<long double>(::lgamma(static_cast<double>(x))); }
+inline long double lgamma(long double x) { return static_cast<long double>(_CXX1_LDBL(lgamma)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type lgamma(T x) { return ::lgamma(static_cast<double>(x)); }
 inline float rint(float x) { return static_cast<float>(::rint(static_cast<double>(x))); }
-inline long double rint(long double x) { return static_cast<long double>(::rint(static_cast<double>(x))); }
+inline long double rint(long double x) { return static_cast<long double>(_CXX1_LDBL(rint)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type rint(T x) { return ::rint(static_cast<double>(x)); }
 inline float nearbyint(float x) { return static_cast<float>(::nearbyint(static_cast<double>(x))); }
-inline long double nearbyint(long double x) { return static_cast<long double>(::nearbyint(static_cast<double>(x))); }
+inline long double nearbyint(long double x) { return static_cast<long double>(_CXX1_LDBL(nearbyint)(x)); }
 template <class T> inline typename __cxx1_int_arg<T>::type nearbyint(T x) { return ::nearbyint(static_cast<double>(x)); }
 inline int ilogb(float x) { return ::ilogb(static_cast<double>(x)); }
 inline int ilogb(long double x) { return ::ilogb(static_cast<double>(x)); }
 template <class T> inline int ilogb(T x, typename __cxx1_int_arg<T>::type * = 0) { return ::ilogb(static_cast<double>(x)); }
 inline long lround(float x) { return ::lround(static_cast<double>(x)); }
-inline long lround(long double x) { return ::lround(static_cast<double>(x)); }
+inline long lround(long double x) { return _CXX1_LDBL(lround)(x); }
 template <class T> inline long lround(T x, typename __cxx1_int_arg<T>::type * = 0) { return ::lround(static_cast<double>(x)); }
 inline long long llround(float x) { return ::llround(static_cast<double>(x)); }
-inline long long llround(long double x) { return ::llround(static_cast<double>(x)); }
+inline long long llround(long double x) { return _CXX1_LDBL(llround)(x); }
 template <class T> inline long long llround(T x, typename __cxx1_int_arg<T>::type * = 0) { return ::llround(static_cast<double>(x)); }
 inline long lrint(float x) { return ::lrint(static_cast<double>(x)); }
-inline long lrint(long double x) { return ::lrint(static_cast<double>(x)); }
+inline long lrint(long double x) { return _CXX1_LDBL(lrint)(x); }
 template <class T> inline long lrint(T x, typename __cxx1_int_arg<T>::type * = 0) { return ::lrint(static_cast<double>(x)); }
 inline long long llrint(float x) { return ::llrint(static_cast<double>(x)); }
-inline long long llrint(long double x) { return ::llrint(static_cast<double>(x)); }
+inline long long llrint(long double x) { return _CXX1_LDBL(llrint)(x); }
 template <class T> inline long long llrint(T x, typename __cxx1_int_arg<T>::type * = 0) { return ::llrint(static_cast<double>(x)); }
 inline float atan2(float x, float y) { return static_cast<float>(::atan2(static_cast<double>(x), static_cast<double>(y))); }
 inline long double atan2(long double x, long double y) {
-    return static_cast<long double>(::atan2(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(atan2)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type atan2(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::atan2(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float fmod(float x, float y) { return static_cast<float>(::fmod(static_cast<double>(x), static_cast<double>(y))); }
 inline long double fmod(long double x, long double y) {
-    return static_cast<long double>(::fmod(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(fmod)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type fmod(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::fmod(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float pow(float x, float y) { return static_cast<float>(::pow(static_cast<double>(x), static_cast<double>(y))); }
 inline long double pow(long double x, long double y) {
-    return static_cast<long double>(::pow(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(pow)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type pow(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::pow(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float remainder(float x, float y) { return static_cast<float>(::remainder(static_cast<double>(x), static_cast<double>(y))); }
 inline long double remainder(long double x, long double y) {
-    return static_cast<long double>(::remainder(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(remainder)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type remainder(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::remainder(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float fmax(float x, float y) { return static_cast<float>(::fmax(static_cast<double>(x), static_cast<double>(y))); }
 inline long double fmax(long double x, long double y) {
-    return static_cast<long double>(::fmax(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(fmax)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type fmax(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::fmax(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float fmin(float x, float y) { return static_cast<float>(::fmin(static_cast<double>(x), static_cast<double>(y))); }
 inline long double fmin(long double x, long double y) {
-    return static_cast<long double>(::fmin(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(fmin)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type fmin(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::fmin(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float fdim(float x, float y) { return static_cast<float>(::fdim(static_cast<double>(x), static_cast<double>(y))); }
 inline long double fdim(long double x, long double y) {
-    return static_cast<long double>(::fdim(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(fdim)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type fdim(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::fdim(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float hypot(float x, float y) { return static_cast<float>(::hypot(static_cast<double>(x), static_cast<double>(y))); }
 inline long double hypot(long double x, long double y) {
-    return static_cast<long double>(::hypot(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(hypot)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type hypot(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::hypot(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float copysign(float x, float y) { return static_cast<float>(::copysign(static_cast<double>(x), static_cast<double>(y))); }
 inline long double copysign(long double x, long double y) {
-    return static_cast<long double>(::copysign(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(copysign)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type copysign(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::copysign(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float nextafter(float x, float y) { return static_cast<float>(::nextafter(static_cast<double>(x), static_cast<double>(y))); }
 inline long double nextafter(long double x, long double y) {
-    return static_cast<long double>(::nextafter(static_cast<double>(x), static_cast<double>(y)));
+    return static_cast<long double>(_CXX1_LDBL(nextafter)(x, y));
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type nextafter(A x, B y) {
     return static_cast<typename __cxx1_fp_mix<A, B>::type>(::nextafter(static_cast<double>(x), static_cast<double>(y)));
 }
 inline float fma(float x, float y, float z) { return static_cast<float>(::fma(x, y, z)); }
 inline long double fma(long double x, long double y, long double z) {
-    return static_cast<long double>(::fma(static_cast<double>(x), static_cast<double>(y), static_cast<double>(z)));
+    return static_cast<long double>(_CXX1_LDBL(fma)(x, y, z));
 }
 template <class A, class B, class C>
 inline typename __cxx1_fp_mix<typename __cxx1_fp_mix<A, B>::type, C>::type fma(A x, B y, C z) {
     return ::fma(static_cast<double>(x), static_cast<double>(y), static_cast<double>(z));
 }
 inline float frexp(float x, int * e) { return static_cast<float>(::frexp(x, e)); }
-inline long double frexp(long double x, int * e) { return ::frexp(static_cast<double>(x), e); }
+inline long double frexp(long double x, int * e) { return _CXX1_LDBL(frexp)(x, e); }
 template <class T> inline typename __cxx1_int_arg<T>::type frexp(T x, int * e) { return ::frexp(static_cast<double>(x), e); }
 inline float ldexp(float x, int e) { return static_cast<float>(::ldexp(x, e)); }
-inline long double ldexp(long double x, int e) { return ::ldexp(static_cast<double>(x), e); }
+inline long double ldexp(long double x, int e) { return _CXX1_LDBL(ldexp)(x, e); }
 template <class T> inline typename __cxx1_int_arg<T>::type ldexp(T x, int e) { return ::ldexp(static_cast<double>(x), e); }
 inline float scalbn(float x, int e) { return static_cast<float>(::scalbn(x, e)); }
-inline long double scalbn(long double x, int e) { return ::scalbn(static_cast<double>(x), e); }
+inline long double scalbn(long double x, int e) { return _CXX1_LDBL(scalbn)(x, e); }
 template <class T> inline typename __cxx1_int_arg<T>::type scalbn(T x, int e) { return ::scalbn(static_cast<double>(x), e); }
 inline float scalbln(float x, long e) { return static_cast<float>(::scalbln(x, e)); }
-inline long double scalbln(long double x, long e) { return ::scalbln(static_cast<double>(x), e); }
+inline long double scalbln(long double x, long e) { return _CXX1_LDBL(scalbln)(x, e); }
 template <class T> inline typename __cxx1_int_arg<T>::type scalbln(T x, long e) { return ::scalbln(static_cast<double>(x), e); }
 inline float modf(float x, float *ip) {
     double d;
@@ -333,23 +404,28 @@ inline float modf(float x, float *ip) {
     return r;
 }
 inline long double modf(long double x, long double *ip) {
+#if defined(__linux__)
+    return ::modfl(x, ip);
+#else
     double d;
     const long double r = ::modf(static_cast<double>(x), &d);
     *ip = d;
     return r;
+#endif
 }
 inline float remquo(float x, float y, int *q) { return static_cast<float>(::remquo(x, y, q)); }
 inline long double remquo(long double x, long double y, int *q) {
-    return ::remquo(static_cast<double>(x), static_cast<double>(y), q);
+    return _CXX1_LDBL(remquo)(x, y, q);
 }
 template <class A, class B> inline typename __cxx1_fp_mix<A, B>::type remquo(A x, B y, int *q) {
     return ::remquo(static_cast<double>(x), static_cast<double>(y), q);
 }
 inline float nexttoward(float x, long double y) { return static_cast<float>(::nexttoward(x, y)); }
-inline long double nexttoward(long double x, long double y) { return ::nexttoward(static_cast<double>(x), y); }
+inline long double nexttoward(long double x, long double y) { return _CXX1_LDBL(nexttoward)(x, y); }
 template <class T> inline typename __cxx1_int_arg<T>::type nexttoward(T x, long double y) {
     return ::nexttoward(static_cast<double>(x), y);
 }
+#undef _CXX1_LDBL
 
 // The C99 classification functions, as C++11's <cmath> has them: a NaN is
 // the one value unequal to itself, an infinity is what is left when the
@@ -380,22 +456,46 @@ inline bool islessgreater(double x, double y) { return !isunordered(x, y) && (x 
 
 // The classification functions' float and long double forms, and an integer taken as a double.
 inline bool isnan(float v) { return isnan(static_cast<double>(v)); }
+#if defined(__linux__)
+inline bool isnan(long double v) { return __isnanl(v) != 0; }
+#else
 inline bool isnan(long double v) { return isnan(static_cast<double>(v)); }
+#endif
 template <class T> inline bool isnan(T v, typename __cxx1_int_arg<T>::type * = 0) { return isnan(static_cast<double>(v)); }
 inline bool isinf(float v) { return isinf(static_cast<double>(v)); }
+#if defined(__linux__)
+inline bool isinf(long double v) { return __isinfl(v) != 0; }
+#else
 inline bool isinf(long double v) { return isinf(static_cast<double>(v)); }
+#endif
 template <class T> inline bool isinf(T v, typename __cxx1_int_arg<T>::type * = 0) { return isinf(static_cast<double>(v)); }
 inline bool isfinite(float v) { return isfinite(static_cast<double>(v)); }
+#if defined(__linux__)
+inline bool isfinite(long double v) { return __finitel(v) != 0; }
+#else
 inline bool isfinite(long double v) { return isfinite(static_cast<double>(v)); }
+#endif
 template <class T> inline bool isfinite(T v, typename __cxx1_int_arg<T>::type * = 0) { return isfinite(static_cast<double>(v)); }
 inline bool signbit(float v) { return signbit(static_cast<double>(v)); }
+#if defined(__linux__)
+inline bool signbit(long double v) { return __signbitl(v) != 0; }
+#else
 inline bool signbit(long double v) { return signbit(static_cast<double>(v)); }
+#endif
 template <class T> inline bool signbit(T v, typename __cxx1_int_arg<T>::type * = 0) { return signbit(static_cast<double>(v)); }
 inline bool isnormal(float v) { return isnormal(static_cast<double>(v)); }
+#if defined(__linux__)
+inline bool isnormal(long double v) { return __fpclassifyl(v) == FP_NORMAL; }
+#else
 inline bool isnormal(long double v) { return isnormal(static_cast<double>(v)); }
+#endif
 template <class T> inline bool isnormal(T v, typename __cxx1_int_arg<T>::type * = 0) { return isnormal(static_cast<double>(v)); }
 inline int fpclassify(float v) { return fpclassify(static_cast<double>(v)); }
+#if defined(__linux__)
+inline int fpclassify(long double v) { return __fpclassifyl(v); }
+#else
 inline int fpclassify(long double v) { return fpclassify(static_cast<double>(v)); }
+#endif
 template <class T> inline int fpclassify(T v, typename __cxx1_int_arg<T>::type * = 0) { return fpclassify(static_cast<double>(v)); }
 inline bool isunordered(float x, float y) { return isunordered(static_cast<double>(x), static_cast<double>(y)); }
 inline bool isunordered(long double x, long double y) { return isunordered(static_cast<double>(x), static_cast<double>(y)); }

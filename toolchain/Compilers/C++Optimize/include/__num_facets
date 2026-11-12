@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ios>
+#include <limits>
 #include <string>
 #include <streambuf>
 #include <__locale>
@@ -436,8 +437,9 @@ private:
             err |= ios_base::failbit;
             return in;
         }
-        // An infinity from strtold is past every finite value too.
-        const long double big = kind == 0 ? FLT_MAX : kind == 1 ? DBL_MAX : LDBL_MAX;
+        // An infinity from strtold is past every finite value too. x87's largest is made from its bits in
+        // <limits>: the compiler carries a floating constant in a double and refuses LDBL_MAX's literal.
+        const long double big = kind == 0 ? FLT_MAX : kind == 1 ? DBL_MAX : numeric_limits<long double>::max();
         if (d > big || d < -big) {
             *v = d < 0 ? -big : big;
             err |= ios_base::failbit;

@@ -10,7 +10,7 @@ namespace rts6x {
 
 class Termination {
 public:
-    // A function for exit to call; 0, or non-zero when the list is full.
+    // A function for exit to call; 0, or non-zero when there is no memory for it.
     static int add(void (*function)(void));
     // A destructor and its object, for exit to call in the same list (C++).
     static int add(void (*destructor)(void *), void *object);
@@ -25,19 +25,29 @@ private:
 #if defined(_WIN32)
     // GRIDE's runtime for Windows (toolchain\Windows\RT): abort ends a program as the Microsoft runtime's
     // Release build does, by the fast fail, whose exit code 0xC0000409 is the status __rts6x_halt is given
-    // (win\halt.asm takes it as the sign to fail fast). The list holds every static object's destructor a
-    // C++ program registers, as that runtime's grows to.
-    enum { Capacity = 4096, AbortStatus = -1073740791 };
+    // (win\halt.asm takes it as the sign to fail fast).
+    enum { AbortStatus = -1073740791 };
 #else
-    enum { Capacity = 64, AbortStatus = 134 };
+    enum { AbortStatus = 134 };
 #endif
     struct Entry {
         void (*plain)(void);
         void (*withObject)(void *);
         void *object;
     };
-    static Entry entries_[Capacity];
-    static int count_;
+    // The list grows: a static first chunk, then a chunk from malloc each time the last is full, so every
+    // static object's destructor a C++ program registers has a place, however many there are. A full list
+    // was once a fixed 64 (4,096 on Windows) and refused the rest without a word, which cpp11's
+    // initialisers never check.
+    enum { ChunkSize = 64 };
+    struct Chunk {
+        Entry entries[ChunkSize];
+        Chunk *older;
+        int count;
+    };
+    static Entry *slot();
+    static Chunk first_;
+    static Chunk *last_;
     static void (*streams_)(void);
     // Set while SIGABRT is delivered, so an abort from its handler (SIG_DFL included) stops at once.
     static bool aborting_;

@@ -92,6 +92,7 @@ public:
     void dataInt(int size, long long v) override;
     void dataSym(const std::string &sym, long long off) override;
     void noteHasEh(bool yes) override;
+    void flagExchange() override;
     void initialiserEntry(const std::string &fn, bool dsoHandle) override;
     std::string labelText(const std::string &l) const override { return under_.labelText(l); }
     std::string codeLabelText(const std::string &prefix, const std::string &symbol) override {

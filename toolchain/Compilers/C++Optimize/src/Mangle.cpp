@@ -895,7 +895,8 @@ private:
                 out += 'T';
                 if (t->boundParam() > 0) out += std::to_string(t->boundParam() - 1);
                 out += '_';
-            } else {
+            } else if (t->length() >= 0) {
+                // An array of unknown bound is `A_i`: nothing between the A and the underscore.
                 out += std::to_string(t->length());
             }
             out += '_';
@@ -1871,36 +1872,42 @@ bool microsoftThrowNames(const Type *t, int size, MicrosoftThrow *out,
     out->size = size;
     out->isConst = false;
     if (t->isReference()) t = t->referent()->unqualified();
+    // What is not a class, a fundamental type or a pointer to one: typeid's spelling, which has the whole grammar.
+    const auto spelled = [&](const Type *whole, std::string *code) {
+        Microsoft m;
+        m.anyType(whole);
+        if (!m.ok) { *problem = m.problem; return false; }
+        *code = m.out;
+        return true;
+    };
     if (t->isPointer()) {
         // **A pointer to const is spelled without it**, and the ThrowInfo says
         // `C` after its count: cl writes `_TI2CPEAD` for `const char *` where clang writes `_TIC2PEAD`.
         const Type *pointee = t->pointee();
         out->isConst = pointee->isConst();
         pointee = pointee->unqualified();
-        if (pointee->isPointer() || pointee->isFunction() ||
-            pointee->isMemberPointer() || pointee->isMemberFunctionPointer()) {
-            *problem = "a pointer to a function has no type_info here yet, nor has a "
-                       "pointer to a pointer or a member - a thrown pointer to '" +
-                       pointee->describe() + "' is not supported yet";
-            return false;
-        }
+        const bool toMember = pointee->isMemberPointer() || pointee->isMemberFunctionPointer();
         std::string code;
-        if (pointee->isVoid()) code = "X";
+        if (pointee->isFunction() || pointee->isPointer() || toMember) {
+            if (!spelled(pointee->isFunction() ? t : pointee, &code)) return false;
+        }
+        else if (pointee->isVoid()) code = "X";
         else if (!microsoftDescriptorCode(pointee, &code, problem)) return false;
-        if (pointee->isStructOrUnion()) code = code.substr(2);   // `?AUB@@` to `UB@@`
-        out->decorated = ".PEA" + code;
-        out->descriptor = "??_R0PEA" + code + "@8";
+        if (pointee->isStructOrUnion() && !toMember) code = code.substr(2);   // `?AUB@@` to `UB@@`
+        const std::string spelt = pointee->isFunction() ? code : "PEA" + code;    // `P6AXXZ` is whole already
+        out->decorated = "." + spelt;
+        out->descriptor = "??_R0" + spelt + "@8";
         MicrosoftThrow::Catchable self;
         self.decorated = out->decorated;
         self.descriptor = out->descriptor;
         self.size = size;
         self.simple = true;
         out->catchables.push_back(self);
-        if (pointee->isStructOrUnion() &&
+        if (pointee->isStructOrUnion() && !toMember &&
             !microsoftCatchableBases(pointee, 0, true, &out->catchables, problem))
             return false;
-        // And `void *`, which every object pointer may be caught as.
-        if (!pointee->isVoid()) {
+        // And `void *`, which every object pointer may be caught as, and a pointer to a function may not.
+        if (!pointee->isVoid() && !pointee->isFunction()) {
             MicrosoftThrow::Catchable any;
             any.decorated = ".PEAX";
             any.descriptor = "??_R0PEAX@8";
@@ -1912,18 +1919,19 @@ bool microsoftThrowNames(const Type *t, int size, MicrosoftThrow *out,
             out->catchables[i].size = size;
         return true;
     }
+    const bool member = t->isMemberPointer() || t->isMemberFunctionPointer();
     std::string code;
-    if (!microsoftDescriptorCode(t, &code, problem)) return false;
+    if (member ? !spelled(t, &code) : !microsoftDescriptorCode(t, &code, problem)) return false;
     out->decorated = "." + code;
     out->descriptor = "??_R0" + code + "@8";
     MicrosoftThrow::Catchable self;
-    self.cls = t->isStructOrUnion() ? t : nullptr;
+    self.cls = t->isStructOrUnion() && !member ? t : nullptr;
     self.decorated = out->decorated;
     self.descriptor = out->descriptor;
     self.size = size;
-    self.simple = !t->isStructOrUnion();
+    self.simple = member || !t->isStructOrUnion();
     out->catchables.push_back(self);
-    if (t->isStructOrUnion() &&
+    if (t->isStructOrUnion() && !member &&
         !microsoftCatchableBases(t, 0, false, &out->catchables, problem))
         return false;
     return true;

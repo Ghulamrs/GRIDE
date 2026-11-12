@@ -18,7 +18,7 @@ the project files stay inside the tool trees.
 | sim6747 | TI\SIM6747 | sim6747.vcxproj, src\ | |
 | vm6747 | TI\VM6747 | vm6747.vcxproj, src\ | |
 | masm | Windows\MASM | masm.vcxproj, src\ | |
-| link | Windows\LINK | link.vcxproj, src\ | src\librarian.cpp is link /LIB (archives, import libraries from a .def) |
+| link | Windows\LINK | link.vcxproj, src\, tests\ | src\librarian.cpp is link /LIB (archives, import libraries from a .def); tests\ is this tree's own, not a copy |
 | grt | Windows\RT | grt.vcxproj, rts6x-c.sources, rts6x-cxx.sources, kernel32.def, catalogue.json, start\, compat\, cxx\, c\, win\, internal\, tests\, bench\ | GRIDE's own runtime for Windows, GRIDE's (not copied; docs\Runtime_Design.md): RTS6x's C library (the files rts6x-c.sources names) and the runtime's own layers, built by c90, cpp11, masm and link into five layered libraries - lib\grtstart.lib, grtcompat.lib, grtcxx.lib, grtc.lib, grtwin.lib - with lib\kernel32.lib and the Shalimar runtime over them; catalogue.json is its public C ABI |
 
 `msbuild\Toolchain.targets` holds the build steps the tool trees did with batch files, as MSBuild tasks:

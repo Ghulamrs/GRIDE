@@ -132,6 +132,7 @@ struct World {
     std::map<std::string, std::pair<int, int> > comdat;    /* COMDAT symbol -> the contribution that holds it */
     std::vector<std::pair<int, int> > pending;             /* live sections whose references are still to be followed */
     std::map<std::string, bool> optional;                  /* names the linker asks for on its own account: no error when nothing has them */
+    std::map<std::string, std::pair<int, int> > dlls;      /* a DLL -> the first library to give a member of it, and its number */
 };
 
 /*  A name ending in _$fo$ is link.exe's function-override hook (the CRT's memcpy_$fo$,
@@ -371,6 +372,23 @@ bool take_module(World &w, const Module &m0, std::string &err)
     return true;
 }
 
+/*  The DLL a member of an import library belongs to, spelled as its import descriptor is: every
+ *  member but the null descriptor's names __IMPORT_DESCRIPTOR_<dll> or \x7f<dll>_NULL_THUNK_DATA,
+ *  defined or not. That name is the one link.exe goes by: KERNEL32.dll and KERNEL32.DLL share a
+ *  descriptor, kernel32.dll has its own. */
+std::string import_dll(const Module &m)
+{
+    static const char descriptor[] = "__IMPORT_DESCRIPTOR_", thunk[] = "_NULL_THUNK_DATA";
+    const size_t nd = sizeof descriptor - 1, nt = sizeof thunk - 1;
+    for (size_t i = 0; i < m.syms.size(); i++) {
+        const std::string &s = m.syms[i].name;
+        if (s.compare(0, nd, descriptor) == 0) return s.substr(nd);
+        if (s.size() > nt + 1 && s[0] == '\x7f' && s.compare(s.size() - nt, nt, thunk) == 0)
+            return s.substr(1, s.size() - nt - 1);
+    }
+    return std::string();
+}
+
 /*  One pass over the archives: every member the current undefined set names is taken, and
  *  the members taken may ask for more. An archive is searched again for what its own
  *  members just asked before the next archive is opened - link.exe's order, and the one
@@ -409,6 +427,13 @@ bool pull_pass(World &w, std::string &err, bool &took)
             if (!ar.member(pull[k], ar.name, m, err)) return false;
             if (w.lk->opt.verbose) fprintf(stderr, "took %s\n", m.name.c_str());
             m.lib = (int)a;
+            const std::string dll = import_dll(m);
+            if (!dll.empty()) {
+                const std::pair<int, int> first(m.lib, (int)w.dlls.size());
+                const std::pair<int, int> &known = w.dlls.insert(std::make_pair(dll, first)).first->second;
+                m.lib = known.first;
+                m.dll = known.second;
+            }
             ar.taken.push_back(pull[k]);
             if (!take_module(w, m, err)) return false;
             took = true;
@@ -717,21 +742,28 @@ static int rank_of(const std::string &out, const std::string &name)
 
 namespace {
 
-/*  Inside a run of import-table contributions the order is per library: each library's
- *  words are contiguous, and the library's null word - the NULL_THUNK_DATA member's, the
- *  one with no relocation - comes last in its run, or the loader takes it for the end of
- *  the table (the review's L11: every corpus image crashed on it). Libraries in the order
- *  they were named or asked for. */
+/*  Inside a run of import-table contributions the order is per DLL: each DLL's words are
+ *  contiguous, and the DLL's null word - the NULL_THUNK_DATA member's, the one with no
+ *  relocation - comes last in its run, or the loader takes it for the end of the table (the
+ *  review's L11: every corpus image crashed on it). A DLL has one descriptor and one null
+ *  word however many import libraries gave its names, the first library's, so words of a
+ *  later library outside that run are never bound. link.exe keeps them together as well, in
+ *  an order that changes with the objects; here, the order they were taken in. DLLs go in
+ *  the order their libraries were named or asked for, and in the order they were first
+ *  taken inside a library of several, as ucrt.lib is, as link.exe's do. Sharing one run
+ *  there went unseen: each api-ms-win-crt DLL was given every name, and all of them answer. */
 struct Placed {
     Contrib *c;
     int out, rank;
     int lib;            /* the library the contribution came from, -1 for an object */
+    int dll;            /* an import-table contribution's DLL, else -1 */
     bool last;          /* an import-table word with no relocation: the terminator */
     bool operator<(const Placed &o) const {
         if (out  != o.out)  return out < o.out;
         if (rank != o.rank) return rank < o.rank;
         if (c->name != o.c->name) return c->name < o.c->name;
         if (lib  != o.lib)  return lib < o.lib;
+        if (dll  != o.dll)  return dll < o.dll;
         if (last != o.last) return !last;
         return c->serial < o.c->serial;
     }
@@ -811,6 +843,7 @@ bool Link::lay_out()
                 p.out = out_order(out_of(c.name));
                 p.rank = rank_of(out_of(c.name), c.name);
                 p.lib = mods[mi].lib;
+                p.dll = c.name.compare(0, 7, ".idata$") == 0 ? mods[mi].dll : -1;
                 p.last = c.name.compare(0, 7, ".idata$") == 0 && c.relocs.empty() &&
                          (c.name == ".idata$4" || c.name == ".idata$5");
                 ps.push_back(p);
@@ -1045,12 +1078,15 @@ bool Link::fix_up()
             bool absolute = false;                 /* the value is not an address: no base, no base relocation */
             if (s.section == 0 && s.storage == SYM_SECTION) {
                 /*  A section-class reference - the import descriptor's, to its library's
-                 *  .idata$4, $5 and $6: the first contribution of that name that came from
-                 *  the same library, which the per-library placement makes the start of that
-                 *  library's run. */
+                 *  .idata$4, $5 and $6: the first contribution of that name from the same
+                 *  library and DLL, which the per-DLL placement makes the start of that DLL's
+                 *  run. */
                 bool found = false;
                 for (size_t k = 0; k < all.size() && !found; k++)
-                    if (all[k]->name == s.name && mods[all[k]->module].lib == m.lib) { S = all[k]->rva; found = true; }
+                    if (all[k]->name == s.name && mods[all[k]->module].lib == m.lib && mods[all[k]->module].dll == m.dll) {
+                        S = all[k]->rva;
+                        found = true;
+                    }
                 for (size_t k = 0; k < all.size() && !found; k++)
                     if (all[k]->name == s.name) { S = all[k]->rva; found = true; }
                 if (!found) { err = "no contribution named " + s.name + " for " + m.name; return false; }

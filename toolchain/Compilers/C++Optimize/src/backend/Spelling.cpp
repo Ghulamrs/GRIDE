@@ -58,7 +58,7 @@ void GnuSpelling::defLabel(const std::string &l) { o_ += sym(l); o_ += ":\n"; }
 // keeps it; a group is kept once. Measured on Compiler++ (docs/PORT-FROM-CPPI.md).
 void GnuSpelling::functionBegin(const std::string &name, bool exported,
                                 bool mergeable) {
-    if (exported) globl(name);
+    if (exported && !(mergeable && weakBindsGlobal())) globl(name);
     textSection_ = mergeable
         ? "  .section .text." + sym(name) + ",\"axG\",@progbits," + sym(name) + ",comdat\n"
         : std::string("  .text\n");
@@ -110,8 +110,8 @@ void GnuSpelling::globl(const std::string &name) {
     o_ += "  .globl "; o_ += sym(name); o_ += '\n';
 }
 
-// Measured from clang: `.weak` beside the `.globl`, which is what makes the
-// linker fold the copies of an inline function rather than reject them.
+// `.weak` is what makes the linker fold the copies of an inline function rather than reject them, and
+// it binds the symbol global by itself: clang writes no `.globl` beside it, and its assembler warns of one.
 void GnuSpelling::weakDefinition(const std::string &name) {
     o_ += "  .weak "; o_ += sym(name); o_ += '\n';
 }
@@ -141,6 +141,10 @@ void GnuSpelling::initialiserEntry(const std::string &fn, bool dsoHandle) {
     o_ += "  .section .init_array,\"aw\",@init_array\n  .p2align 3, 0x0\n  .quad ";
     o_ += sym(fn);
     o_ += '\n';
+}
+
+void GnuSpelling::flagExchange() {
+    o_ += "  .text\n__cxx1_flag_exchange:\n  movl %esi, %eax\n  xchgb %al, (%rdi)\n  movzbl %al, %eax\n  retq\n";
 }
 
 void GnuSpelling::textSection()   { o_ += textSection_; }
@@ -342,6 +346,10 @@ void CoffSpelling::weakDefinition(const std::string &name) {
 // Measured from clang for x86_64-pc-windows-msvc: the same pointer, in the
 // section the CRT walks before main. **`.CRT$XCU` carries no COMDAT clause**,
 // and the `unique,0` that used to be here is why this is a comment.
+void CoffSpelling::flagExchange() {
+    o_ += "  .text\n__cxx1_flag_exchange:\n  movl %edx, %eax\n  xchgb %al, (%rcx)\n  movzbl %al, %eax\n  retq\n";
+}
+
 void CoffSpelling::initialiserEntry(const std::string &fn, bool) {
     o_ += "  .section .CRT$XCU,\"dr\"\n  .p2align 3, 0x0\n  .quad ";
     o_ += sym(fn);

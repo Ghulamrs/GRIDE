@@ -124,6 +124,7 @@ typedef long long fpos_t;
 #define _IONBF       0x0004
 #define FILENAME_MAX 256
 #define FOPEN_MAX    20
+#define L_tmpnam     256
 #define TMP_MAX      65535
 typedef long fpos_t;
 #else

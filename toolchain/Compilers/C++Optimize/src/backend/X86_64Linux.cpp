@@ -939,6 +939,25 @@ void X86_64Linux::genFloatBinary(const Binary &n) {
     a_->ins("movzbq", reg("%al"), reg("%rax"));
 }
 
+// The names GCC treats as returning twice (special_function_p), with one or two underscores in front or none, and
+// the UCRT's _setjmpex; a call by pointer is not known for one. The idioms C90 7.6.2.1 allows put the call, or an
+// assignment of it, straight under the comparison, so those two shapes and a cast of either are looked through.
+static bool returnsTwiceName(const std::string &name) {
+    std::size_t at = 0;
+    while (at < 2 && at < name.size() && name[at] == '_') at++;
+    static const char *const kNames[] = { "setjmp", "setjmpex", "sigsetjmp", "savectx", "vfork", "getcontext" };
+    for (const char *k : kNames)
+        if (name.compare(at, std::string::npos, k) == 0) return true;
+    return false;
+}
+
+static bool returnsTwice(const Expr &e) {
+    if (const Call *c = dynamic_cast<const Call *>(&e)) return c->callee() == nullptr && returnsTwiceName(c->name());
+    if (const Assign *a = dynamic_cast<const Assign *>(&e)) return returnsTwice(a->value());
+    if (const Cast *c = dynamic_cast<const Cast *>(&e)) return returnsTwice(c->value());
+    return false;
+}
+
 void X86_64Linux::visit(const Binary &n) {
     if (n.op() == BinOp::LAnd || n.op() == BinOp::LOr) {
         int id = nextLabel();
@@ -963,10 +982,23 @@ void X86_64Linux::visit(const Binary &n) {
 
     if (n.lhs().type()->isFloating()) { genFloatBinary(n); return; }
 
-    n.rhs().accept(*this);
-    push();
-    n.lhs().accept(*this);
-    pop(abi_.scratch);
+    // **A function that returns twice is called with nothing parked** (c90's rule, its X86_64Linux.cpp). The right
+    // operand is evaluated first and parked while the left is worked out; in `if ((r = setjmp(jb)) == 0)` the parked
+    // 0 sat below rsp through setjmp's first return, was written over by the calls made since, and longjmp's second
+    // return compared against rubbish - a C++ program longjmping out of a signal handler went round for ever where the
+    // same C did not. The operand that calls setjmp is evaluated first, then the other, into the same registers.
+    if (returnsTwice(n.lhs())) {
+        n.lhs().accept(*this);
+        push();
+        n.rhs().accept(*this);
+        a_->ins("mov", reg("%rax"), reg(abi_.scratch));
+        pop("%rax");
+    } else {
+        n.rhs().accept(*this);
+        push();
+        n.lhs().accept(*this);
+        pop(abi_.scratch);
+    }
 
     const Type *t = n.lhs().type();
     const char *a = acc(t);
@@ -1361,6 +1393,52 @@ void X86_64Linux::genTruth(const Expr &e) {
     a_->ins("movzbq", reg("%al"), reg("%rax"));
 }
 
+// `va_arg` of a class on SysV, %rax holding the va_list: past 16 bytes it is in the overflow area, as it is when the
+// registers left will not take all of it. Otherwise its eightbytes are in the two save areas, a word of general
+// registers and sixteen bytes of xmm at a time, and it is put back together in the frame.
+void X86_64Linux::vaArgClass(const VaArg &n) {
+    const Type *t = n.type();
+    const int size = t->size(target_);
+    const std::vector<bool> lanes = size > 16 ? std::vector<bool>() : classifyEightbytes(t, target_);
+    if (size <= 16 && lanes.empty()) {         // a class with no data members took no register and no stack
+        a_->ins("lea", local(n.slot()), reg("%rax"));
+        return;
+    }
+    const int id = nextLabel();
+    const std::string onStack = label("va.stack", id), done = label("va.done", id);
+    if (!lanes.empty()) {
+        int ints = 0, sses = 0;
+        for (std::size_t e = 0; e < lanes.size(); e++) (lanes[e] ? sses : ints)++;
+        if (ints > 0) {
+            a_->ins("movl", mem("%rax"), reg("%ecx"));
+            a_->ins("cmpl", imm(48 - 8 * ints), reg("%ecx"));
+            a_->ins("ja", lbl(onStack));
+        }
+        if (sses > 0) {
+            a_->ins("movl", mem(4, "%rax"), reg("%ecx"));
+            a_->ins("cmpl", imm(176 - 16 * sses), reg("%ecx"));
+            a_->ins("ja", lbl(onStack));
+        }
+        a_->ins("mov", mem(16, "%rax"), reg("%r8"));
+        a_->ins("lea", local(n.slot()), reg("%r9"));
+        for (std::size_t e = 0; e < lanes.size(); e++) {
+            a_->ins("movl", lanes[e] ? mem(4, "%rax") : mem("%rax"), reg("%ecx"));
+            a_->ins("add", reg("%r8"), reg("%rcx"));
+            a_->ins("mov", mem("%rcx"), reg("%rdx"));
+            a_->ins("mov", reg("%rdx"), mem(static_cast<int>(e) * 8, "%r9"));
+            a_->ins("addl", imm(lanes[e] ? 16 : 8), lanes[e] ? mem(4, "%rax") : mem("%rax"));
+        }
+        a_->ins("mov", reg("%r9"), reg("%rax"));
+        a_->ins("jmp", lbl(done));
+        a_->defLabel(onStack);
+    }
+    a_->ins("mov", mem(8, "%rax"), reg("%rdx"));
+    a_->ins("lea", mem((size + 7) / 8 * 8, "%rdx"), reg("%rcx"));
+    a_->ins("mov", reg("%rcx"), mem(8, "%rax"));
+    a_->ins("mov", reg("%rdx"), reg("%rax"));
+    a_->defLabel(done);
+}
+
 void X86_64Linux::visit(const VaArg &n) {
     n.list().accept(*this);
     const Type *t = n.type();
@@ -1370,7 +1448,17 @@ void X86_64Linux::visit(const VaArg &n) {
         a_->ins("lea", mem(8, "%rcx"), reg("%rdx"));
         a_->ins("mov", reg("%rdx"), mem("%rax"));
         a_->ins("mov", reg("%rcx"), reg("%rax"));
+        if (t->isStructOrUnion()) {
+            // cl's rule for every argument: 1, 2, 4 or 8 bytes in the slot, anything else the address of a copy.
+            const int size = t->size(target_);
+            if (size != 1 && size != 2 && size != 4 && size != 8) a_->ins("mov", mem("%rax"), reg("%rax"));
+            return;
+        }
         load(t);
+        return;
+    }
+    if (t->isStructOrUnion()) {
+        vaArgClass(n);
         return;
     }
 
@@ -1585,8 +1673,7 @@ void X86_64Linux::finishChunk() {
     out_.clear();
 }
 
-namespace { std::vector<const Call *> callsIn(const Node &n, std::vector<const Call *> *outer = nullptr, bool *tlsGuarded = nullptr);
-            bool touchesVolatile(const Node &n); }
+namespace { std::vector<const Call *> callsIn(const Node &n, std::vector<const Call *> *outer = nullptr, bool *tlsGuarded = nullptr); }
 
 // A call with stack arguments writes them above the shadow space, and a callee
 // walked in place may make any call at all.
@@ -1636,7 +1723,7 @@ void X86_64Linux::emit(const Function &fn) {
     // label at the same address, which is what makes it the same function
     // rather than a second copy of it.
     if (!fn.alias().empty()) {
-        if (!fn.isStatic()) a_->globl(fn.alias());
+        if (!fn.isStatic() && !(fn.isInline() && a_->weakBindsGlobal())) a_->globl(fn.alias());
         if (fn.isInline()) a_->weakDefinition(fn.alias());
         a_->defLabel(fn.alias());
     }
@@ -1891,12 +1978,8 @@ public:
     int inCall = 0;
     // A thread_local reached through the CRT's guard is a call to `__dyn_tls_on_demand_init` too.
     bool tlsGuarded = false;
-    // An lvalue of volatile type - a variable, a dereference, a member - read or written here.
-    bool volatileSeen = false;
-    void seen(const Expr &n) { if (n.type() != nullptr && n.type()->isVolatile()) volatileSeen = true; }
     void visit(const Num &) override {}
     void visit(const Var &n) override {
-        seen(n);
         if (n.isThreadLocal() && n.viaWrapper()) tlsGuarded = true;
     }
     void visit(const StrLit &) override {}
@@ -1915,7 +1998,7 @@ public:
     void visit(const VaStart &n) override { n.list().accept(*this); }
     void visit(const VaArg &n) override { n.list().accept(*this); }
     void visit(const Assign &n) override { n.target().accept(*this); n.value().accept(*this); }
-    void visit(const Unary &n) override { seen(n); n.operand().accept(*this); }
+    void visit(const Unary &n) override { n.operand().accept(*this); }
     void visit(const Binary &n) override { n.lhs().accept(*this); n.rhs().accept(*this); }
     void visit(const Postfix &n) override { n.target().accept(*this); }
     void visit(const Cast &n) override { n.value().accept(*this); }
@@ -1923,7 +2006,7 @@ public:
     void visit(const Conditional &n) override {
         n.cond().accept(*this); n.thenArm().accept(*this); n.elseArm().accept(*this);
     }
-    void visit(const MemberAccess &n) override { seen(n); n.object().accept(*this); }
+    void visit(const MemberAccess &n) override { n.object().accept(*this); }
     void visit(const ExprStmt &n) override { n.expr().accept(*this); }
     void visit(const Return &n) override { if (n.hasValue()) n.value().accept(*this); }
     void visit(const Block &n) override { for (const StmtPtr &s : n.body()) s->accept(*this); }
@@ -1957,13 +2040,6 @@ std::vector<const Call *> callsIn(const Node &n, std::vector<const Call *> *oute
     if (outer != nullptr) *outer = scan.outer;
     if (tlsGuarded != nullptr) *tlsGuarded = scan.tlsGuarded;
     return scan.calls;
-}
-
-// Whether a body reads or writes an lvalue of volatile type anywhere.
-bool touchesVolatile(const Node &n) {
-    CallScan scan;
-    n.accept(scan);
-    return scan.volatileSeen;
 }
 
 }
@@ -2378,7 +2454,7 @@ void X86_64Linux::emitCoffClassRtti(const Program &program) {
 
 void X86_64Linux::emitGlobal(const Global &g, Segment seg) {
     int size = g.type->size(target_);
-    if (!g.isStatic) a_->globl(g.symbol);
+    if (!g.isStatic && !(g.isInline && a_->weakBindsGlobal())) a_->globl(g.symbol);
     if (g.isInline) a_->weakDefinition(g.symbol);
 
     if (abi_.elfSymbolAttributes) {
@@ -2575,6 +2651,10 @@ void X86_64Linux::run(const Program &program) {
     for (const Function &fn : program.functions) bodies_[fn.symbol()] = &fn;
     if (inliner_) inliner_->summarize(program);
     for (const Function &fn : program.functions) emit(fn);
+    if (program.usesFlagExchange) {
+        a_->flagExchange();
+        finishChunk();
+    }
     if (!program.initFunction.empty()) {
         a_->initialiserEntry(program.initFunction, program.usesDsoHandle);
         finishChunk();

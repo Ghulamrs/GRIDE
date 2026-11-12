@@ -357,9 +357,9 @@ bool Parser::enterConstexprCall(const Call &c, const ConstexprFn **out,
 
     // A recursion that does not end is a compiler that does not either.
     // The standard lets an implementation set a limit and say so; this is
-    // that limit, and it is said where it is reached.
-    if (constexprFrames_.size() >= 256)
-        src_.fail(pos, "this constant expression is more than 256 calls "
+    // that limit - twice Annex B's 512 - and it is said where it is reached.
+    if (constexprFrames_.size() >= kMaxConstexprCalls)
+        src_.fail(pos, "this constant expression is more than " + std::to_string(kMaxConstexprCalls) + " calls "
                        "deep - a 'constexpr' function that never stops "
                            "recursing cannot be worked out while compiling");
 
@@ -1120,9 +1120,9 @@ bool Parser::constructConst(const Call &c, std::size_t pos) const {
     if (it == constexprCtors_.end() || c.args().empty()) return false;
     const ConstexprCtor &ctor = it->second;
     if (ctor.slots.size() + 1 != c.args().size()) return false;
-    if (constexprFrames_.size() >= 256)
-        src_.fail(pos, "this constant expression is more than 256 calls deep - a 'constexpr' "
-                       "function that never stops recursing cannot be worked out while compiling");
+    if (constexprFrames_.size() >= kMaxConstexprCalls)
+        src_.fail(pos, "this constant expression is more than " + std::to_string(kMaxConstexprCalls) + " calls deep "
+                       "- a 'constexpr' function that never stops recursing cannot be worked out while compiling");
     // A temporary the comma around this call reads back is made here, in the caller's frame.
     ConstexprSlot self;
     self.offset = ctor.thisSlot;

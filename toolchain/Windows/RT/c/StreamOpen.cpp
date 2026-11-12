@@ -106,13 +106,13 @@ namespace rts6x {
 // file "w" must create (_O_EXCL).
 bool Stream::parseMode(const char *mode, unsigned &host, unsigned &own)
 {
-    bool update = false, binary = false;
+    bool update = false, binary = false, translation = false;
     unsigned more = 0;
     if (!mode[0]) return false;
+    // As the Microsoft runtime reads a mode: one +, and one of b and t, or the mode is invalid ("r+b+", "rbt").
     for (const char *p = mode + 1; *p; p++) {
-        if (*p == '+') update = true;
-        else if (*p == 'b') binary = true;
-        else if (*p == 't') binary = false;
+        if (*p == '+') { if (update) return false; update = true; }
+        else if (*p == 'b' || *p == 't') { if (translation) return false; translation = true; binary = *p == 'b'; }
         else if (*p == 'D') more |= 0x40;
         else if (*p == 'x' && mode[0] == 'w') more |= 0x100;
         else return false;

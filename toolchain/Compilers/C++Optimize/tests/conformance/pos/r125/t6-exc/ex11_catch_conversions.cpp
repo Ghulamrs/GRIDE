@@ -10,7 +10,7 @@ int main() {
     try { int *p = 0; throw p; } catch (void *) { std::printf("void* "); }
     try { const int *p = 0; throw p; } catch (void *) { std::printf("void*-wrong "); } catch (const void *) { std::printf("const-void* "); }
     try { B *b = new B; throw b; } catch (A *a) { std::printf("A* "); delete a; }
-    try { throw nullptr; } catch (int *) { std::printf("int*-wrong "); } catch (std::nullptr_t) { std::printf("nullptr_t "); }
+    try { throw nullptr; } catch (int *) { std::printf("int* "); } catch (std::nullptr_t) { std::printf("nullptr_t-wrong "); }
     try { throw "arr"; } catch (const char *s) { std::printf("%s ", s); }
     try { throw 1.0f; } catch (double) { std::printf("double-wrong "); } catch (float) { std::printf("float "); }
     try { throw B(); } catch (A) { std::printf("A-by-value "); }
