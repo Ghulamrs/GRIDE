@@ -1,0 +1,252 @@
+outlook:        White (GRIDE 1.0)
+project:        compilerpp   (examples\projects\compilerpp\compilerpp.pro)
+configuration:  Debug
+target:         tms6747
+commands:       18   (compile 16, assemble 1, link 1, other 0)
+last link:      FAILED (exit 1)
+driver:         Build > Build project; build ended
+dialog:         'GRIDE': The project's own lnk6x did not build it. Use TI's lnk6x for this build instead?  [buttons: No, Yes; pressed: No]
+
+[1] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/AST.cpp" -o "<proj>/compilerpp.vm/AST.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[2] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Bytecode.cpp" -o "<proj>/compilerpp.vm/Bytecode.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[3] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/CodeGen.cpp" -o "<proj>/compilerpp.vm/CodeGen.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[4] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/IR.cpp" -o "<proj>/compilerpp.vm/IR.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[5] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Lower.cpp" -o "<proj>/compilerpp.vm/Lower.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[6] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Diagnostics.cpp" -o "<proj>/compilerpp.vm/Diagnostics.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[7] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Layout.cpp" -o "<proj>/compilerpp.vm/Layout.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[8] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/AST1.cpp" -o "<proj>/compilerpp.vm/AST1.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[9] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Lower1.cpp" -o "<proj>/compilerpp.vm/Lower1.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[10] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Lexer.cpp" -o "<proj>/compilerpp.vm/Lexer.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[11] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Parser1.cpp" -o "<proj>/compilerpp.vm/Parser1.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[12] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Semantic.cpp" -o "<proj>/compilerpp.vm/Semantic.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[13] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/Parser.cpp" -o "<proj>/compilerpp.vm/Parser.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[14] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/VM.cpp" -o "<proj>/compilerpp.vm/VM.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[15] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/SymbolTable.cpp" -o "<proj>/compilerpp.vm/SymbolTable.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[16] cpp11   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\cpp11.exe" -S -arch tms6747 "<proj>/main.cpp" -o "<proj>/compilerpp.vm/main.s" -g -D_DEBUG=1
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[17] asm6x   assemble   exit 0
+    cwd: <bin>
+    cmd: "<bin>/asm6x.exe" "<proj>/compilerpp.vm/AST.s" "<proj>/compilerpp.vm/AST1.s" "<proj>/compilerpp.vm/Bytecode.s" "<proj>/compilerpp.vm/CodeGen.s" "<proj>/compilerpp.vm/Diagnostics.s" "<proj>/compilerpp.vm/IR.s" "<proj>/compilerpp.vm/Layout.s" "<proj>/compilerpp.vm/Lexer.s" "<proj>/compilerpp.vm/Lower.s" "<proj>/compilerpp.vm/Lower1.s" "<proj>/compilerpp.vm/main.s" "<proj>/compilerpp.vm/Parser.s" "<proj>/compilerpp.vm/Parser1.s" "<proj>/compilerpp.vm/Semantic.s" "<proj>/compilerpp.vm/SymbolTable.s" "<proj>/compilerpp.vm/VM.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[18] lnk6x   link   exit 1
+    cwd: <bin>
+    cmd: "<bin>/lnk6x.exe" -mv6740 --abi=eabi -i "<bin>/lib/tms6747" "<proj>/compilerpp.vm/ti-link.cmd" "<proj>/compilerpp.vm/AST.obj" "<proj>/compilerpp.vm/AST1.obj" "<proj>/compilerpp.vm/Bytecode.obj" "<proj>/compilerpp.vm/CodeGen.obj" "<proj>/compilerpp.vm/Diagnostics.obj" "<proj>/compilerpp.vm/IR.obj" "<proj>/compilerpp.vm/Layout.obj" "<proj>/compilerpp.vm/Lexer.obj" "<proj>/compilerpp.vm/Lower.obj" "<proj>/compilerpp.vm/Lower1.obj" "<proj>/compilerpp.vm/main.obj" "<proj>/compilerpp.vm/Parser.obj" "<proj>/compilerpp.vm/Parser1.obj" "<proj>/compilerpp.vm/Semantic.obj" "<proj>/compilerpp.vm/SymbolTable.obj" "<proj>/compilerpp.vm/VM.obj" -l rts6xd.lib -o "<proj>/compilerpp.out"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+file written for a tool: <proj>\compilerpp.vm\ti-link.cmd
+    | /* one flat memory for the C6747 and every section in it - written by GRIDE */
+    | --rom_model
+    | --stack_size=0x100000
+    | --heap_size=0x1000000
+    | MEMORY
+    | {
+    |     RAM : origin = 0xC0000000, length = 0x04000000
+    | }
+    | SECTIONS
+    | {
+    |     .text        > RAM
+    |     .const       > RAM
+    |     .data        > RAM
+    |     .bss         > RAM
+    |     .far         > RAM
+    |     .fardata     > RAM
+    |     .neardata    > RAM
+    |     .rodata      > RAM
+    |     .cinit       > RAM
+    |     .init_array  > RAM
+    |     .switch      > RAM
+    |     .cio         > RAM
+    |     .stack       > RAM
+    |     .sysmem      > RAM
+    |     .vm6747.eh   > RAM
+    | }

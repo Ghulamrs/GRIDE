@@ -1983,3 +1983,7 @@ p166	p166	nh02_throwing_every_kind_of_pointer	pass	pass
 p166	p166	va01_structs_through_the_ellipsis	pass	pass
 p167	p167	da01_a_definition_after_a_function_that_used_a_string	pass	pass
 p167	p167	wl04_an_int_made_double_after_a_byte_is_loaded	pass	pass
+p168	p168	cv01_a_cv_qualifier_after_the_type_name	pass	pass
+p168	p168neg	cv02_const_written_twice_after_a_class	refused	refused
+p168	p168neg	cv03_const_written_twice_around_int	refused	refused
+p168	p168neg	cv04_volatile_written_twice_after_a_typedef	refused	refused

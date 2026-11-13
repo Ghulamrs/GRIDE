@@ -36,7 +36,7 @@ namespace Gride
         property String^ FilePath;
     };
 
-    public enum class JobKind { Build, Rebuild, Clean, Run, BuildAndRun, Convert, CompileFile, BuildAndDebug };
+    public enum class JobKind { Build, Rebuild, Clean, Run, BuildAndRun, Convert, CompileFile, BuildAndDebug, DryRun };
 
     public ref class BuildJob
     {
@@ -61,6 +61,10 @@ namespace Gride
         MainForm(array<String^>^ args)
         {
             startupArgs = args;
+            // The block, compile.dll, checked first - before the settings and the environment are loaded - and
+            // once: beside GRIDE.exe, and the release this GRIDE.exe was built with. Nothing of the DLL is used when
+            // it is not; builds are then planned by Grey's own planner, and OnShown says why.
+            blockProblem = GrideBlock::Block::Problem;
             String^ warning = nullptr;
             settings = IdeSettings::Load(warning);
             settingsWarning = warning;
@@ -121,6 +125,11 @@ namespace Gride
             RestoreSplitters();
             if (settingsWarning != nullptr) Ui::Error(this, settingsWarning);
             ReportToolchainProblems();
+            if (blockProblem != nullptr)
+            {
+                EnqueueOutput(String::Concat("[", blockProblem, " - builds are planned by Grey's own planner, and there is no dry run of a GRIDE project]"));
+                ShowBottom(pageOutput);
+            }
 
             bool opened = false;
             if (startupArgs != nullptr)
@@ -135,7 +144,7 @@ namespace Gride
             if (!opened && settings->ReopenLastProject && !String::IsNullOrEmpty(settings->LastProject) &&
                 File::Exists(settings->LastProject))
                 OpenProject(settings->LastProject);
-            SetStatus("Ready");
+            SetStatus(blockProblem != nullptr ? "compile.dll cannot be used - see the Output pane" : "Ready");
         }
 
         ~MainForm()
@@ -147,6 +156,7 @@ namespace Gride
         // ------------------------------------------------------------ state
         IdeSettings^ settings;
         String^ settingsWarning;
+        String^ blockProblem;            // why compile.dll cannot be used, found at start-up; nullptr when it can
         GrideProject^ project;
         GrideProject^ lone;                 // a source built with no project open: its own one-file program (BuildProject)
         DateTime projectDiskTime;           // last write time of the .pro we know about
@@ -246,6 +256,9 @@ namespace Gride
         Func<String^, List<String^>^, String^>^ projectChooser;
         ToolStripMenuItem^ miImportCcs;
         ToolStripMenuItem^ miBuild;
+        ToolStripMenuItem^ miDryRun;         // Build > Dry Run: the build's commands in the Output pane, and nothing run
+        ToolStripMenuItem^ miShowLog;        // Build > Show Build Log: the log the block kept of the last build
+        ToolStripMenuItem^ tmDryRun;         // the same dry run, on the project tree's right-click menu
         ToolStripMenuItem^ miCompileFile;
         ToolStripMenuItem^ miEdit;
         bool checkingDisk;
@@ -468,6 +481,9 @@ namespace Gride
             treeMenu->Items->Add(gcnew ToolStripSeparator());
             treeMenu->Items->Add(tmRename);
             treeMenu->Items->Add(tmRemove);
+            tmDryRun = gcnew ToolStripMenuItem("Dry Run Project (commands only)", nullptr, GRIDE_EH(OnDryRun));
+            treeMenu->Items->Add(gcnew ToolStripSeparator());
+            treeMenu->Items->Add(tmDryRun);
             treeMenu->Items->Add(gcnew ToolStripSeparator());
             treeMenu->Items->Add(tmProps);
             treeMenu->Opening += gcnew CancelEventHandler(this, &MainForm::OnTreeMenuOpening);
@@ -566,6 +582,9 @@ namespace Gride
             miCompileFile = AddItem(build, "Com&pile Current File", GRIDE_EH(OnCompileFile), Keys::Control | Keys::F7, nullptr);
             miRebuild = AddItem(build, "&Rebuild Project", GRIDE_EH(OnRebuild), Keys::None, nullptr);
             miClean = AddItem(build, "&Clean Project", GRIDE_EH(OnClean), Keys::None, nullptr);
+            // the build as a script, and nothing run: "DRY RUN ONLY", then every command of a full build (2026-11-13)
+            miDryRun = AddItem(build, "&Dry Run Project (commands only)", GRIDE_EH(OnDryRun), Keys::None, nullptr);
+            miShowLog = AddItem(build, "Show Build &Log", GRIDE_EH(OnShowBuildLog), Keys::None, nullptr);
             AddSep(build);
             miBuildStop = AddItem(build, "Cancel Build", GRIDE_EH(OnStop), Keys::Control | Keys::Cancel, "Ctrl+Break");
 
@@ -747,6 +766,9 @@ namespace Gride
                                      (!hasProject || project->ContainsFile(ed->FilePath));
             miRebuild->Enabled = canBuild;
             miClean->Enabled = canBuild;
+            miDryRun->Enabled = canBuild;
+            tmDryRun->Enabled = canBuild;
+            miShowLog->Enabled = canBuild;
             // one program at a time; Stop ends a build or the running program (RIDE's Stop)
             bool programBusy = ProgramBusy();
             bool canRun = canBuild && !programBusy;
@@ -2491,6 +2513,35 @@ namespace Gride
             SetStatus(String::Format("Compiling {0}...", ed->DisplayName));
             StartJob(job, true);
         }
+        // Build > Dry Run: the project's build as a script in the Output pane - "DRY RUN ONLY", every command a full
+        // build would run, compile, assemble and link, each written whole, "DRY RUN ONLY - end" - and nothing run.
+        // A CCS project and a Visual Studio project have theirs too. The Error List is left as it is.
+        void OnDryRun(Object^ sender, EventArgs^ e)
+        {
+            if (!PrepareBuild()) return;
+            String^ s;
+            while (outQueue->TryDequeue(s)) {}
+            txtOutput->Clear();
+            SetStatus("Dry run...");
+            StartJob(MakeJob(JobKind::DryRun), false);
+        }
+        // Build > Show Build Log: the log of the project's last build for the configuration and target chosen, as
+        // the block kept it - every step, its whole command line, all its tool wrote - opened as a document
+        void OnShowBuildLog(Object^ sender, EventArgs^ e)
+        {
+            GrideProject^ p = BuildProject();
+            if (p == nullptr) { Ui::Info(this, NothingToBuild); return; }
+            String^ file = nullptr;
+            try
+            {
+                BuildEngine^ engine = gcnew BuildEngine(p, settings, nullptr, nullptr, System::Threading::CancellationToken::None);
+                file = engine->LogFile();
+            }
+            catch (Exception^) { file = nullptr; }
+            if (file == nullptr) { Ui::Info(this, "The build log is kept for GRIDE projects (.pro) that compile.dll plans; this project has none."); return; }
+            if (!File::Exists(file)) { Ui::Info(this, String::Concat("No build of ", p->Name, " for this configuration and target has left a log yet:\n", file)); return; }
+            OpenFile(file);
+        }
         void OnRebuild(Object^ sender, EventArgs^ e) { StartBuild(JobKind::Rebuild); }
         void OnClean(Object^ sender, EventArgs^ e) { StartBuild(JobKind::Clean); }
         void OnBuildAndRun(Object^ sender, EventArgs^ e) { StartRun(RunHow::Run, true); }
@@ -2730,6 +2781,7 @@ namespace Gride
                     BuildEngine^ engine = gcnew BuildEngine(job->Project, job->Settings, out, msg, token);
                     engine->SingleFile = job->SingleFile;
                     engine->Asker = gcnew Func<String^, bool>(this, &MainForm::AskFromBuild);
+                    engine->DryRun = job->Kind == JobKind::DryRun;
                     BuildAction action = BuildAction::Build;
                     if (job->Kind == JobKind::Rebuild) action = BuildAction::Rebuild;
                     else if (job->Kind == JobKind::Clean) action = BuildAction::Clean;
@@ -2767,6 +2819,7 @@ namespace Gride
             BuildJob^ job = dynamic_cast<BuildJob^>(e->Result);
             if (job == nullptr) return;
 
+            if (job->Result != nullptr && job->Result->DryRun) { SetStatus("Dry run only - nothing was built"); return; }
             if (job->Result != nullptr)
             {
                 if (job->Result->Cancelled) SetStatus("Build cancelled");
@@ -3190,6 +3243,7 @@ namespace Gride
             info->Fore = this->ForeColor;
             info->Accent = Color::FromArgb(0, 122, 204);
             info->AccentFore = Color::White;
+            info->BlockExpected = GrideBlock::Block::Expected;      // the compile.dll this GRIDE.exe was built with
             GrideAbout::AboutBox::Open(this, info);
         }
 

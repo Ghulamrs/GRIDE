@@ -1,0 +1,83 @@
+outlook:        White (GRIDE 1.0)
+project:        c-demo   (examples\projects\c-demo\demo.pro)
+configuration:  Release
+target:         tms6747
+commands:       4   (compile 2, assemble 1, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Build project; build ended
+
+[1] c90   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\c90.exe" -S -arch tms6747 "<proj>/main.c" -o "<proj>/demo.vm/main.s" -O2 -DNDEBUG=1 -I"<bin>/lib"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[2] c90   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\c90.exe" -S -arch tms6747 "<proj>/greet.c" -o "<proj>/demo.vm/greet.s" -O2 -DNDEBUG=1 -I"<bin>/lib"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[3] asm6x   assemble   exit 0
+    cwd: <bin>
+    cmd: "<bin>/asm6x.exe" "<proj>/demo.vm/greet.s" "<proj>/demo.vm/main.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[4] lnk6x   link   exit 0
+    cwd: <bin>
+    cmd: "<bin>/lnk6x.exe" -mv6740 --abi=eabi -i "<bin>/lib/tms6747" "<proj>/demo.vm/ti-link.cmd" "<proj>/demo.vm/greet.obj" "<proj>/demo.vm/main.obj" -l rts6x.lib -o "<proj>/demo.out"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+file written for a tool: <proj>\demo.vm\ti-link.cmd
+    | /* one flat memory for the C6747 and every section in it - written by GRIDE */
+    | --rom_model
+    | --stack_size=0x100000
+    | --heap_size=0x1000000
+    | MEMORY
+    | {
+    |     RAM : origin = 0xC0000000, length = 0x04000000
+    | }
+    | SECTIONS
+    | {
+    |     .text        > RAM
+    |     .const       > RAM
+    |     .data        > RAM
+    |     .bss         > RAM
+    |     .far         > RAM
+    |     .fardata     > RAM
+    |     .neardata    > RAM
+    |     .rodata      > RAM
+    |     .cinit       > RAM
+    |     .init_array  > RAM
+    |     .switch      > RAM
+    |     .cio         > RAM
+    |     .stack       > RAM
+    |     .sysmem      > RAM
+    |     .vm6747.eh   > RAM
+    | }

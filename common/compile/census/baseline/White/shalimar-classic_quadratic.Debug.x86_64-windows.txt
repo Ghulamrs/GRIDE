@@ -1,0 +1,43 @@
+outlook:        White (GRIDE 1.0)
+project:        shalimar-classic_quadratic   (examples\projects\shalimar-classic\quadratic\quadratic.pro)
+configuration:  Debug
+target:         x86_64-windows
+commands:       3   (compile 1, assemble 1, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Build project; build ended
+
+[1] shalimar   compile   exit 0
+    cwd: <bin>
+    cmd: "<bin>\shalimar.exe" "<proj>/quadratic.shl" -c -o "<temp>/gride-parts-<pid>/quadratic.obj" --debug -g -masm=masm
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[2] masm   assemble   exit 0   (started by [1])
+    cwd: <bin>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo"<temp>/gride-parts-<pid>/quadratic.obj" "<temp>/gride-parts-<pid>/quadratic.obj.asm"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[3] link   link   exit 0
+    cwd: <bin>
+    cmd: "<bin>/link.exe" /nologo /subsystem:console /DEBUG /out:"<proj>/quadratic.exe" "<temp>/gride-parts-<pid>/quadratic.obj" "<bin>/lib/x86_64-windows/shmrtd.lib" "<bin>/lib/x86_64-windows/grtstart.lib" "<bin>/lib/x86_64-windows/grtcompat.lib" "<bin>/lib/x86_64-windows/grtcxx.lib" "<bin>/lib/x86_64-windows/grtc.lib" "<bin>/lib/x86_64-windows/grtwin.lib" "<bin>/lib/x86_64-windows/kernel32.lib" /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd /NODEFAULTLIB:libvcruntime /NODEFAULTLIB:libvcruntimed /NODEFAULTLIB:vcruntime /NODEFAULTLIB:vcruntimed /NODEFAULTLIB:libcpmt /NODEFAULTLIB:libcpmtd /NODEFAULTLIB:msvcprt /NODEFAULTLIB:msvcprtd /NODEFAULTLIB:oldnames /NODEFAULTLIB:legacy_stdio_definitions
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe

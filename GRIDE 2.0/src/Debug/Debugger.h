@@ -1072,7 +1072,7 @@ namespace Gride
             bool shalimar = ProgramLauncher::HasShalimar(p, s);
             TargetInfo^ t = TargetInfo::Get(p->TargetValue);
             String^ shmrt = shalimar && t->Emulated ? IdeSettingsPaths::FindShalimarRuntimeAsm(ToolchainFile::Current->LibraryByKind(t->Arch, "shalimarRuntime"), BuildEngine::IsDebugConfig(cfg->Name)) : nullptr;
-            return For(p, cfg, s, BuildEngine::OutputFileOf(p), Path::Combine(p->OutputDirectory(), "obj"), shalimar, shmrt);
+            return For(p, cfg, s, BuildEngine::OutputFileOf(p), p->ObjectDirectory(), shalimar, shmrt);
         }
 
         // program: the build's program (the .out on tms6747); assembly: what the emulator runs (a .s, or the folder

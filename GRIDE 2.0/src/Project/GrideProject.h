@@ -83,6 +83,9 @@ namespace Gride
     public ref class BuildConfiguration
     {
     public:
+        literal String^ DefaultOutputDir = "out\\$(Config)\\$(TargetFolder)";
+        literal String^ DefaultObjectDir = "obj\\$(Config)\\$(TargetFolder)";
+        literal String^ FormerOutputDir = "build\\$(Target)\\$(Config)";
         [DataMember(Name = "name", Order = 0)]      property String^ Name;
         [DataMember(Name = "defines", Order = 1)]   property List<String^>^ Defines;
         [DataMember(Name = "flags", Order = 2)]     property String^ Flags;
@@ -117,7 +120,10 @@ namespace Gride
             if (Flags == nullptr) Flags = String::Empty;
             if (LinkFlags == nullptr) LinkFlags = String::Empty;
             if (AsmFlags == nullptr) AsmFlags = String::Empty;
-            if (String::IsNullOrWhiteSpace(OutputDir)) OutputDir = "build\\$(Target)\\$(Config)";
+            // One rule for the three outlooks since 2026-11-13 (the design's D3): the program in
+            // out\<Config>\<TargetFolder>, the objects in obj\<Config>\<TargetFolder>. The folder Grey gave every
+            // configuration before, build\<Target>\<Config>, was never a project's own choice, and reads as the rule.
+            if (String::IsNullOrWhiteSpace(OutputDir) || String::Equals(OutputDir, FormerOutputDir, StringComparison::OrdinalIgnoreCase)) OutputDir = DefaultOutputDir;
             if (IncludePathsHere == nullptr) IncludePathsHere = gcnew List<String^>();
             if (LibrariesHere == nullptr) LibrariesHere = gcnew List<String^>();
             if (LibraryDirs == nullptr) LibraryDirs = gcnew List<String^>();
@@ -399,11 +405,31 @@ namespace Gride
         String^ OutputDirectory()
         {
             BuildConfiguration^ c = ActiveConfig();
-            String^ d = c->OutputDir
-                ->Replace("$(Target)", Target)
-                ->Replace("$(Config)", c->Name)
-                ->Replace("$(Name)", Name);
-            return PathUtil::Resolve(ProjectDir, d);
+            return PathUtil::Resolve(ProjectDir, FolderFilled(c->OutputDir, c));
+        }
+
+        // Where the objects, the assembly and the build's log go (absolute): obj\<Config>\<TargetFolder> by the
+        // rule the three outlooks share; "obj" under the output folder where a configuration names a folder of
+        // its own, as Grey always kept them - and as the block reads a stored "outputDir".
+        String^ ObjectDirectory()
+        {
+            BuildConfiguration^ c = ActiveConfig();
+            if (String::Equals(c->OutputDir, BuildConfiguration::DefaultOutputDir, StringComparison::OrdinalIgnoreCase))
+                return PathUtil::Resolve(ProjectDir, FolderFilled(BuildConfiguration::DefaultObjectDir, c));
+            return Path::Combine(OutputDirectory(), "obj");
+        }
+
+        // the target's name in a build's folders: toolchain.json's "folder" (Win, C6747)
+        String^ TargetFolder()
+        {
+            TargetEntry^ e = ToolchainFile::Current == nullptr ? nullptr : ToolchainFile::Current->TargetByArch(ArchOf(TargetValue));
+            if (e != nullptr && !String::IsNullOrEmpty(e->Folder)) return e->Folder;
+            return TargetValue == TargetKind::TMS6747 ? "C6747" : "Win";
+        }
+
+        String^ FolderFilled(String^ dir, BuildConfiguration^ c)
+        {
+            return dir->Replace("$(TargetFolder)", TargetFolder())->Replace("$(Target)", Target)->Replace("$(Config)", c->Name)->Replace("$(Name)", Name);
         }
 
         // ---------------------------------------------------------------
@@ -661,7 +687,7 @@ namespace Gride
                 BuildConfiguration^ c = Configurations[i];
                 if (!String::Equals(c->Name, names[i]) || c->Defines->Count != 1 || !String::Equals(c->Defines[0], defines[i]) ||
                     c->Flags->Length > 0 || c->LinkFlags->Length > 0 || c->AsmFlags->Length > 0 ||
-                    !String::Equals(c->OutputDir, "build\\$(Target)\\$(Config)")) return false;
+                    !String::Equals(c->OutputDir, BuildConfiguration::DefaultOutputDir)) return false;
             }
             return true;
         }

@@ -77,6 +77,17 @@ foreach ($c in $Choices) {
   # Black and Grey read toolchain.json, White the settings.json it ships beside it; all three install the one
   # examples folder - cppparse's .pro (the one GRIDE format) and its Visual Studio solution, the projects, the programs
   if ($c -eq "White") { Check (Test-Path "$dir\settings.json") "settings.json" } else { Check (Test-Path "$dir\toolchain.json") "toolchain.json" }
+  # the block, compile.dll, plans Black's builds since Setup 1.7.0 (common\Common_Compilation_Design.md, step 3):
+  # the DLL and its front end beside GRIDE.exe, the two of one release, and a dry run that names every command
+  if ($c -in "Black", "Grey") {
+    Check ((Test-Path "$dir\compile.dll") -and (Test-Path "$dir\gride-plan.exe")) "compile.dll and gride-plan.exe beside it"
+    $said = @(& "$dir\gride-plan.exe" --version 2>&1)
+    Check ($said.Count -ge 3 -and $said[0] -match '^gride-plan \d+\.\d+ - ' -and $said[2] -match '^compile \d+\.\d+ - ') "gride-plan --version names itself and the block -> $($said[0]) / $($said[2])"
+    $dry = @(& "$dir\gride-plan.exe" "$dir\examples\projects\c-bank\c-bank.pro" -no-settings -dry 2>&1)
+    $commands = @($dry | Where-Object { $_ -match '^\s+"?[^"]*\\(c90|masm|link)\.exe"? ' })
+    Check ($LASTEXITCODE -eq 0 -and "$($dry[0])" -match '^DRY RUN ONLY' -and $commands.Count -eq 5) "a dry run of c-bank: DRY RUN ONLY, two compiles, two assembles and a link -> $($commands.Count) commands"
+    Check (-not (Test-Path "$dir\examples\projects\c-bank\obj")) "and the dry run wrote nothing"
+  }
   $cp = "$dir\examples\projects\cppparse"
   Check ((Test-Path "$cp\cppparse.pro") -and (Test-Path "$cp\cppparse.sln") -and (Test-Path "$cp\cppparse\cppparse.vcxproj")) "examples\projects\cppparse (its .pro, solution and project)"
   # 29 .pro projects - the 14 of RIDE's set and cppparse's line, cpp-sampleext (2026-10-27), the showcase's 3, the

@@ -1,0 +1,755 @@
+outlook:        Grey (GRIDE 2.0)
+project:        cppparse   (examples\projects\cppparse\cppparse.pro)
+configuration:  Release
+target:         x86_64-windows
+commands:       79   (compile 39, assemble 39, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 79 command line(s)
+
+[1] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\Parser.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Parser.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[2] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\report\Health.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Health.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[3] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\middle\IrGen.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_middle_IrGen.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[4] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\frontend\Pp.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_Pp.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[5] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\frontend\SemaExpr.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_SemaExpr.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[6] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\frontend\Sema.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_Sema.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[7] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\frontend\CxxParser.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_CxxParser.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[8] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\backend\X86.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_backend_X86.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[9] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\report\Report.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Report.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[10] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\IrBuilder.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_IrBuilder.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[11] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\report\Html.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Html.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[12] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\driver\main.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_driver_main.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[13] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\report\Symbols.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Symbols.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[14] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\BodyParser.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_BodyParser.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[15] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\backend\MangleSema.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_backend_MangleSema.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[16] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\TypeCheck.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_TypeCheck.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[17] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\backend\Lower.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_backend_Lower.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[18] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\middle\Optimizer.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_middle_Optimizer.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[19] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\frontend\CxxAst.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_CxxAst.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[20] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\backend\Coff.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_backend_Coff.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[21] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_TypeCheck.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_TypeCheck.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[22] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_BodyParser.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_BodyParser.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[23] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_frontend_CxxParser.s" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_CxxParser.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[24] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Symbols.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Symbols.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[25] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Health.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Health.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[26] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_backend_Lower.s" -o "<proj>\build\Windows\Release\obj\cppparse_backend_Lower.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[27] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Report.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Report.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[28] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_frontend_Pp.s" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_Pp.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[29] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_Parser.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Parser.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[30] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_backend_MangleSema.s" -o "<proj>\build\Windows\Release\obj\cppparse_backend_MangleSema.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[31] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_frontend_CxxAst.s" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_CxxAst.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[32] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_IrBuilder.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_IrBuilder.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[33] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\Compiler.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Compiler.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[34] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\Instantiate.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Instantiate.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[35] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\report\Diagram.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Diagram.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[36] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\middle\Ssa.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_middle_Ssa.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[37] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_middle_Optimizer.s" -o "<proj>\build\Windows\Release\obj\cppparse_middle_Optimizer.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[38] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\report\Pdf.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Pdf.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[39] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\CodeBase.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_CodeBase.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[40] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\Types.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Types.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[41] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\common\PathUtil.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_common_PathUtil.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[42] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\ProjectReader.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_ProjectReader.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[43] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_backend_Coff.s" -o "<proj>\build\Windows\Release\obj\cppparse_backend_Coff.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[44] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Html.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Html.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[45] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_ProjectReader.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_ProjectReader.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[46] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\common\Literal.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_common_Literal.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[47] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_CodeBase.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_CodeBase.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[48] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_frontend_SemaExpr.s" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_SemaExpr.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[49] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_common_PathUtil.s" -o "<proj>\build\Windows\Release\obj\cppparse_common_PathUtil.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[50] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\backend\Mangle.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_backend_Mangle.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[51] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_Types.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Types.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[52] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\backend\MapFile.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_backend_MapFile.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[53] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\middle\Ir.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_middle_Ir.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[54] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Diagram.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Diagram.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[55] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_common_Literal.s" -o "<proj>\build\Windows\Release\obj\cppparse_common_Literal.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[56] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\Model.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Model.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[57] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\Ast.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Ast.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[58] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_frontend_Sema.s" -o "<proj>\build\Windows\Release\obj\cppparse_frontend_Sema.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[59] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\analyzer\Lexer.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Lexer.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[60] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_middle_Ssa.s" -o "<proj>\build\Windows\Release\obj\cppparse_middle_Ssa.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[61] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_Instantiate.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Instantiate.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[62] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Pdf.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Pdf.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[63] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\backend\BackEnd.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_backend_BackEnd.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[64] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\common\Parallel.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_common_Parallel.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[65] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_Model.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Model.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[66] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_backend_Mangle.s" -o "<proj>\build\Windows\Release\obj\cppparse_backend_Mangle.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[67] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_common_Parallel.s" -o "<proj>\build\Windows\Release\obj\cppparse_common_Parallel.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[68] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_Lexer.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Lexer.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[69] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\cppparse\common\Target.cpp" -o "<proj>\build\Windows\Release\obj\cppparse_common_Target.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -I"<proj>\cppparse\driver" -I"<proj>\cppparse\common" -I"<proj>\cppparse\frontend" -I"<proj>\cppparse\middle" -I"<proj>\cppparse\backend" -I"<proj>\cppparse\analyzer" -I"<proj>\cppparse\analyzer\report" -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[70] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_backend_MapFile.s" -o "<proj>\build\Windows\Release\obj\cppparse_backend_MapFile.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[71] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_Compiler.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Compiler.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[72] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_common_Target.s" -o "<proj>\build\Windows\Release\obj\cppparse_common_Target.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[73] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_analyzer_Ast.s" -o "<proj>\build\Windows\Release\obj\cppparse_analyzer_Ast.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[74] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_middle_Ir.s" -o "<proj>\build\Windows\Release\obj\cppparse_middle_Ir.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[75] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_backend_BackEnd.s" -o "<proj>\build\Windows\Release\obj\cppparse_backend_BackEnd.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[76] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_driver_main.s" -o "<proj>\build\Windows\Release\obj\cppparse_driver_main.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[77] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_middle_IrGen.s" -o "<proj>\build\Windows\Release\obj\cppparse_middle_IrGen.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[78] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\cppparse_backend_X86.s" -o "<proj>\build\Windows\Release\obj\cppparse_backend_X86.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[79] link   link   exit 0
+    cwd: <proj>
+    cmd: "<bin>\link.exe" /nologo /subsystem:console /out:"<proj>\build\Windows\Release\cppparse.exe" "<proj>\build\Windows\Release\obj\cppparse_driver_main.obj" "<proj>\build\Windows\Release\obj\cppparse_common_Literal.obj" "<proj>\build\Windows\Release\obj\cppparse_common_Parallel.obj" "<proj>\build\Windows\Release\obj\cppparse_common_PathUtil.obj" "<proj>\build\Windows\Release\obj\cppparse_common_Target.obj" "<proj>\build\Windows\Release\obj\cppparse_frontend_CxxAst.obj" "<proj>\build\Windows\Release\obj\cppparse_frontend_CxxParser.obj" "<proj>\build\Windows\Release\obj\cppparse_frontend_Pp.obj" "<proj>\build\Windows\Release\obj\cppparse_frontend_Sema.obj" "<proj>\build\Windows\Release\obj\cppparse_frontend_SemaExpr.obj" "<proj>\build\Windows\Release\obj\cppparse_middle_Ir.obj" "<proj>\build\Windows\Release\obj\cppparse_middle_IrGen.obj" "<proj>\build\Windows\Release\obj\cppparse_middle_Optimizer.obj" "<proj>\build\Windows\Release\obj\cppparse_middle_Ssa.obj" "<proj>\build\Windows\Release\obj\cppparse_backend_BackEnd.obj" "<proj>\build\Windows\Release\obj\cppparse_backend_Coff.obj" "<proj>\build\Windows\Release\obj\cppparse_backend_Lower.obj" "<proj>\build\Windows\Release\obj\cppparse_backend_Mangle.obj" "<proj>\build\Windows\Release\obj\cppparse_backend_MangleSema.obj" "<proj>\build\Windows\Release\obj\cppparse_backend_MapFile.obj" "<proj>\build\Windows\Release\obj\cppparse_backend_X86.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_Ast.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_BodyParser.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_CodeBase.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_Compiler.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_Instantiate.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_IrBuilder.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_Lexer.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_Model.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_Parser.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_ProjectReader.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_TypeCheck.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_Types.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Diagram.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Health.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Html.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Pdf.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Report.obj" "<proj>\build\Windows\Release\obj\cppparse_analyzer_report_Symbols.obj" "<bin>\lib\x86_64-windows\grtstart.lib" "<bin>\lib\x86_64-windows\grtcompat.lib" "<bin>\lib\x86_64-windows\grtcxx.lib" "<bin>\lib\x86_64-windows\grtc.lib" "<bin>\lib\x86_64-windows\grtwin.lib" "<bin>\lib\x86_64-windows\kernel32.lib" /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd /NODEFAULTLIB:libvcruntime /NODEFAULTLIB:libvcruntimed /NODEFAULTLIB:vcruntime /NODEFAULTLIB:vcruntimed /NODEFAULTLIB:libcpmt /NODEFAULTLIB:libcpmtd /NODEFAULTLIB:msvcprt /NODEFAULTLIB:msvcprtd /NODEFAULTLIB:oldnames /NODEFAULTLIB:legacy_stdio_definitions
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%

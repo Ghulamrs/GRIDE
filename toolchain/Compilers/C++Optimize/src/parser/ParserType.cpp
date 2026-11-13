@@ -2270,9 +2270,37 @@ const Type *Parser::specifiers(StorageClass *storage, Qualifiers *quals) {
     // read there, and instantiateMemberTemplate gives the specialization it.
     if (memberTemplateInst_ && !inlineOwner_.empty() && peek().is("explicit")) at_++;
     const Type *t = unqualifiedSpecifiers(storage, quals);
+    // **A cv-qualifier after a type's name is the same cv-qualifier** ([dcl.type]/1: the decl-specifiers come
+    // in any order): `T const &`, `std::size_t const n`, `S volatile s`. unqualifiedSpecifiers reads them after a
+    // built-in type in its own loop, but returns as soon as it has a class, a typedef, a template parameter or a
+    // qualified name - and before 1.67 the `const` written after one was left for the declarator, which wanted a
+    // name and said "expected a name".
+    while (cvSpecifier(quals)) {}
     if (quals->isConst) t = types_.withConst(t);
     if (quals->isVolatile) t = types_.withVolatile(t);
     return t;
+}
+
+// **One `const` and one `volatile` among a declaration's specifiers** ([dcl.type]/2): written twice - `const int
+// const`, `S volatile volatile` - is ill-formed, before or after the type's name alike; a typedef that already
+// holds one is not a second (`typedef const int CI; CI const x;`), since what it holds is in its type, not in quals.
+// True when it read one.
+bool Parser::cvSpecifier(Qualifiers *quals) {
+    if (peek().is("const")) {
+        if (quals->constWritten)
+            src_.fail(peek().pos, "'const' is written twice among this declaration's specifiers, [dcl.type]/2");
+        at_++;
+        quals->isConst = quals->constWritten = true;
+        return true;
+    }
+    if (peek().is("volatile")) {
+        if (quals->isVolatile)
+            src_.fail(peek().pos, "'volatile' is written twice among this declaration's specifiers, [dcl.type]/2");
+        at_++;
+        quals->isVolatile = sawVolatile();
+        return true;
+    }
+    return false;
 }
 
 // **`volatile` is in the type system, yet its file is compiled without -O**:
@@ -2372,7 +2400,7 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
             continue;
         }
         if (peek().is("typedef")) { storageClass(StorageTypedef); continue; }
-        if (consume("const"))    { quals->isConst = quals->constWritten = true; continue; }
+        if (peek().is("const")) { cvSpecifier(quals); continue; }
         // **`constexpr` on an object is `const` plus a demand.** [dcl.constexpr]
         // makes the object const and the rest of the compiler wants to know nothing
         // else, which is why almost nothing downstream mentions constexpr at all.
@@ -2381,7 +2409,7 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
             quals->isConstexpr = true;
             continue;
         }
-        if (consume("volatile")) { quals->isVolatile = sawVolatile(); continue; }
+        if (peek().is("volatile")) { cvSpecifier(quals); continue; }
         // **`inline` is a hint about linkage, not about the type.** It makes a function's
         // definition mergeable across translation units; nothing else downstream needs it.
         // `inline namespace` at file scope is topLevel's; here it is one in a class or block.
@@ -2578,13 +2606,13 @@ const Type *Parser::unqualifiedSpecifiers(StorageClass *storage, Qualifiers *qua
         // below consumes one, so without this the loop spins forever on
         // `typedef long T;`. Inherited from Compiler-C, where it hangs too.
         if (peek().kind == TokenKind::Ident) break;
-        if (consume("const"))         { quals->isConst = quals->constWritten = true; continue; }
+        if (peek().is("const"))       { cvSpecifier(quals); continue; }
         if (consume("constexpr")) {
             quals->isConst = true;
             quals->isConstexpr = true;
             continue;
         }
-        if (consume("volatile"))      { quals->isVolatile = sawVolatile(); continue; }
+        if (peek().is("volatile"))    { cvSpecifier(quals); continue; }
         if (consume("float"))         isFloat++;
         else if (consume("double"))   isDouble++;
         else if (consume("void"))     isVoid++;

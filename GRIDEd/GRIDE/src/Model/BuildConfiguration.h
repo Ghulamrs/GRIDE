@@ -46,11 +46,14 @@ namespace Gride { namespace Model {
             String^ folder = TargetInfo::FolderName(TargetKind);
             OutDir = "out/" + Config + "/" + folder;
             ObjDir = "obj/" + Config + "/" + folder;
+            // Nothing is invented for a project (2026-11-13, the census's finding C4): until then every configuration
+            // began with the define DEBUG or NDEBUG and the include folder "inc", whether or not the project had
+            // one, so that one define reached a compiler twice (-D_DEBUG=1 from the Compiler Options, -DDEBUG from
+            // here). A define is the Compiler Options'; an include folder is what the project names. A .pro that
+            // stores the old defaults keeps them.
             Defines->Clear();
-            if (IsDebug) { Defines->Add("DEBUG"); Optimise = "O0"; }
-            else         { Defines->Add("NDEBUG"); Optimise = "O2"; }
+            Optimise = IsDebug ? "O0" : "O2";
             IncludeDirs->Clear();
-            IncludeDirs->Add("inc");
             LibDirs->Clear();
             Libs->Clear();
             if (TargetKind == Target::C6747)

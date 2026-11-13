@@ -1,0 +1,56 @@
+outlook:        Grey (GRIDE 2.0)
+project:        shalimar-classic_factorial   (examples\projects\shalimar-classic\factorial\factorial.pro)
+configuration:  Release
+target:         tms6747
+commands:       3   (compile 1, assemble 1, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 3 command line(s)
+
+[1] shalimar   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\shalimar.exe" -S "<proj>\factorial.shl" -o "<proj>\build\TMS6747\Release\obj\factorial.s" --target=tms6747
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[2] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\factorial.s" -o "<proj>\build\TMS6747\Release\obj\factorial.obj"
+    env: (none of the recorded variables is set)
+
+[3] lnk6x   link   exit 0
+    cwd: <proj>
+    cmd: "<bin>\lnk6x.exe" -mv6740 --abi=eabi -i "<bin>\lib\tms6747" "<proj>\build\TMS6747\Release\obj\ti-link.cmd" "<proj>\build\TMS6747\Release\obj\factorial.obj" -l "<bin>\lib\tms6747\shmrt6x.lib" -l "<bin>\lib\tms6747\rts6x.lib" -o "<proj>\build\TMS6747\Release\factorial.out"
+    env: (none of the recorded variables is set)
+
+file written for a tool: <proj>\build\TMS6747\Release\obj\ti-link.cmd
+    | /* one flat memory for the C6747 and every section in it - written by GRIDE, as White writes it */
+    | --rom_model
+    | --stack_size=0x100000
+    | --heap_size=0x1000000
+    | MEMORY
+    | {
+    |     RAM : origin = 0xC0000000, length = 0x04000000
+    | }
+    | SECTIONS
+    | {
+    |     .text        > RAM
+    |     .const       > RAM
+    |     .data        > RAM
+    |     .bss         > RAM
+    |     .far         > RAM
+    |     .fardata     > RAM
+    |     .neardata    > RAM
+    |     .rodata      > RAM
+    |     .cinit       > RAM
+    |     .init_array  > RAM
+    |     .switch      > RAM
+    |     .cio         > RAM
+    |     .stack       > RAM
+    |     .sysmem      > RAM
+    |     .vm6747.eh   > RAM
+    | }

@@ -1,0 +1,28 @@
+outlook:        Grey (GRIDE 2.0)
+project:        ccs_Hello   (examples\projects\ccs\Hello)
+configuration:  Release
+target:         tms6747
+commands:       3   (compile 1, assemble 1, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 3 command line(s)
+
+[1] c90   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\c90.exe" -S "<proj>\hello.c" -o "<temp>\gride-ccs-Hello\Release\obj\hello.s" -arch tms6747 -O2 -I"<proj>" -I"<bin>\include\c" -I"<bin>\include\win" -I"<bin>\lib" -Dc6747
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[2] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<temp>\gride-ccs-Hello\Release\obj\hello.s" -o "<temp>\gride-ccs-Hello\Release\obj\hello.obj"
+    env: (none of the recorded variables is set)
+
+[3] lnk6x   link   exit 0
+    cwd: <proj>
+    cmd: "<bin>\lnk6x.exe" -mv6740 --abi=eabi -i "<bin>\lib\tms6747" "<proj>\C6747.cmd" --heap_size=0x800 --stack_size=0x800 --rom_model "<temp>\gride-ccs-Hello\Release\obj\hello.obj" -l "<bin>\lib\tms6747\rts6x.lib" -o "<temp>\gride-ccs-Hello\Release\Hello.out"
+    env: (none of the recorded variables is set)

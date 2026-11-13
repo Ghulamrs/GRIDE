@@ -151,6 +151,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\NativeMethods.cpp" />
+    <!-- Black's bridge to the block: the one file that includes common\compile\gride_compile.h -->
+    <ClCompile Include="..\..\common\compile\clr\Block.cpp" />
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\UI\MainForm.Build.cpp" />
     <ClCompile Include="src\UI\MainForm.Commands.cpp" />
@@ -172,6 +174,7 @@
     <ClInclude Include="src\Model\VsSolution.h" />
     <ClInclude Include="src\Model\Workspace.h" />
     <ClInclude Include="src\Services\BuildEngine.h" />
+    <ClInclude Include="..\..\common\compile\clr\Block.h" />
     <ClInclude Include="src\Services\BuildMessage.h" />
     <ClInclude Include="src\Services\CodeConverter.h" />
     <ClInclude Include="src\Services\Debugger.h" />
@@ -214,15 +217,43 @@
     <ClInclude Include="src\pch.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="toolchain.json" />
+    <!-- the one toolchain.json of the three outlooks, common\toolchain.json (2026-11-12): this project keeps no copy -->
+    <None Include="..\..\common\toolchain.json" />
     <None Include="lib\ccs\options-ccs74-C6000_8.2.tsv" />
     <None Include="lib\ccs\options-ccs55-C6000_7.4.tsv" />
   </ItemGroup>
+  <!-- The block, compile.dll (common\compile): built with Black, by the same compiler and against the same runtime,
+       and never mixed from two releases. Its import library is linked; the DLL is delay-loaded, so that Black
+       starts without it and says what is missing (common\compile\clr\Block.cpp, the bridge Black and Grey share) instead of failing to start. gride-plan.exe,
+       the block's command-line front end, is built with it. Both are copied beside GRIDE.exe below. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\common\compile\compile.vcxproj">
+      <Project>{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SetConfiguration>Configuration=$(Configuration)</SetConfiguration>
+      <SetPlatform>Platform=$(Platform)</SetPlatform>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+    </ProjectReference>
+    <ProjectReference Include="..\..\common\compile\plan\gride-plan.vcxproj">
+      <Project>{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SetConfiguration>Configuration=$(Configuration)</SetConfiguration>
+      <SetPlatform>Platform=$(Platform)</SetPlatform>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <DelayLoadDLLs>compile.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <AdditionalDependencies>delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
   <Target Name="CopyToolchainFile" AfterTargets="Build">
-    <Copy SourceFiles="$(ProjectDir)toolchain.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ProjectDir)..\..\common\toolchain.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ProjectDir)..\..\common\compile\$(Platform)\$(Configuration)\compile.dll;$(ProjectDir)..\..\common\compile\$(Platform)\$(Configuration)\gride-plan.exe" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     <!-- the Help beside the exe (Help > View Help looks in docs beside it): GRIDEx3's docs\, which the three outlooks
          share - GRIDE_Help.html and the reference pages; GRIDEd's own docs\ holds only notes for its developers -->
     <ItemGroup>

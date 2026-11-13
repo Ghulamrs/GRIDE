@@ -1,0 +1,89 @@
+outlook:        Grey (GRIDE 2.0)
+project:        cpp-inventory   (examples\projects\cpp-inventory\cpp-inventory.pro)
+configuration:  Debug
+target:         tms6747
+commands:       7   (compile 3, assemble 3, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 7 command line(s)
+
+[1] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\item.cpp" -o "<proj>\build\TMS6747\Debug\obj\item.s" -arch tms6747 -g -D_DEBUG=1 -D_DEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[2] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\main.cpp" -o "<proj>\build\TMS6747\Debug\obj\main.s" -arch tms6747 -g -D_DEBUG=1 -D_DEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[3] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\inventory.cpp" -o "<proj>\build\TMS6747\Debug\obj\inventory.s" -arch tms6747 -g -D_DEBUG=1 -D_DEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[4] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Debug\obj\item.s" -o "<proj>\build\TMS6747\Debug\obj\item.obj"
+    env: (none of the recorded variables is set)
+
+[5] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Debug\obj\main.s" -o "<proj>\build\TMS6747\Debug\obj\main.obj"
+    env: (none of the recorded variables is set)
+
+[6] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Debug\obj\inventory.s" -o "<proj>\build\TMS6747\Debug\obj\inventory.obj"
+    env: (none of the recorded variables is set)
+
+[7] lnk6x   link   exit 0
+    cwd: <proj>
+    cmd: "<bin>\lnk6x.exe" -mv6740 --abi=eabi -i "<bin>\lib\tms6747" "<proj>\build\TMS6747\Debug\obj\ti-link.cmd" "<proj>\build\TMS6747\Debug\obj\main.obj" "<proj>\build\TMS6747\Debug\obj\inventory.obj" "<proj>\build\TMS6747\Debug\obj\item.obj" -l "<bin>\lib\tms6747\rts6xd.lib" -o "<proj>\build\TMS6747\Debug\cpp-inventory.out"
+    env: (none of the recorded variables is set)
+
+file written for a tool: <proj>\build\TMS6747\Debug\obj\ti-link.cmd
+    | /* one flat memory for the C6747 and every section in it - written by GRIDE, as White writes it */
+    | --rom_model
+    | --stack_size=0x100000
+    | --heap_size=0x1000000
+    | MEMORY
+    | {
+    |     RAM : origin = 0xC0000000, length = 0x04000000
+    | }
+    | SECTIONS
+    | {
+    |     .text        > RAM
+    |     .const       > RAM
+    |     .data        > RAM
+    |     .bss         > RAM
+    |     .far         > RAM
+    |     .fardata     > RAM
+    |     .neardata    > RAM
+    |     .rodata      > RAM
+    |     .cinit       > RAM
+    |     .init_array  > RAM
+    |     .switch      > RAM
+    |     .cio         > RAM
+    |     .stack       > RAM
+    |     .sysmem      > RAM
+    |     .vm6747.eh   > RAM
+    | }

@@ -326,9 +326,16 @@
 // asking recognise and recogniseWindow, which both answered "the head is not above". A switch of 16,384 cases took
 // 282 s for the C6747 at -O2 and takes 3 s. The code written is the same: 1,143 sources - the conformance programs,
 // the examples and the runtime probes - give 1.65's C6747 assembly at -O2 byte for byte.
-#define CXX1_VERSION      "1.66"
-#define CXX1_SEAL_DATE    "11-11-2026"
-#define CXX1_SEAL_FILE    "cxx1-1.66.dat"
+// 1.67 (2026-11-13): a cv-qualifier after a type's name. `T const &`, `std::size_t const n`, `S volatile s` - a
+// `const` or `volatile` after a class, a typedef, a qualified name or a template parameter - were refused with
+// "expected a name": the specifiers' reader took them after a built-in type in its own loop but returned as soon as
+// it had any other, and left the qualifier for the declarator ([dcl.type]/1; open since the review of 1.62 noted it).
+// And `const` or `volatile` written twice among one declaration's specifiers - `const int const`, `S volatile
+// volatile` - is refused, where every release took the second silently ([dcl.type]/2); one a typedef holds is not
+// a second. Conformance set p168: one program of every place the qualifier may follow a name, three refused.
+#define CXX1_VERSION      "1.67"
+#define CXX1_SEAL_DATE    "13-11-2026"
+#define CXX1_SEAL_FILE    "cxx1-1.67.dat"
 
 // The line every run prints first; what it claims is docs/EXCLUSIONS.md's to measure (review of 2026-10-08).
 #define CXX1_BANNER "©2026 G. R. Akhtar - C++03 with C++11 extensions"

@@ -69,6 +69,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "TI", "TI", "{3B7E2C10-5A41-
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Windows", "Windows", "{3B7E2C10-5A41-4E9D-8F26-0C1D2E3F4A53}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "compile", "..\common\compile\compile.vcxproj", "{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gride-plan", "..\common\compile\plan\gride-plan.vcxproj", "{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -169,6 +173,18 @@ Global
 		{4E8B2D17-9C3A-4F61-B5D2-7A0E3C9F1B48}.Release|x64.ActiveCfg = Release|x64
 		{4E8B2D17-9C3A-4F61-B5D2-7A0E3C9F1B48}.Release|x64.Build.0 = Release|x64
 		{4E8B2D17-9C3A-4F61-B5D2-7A0E3C9F1B48}.Release|x86.ActiveCfg = Release|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}.Debug|x64.ActiveCfg = Debug|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}.Debug|x64.Build.0 = Debug|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}.Debug|x86.ActiveCfg = Debug|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}.Release|x64.ActiveCfg = Release|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}.Release|x64.Build.0 = Release|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}.Release|x86.ActiveCfg = Release|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}.Debug|x64.ActiveCfg = Debug|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}.Debug|x64.Build.0 = Debug|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}.Debug|x86.ActiveCfg = Debug|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}.Release|x64.ActiveCfg = Release|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}.Release|x64.Build.0 = Release|x64
+		{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}.Release|x86.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -292,6 +292,7 @@ namespace Gride
         property String^ EmulatedProgramExtension;
         property String^ LibraryDirFlag;
         property String^ LibraryFlag;
+        property String^ Folder;            // the target's name in a build's folders (out\Debug\Win): toolchain.json's "folder"
         property Dictionary<String^, String^>^ Roles;
         property String^ Runtime;
         property String^ LinkerCommandFile;
@@ -1205,6 +1206,7 @@ namespace Gride
                     d->EmulatedProgramExtension = t->GetString("emulatedProgramExtension", d->EmulatedProgramExtension);
                     d->LibraryDirFlag = t->GetString("libraryDirFlag", d->LibraryDirFlag);
                     d->LibraryFlag = t->GetString("libraryFlag", d->LibraryFlag);
+                    d->Folder = t->GetString("folder", d->Folder);
                     ReadMap(t, "roles", d->Roles);
                     d->Runtime = t->GetString("runtime", String::Empty);
                     d->LinkerCommandFile = t->GetString("linkerCommandFile", String::Empty);

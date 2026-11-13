@@ -1,0 +1,52 @@
+outlook:        Grey (GRIDE 2.0)
+project:        cpp-table   (examples\projects\cpp-table\cpp-table.pro)
+configuration:  Release
+target:         x86_64-windows
+commands:       5   (compile 2, assemble 2, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 5 command line(s)
+
+[1] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\main.cpp" -o "<proj>\build\Windows\Release\obj\main.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[2] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\table.cpp" -o "<proj>\build\Windows\Release\obj\table.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[3] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\table.s" -o "<proj>\build\Windows\Release\obj\table.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[4] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\main.s" -o "<proj>\build\Windows\Release\obj\main.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[5] link   link   exit 0
+    cwd: <proj>
+    cmd: "<bin>\link.exe" /nologo /subsystem:console /out:"<proj>\build\Windows\Release\cpp-table.exe" "<proj>\build\Windows\Release\obj\main.obj" "<proj>\build\Windows\Release\obj\table.obj" "<bin>\lib\x86_64-windows\grtstart.lib" "<bin>\lib\x86_64-windows\grtcompat.lib" "<bin>\lib\x86_64-windows\grtcxx.lib" "<bin>\lib\x86_64-windows\grtc.lib" "<bin>\lib\x86_64-windows\grtwin.lib" "<bin>\lib\x86_64-windows\kernel32.lib" /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd /NODEFAULTLIB:libvcruntime /NODEFAULTLIB:libvcruntimed /NODEFAULTLIB:vcruntime /NODEFAULTLIB:vcruntimed /NODEFAULTLIB:libcpmt /NODEFAULTLIB:libcpmtd /NODEFAULTLIB:msvcprt /NODEFAULTLIB:msvcprtd /NODEFAULTLIB:oldnames /NODEFAULTLIB:legacy_stdio_definitions
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%

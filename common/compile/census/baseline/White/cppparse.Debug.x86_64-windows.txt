@@ -1,0 +1,571 @@
+outlook:        White (GRIDE 1.0)
+project:        cppparse   (examples\projects\cppparse\cppparse.pro)
+configuration:  Debug
+target:         x86_64-windows
+commands:       47   (compile 7, assemble 39, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Build project; build ended
+
+[1] cpp11   compile   exit 0
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>\cpp11.exe" -c "<proj>/cppparse/driver/main.cpp" -g -D_DEBUG=1 -masm=masm -I"<proj>/cppparse/driver" -I"<proj>/cppparse/common" -I"<proj>/cppparse/frontend" -I"<proj>/cppparse/middle" -I"<proj>/cppparse/backend" -I"<proj>/cppparse/analyzer" -I"<proj>/cppparse/analyzer/report"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[2] cpp11   compile   exit 0
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>\cpp11.exe" -c "<proj>/cppparse/analyzer/Ast.cpp" "<proj>/cppparse/analyzer/BodyParser.cpp" "<proj>/cppparse/analyzer/CodeBase.cpp" "<proj>/cppparse/analyzer/Compiler.cpp" "<proj>/cppparse/analyzer/Instantiate.cpp" "<proj>/cppparse/analyzer/IrBuilder.cpp" "<proj>/cppparse/analyzer/Lexer.cpp" "<proj>/cppparse/analyzer/Model.cpp" "<proj>/cppparse/analyzer/Parser.cpp" "<proj>/cppparse/analyzer/ProjectReader.cpp" "<proj>/cppparse/analyzer/TypeCheck.cpp" "<proj>/cppparse/analyzer/Types.cpp" -g -D_DEBUG=1 -masm=masm -I"<proj>/cppparse/driver" -I"<proj>/cppparse/common" -I"<proj>/cppparse/frontend" -I"<proj>/cppparse/middle" -I"<proj>/cppparse/backend" -I"<proj>/cppparse/analyzer" -I"<proj>/cppparse/analyzer/report"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[3] cpp11   compile   exit 0
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>\cpp11.exe" -c "<proj>/cppparse/middle/Ir.cpp" "<proj>/cppparse/middle/IrGen.cpp" "<proj>/cppparse/middle/Optimizer.cpp" "<proj>/cppparse/middle/Ssa.cpp" -g -D_DEBUG=1 -masm=masm -I"<proj>/cppparse/driver" -I"<proj>/cppparse/common" -I"<proj>/cppparse/frontend" -I"<proj>/cppparse/middle" -I"<proj>/cppparse/backend" -I"<proj>/cppparse/analyzer" -I"<proj>/cppparse/analyzer/report"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[4] cpp11   compile   exit 0
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>\cpp11.exe" -c "<proj>/cppparse/common/Literal.cpp" "<proj>/cppparse/common/Parallel.cpp" "<proj>/cppparse/common/PathUtil.cpp" "<proj>/cppparse/common/Target.cpp" -g -D_DEBUG=1 -masm=masm -I"<proj>/cppparse/driver" -I"<proj>/cppparse/common" -I"<proj>/cppparse/frontend" -I"<proj>/cppparse/middle" -I"<proj>/cppparse/backend" -I"<proj>/cppparse/analyzer" -I"<proj>/cppparse/analyzer/report"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[5] cpp11   compile   exit 0
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>\cpp11.exe" -c "<proj>/cppparse/frontend/CxxAst.cpp" "<proj>/cppparse/frontend/CxxParser.cpp" "<proj>/cppparse/frontend/Pp.cpp" "<proj>/cppparse/frontend/Sema.cpp" "<proj>/cppparse/frontend/SemaExpr.cpp" -g -D_DEBUG=1 -masm=masm -I"<proj>/cppparse/driver" -I"<proj>/cppparse/common" -I"<proj>/cppparse/frontend" -I"<proj>/cppparse/middle" -I"<proj>/cppparse/backend" -I"<proj>/cppparse/analyzer" -I"<proj>/cppparse/analyzer/report"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[6] cpp11   compile   exit 0
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>\cpp11.exe" -c "<proj>/cppparse/analyzer/report/Diagram.cpp" "<proj>/cppparse/analyzer/report/Health.cpp" "<proj>/cppparse/analyzer/report/Html.cpp" "<proj>/cppparse/analyzer/report/Pdf.cpp" "<proj>/cppparse/analyzer/report/Report.cpp" "<proj>/cppparse/analyzer/report/Symbols.cpp" -g -D_DEBUG=1 -masm=masm -I"<proj>/cppparse/driver" -I"<proj>/cppparse/common" -I"<proj>/cppparse/frontend" -I"<proj>/cppparse/middle" -I"<proj>/cppparse/backend" -I"<proj>/cppparse/analyzer" -I"<proj>/cppparse/analyzer/report"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[7] cpp11   compile   exit 0
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>\cpp11.exe" -c "<proj>/cppparse/backend/BackEnd.cpp" "<proj>/cppparse/backend/Coff.cpp" "<proj>/cppparse/backend/Lower.cpp" "<proj>/cppparse/backend/Mangle.cpp" "<proj>/cppparse/backend/MangleSema.cpp" "<proj>/cppparse/backend/MapFile.cpp" "<proj>/cppparse/backend/X86.cpp" -g -D_DEBUG=1 -masm=masm -I"<proj>/cppparse/driver" -I"<proj>/cppparse/common" -I"<proj>/cppparse/frontend" -I"<proj>/cppparse/middle" -I"<proj>/cppparse/backend" -I"<proj>/cppparse/analyzer" -I"<proj>/cppparse/analyzer/report"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[8] masm   assemble   exit 0   (started by [4])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Parallel.o" "<temp>\cpp11-<pid>-1\Parallel.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[9] masm   assemble   exit 0   (started by [4])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Literal.o" "<temp>\cpp11-<pid>-0\Literal.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[10] masm   assemble   exit 0   (started by [4])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Target.o" "<temp>\cpp11-<pid>-3\Target.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[11] masm   assemble   exit 0   (started by [4])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "PathUtil.o" "<temp>\cpp11-<pid>-2\PathUtil.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[12] masm   assemble   exit 0   (started by [6])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Pdf.o" "<temp>\cpp11-<pid>-3\Pdf.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[13] masm   assemble   exit 0   (started by [6])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Symbols.o" "<temp>\cpp11-<pid>-5\Symbols.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[14] masm   assemble   exit 0   (started by [6])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Diagram.o" "<temp>\cpp11-<pid>-0\Diagram.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[15] masm   assemble   exit 0   (started by [6])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Html.o" "<temp>\cpp11-<pid>-2\Html.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[16] masm   assemble   exit 0   (started by [6])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Report.o" "<temp>\cpp11-<pid>-4\Report.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[17] masm   assemble   exit 0   (started by [6])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Health.o" "<temp>\cpp11-<pid>-1\Health.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[18] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Compiler.o" "<temp>\cpp11-<pid>-3\Compiler.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[19] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "IrBuilder.o" "<temp>\cpp11-<pid>-5\IrBuilder.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[20] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Ast.o" "<temp>\cpp11-<pid>-0\Ast.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[21] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Instantiate.o" "<temp>\cpp11-<pid>-4\Instantiate.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[22] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "ProjectReader.o" "<temp>\cpp11-<pid>-9\ProjectReader.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[23] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Types.o" "<temp>\cpp11-<pid>-11\Types.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[24] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "TypeCheck.o" "<temp>\cpp11-<pid>-10\TypeCheck.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[25] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "CodeBase.o" "<temp>\cpp11-<pid>-2\CodeBase.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[26] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Parser.o" "<temp>\cpp11-<pid>-8\Parser.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[27] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "BodyParser.o" "<temp>\cpp11-<pid>-1\BodyParser.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[28] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Model.o" "<temp>\cpp11-<pid>-7\Model.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[29] masm   assemble   exit 0   (started by [2])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Lexer.o" "<temp>\cpp11-<pid>-6\Lexer.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[30] masm   assemble   exit 0   (started by [5])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Sema.o" "<temp>\cpp11-<pid>-3\Sema.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[31] masm   assemble   exit 0   (started by [5])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "CxxParser.o" "<temp>\cpp11-<pid>-1\CxxParser.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[32] masm   assemble   exit 0   (started by [5])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "SemaExpr.o" "<temp>\cpp11-<pid>-4\SemaExpr.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[33] masm   assemble   exit 0   (started by [5])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Pp.o" "<temp>\cpp11-<pid>-2\Pp.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[34] masm   assemble   exit 0   (started by [5])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "CxxAst.o" "<temp>\cpp11-<pid>-0\CxxAst.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[35] masm   assemble   exit 0   (started by [1])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "main.o" "<temp>\cpp11-<pid>-0\main.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[36] masm   assemble   exit 0   (started by [7])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Lower.o" "<temp>\cpp11-<pid>-2\Lower.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[37] masm   assemble   exit 0   (started by [7])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Coff.o" "<temp>\cpp11-<pid>-1\Coff.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[38] masm   assemble   exit 0   (started by [7])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "MangleSema.o" "<temp>\cpp11-<pid>-4\MangleSema.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[39] masm   assemble   exit 0   (started by [7])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "X86.o" "<temp>\cpp11-<pid>-6\X86.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[40] masm   assemble   exit 0   (started by [7])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Mangle.o" "<temp>\cpp11-<pid>-3\Mangle.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[41] masm   assemble   exit 0   (started by [7])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "MapFile.o" "<temp>\cpp11-<pid>-5\MapFile.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[42] masm   assemble   exit 0   (started by [7])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "BackEnd.o" "<temp>\cpp11-<pid>-0\BackEnd.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[43] masm   assemble   exit 0   (started by [3])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Ssa.o" "<temp>\cpp11-<pid>-3\Ssa.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[44] masm   assemble   exit 0   (started by [3])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Optimizer.o" "<temp>\cpp11-<pid>-2\Optimizer.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[45] masm   assemble   exit 0   (started by [3])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "Ir.o" "<temp>\cpp11-<pid>-0\Ir.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[46] masm   assemble   exit 0   (started by [3])
+    cwd: <temp>\gride-parts-<pid>
+    cmd: "<bin>/masm.exe" /nologo /c /Fo "IrGen.o" "<temp>\cpp11-<pid>-1\IrGen.s"
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe
+
+[47] link   link   exit 0
+    cwd: <bin>
+    cmd: "<bin>/link.exe" /nologo /subsystem:console /stack:8388608 /DEBUG /out:"<proj>/cppparse.exe" "<temp>/gride-parts-<pid>/main.o" "<temp>/gride-parts-<pid>/Literal.o" "<temp>/gride-parts-<pid>/Parallel.o" "<temp>/gride-parts-<pid>/PathUtil.o" "<temp>/gride-parts-<pid>/Target.o" "<temp>/gride-parts-<pid>/CxxAst.o" "<temp>/gride-parts-<pid>/CxxParser.o" "<temp>/gride-parts-<pid>/Pp.o" "<temp>/gride-parts-<pid>/Sema.o" "<temp>/gride-parts-<pid>/SemaExpr.o" "<temp>/gride-parts-<pid>/Ir.o" "<temp>/gride-parts-<pid>/IrGen.o" "<temp>/gride-parts-<pid>/Optimizer.o" "<temp>/gride-parts-<pid>/Ssa.o" "<temp>/gride-parts-<pid>/BackEnd.o" "<temp>/gride-parts-<pid>/Coff.o" "<temp>/gride-parts-<pid>/Lower.o" "<temp>/gride-parts-<pid>/Mangle.o" "<temp>/gride-parts-<pid>/MangleSema.o" "<temp>/gride-parts-<pid>/MapFile.o" "<temp>/gride-parts-<pid>/X86.o" "<temp>/gride-parts-<pid>/Ast.o" "<temp>/gride-parts-<pid>/BodyParser.o" "<temp>/gride-parts-<pid>/CodeBase.o" "<temp>/gride-parts-<pid>/Compiler.o" "<temp>/gride-parts-<pid>/Instantiate.o" "<temp>/gride-parts-<pid>/IrBuilder.o" "<temp>/gride-parts-<pid>/Lexer.o" "<temp>/gride-parts-<pid>/Model.o" "<temp>/gride-parts-<pid>/Parser.o" "<temp>/gride-parts-<pid>/ProjectReader.o" "<temp>/gride-parts-<pid>/TypeCheck.o" "<temp>/gride-parts-<pid>/Types.o" "<temp>/gride-parts-<pid>/Diagram.o" "<temp>/gride-parts-<pid>/Health.o" "<temp>/gride-parts-<pid>/Html.o" "<temp>/gride-parts-<pid>/Pdf.o" "<temp>/gride-parts-<pid>/Report.o" "<temp>/gride-parts-<pid>/Symbols.o" "<bin>/lib/x86_64-windows/grtstart.lib" "<bin>/lib/x86_64-windows/grtcompat.lib" "<bin>/lib/x86_64-windows/grtcxx.lib" "<bin>/lib/x86_64-windows/grtc.lib" "<bin>/lib/x86_64-windows/grtwin.lib" "<bin>/lib/x86_64-windows/kernel32.lib" /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd /NODEFAULTLIB:libvcruntime /NODEFAULTLIB:libvcruntimed /NODEFAULTLIB:vcruntime /NODEFAULTLIB:vcruntimed /NODEFAULTLIB:libcpmt /NODEFAULTLIB:libcpmtd /NODEFAULTLIB:msvcprt /NODEFAULTLIB:msvcprtd /NODEFAULTLIB:oldnames /NODEFAULTLIB:legacy_stdio_definitions
+    env: C90_AS=<bin>/masm.exe
+    env: C90_LD=<bin>/link.exe
+    env: CPP11_AS=<bin>/masm.exe
+    env: CPP11_LD=<bin>/link.exe
+    env: INCLUDE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/ucrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/shared;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/winrt;C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/cppwinrt
+    env: LIB=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/lib/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64
+    env: SHALIMAR_AS=<bin>/masm.exe
+    env: SHALIMAR_LD=<bin>/link.exe

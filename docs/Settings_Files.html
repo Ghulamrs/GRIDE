@@ -40,7 +40,7 @@
 <h3 id="tc-the-document">The file as a whole</h3>
 <table>
   <tr><th>Entry</th><th>What it is</th></tr>
-  <tr><td><code>the file</code></td><td>The toolchain GRIDE drives (it was RIDE 5.17&#x27;s): c90, cpp11 and shalimar compile to assembly for four targets; masm and link (or clang and Microsoft&#x27;s link.exe for a Debug build) make the Windows program, asm6x and lnk6x the TMS320C6747 program against RTS6x; sim6747 runs it, vm6747 emulates the assembly and debugs; cdb, gdb and lldb debug the host programs; c2s converts between C and Shalimar.</td></tr>
+  <tr><td><code>the file</code></td><td>The toolchain GRIDE drives (it was RIDE 5.17&#x27;s): c90, cpp11 and shalimar compile to assembly for four targets; masm and link make the Windows program, a Debug build too (clang and Microsoft&#x27;s link.exe only for a compiler that writes no CodeView of its own), asm6x and lnk6x the TMS320C6747 program against RTS6x; sim6747 runs it, vm6747 emulates the assembly and debugs; cdb, gdb and lldb debug the host programs; c2s converts between C and Shalimar.</td></tr>
 </table>
 <h3 id="tc-installation">installation - where the toolchain is installed</h3>
 <table>
@@ -72,7 +72,7 @@
 <table>
   <tr><th>Entry</th><th>What it is</th></tr>
   <tr><td><code>targets</code></td><td>The four targets, keyed by the arch word c90, cpp11 and shalimar take. ideTarget names the IDE&#x27;s target; host says the programs run on this machine; emulated says the program runs on the emulator or simulator; debugInfo is what a Debug build carries (codeview, dwarf, dwpsn, or empty for none); roles names, per role, the tool id that plays it for this target (nativeAssembler / nativeLinker are the vendor&#x27;s tools offered when the project&#x27;s own fail); runtime names the libraries entry linked as the C runtime; run and debug say how a program is started here: program (the program itself), simulator (the simulator&#x27;s simulate / debug operations), debugger (the debugger&#x27;s debug operation), none (the target only reaches assembly on this machine).</td></tr>
-  <tr><td><code>targets.x86_64-windows</code></td><td>Windows on x86-64: the programs are native and run here; a Debug build carries CodeView through clang and link.exe /DEBUG, a Release build goes through masm and link.</td></tr>
+  <tr><td><code>targets.x86_64-windows</code></td><td>Windows on x86-64: the programs are native and run here; every build goes through masm and link, and a Debug build carries the compilers&#x27; own CodeView through them, link given /DEBUG (clang and Microsoft&#x27;s link.exe only for a compiler that writes none).</td></tr>
   <tr><td><code>targets.x86_64-linux</code></td><td>Linux on x86-64: the compilers reach assembly here; assembling, linking and running need a Linux machine (as, cc, gdb).</td></tr>
   <tr><td><code>targets.arm64-darwin</code></td><td>macOS on Apple silicon: the compilers reach assembly here; assembling, linking and running need a Mac (as, cc, lldb).</td></tr>
   <tr><td><code>targets.tms6747</code></td><td>The TMS320C6747 DSP: the compilers write C6000 assembly, asm6x and lnk6x make the .out against RTS6x, sim6747 runs it, vm6747 runs the assembly straight and is the debugger (through sim6747 --run --debug).</td></tr>
@@ -126,7 +126,7 @@
   <tr><td><code>tools.clang.lookup</code></td><td>PATH (Visual Studio&#x27;s LLVM after vcvars64.bat, or LLVM&#x27;s own installer)</td></tr>
   <tr><td><code>tools.clang.version</code></td><td></td></tr>
   <tr><td><code>tools.clang.operations.assemble</code></td><td>one GNU-spelled assembly file to one object with CodeView</td></tr>
-  <tr><td><code>tools.mslink</code></td><td>Microsoft&#x27;s linker, the Debug build&#x27;s: writes the PDB cdb reads. Also the linker of cl&#x27;s objects in every configuration (they are Microsoft&#x27;s, with its CRT). Found in Visual Studio&#x27;s folders or through vcvars64.bat; C90_LD names it for c90&#x27;s own link.</td></tr>
+  <tr><td><code>tools.mslink</code></td><td>Microsoft&#x27;s linker: the Debug build&#x27;s only for a compiler that writes no CodeView of its own (c90, cpp11 and shalimar write theirs, and GRIDE&#x27;s link writes the PDB). Also the linker of cl&#x27;s objects in every configuration (they are Microsoft&#x27;s, with its CRT). Found in Visual Studio&#x27;s folders or through vcvars64.bat; C90_LD names it for c90&#x27;s own link.</td></tr>
   <tr><td><code>tools.mslink.lookup</code></td><td>$C90_LD, else PATH after vcvars64.bat</td></tr>
   <tr><td><code>tools.mslink.version</code></td><td>link.exe prints its version with no arguments</td></tr>
   <tr><td><code>tools.mslink.operations.link</code></td><td>objects to a console program with a PDB</td></tr>
@@ -263,7 +263,7 @@ DATA_DIR=$(ProjectDir)data</code></pre>
 <p>A C++ project needs only its <code>.pro</code> and its sources. <code>toolchain.json</code> comes with GRIDE and <code>settings.json</code> is GRIDE's own memory; neither is copied into a project, and a project builds the same with either of them fresh. The example is <code>examples\projects\showcase\solve3-cpp11</code>.</p>
 <table>
   <tr><th>File</th><th>GRIDE built and started in Visual Studio</th><th>GRIDE installed by Setup</th></tr>
-  <tr><td><code>toolchain.json</code></td><td><code>GRIDEd\x64\&lt;Config&gt;\toolchain.json</code> - the build copies <code>GRIDEd\GRIDE\toolchain.json</code> there, beside <code>GRIDE.exe</code> and the programs the same build made (c90, cpp11, shalimar, masm, link ...)</td><td>the installation folder, beside <code>GRIDE.exe</code></td></tr>
+  <tr><td><code>toolchain.json</code></td><td><code>GRIDEd\x64\&lt;Config&gt;\toolchain.json</code> - the build copies <code>common\toolchain.json</code> there (the one file of the three outlooks&#x27; repository since 2026-11-12; Grey&#x27;s build copies the same file into its own folder), beside <code>GRIDE.exe</code> and the programs the same build made (c90, cpp11, shalimar, masm, link ...)</td><td>the installation folder, beside <code>GRIDE.exe</code></td></tr>
   <tr><td><code>toolchain.json</code> (yours)</td><td colspan="2"><code>%APPDATA%\GRIDE\toolchain.json</code> - only once Tools &gt; Options has changed a tool; otherwise there is none</td></tr>
   <tr><td><code>settings.json</code></td><td colspan="2"><code>%APPDATA%\GRIDE\settings.json</code> - one per Windows user, the same file for a GRIDE started from Visual Studio and an installed one, and for GRIDE, GRIDE 2.0 and GRIDE 1.0. Written when GRIDE closes; a missing one is written afresh</td></tr>
   <tr><td><code>solve3-cpp11.pro</code></td><td colspan="2">the project's folder</td></tr>

@@ -16,6 +16,7 @@
 //  found without cmd.exe, the native question, and RIDE's refusals.
 // ============================================================================
 #include "../Toolchain/Toolchain.h"
+#include "../../../common/compile/clr/Block.h"      // the bridge to compile.dll, which Black and Grey share
 
 namespace Gride
 {
@@ -287,6 +288,7 @@ namespace Gride
         property TimeSpan Elapsed;
         property BuildMessage^ FirstError;      // where RIDE puts the caret after a failed build: the first error
         property bool Native;                   // built again with the vendor's assembler and linker, as the native question asked
+        property bool DryRun;                   // a dry run: nothing was built, nothing is to follow it
     };
 
     // The build, by RIDE's rules (ride-port\RIDE-conventions.md 4.3-4.7): a part per compiler, a Shalimar
@@ -307,6 +309,8 @@ namespace Gride
         // who answers the native question (RIDE's askNative), on the window's thread; nullptr: nothing here
         // can ask, and the build stands
         property Func<String^, bool>^ Asker;
+        // Build > Dry Run: Execute writes the build's commands and runs none (ExecuteDry)
+        property bool DryRun;
 
         BuildEngine(GrideProject^ project, IdeSettings^ settings, Action<String^>^ output,
                     Action<BuildMessage^>^ message, CancellationToken token)
@@ -321,7 +325,7 @@ namespace Gride
             config = project->ActiveConfig();
             projectDir = project->ProjectDir;
             outDir = project->OutputDirectory();
-            objDir = Path::Combine(outDir, "obj");
+            objDir = project->ObjectDirectory();
             exePath = OutputFileOf(project);
             lines = gcnew List<String^>();
             failedStep = String::Empty;
@@ -367,6 +371,7 @@ namespace Gride
 
         BuildResult^ Execute(BuildAction action)
         {
+            if (DryRun) return ExecuteDry();
             System::Diagnostics::Stopwatch^ sw = System::Diagnostics::Stopwatch::StartNew();
             BuildResult^ res = gcnew BuildResult();
             res->OutputFile = exePath;
@@ -379,6 +384,20 @@ namespace Gride
             bool ok = true;
             try
             {
+                // Since 2026-11-13 the block, compile.dll, plans the build of a GRIDE project (the design's step 4);
+                // Grey's own planner below still builds what the block does not plan yet, and says so.
+                String^ whyNot = WhyNotBlock();
+                usingBlock = whyNot == nullptr;
+                if (usingBlock)
+                {
+                    ok = BuildByBlock(action, false, res);
+                    if (!ok && !token.IsCancellationRequested && (action == BuildAction::Build || action == BuildAction::Rebuild))
+                        ok = NativeFallback(action == BuildAction::Rebuild);
+                    if (ok && blockProgram != nullptr && blockProgram->Length > 0) res->OutputFile = blockProgram;
+                }
+                else
+                {
+                if (whyNot->Length > 0) Out(String::Concat("[", whyNot, " - this build is planned by Grey's own planner, not by compile.dll]"));
                 if (action != BuildAction::Clean) ok = NamesKnown();
                 if (ok && (action == BuildAction::Clean || action == BuildAction::Rebuild)) ok = Clean();
                 if (ok && action == BuildAction::CompileFile) ok = DoCompileFile();
@@ -386,6 +405,7 @@ namespace Gride
                 {
                     ok = DoBuild(action == BuildAction::Rebuild);
                     if (!ok && !token.IsCancellationRequested) ok = NativeFallback(action == BuildAction::Rebuild);
+                }
                 }
             }
             catch (Exception^ ex)
@@ -456,7 +476,7 @@ namespace Gride
             Dictionary<String^, String^>^ v = gcnew Dictionary<String^, String^>();
             v["exe"] = exe; v["Program"] = exe;
             v["outdir"] = Path::GetDirectoryName(exe); v["OutDir"] = Path::GetDirectoryName(exe);
-            v["asmdir"] = Path::Combine(p->OutputDirectory(), "obj");
+            v["asmdir"] = p->ObjectDirectory();
             v["projectdir"] = p->ProjectDir; v["ProjectDir"] = p->ProjectDir; v["WorkspaceDir"] = p->ProjectDir;
             v["name"] = p->Name; v["Name"] = p->Name; v["ProjectName"] = p->Name;
             v["target"] = t->Arch; v["arch"] = t->Arch; v["Arch"] = t->Arch; v["Target"] = p->Target;
@@ -538,6 +558,10 @@ namespace Gride
         String^ failedStep;         // compile / assemble / link: where the build failed
         bool placedError;           // an error naming a file and a line was seen: a fault in the source
         bool native;                // the vendor's assembler and linker, as the native question asked
+        bool dry;                   // a dry run is being written: no tool runs, nothing is cleaned, written or stamped
+        List<String^>^ dryEnvironment;      // the variables said so far in a dry run, each once
+        bool usingBlock;            // this build is planned by compile.dll (the native question's second build is too)
+        String^ blockProgram;       // what the block's link wrote: the program the result names
         bool codeViewWarned;        // the missing clang is said once
         bool clangChecked;          // NoClang has looked
         bool clangMissing;          // and found no clang for this Debug build
@@ -557,6 +581,277 @@ namespace Gride
         String^ crtChosen;          // "grt" / "msvc" once chosen, "" where the target has no choice (the Shalimar runtime follows it)
 
         // Microsoft's runtime libraries, each refused to a link with GRIDE's runtime (docs\Runtime_Design.md 13.4)
+        // =====================================================================================================
+        //  The block (compile.dll, common\Common_Compilation_Design.md, step 4): it plans Build, Rebuild, Clean
+        //  and Compile File of a GRIDE project; Grey runs its steps and prints its log, the text Black prints.
+        //  The planner further down is Grey's own, which still builds what the block does not plan yet - a CCS
+        //  project, a Visual Studio project - and any build while a tool under Tools > Options is changed from
+        //  toolchain.json's (the block reads no tool from settings.json: design D5).
+        // =====================================================================================================
+
+        // null when compile.dll plans this project's builds; else why not ("" for what needs no saying)
+        String^ WhyNotBlock()
+        {
+            if (project->IsImported || project->IsReadOnly) return String::Empty;
+            if (String::IsNullOrEmpty(project->FilePath) || !File::Exists(project->FilePath)) return String::Empty;
+            if (!String::IsNullOrEmpty(System::Environment::GetEnvironmentVariable("GRIDE_OLD_PLANNER"))) return "GRIDE_OLD_PLANNER is set";
+            if (GrideBlock::Block::Problem != nullptr) return GrideBlock::Block::Problem;
+            if (settings->Tools != nullptr)
+                for each (ToolDefinition^ t in settings->Tools)
+                    if (t != nullptr && t->Custom) return String::Concat("the tool ", t->DisplayName, " under Tools > Options > Toolchains is changed from toolchain.json's");
+            return nullptr;
+        }
+
+        GrideBlock::BlockPlan^ PlanByBlock(BuildAction action, bool nativeTools)
+        {
+            GrideBlock::BlockAction a = action == BuildAction::Rebuild ? GrideBlock::BlockAction::Rebuild : action == BuildAction::Clean ? GrideBlock::BlockAction::Clean
+                                      : action == BuildAction::CompileFile ? GrideBlock::BlockAction::CompileFile : GrideBlock::BlockAction::Build;
+            return GrideBlock::Block::Plan(project->FilePath, config->Name, target->Arch, a,
+                                           String::IsNullOrEmpty(SingleFile) ? String::Empty : Path::GetFullPath(SingleFile), nativeTools,
+                                           projectDir, true, String::Concat("Grey ", AppInfo::Version));
+        }
+
+        // one step of a plan on a worker: its tool run, everything it wrote kept
+        ref class BlockWorker
+        {
+        public:
+            BlockWorker(BuildEngine^ engine, GrideBlock::BlockStep^ step) { this->engine = engine; this->step = step; text = gcnew StringBuilder(); Code = 0; Done = false; Started = false; }
+            property int Code;
+            property double Seconds;
+            property bool Started;
+            volatile bool Done;
+            property String^ Text { String^ get() { System::Threading::Monitor::Enter(text); try { return text->ToString(); } finally { System::Threading::Monitor::Exit(text); } } }
+            void Run()
+            {
+                try
+                {
+                    ToolDefinition^ how = gcnew ToolDefinition();        // only what the runner reads of a tool: how its output is spelled
+                    how->OutputCodePage = step->Utf8 ? 65001 : 0;
+                    System::Diagnostics::Stopwatch^ took = System::Diagnostics::Stopwatch::StartNew();
+                    Code = ToolRunner::Run(step->Program, step->Arguments, step->Directory, gcnew Action<String^>(this, &BlockWorker::OnLine), engine->token, how, step->Environment);
+                    Seconds = took->Elapsed.TotalSeconds;
+                }
+                catch (Exception^ ex) { OnLine(String::Concat("error: ", ex->Message)); Code = ToolRunner::ExitStartFailed; }
+                finally
+                {
+                    Done = true;
+                    engine->stepDone->Set();
+                }
+            }
+        private:
+            BuildEngine^ engine;
+            GrideBlock::BlockStep^ step;
+            StringBuilder^ text;
+            void OnLine(String^ line) { System::Threading::Monitor::Enter(text); try { text->AppendLine(line); } finally { System::Threading::Monitor::Exit(text); } }
+        };
+
+        // a step's own lines through the diagnostics reader, for the Error List, the counts and the first error
+        void ReadDiagnostics(GrideBlock::BlockStep^ step, String^ text)
+        {
+            currentTool = step->Tool;
+            currentToolName = Path::GetFileNameWithoutExtension(step->Program);
+            currentRegex = nullptr;
+            currentDir = projectDir;
+            currentSource = step->Kind == "link" || String::IsNullOrEmpty(step->Source) ? nullptr : step->Source;
+            previousLine = nullptr;
+            for each (String^ raw in text->Split(gcnew array<wchar_t>{ L'\n' }))
+            {
+                String^ line = raw->TrimEnd(L'\r');
+                if (line->Length == 0) continue;
+                BuildMessage^ m = parser->ParseIn(line, currentRegex, currentDir, previousLine, currentSource, currentToolName);
+                previousLine = line;
+                if (m == nullptr) continue;
+                m->Tool = currentTool;
+                Count(m);
+                if (message != nullptr) message->Invoke(m);
+            }
+        }
+
+        void SayLog(List<String^>^ lines) { for each (String^ s in lines) Out(s); }
+
+        // true when the build stands (built, or up to date); false when a step failed, the plan has an error, or
+        // the build was cancelled
+        bool BuildByBlock(BuildAction action, bool nativeTools, BuildResult^ res)
+        {
+            GrideBlock::BlockPlan^ plan = PlanByBlock(action, nativeTools);
+            if (plan == nullptr) { AddMessage("error", GrideBlock::Block::Problem, nullptr, 0); return false; }
+            try
+            {
+                // what the block found: into the Error List here; the log's head prints the same lines
+                for each (GrideBlock::BlockProblem^ pr in plan->Problems)
+                {
+                    if (pr->Severity == "note") continue;
+                    BuildMessage^ m = gcnew BuildMessage();
+                    m->Severity = pr->Severity; m->Text = pr->Text; m->FilePath = pr->File == nullptr ? String::Empty : pr->File;
+                    m->Line = 0; m->Code = String::Empty; m->Tool = "GRIDE";
+                    Count(m);
+                    if (message != nullptr) message->Invoke(m);
+                }
+                if (!plan->Runnable) { SayLog(plan->Begin()); SayLog(plan->End(0)); failedStep = "plan"; return false; }
+                if (plan->Steps->Count == 0 && plan->Cleans->Count == 0) { SayLog(plan->Begin()); return true; }
+                for each (String^ dir in plan->Cleans)
+                {
+                    if (!Directory::Exists(dir)) continue;
+                    try { Directory::Delete(dir, true); Out(String::Format("Deleted {0}", dir)); }
+                    catch (Exception^ ex) { AddMessage("error", String::Format("Clean failed: {0}", ex->Message), nullptr, 0); return false; }
+                }
+                if (action == BuildAction::Clean) return true;
+
+                System::Diagnostics::Stopwatch^ took = System::Diagnostics::Stopwatch::StartNew();
+                plan->WriteFiles();
+                SayLog(plan->Begin());
+                bool ok = RunBlockSteps(plan);
+                plan->SaveStamps();
+                if (token.IsCancellationRequested) return false;
+                SayLog(plan->End(took->Elapsed.TotalSeconds));
+                if (ok) blockProgram = plan->Program;
+                return ok && errors == 0;
+            }
+            finally { delete plan; }
+        }
+
+        // The steps wave by wave: within a wave, Jobs() at a time; each step asked whether it is up to date when its
+        // wave begins - the wave before has by then rewritten what it reads - and read back in the plan's order, so
+        // the Output pane, the Error List and the log are what one tool after another gave. The first step to fail
+        // stops the rest: those running end, no more start.
+        bool RunBlockSteps(GrideBlock::BlockPlan^ plan)
+        {
+            int n = plan->Steps->Count, jobs = Jobs(), at = 0;
+            while (at < n)
+            {
+                int end = at;
+                while (end < n && plan->Steps[end]->Wave == plan->Steps[at]->Wave) end++;
+                array<BlockWorker^>^ workers = gcnew array<BlockWorker^>(end - at);
+                for (int i = at; i < end; i++)
+                    workers[i - at] = plan->IsUpToDate(i) ? nullptr : gcnew BlockWorker(this, plan->Steps[i]);
+                int read = at, started = at;
+                bool failed = false;
+                for (;;)
+                {
+                    while (!failed && read < end && (workers[read - at] == nullptr || workers[read - at]->Done))
+                    {
+                        BlockWorker^ w = workers[read - at];
+                        if (w == nullptr) SayLog(plan->UpToDate(read));
+                        else
+                        {
+                            GrideBlock::BlockStep^ step = plan->Steps[read];
+                            String^ text = w->Text;
+                            ReadDiagnostics(step, text);
+                            if (w->Code == ToolRunner::ExitStartFailed) text = String::Concat(text, step->Tool, " could not be run: ", step->Program, "\r\n");
+                            plan->Ran(read, w->Code == 0);
+                            SayLog(plan->Finished(read, w->Code, text, w->Seconds));
+                            if (w->Code != 0)
+                            {
+                                failed = true;
+                                failedStep = step->Kind;
+                                for each (String^ o in step->Outputs) TryDelete(o);       // half an object would look up to date
+                            }
+                        }
+                        read++;
+                    }
+                    int running = 0;
+                    for each (BlockWorker^ w in workers) if (w != nullptr && w->Started && !w->Done) running++;
+                    if (failed || token.IsCancellationRequested)
+                    {
+                        if (running == 0) return false;
+                    }
+                    else
+                    {
+                        if (read == end) break;
+                        while (running < jobs && started < end)
+                        {
+                            BlockWorker^ next = workers[started++ - at];
+                            if (next == nullptr) continue;
+                            next->Started = true;
+                            System::Threading::Thread^ th = gcnew System::Threading::Thread(gcnew System::Threading::ThreadStart(next, &BlockWorker::Run));
+                            th->IsBackground = true;
+                            th->Name = "GRIDE build step";
+                            th->Start();
+                            running++;
+                        }
+                    }
+                    stepDone->WaitOne(100);
+                }
+                at = end;
+            }
+            return true;
+        }
+
+        // ---- the dry run (Build > Dry Run; the design's 5.2) ---------------------------------------------------
+        // The project's build as a script, and nothing run: "DRY RUN ONLY", every command of a full build written
+        // whole, "DRY RUN ONLY - end". A project the block plans gets the block's text, the text Black shows. A
+        // CCS project, a Visual Studio project and a build with a changed tool are planned by Grey's own planner
+        // with `dry` set: it goes through the whole build, and where it would run a tool, clean a folder or write
+        // a file, it says so instead.
+        BuildResult^ ExecuteDry()
+        {
+            BuildResult^ res = gcnew BuildResult();
+            res->OutputFile = exePath;
+            res->DryRun = true;
+            res->Success = true;
+            try
+            {
+                String^ whyNot = WhyNotBlock();
+                GrideBlock::BlockPlan^ plan = whyNot == nullptr ? PlanByBlock(BuildAction::Build, false) : nullptr;
+                if (plan != nullptr)
+                {
+                    try { for each (String^ line in plan->DryRun()->Split(gcnew array<String^>{ "\r\n" }, StringSplitOptions::RemoveEmptyEntries)) Out(line); }
+                    finally { delete plan; }
+                }
+                else
+                {
+                    if (whyNot == nullptr) whyNot = GrideBlock::Block::Problem;
+                    String^ kind = project->IsCcs ? "a CCS project" : project->IsVs ? "a Visual Studio project" : whyNot;
+                    dry = true;
+                    dryEnvironment = gcnew List<String^>();
+                    Out("DRY RUN ONLY - nothing was compiled, assembled or linked: these are the commands a full build would run");
+                    Out(String::Format("GRIDE build   {0}   {1}   {2}   {3:dd-MM-yyyy HH:mm:ss}   Grey {4}", project->Name, config->Name, target->Arch, DateTime::Now, AppInfo::Version));
+                    Out(String::Concat("planner       Grey's own: ", kind, project->IsImported ? " is read from its own files, which compile.dll does not plan yet" : String::Empty));
+                    Out(String::Concat("project       ", String::IsNullOrEmpty(project->FilePath) ? projectDir : project->FilePath));
+                    Out(String::Concat("folder        ", projectDir, "   (every command runs here)"));
+                    bool ok = NamesKnown() && DoBuild(true);
+                    if (!ok) Out("not runnable  the errors above stand in the way of this build");
+                    Out("DRY RUN ONLY - end");
+                }
+            }
+            catch (Exception^ ex) { Out(String::Concat("error         ", ex->Message)); Out("DRY RUN ONLY - end"); }
+            finally { dry = false; }
+            Out("========== DRY RUN ONLY: nothing was built ==========");
+            return res;
+        }
+
+        // the variables a command of a dry run is given, each said once (again when its value changes)
+        void DryEnvironment(List<String^>^ env)
+        {
+            if (env == nullptr) return;
+            for each (String^ v in env)
+            {
+                if (dryEnvironment->Contains(v)) continue;
+                dryEnvironment->Add(v);
+                Out(String::Concat("      set ", v));
+            }
+        }
+
+        // a file a build would write for a tool (the C6747's linker command file): named, and its lines shown
+        void DryFile(String^ file, String^ text)
+        {
+            Out(String::Concat("writes        ", file));
+            for each (String^ line in text->Replace("\r", String::Empty)->TrimEnd(L'\n')->Split(L'\n')) Out(String::Concat("      | ", line));
+        }
+
+    public:
+        // where the block keeps the log of this project's builds, for Build > Show Build Log; null where the
+        // block does not plan the project
+        String^ LogFile()
+        {
+            if (WhyNotBlock() != nullptr) return nullptr;
+            GrideBlock::BlockPlan^ plan = PlanByBlock(BuildAction::Build, false);
+            if (plan == nullptr) return nullptr;
+            try { return plan->LogFile; }
+            finally { delete plan; }
+        }
+
+    private:
         literal String^ MicrosoftRuntimeRefused =
             " /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd"
             " /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd"
@@ -592,6 +887,7 @@ namespace Gride
 
         void Tell(BuildMessage^ m)
         {
+            if (dry) { Out(String::Format("{0,-13} {1}", m->Severity, m->Text)); return; }
             Count(m);
             Out(String::Format("{0}: {1}", m->Severity, m->Text));
             if (message != nullptr) message->Invoke(m);
@@ -664,6 +960,12 @@ namespace Gride
             {
                 Directory::Delete(outDir, true);
                 Out(String::Format("Deleted {0}", outDir));
+                // the objects' folder, where it is not under the program's (the rule's obj\<Config>\<Target>)
+                if (Directory::Exists(objDir) && PathUtil::IsStrictlyUnder(projectDir, objDir))
+                {
+                    Directory::Delete(objDir, true);
+                    Out(String::Format("Deleted {0}", objDir));
+                }
                 return true;
             }
             catch (Exception^ ex)
@@ -1147,7 +1449,7 @@ namespace Gride
         {
             ToolPass^ p = Pass(tool, vars, env);
             int before = BeginPass(p);
-            p->Code = ToolRunner::Run(p->Exe, p->Args, projectDir, gcnew Action<String^>(this, &BuildEngine::OnToolLine), token, tool, env);
+            p->Code = dry ? 0 : ToolRunner::Run(p->Exe, p->Args, projectDir, gcnew Action<String^>(this, &BuildEngine::OnToolLine), token, tool, env);
             EndPass(p, before);
             return p->Code;
         }
@@ -1169,6 +1471,7 @@ namespace Gride
         // the "> program arguments" line and the reader set for the run's lines; the errors counted before them
         int BeginPass(ToolPass^ p)
         {
+            if (dry) DryEnvironment(p->Env);
             Out(String::Format("> {0} {1}", PathUtil::Quote(p->Exe), p->Args));
             currentTool = p->Tool->DisplayName;
             currentToolName = Path::GetFileNameWithoutExtension(p->Exe);
@@ -1525,6 +1828,7 @@ namespace Gride
 
         void RunPass(ToolPass^ p, Action<String^>^ onLine)
         {
+            if (dry) { p->Code = 0; p->Made = true; return; }        // a dry run: the command was said, nothing runs
             for each (String^ f in p->Removed) TryDelete(f);
             p->Code = ToolRunner::Run(p->Exe, p->Args, projectDir, onLine, token, p->Tool, p->Env);
             if (p->Code != 0) TryDelete(p->Writes);
@@ -1673,7 +1977,7 @@ namespace Gride
                 AddMessage("error", String::Format("{0} is not a source file of this project.", Path::GetFileName(SingleFile)), SingleFile, 0);
                 return false;
             }
-            String^ why = Unwritable(objDir);
+            String^ why = dry ? nullptr : Unwritable(objDir);
             if (why != nullptr) { AddMessage("error", why, nullptr, 0); return false; }
             String^ refusal;
             String^ refused;
@@ -1691,7 +1995,7 @@ namespace Gride
             // RIDE refuses a build whose program could not be written where it would go, before anything runs
             for each (String^ dir in gcnew array<String^>{ outDir, objDir })
             {
-                String^ why = Unwritable(dir);
+                String^ why = dry ? nullptr : Unwritable(dir);       // the probe makes the folder: not in a dry run
                 if (why != nullptr) { AddMessage("error", why, nullptr, 0); return false; }
             }
 
@@ -1699,8 +2003,8 @@ namespace Gride
             String^ stampPath = Path::Combine(objDir, StampFileName);
             String^ stamp = BuildStamp();
             String^ oldStamp = File::Exists(stampPath) ? File::ReadAllText(stampPath) : String::Empty;
-            bool forceAll = rebuild || native || !String::Equals(stamp, oldStamp);
-            if (forceAll && !rebuild && !native && oldStamp->Length > 0) Out("Build settings changed - rebuilding all files.");
+            bool forceAll = dry || rebuild || native || !String::Equals(stamp, oldStamp);
+            if (forceAll && !dry && !rebuild && !native && oldStamp->Length > 0) Out("Build settings changed - rebuilding all files.");
 
             // Any change to a project header rebuilds every source file.
             // (Headers found only through include paths are not tracked - use Rebuild.)
@@ -1745,7 +2049,7 @@ namespace Gride
                 Out("Link skipped because of earlier errors.");
                 return false;
             }
-            File::WriteAllText(stampPath, stamp);
+            if (!dry) File::WriteAllText(stampPath, stamp);
             if (compiledCount == 0) Out("All source files are up to date.");
 
             if (target->CrossOnly)
@@ -1924,7 +2228,7 @@ namespace Gride
             linkStamp = LinkStamp(linker, libs, cmdFiles);
             String^ oldLinkStamp = File::Exists(linkStampPath) ? File::ReadAllText(linkStampPath) : String::Empty;
             DateTime exeTime = TimeOf(exePath);
-            if (changed || exeTime == DateTime::MinValue || !String::Equals(linkStamp, oldLinkStamp)) return true;
+            if (dry || changed || exeTime == DateTime::MinValue || !String::Equals(linkStamp, oldLinkStamp)) return true;
             for each (String^ o in objs) if (TimeOf(o) > exeTime) return true;
             for each (String^ l in libs) if (File::Exists(l) && TimeOf(l) > exeTime) return true;
             for each (String^ c in cmdFiles) if (TimeOf(c) > exeTime) return true;
@@ -1942,9 +2246,12 @@ namespace Gride
             for each (String^ c in cmdFiles) cmdList->Append(PathUtil::Quote(c))->Append(L' ');
 
             String^ linkStampPath = Path::Combine(objDir, LinkStampFileName);
-            Directory::CreateDirectory(outDir);
-            TryDelete(exePath);
-            TryDelete(linkStampPath);
+            if (!dry)
+            {
+                Directory::CreateDirectory(outDir);
+                TryDelete(exePath);
+                TryDelete(linkStampPath);
+            }
             Dictionary<String^, String^>^ vl = Vars(linker);
             vl["out"] = exePath; vl["Output"] = exePath;
             vl["objs"] = objList->ToString()->Trim(); vl["Objects"] = vl["objs"];
@@ -1969,6 +2276,7 @@ namespace Gride
             int lrc = RunTool(linker, vl, ToolEnvironment(linker));
             if (lrc == ToolRunner::ExitCancelled) return false;
             if (lrc != 0) { failedStep = "link"; return false; }
+            if (dry) { Out(String::Concat("would build   ", exePath)); return true; }
             if (!File::Exists(exePath))
             {
                 AddMessage("error", String::Format("{0} did not produce '{1}'.", linker->DisplayName, exePath), nullptr, 0);
@@ -2022,7 +2330,7 @@ namespace Gride
             LibraryDirFlags(true);
             Out(String::Concat("$ linking with ", ToolName(linker)));
             if (!RunLink(linker, objs, libs, none, linkStamp)) return false;
-            Out(String::Format("[built {0}]", exePath));
+            if (!dry) Out(String::Format("[built {0}]", exePath));
             return true;
         }
 
@@ -2085,7 +2393,8 @@ namespace Gride
                 {
                     String^ path = Path::Combine(objDir, f->Name);
                     String^ text = f->Text();
-                    if (!File::Exists(path) || !String::Equals(File::ReadAllText(path), text)) File::WriteAllText(path, text, gcnew UTF8Encoding(false));
+                    if (dry) DryFile(path, text);
+                    else if (!File::Exists(path) || !String::Equals(File::ReadAllText(path), text)) File::WriteAllText(path, text, gcnew UTF8Encoding(false));
                     cmdFiles->Add(path);
                 }
             }
@@ -2106,7 +2415,7 @@ namespace Gride
                 if (!token.IsCancellationRequested) Out(String::Concat(name, " did not link it - see its messages above"));
                 return false;
             }
-            Out(String::Format("[linked {0}]", exePath));
+            if (!dry) Out(String::Format("[linked {0}]", exePath));
             return true;
         }
 
@@ -2123,7 +2432,7 @@ namespace Gride
                 return true;
             }
             String^ into = Path::Combine(objDir, "shmrt");
-            Directory::CreateDirectory(into);
+            if (!dry) Directory::CreateDirectory(into);
             ToolDefinition^ assembler = AssemblerFor(false);
             if (assembler == nullptr) return false;
             array<String^>^ files = Directory::GetFiles(theirs, String::Concat("*", target->AsmExt));
@@ -2132,14 +2441,14 @@ namespace Gride
             {
                 String^ copy = Path::Combine(into, Path::GetFileName(s));
                 String^ obj = Path::ChangeExtension(copy, target->ObjExt);
-                if (TimeOf(copy) != TimeOf(s)) File::Copy(s, copy, true);
-                if (TimeOf(obj) < TimeOf(copy))
+                if (!dry && TimeOf(copy) != TimeOf(s)) File::Copy(s, copy, true);
+                if (dry || TimeOf(obj) < TimeOf(copy))
                 {
                     Dictionary<String^, String^>^ va = Vars(assembler);
                     va["in"] = copy; va["out"] = obj;
                     va["AsmFile"] = copy; va["ObjFile"] = obj; va["Name"] = Path::GetFileNameWithoutExtension(copy);
                     int rc = RunTool(assembler, va, ToolEnvironment(assembler));
-                    if (rc != 0 || !File::Exists(obj))
+                    if (rc != 0 || (!dry && !File::Exists(obj)))
                     {
                         if (rc != ToolRunner::ExitCancelled) Out(String::Format("cannot assemble the Shalimar runtime's {0}", Path::GetFileName(s)));
                         return false;
@@ -2195,7 +2504,7 @@ namespace Gride
             // the retry's outcome is the build's: the first attempt's errors stand in the output above
             errors = 0; firstError = nullptr; placedError = false; failedStep = String::Empty;
             native = true;
-            bool again = DoBuild(rebuild) && errors == 0;
+            bool again = (usingBlock ? BuildByBlock(rebuild ? BuildAction::Rebuild : BuildAction::Build, true, nullptr) : DoBuild(rebuild)) && errors == 0;
             Out(again ? String::Concat("[built with ", theirs, ", not GRIDE's ", ours, "]") : String::Concat("[not built: ", theirs, " failed as well]"));
             return again;
         }

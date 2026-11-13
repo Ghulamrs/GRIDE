@@ -2166,6 +2166,7 @@ private:
     // Where a written qualified type name ends, **past a template argument list**.
     std::size_t qualifiedTypeEndPastArgs() const;
     bool sawVolatile();
+    bool cvSpecifier(Qualifiers *quals);     // a written `const` or `volatile` among the specifiers, refused when it is the second
 
     const Type *specifiers(StorageClass *storage, Qualifiers *quals = nullptr);
     const Type *unqualifiedSpecifiers(StorageClass *storage, Qualifiers *quals);

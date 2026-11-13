@@ -1,0 +1,30 @@
+outlook:        Grey (GRIDE 2.0)
+project:        ccs_Sample   (examples\projects\ccs\Sample)
+configuration:  Debug
+target:         tms6747
+commands:       3   (compile 1, assemble 1, link 1, other 0)
+last link:      FAILED (exit 1)
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 3 command line(s)
+dialog:         'GRIDE 2.0': The project's own lnk6x did not build it. Use TI's lnk6x for this build instead?  [buttons: No, Yes; pressed: No]
+
+[1] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Math.cpp" -o "<temp>\gride-ccs-Sample\Debug\obj\Math.s" -arch tms6747 -g -I"<proj>" -Dc6747
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[2] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<temp>\gride-ccs-Sample\Debug\obj\Math.s" -o "<temp>\gride-ccs-Sample\Debug\obj\Math.obj"
+    env: (none of the recorded variables is set)
+
+[3] lnk6x   link   exit 1
+    cwd: <proj>
+    cmd: "<bin>\lnk6x.exe" -mv6740 --abi=eabi -i "<bin>\lib\tms6747" "<proj>\C6747.cmd" --heap_size=0x800 --stack_size=0x4000 --rom_model "<temp>\gride-ccs-Sample\Debug\obj\Math.obj" -l "<bin>\lib\tms6747\rts6xd.lib" -o "<temp>\gride-ccs-Sample\Debug\Sample.out"
+    env: (none of the recorded variables is set)

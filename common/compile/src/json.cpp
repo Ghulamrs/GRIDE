@@ -1,0 +1,387 @@
+#include "json.h"
+
+#include <cstdio>
+#include <cstdlib>
+
+namespace gride { namespace compile {
+
+namespace {
+
+const Json& nothing() {
+    static const Json* empty = new Json();
+    return *empty;
+}
+
+bool space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+struct Reader {
+    const std::string& in;
+    size_t at;
+    std::string error;
+
+    Reader(const std::string& text) : in(text), at(0) {}
+
+    void skip() {
+        for (;;) {
+            while (at < in.size() && space(in[at])) ++at;
+
+            if (at + 1 < in.size() && in[at] == '/' && in[at + 1] == '/') {
+                while (at < in.size() && in[at] != '\n') ++at;
+                continue;
+            }
+            return;
+        }
+    }
+
+    bool fail(const std::string& what) {
+        if (error.empty()) {
+            char where[32];
+            std::snprintf(where, sizeof where, " at character %lu",
+                          static_cast<unsigned long>(at + 1));
+            error = what + where;
+        }
+        return false;
+    }
+
+    bool literal(const char* word) {
+        size_t n = 0;
+        while (word[n]) ++n;
+        if (in.compare(at, n, word) != 0) return false;
+        at += n;
+        return true;
+    }
+
+    bool string(std::string& out) {
+        if (at >= in.size() || in[at] != '"') return fail("expected a string");
+        ++at;
+        out.clear();
+        while (at < in.size()) {
+            char c = in[at++];
+            if (c == '"') return true;
+            if (c != '\\') {
+                out += c;
+                continue;
+            }
+            if (at >= in.size()) break;
+            char esc = in[at++];
+            switch (esc) {
+                case '"':  out += '"';  break;
+                case '\\': out += '\\'; break;
+                case '/':  out += '/';  break;
+                case 'n':  out += '\n'; break;
+                case 't':  out += '\t'; break;
+                case 'r':  out += '\r'; break;
+                case 'b':  out += '\b'; break;
+                case 'f':  out += '\f'; break;
+                default:   return fail("unknown escape in a string");
+            }
+        }
+        return fail("a string was never closed");
+    }
+
+    bool value(Json& out) {
+        skip();
+        if (at >= in.size()) return fail("the file ended too early");
+
+        char c = in[at];
+        if (c == '"') {
+            std::string s;
+            if (!string(s)) return false;
+            out = Json::fromText(s);
+            return true;
+        }
+        if (c == '{') return object(out);
+        if (c == '[') return array(out);
+        if (literal("true"))  { out = Json::fromBool(true);  return true; }
+        if (literal("false")) { out = Json::fromBool(false); return true; }
+        if (literal("null"))  { out = Json();                return true; }
+
+        if (c == '-' || (c >= '0' && c <= '9')) {
+            size_t start = at;
+            if (in[at] == '-') ++at;
+            while (at < in.size() && ((in[at] >= '0' && in[at] <= '9') || in[at] == '.' ||
+                                      in[at] == 'e' || in[at] == 'E' || in[at] == '+' ||
+                                      in[at] == '-'))
+                ++at;
+            out = Json::fromNumber(std::atof(in.substr(start, at - start).c_str()));
+            return true;
+        }
+
+        return fail("expected a value");
+    }
+
+    bool array(Json& out) {
+        out = Json::array();
+        ++at;
+        skip();
+        if (at < in.size() && in[at] == ']') { ++at; return true; }
+
+        for (;;) {
+            Json item;
+            if (!value(item)) return false;
+            out.push(item);
+
+            skip();
+            if (at < in.size() && in[at] == ',') { ++at; continue; }
+            if (at < in.size() && in[at] == ']') { ++at; return true; }
+            return fail("expected a comma or a closing bracket");
+        }
+    }
+
+    bool object(Json& out) {
+        out = Json::object();
+        ++at;
+        skip();
+        if (at < in.size() && in[at] == '}') { ++at; return true; }
+
+        for (;;) {
+            skip();
+            std::string key;
+            if (!string(key)) return false;
+
+            skip();
+            if (at >= in.size() || in[at] != ':') return fail("expected a colon");
+            ++at;
+
+            Json item;
+            if (!value(item)) return false;
+            out.set(key, item);
+
+            skip();
+            if (at < in.size() && in[at] == ',') { ++at; continue; }
+            if (at < in.size() && in[at] == '}') { ++at; return true; }
+            return fail("expected a comma or a closing brace");
+        }
+    }
+};
+
+std::string quoted(const std::string& s) {
+    std::string out = "\"";
+    for (size_t i = 0; i < s.size(); ++i) {
+        char c = s[i];
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\t': out += "\\t";  break;
+            case '\r': out += "\\r";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char u[8];
+                    std::snprintf(u, sizeof u, "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
+                    out += u;
+                } else {
+                    out += c;
+                }
+                break;
+        }
+    }
+    return out + "\"";
+}
+
+// Characters, not bytes: a UTF-8 continuation byte is part of the character before it. The 90-character line a
+// list may take is counted as Black and Grey count it.
+size_t characters(const std::string& s) {
+    size_t n = 0;
+    for (size_t i = 0; i < s.size(); ++i)
+        if ((static_cast<unsigned char>(s[i]) & 0xC0) != 0x80) ++n;
+    return n;
+}
+
+}
+
+Json Json::fromBool(bool value) {
+    Json j;
+    j.type_ = Bool;
+    j.bool_ = value;
+    return j;
+}
+
+Json Json::fromNumber(double value) {
+    Json j;
+    j.type_ = Number;
+    j.number_ = value;
+    return j;
+}
+
+Json Json::fromText(const std::string& value) {
+    Json j;
+    j.type_ = String;
+    j.text_ = value;
+    return j;
+}
+
+Json Json::array() {
+    Json j;
+    j.type_ = Array;
+    return j;
+}
+
+Json Json::object() {
+    Json j;
+    j.type_ = Object;
+    return j;
+}
+
+bool Json::boolean(bool fallback) const { return type_ == Bool ? bool_ : fallback; }
+
+long Json::integer(long fallback) const {
+    return type_ == Number ? static_cast<long>(number_) : fallback;
+}
+
+std::string Json::text(const std::string& fallback) const {
+    return type_ == String ? text_ : fallback;
+}
+
+size_t Json::size() const {
+    if (type_ == Array) return items_.size();
+    if (type_ == Object) return keys_.size();
+    return 0;
+}
+
+const Json& Json::at(size_t index) const {
+    if (type_ == Array && index < items_.size()) return items_[index];
+    return nothing();
+}
+
+bool Json::has(const std::string& key) const {
+    for (size_t i = 0; i < keys_.size(); ++i)
+        if (keys_[i] == key) return true;
+    return false;
+}
+
+const Json& Json::get(const std::string& key) const {
+    for (size_t i = 0; i < keys_.size(); ++i)
+        if (keys_[i] == key) return values_[i];
+    return nothing();
+}
+
+const std::string& Json::keyAt(size_t index) const {
+
+    static const std::string* none = new std::string();
+    if (type_ == Object && index < keys_.size()) return keys_[index];
+    return *none;
+}
+
+const Json& Json::valueAt(size_t index) const {
+    if (type_ == Object && index < keys_.size()) return values_[index];
+    return nothing();
+}
+
+void Json::push(const Json& value) {
+    if (type_ != Array) { type_ = Array; items_.clear(); }
+    items_.push_back(value);
+}
+
+void Json::set(const std::string& key, const Json& value) {
+    if (type_ != Object) { type_ = Object; keys_.clear(); values_.clear(); }
+    for (size_t i = 0; i < keys_.size(); ++i) {
+        if (keys_[i] == key) {
+            values_[i] = value;
+            return;
+        }
+    }
+    keys_.push_back(key);
+    values_.push_back(value);
+}
+
+void Json::remove(const std::string& key) {
+    for (size_t i = 0; i < keys_.size(); ++i) {
+        if (keys_[i] == key) {
+            keys_.erase(keys_.begin() + static_cast<long>(i));
+            values_.erase(values_.begin() + static_cast<long>(i));
+            return;
+        }
+    }
+}
+
+Json Json::parse(const std::string& text, std::string& error) {
+    Reader reader(text);
+    Json out;
+
+    if (!reader.value(out)) {
+        error = reader.error;
+        return Json();
+    }
+
+    reader.skip();
+    if (reader.at != text.size()) {
+        error = "there is more text after the end of the value";
+        return Json();
+    }
+
+    error.clear();
+    return out;
+}
+
+const char* Json::lineEnd() {
+#ifdef _WIN32
+    return "\r\n";
+#else
+    return "\n";
+#endif
+}
+
+std::string Json::document() const {
+    return write() + lineEnd();
+}
+
+std::string Json::write(int depth) const {
+    std::string pad(static_cast<size_t>(depth) * 2, ' ');
+    std::string inner(static_cast<size_t>(depth + 1) * 2, ' ');
+    const std::string nl = lineEnd();
+
+    switch (type_) {
+        case Null:   return "null";
+        case Bool:   return bool_ ? "true" : "false";
+        case String: return quoted(text_);
+        case Number: {
+            char buffer[40];
+
+            if (number_ == static_cast<double>(static_cast<long>(number_))) {
+                std::snprintf(buffer, sizeof buffer, "%ld", static_cast<long>(number_));
+            } else {
+                // The shortest that reads back the same, as Black's and Grey's "R" writes it: 15 digits, else 17.
+                std::snprintf(buffer, sizeof buffer, "%.15g", number_);
+                if (std::strtod(buffer, 0) != number_) std::snprintf(buffer, sizeof buffer, "%.17g", number_);
+            }
+            return buffer;
+        }
+        case Array: {
+            if (items_.empty()) return "[]";
+            bool plain = true;
+            for (size_t i = 0; i < items_.size() && plain; ++i)
+                plain = !items_[i].is(Array) && !items_[i].is(Object);
+            if (plain) {
+                std::string line = "[";
+                for (size_t i = 0; i < items_.size(); ++i) {
+                    if (i > 0) line += ", ";
+                    line += items_[i].write(0);
+                }
+                line += "]";
+                if (characters(line) <= 90) return line;
+            }
+            std::string out = "[" + nl;
+            for (size_t i = 0; i < items_.size(); ++i) {
+                out += inner + items_[i].write(depth + 1);
+                if (i + 1 < items_.size()) out += ",";
+                out += nl;
+            }
+            return out + pad + "]";
+        }
+        case Object: {
+            if (keys_.empty()) return "{}";
+            std::string out = "{" + nl;
+            for (size_t i = 0; i < keys_.size(); ++i) {
+                out += inner + quoted(keys_[i]) + ": " +
+                       values_[i].write(depth + 1);
+                if (i + 1 < keys_.size()) out += ",";
+                out += nl;
+            }
+            return out + pad + "}";
+        }
+    }
+    return "null";
+}
+
+}}

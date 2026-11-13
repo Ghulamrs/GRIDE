@@ -126,6 +126,10 @@ namespace Gride { namespace UI {
         c = Cmd("Build.BuildProject", "Build Project", "Ctrl+B", "build", DO(BuildProject)); c->CanExecute = WHEN(CanBuild);
         c = Cmd("Build.RebuildProject", "Rebuild Project", nullptr, "rebuild", DO(RebuildProject)); c->CanExecute = WHEN(CanBuild);
         c = Cmd("Build.CleanProject", "Clean Project", nullptr, "clean", DO(CleanProject)); c->CanExecute = WHEN(CanBuild);
+        // the build as a script, and nothing run: "DRY RUN ONLY", then every command of a full build, in the Output pane
+        c = Cmd("Build.DryRun", "&Dry Run Project (commands only)", nullptr, nullptr, DO(DryRun)); c->CanExecute = WHEN(CanBuild);
+        c = Cmd("Build.DryRunWorkspace", "Dr&y Run Workspace (commands only)", nullptr, nullptr, DO(DryRunWorkspace)); c->CanExecute = WHEN(CanBuild);
+        c = Cmd("Build.ShowLog", "Show Build &Log", nullptr, nullptr, DO(ShowBuildLog)); c->CanExecute = WHEN(CanBuild);
         c = Cmd("Build.Compile", "Compile", "Ctrl+F7", nullptr, DO(CompileFile)); c->CanExecute = WHEN(CanBuild);
         c = Cmd("Build.AssembleOnly", "Assemble Only (ASM6x / MASM)", nullptr, nullptr, DO(AssembleOnly)); c->CanExecute = WHEN(CanBuild);
         c = Cmd("Build.LinkOnly", "Link Only (LNK6x / LINK)", nullptr, nullptr, DO(LinkOnly)); c->CanExecute = WHEN(CanBuild);
@@ -285,8 +289,8 @@ namespace Gride { namespace UI {
         // ---- Build
         miBuild = TopMenu("&Build");
         miBuild->DropDownOpening += gcnew EventHandler(this, &MainForm::OnBuildMenuOpening);
-        AddItems(miBuild, gcnew array<String^>{ "Build.BuildWorkspace", "Build.RebuildWorkspace", "Build.CleanWorkspace", "-",
-                                                "Build.BuildProject", "Build.RebuildProject", "Build.CleanProject", "-",
+        AddItems(miBuild, gcnew array<String^>{ "Build.BuildWorkspace", "Build.RebuildWorkspace", "Build.CleanWorkspace", "Build.DryRunWorkspace", "-",
+                                                "Build.BuildProject", "Build.RebuildProject", "Build.CleanProject", "Build.DryRun", "Build.ShowLog", "-",
                                                 "Build.Compile", "Build.AssembleOnly", "Build.LinkOnly", "-",
                                                 "Build.Batch", "Build.ConfigManager", "-", "Build.Cancel" });
 
@@ -438,9 +442,9 @@ namespace Gride { namespace UI {
     void MainForm::BuildContextMenus()
     {
         explorer->WorkspaceMenu = MakeContextMenu(gcnew array<String^>{ "Build.BuildWorkspace", "Build.RebuildWorkspace",
-            "Build.CleanWorkspace", "-", "File.NewProject", "Project.AddProject", "File.ImportCcs", "-", "Build.ConfigManager",
+            "Build.CleanWorkspace", "Build.DryRunWorkspace", "-", "File.NewProject", "Project.AddProject", "File.ImportCcs", "-", "Build.ConfigManager",
             "Project.Dependencies", "Project.BuildOrder", "-", "Project.OpenFolder" });
-        explorer->ProjectMenu = MakeContextMenu(gcnew array<String^>{ "Build.BuildProject", "Build.RebuildProject", "Build.CleanProject",
+        explorer->ProjectMenu = MakeContextMenu(gcnew array<String^>{ "Build.BuildProject", "Build.RebuildProject", "Build.CleanProject", "Build.DryRun",
             "-", "Project.SetStartup", "-", "Project.AddNewItem", "Project.AddExisting", "Project.NewFolder", "-",
             "Project.RefreshCcs", "Project.CcsMapping", "Project.Dependencies", "Project.RemoveProject", "-", "Project.OpenFolder", "Project.CompilerOptions", "Project.Properties" });
         explorer->FolderMenu = MakeContextMenu(gcnew array<String^>{ "Project.AddNewItem", "Project.AddExisting", "-", "Project.OpenFolder" });
@@ -543,6 +547,7 @@ namespace Gride { namespace UI {
         commands->Get("Build.BuildProject")->Text = "Build " + name;
         commands->Get("Build.RebuildProject")->Text = "Rebuild " + name;
         commands->Get("Build.CleanProject")->Text = "Clean " + name;
+        commands->Get("Build.DryRun")->Text = "&Dry Run " + name + " (commands only)";
         EditorDocument^ d = docs->Active;
         String^ file = explorer->SelectedFile;
         if (file == nullptr && d != nullptr && !d->IsUntitled) file = d->FilePath;

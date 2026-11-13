@@ -27,12 +27,14 @@
 #include "VisualStudio.h"
 #include "../Model/Workspace.h"
 #include "../Settings/GrideSettings.h"
+#include "../../../../common/compile/clr/Block.h"
 
 namespace Gride { namespace Services {
 
     using namespace Gride::Core;
     using namespace Gride::Model;
     using namespace Gride::Settings;
+    using namespace GrideBlock;          // the bridge to compile.dll, shared with Grey (common\compile\clr)
 
     public enum class BuildAction { Build, Rebuild, Clean, CompileFile, AssembleOnly, LinkOnly };
 
@@ -43,8 +45,11 @@ namespace Gride { namespace Services {
         {
             Projects = gcnew List<GrideProject^>();
             Config = "Debug"; TargetKind = Target::Windows;
-            Action = BuildAction::Build; SingleFile = nullptr; WorkspaceDir = String::Empty;
+            Action = BuildAction::Build; SingleFile = nullptr; WorkspaceDir = String::Empty; DryRun = false;
         }
+        // Build > Dry Run: every command the build would run is written into the Output pane and none is run;
+        // nothing is cleaned, written or logged (common\Common_Compilation_Design.md 5.2)
+        property bool DryRun;
         property List<GrideProject^>^ Projects;   // already in build order
         property String^ Config;
         property Target TargetKind;
@@ -68,6 +73,7 @@ namespace Gride { namespace Services {
         property int Errors { int get() { return errors; } }
         property int Warnings { int get() { return warnings; } }
         property bool Cancelled;
+        property bool DryRun;          // a dry run: nothing was built, nothing is to follow it
         property TimeSpan Elapsed;
         property BuildAction Action;
         property String^ Program;      // the last program built (or linked), for a run
@@ -306,6 +312,8 @@ namespace Gride { namespace Services {
         bool rideHeadersSaid;        // an installation header directory kept from cl was named (once)
         bool crtSaid;                // the Windows C runtime of the link was named (once a project build)
         bool busy;
+        bool dry;                    // a dry run is being written: no tool runs, nothing is cleaned, written or logged
+        List<String^>^ dryEnvironment;      // the variables the command before was given, so each is written once
         String^ logPath;             // the project build's log, opened when its first tool runs; null: none
         StreamWriter^ logWriter;
         Object^ logLock;             // a tool's stdout and stderr are read on two threads
@@ -522,6 +530,7 @@ namespace Gride { namespace Services {
         // runs one tool through the reader; a tool that could not be started gets RIDE's hint
         int RunTool(String^ command, String^ workDir, ToolRunOptions^ options, String^ source, String^ toolName, String^ targetName, bool rideTool)
         {
+            if (dry) { DryCommand(command, workDir, ToolOptions(options, rideTool)); return 0; }
             BeginTool(source, toolName);
             ToolRunOptions^ o = ToolOptions(options, rideTool);
             ShowCommand(command, workDir, o);
@@ -664,6 +673,16 @@ namespace Gride { namespace Services {
         // the rest never start), as the build stopped at it before. -1 when one failed or the build was cancelled, else 0.
         int RunSteps(List<CompileStep^>^ steps, String^ workDir)
         {
+            if (dry)
+            {
+                for each (CompileStep^ step in steps)
+                    for each (ToolPass^ pass in step->Passes)
+                    {
+                        for each (String^ s in pass->Before) Say(s);
+                        DryCommand(pass->Command, workDir, pass->Options);
+                    }
+                return 0;
+            }
             int jobs = Jobs();
             List<CompileStep^>^ order = gcnew List<CompileStep^>(steps);
             order->Sort(gcnew Comparison<CompileStep^>(&BuildEngine::LargerFirst));
@@ -748,6 +767,7 @@ namespace Gride { namespace Services {
 
         void Report(Severity sev, String^ file, String^ text)
         {
+            if (dry) { Say((sev == Severity::Error ? "error         " : sev == Severity::Warning ? "warning       " : "note          ") + text); return; }
             BuildMessage^ m = gcnew BuildMessage();
             m->Sev = sev; m->File = file == nullptr ? String::Empty : file; m->Text = text;
             m->Project = currentProject != nullptr ? currentProject->Name : String::Empty;
@@ -781,8 +801,9 @@ namespace Gride { namespace Services {
                         clSettingsSaid = false;
                         rideHeadersSaid = false;
                         crtSaid = false;
-                        int result = BuildProject(p, r, false);
-                        if (result == -1 && !runner->Cancelled) result = NativeFallback(p, r);
+                        dry = r->DryRun;
+                        int result = dry ? DryOne(p, r) : BuildOne(p, r, false);
+                        if (result == -1 && !runner->Cancelled && !dry) result = NativeFallback(p, r);
                         EndLog(result);
                         if (result > 0) summary->Succeeded++;
                         else if (result == 0) summary->UpToDate++;
@@ -800,6 +821,15 @@ namespace Gride { namespace Services {
             summary->Elapsed = DateTime::Now - start;
             currentProject = nullptr;
 
+            summary->DryRun = first->DryRun;
+            dry = false;
+            if (first->DryRun)
+            {
+                Say("========== DRY RUN ONLY: nothing was built ==========");
+                busy = false;
+                Finished(summary);
+                return;
+            }
             String^ verb = "Build";
             if (first->Action == BuildAction::Clean) verb = "Clean";
             else if (first->Action == BuildAction::Rebuild) verb = "Rebuild All";
@@ -854,7 +884,7 @@ namespace Gride { namespace Services {
             if (!Asker(question)) return -1;
             Say("building again with " + theirs + " in place of the project's " + ours + ", as asked");
             failedStep = String::Empty;
-            int again = BuildProject(p, r, true);
+            int again = BuildOne(p, r, true);
             Say(again > 0 ? "[built with " + theirs + ", not GRIDE's " + ours + "]" : "[not built: " + theirs + " failed as well]");
             return again;
         }
@@ -1019,6 +1049,324 @@ namespace Gride { namespace Services {
         }
 
         // ---- per project -------------------------------------------------------------
+        // =====================================================================================================
+        //  The block (compile.dll, common\Common_Compilation_Design.md): since 2026-11-13 it plans Build, Rebuild,
+        //  Clean and Compile File of a GRIDE project, and Black runs its steps and prints its log. What follows is
+        //  the running; BuildProject below is Black's own planner, which still builds what the block does not plan
+        //  yet - CCS and Visual Studio projects, Assemble Only, Link Only - and any target whose toolchain page is
+        //  changed from its defaults (the block reads no template from settings.json: design D5).
+        // =====================================================================================================
+
+        // Black's own planner or the block's: one project of one request
+        int BuildOne(GrideProject^ p, BuildRequest^ r, bool native)
+        {
+            String^ why = WhyNotBlock(p, r);
+            if (why == nullptr) return BuildByBlock(p, r, native);
+            if (why->Length > 0) Say("[" + why + " - this build is planned by Black's own planner, not by compile.dll]");
+            return BuildProject(p, r, native);
+        }
+
+        // null when the block plans this build; else why not ("" for what needs no saying)
+        String^ WhyNotBlock(GrideProject^ p, BuildRequest^ r)
+        {
+            if (r->Action != BuildAction::Build && r->Action != BuildAction::Rebuild && r->Action != BuildAction::Clean &&
+                r->Action != BuildAction::CompileFile) return String::Empty;
+            if (p->IsImported || p->IsReadOnly) return String::Empty;        // CCS, Visual Studio: the design's step 8
+            if (String::IsNullOrEmpty(p->FilePath) || !File::Exists(p->FilePath)) return String::Empty;   // a lone file's project is never written
+            if (!String::IsNullOrEmpty(Environment::GetEnvironmentVariable("GRIDE_OLD_PLANNER"))) return "GRIDE_OLD_PLANNER is set";
+            if (Block::Problem != nullptr) return Block::Problem;
+            ToolchainSettings^ tc = settings->Toolchain(r->TargetKind);
+            if (!String::Equals(JsonWriter::Write(tc->ToJson()), JsonWriter::Write(tc->Defaults()->ToJson())))
+                return "Tools > Options > Toolchains > " + tc->Name + " is changed from its defaults";
+            return nullptr;
+        }
+
+        static String^ OutlookWord()
+        {
+            try { return "Black " + System::Reflection::Assembly::GetEntryAssembly()->GetName()->Version->ToString(3); }
+            catch (Exception^) { return "Black"; }
+        }
+
+        BlockPlan^ PlanByBlock(GrideProject^ p, BuildRequest^ r, bool native)
+        {
+            BlockAction action = r->Action == BuildAction::Rebuild ? BlockAction::Rebuild : r->Action == BuildAction::Clean ? BlockAction::Clean
+                               : r->Action == BuildAction::CompileFile ? BlockAction::CompileFile : BlockAction::Build;
+            return Block::Plan(p->FilePath, r->Config, RideToolchain::Arch(r->TargetKind), action,
+                               r->SingleFile == nullptr ? String::Empty : Path::GetFullPath(r->SingleFile), native,
+                               r->WorkspaceDir, settings->Env->ShowCommandLines, OutlookWord());
+        }
+
+        // one step of a plan on a worker: its tool run, everything it wrote kept
+        ref class BlockWorker
+        {
+        public:
+            BlockWorker(BuildEngine^ engine, BlockStep^ step) { this->engine = engine; this->step = step; text = gcnew StringBuilder(); Code = 0; Done = false; Started = false; }
+            property int Code;
+            property double Seconds;
+            property bool Started;
+            volatile bool Done;
+            property String^ Text { String^ get() { return text->ToString(); } }
+            void Run()
+            {
+                ToolRunner^ r = gcnew ToolRunner();
+                r->Line += gcnew TextLineHandler(this, &BlockWorker::OnLine);
+                engine->Enlist(r);
+                try
+                {
+                    ToolRunOptions^ o = gcnew ToolRunOptions();
+                    o->Environment = step->Environment;
+                    o->OutputCodePage = step->Utf8 ? 65001 : 0;
+                    System::Diagnostics::Stopwatch^ took = System::Diagnostics::Stopwatch::StartNew();
+                    Code = r->Run(step->CommandLine, step->Directory, o);
+                    Seconds = took->Elapsed.TotalSeconds;
+                }
+                catch (Exception^ ex) { text->AppendLine("error: " + ex->Message); Code = ToolRunner::ExitStartFailed; }
+                finally
+                {
+                    engine->Dismiss(r);
+                    Done = true;
+                    engine->stepDone->Set();
+                }
+            }
+        private:
+            BuildEngine^ engine;
+            BlockStep^ step;
+            StringBuilder^ text;
+            void OnLine(String^ line) { System::Threading::Monitor::Enter(text); try { text->AppendLine(line); } finally { System::Threading::Monitor::Exit(text); } }
+        };
+
+        // the block's lines in the Output pane, as they are; a tool that wrote very much is cut on the screen (its
+        // lines are whole in the log)
+        void SayLog(List<String^>^ lines)
+        {
+            int shown = 0;
+            for each (String^ s in lines)
+            {
+                if (++shown > MaxToolLines + 4) continue;
+                Say(s);
+            }
+            if (shown > MaxToolLines + 4) Say(String::Format("      [{0} more line(s): Build > Show Build Log has them all]", shown - MaxToolLines - 4));
+        }
+
+        // a step's own lines through the diagnostics reader, for the Error List and the counts
+        void ReadDiagnostics(BlockStep^ step, String^ text)
+        {
+            String^ source = step->Kind == "link" || String::IsNullOrEmpty(step->Source) ? nullptr : step->Source;
+            DiagnosticReader^ r = gcnew DiagnosticReader(currentWorkDir, currentPattern, source, step->Tool);
+            for each (String^ line in text->Split(gcnew array<wchar_t>{ L'\n' }))
+            {
+                String^ l = line->TrimEnd(L'\r');
+                if (l->Length == 0) continue;
+                BuildMessage^ m = r->Feed(l);
+                if (m == nullptr) continue;
+                if (currentProject != nullptr) m->Project = currentProject->Name;
+                if (m->Sev == Severity::Error && m->Line > 0 && !String::IsNullOrEmpty(m->File)) placedError = true;
+                summary->Count(m);
+                Message(m);
+            }
+        }
+
+        // returns 1 = built, 0 = up to date, -1 = failed, -2 = skipped - as BuildProject
+        int BuildByBlock(GrideProject^ p, BuildRequest^ r, bool native)
+        {
+            Target t = r->TargetKind;
+            String^ actionName = r->Action == BuildAction::Clean ? "Clean" : r->Action == BuildAction::Rebuild ? "Rebuild All" : "Build";
+            Say(String::Format("------ {0} started: Project {1}, Configuration {2} | {3} ------", actionName, p->Name, r->Config, TargetInfo::Name(t)));
+            currentWorkDir = p->ProjectDir;
+            currentPattern = nullptr;
+            BlockPlan^ plan = PlanByBlock(p, r, native);
+            if (plan == nullptr) { Report(Severity::Error, nullptr, Block::Problem); return -1; }
+            try
+            {
+                // what the block found: into the Error List here; the log's head prints the same lines
+                for each (BlockProblem^ pr in plan->Problems)
+                {
+                    if (pr->Severity == "note") continue;
+                    BuildMessage^ m = gcnew BuildMessage();
+                    m->Sev = pr->Severity == "error" ? Severity::Error : Severity::Warning;
+                    m->File = pr->File; m->Text = pr->Text; m->Project = p->Name;
+                    summary->Count(m->Sev);
+                    Message(m);
+                }
+                if (!plan->Runnable) { SayLog(plan->Begin()); SayLog(plan->End(0)); failedStep = "plan"; return -1; }
+                if (plan->Steps->Count == 0 && plan->Cleans->Count == 0)
+                {
+                    // nothing to do: a project that builds for another target, a library, an emulateOnly project
+                    for each (String^ s in plan->Begin()) Say(s);
+                    return plan->Problems->Count > 0 ? -2 : 1;
+                }
+                for each (String^ dir in plan->Cleans) CleanDir(dir);
+                if (r->Action == BuildAction::Clean) return 1;
+
+                System::Diagnostics::Stopwatch^ took = System::Diagnostics::Stopwatch::StartNew();
+                plan->WriteFiles();
+                SayLog(plan->Begin());
+                int result = RunBlockSteps(plan);
+                plan->SaveStamps();
+                if (runner->Cancelled) return -1;
+                SayLog(plan->End(took->Elapsed.TotalSeconds));
+                if (result < 0) return -1;
+                summary->Program = plan->Program;
+                return result;
+            }
+            finally { delete plan; }
+        }
+
+        // The steps wave by wave: within a wave, Jobs() at a time; each step asked whether it is up to date when its
+        // wave begins - the wave before has by then rewritten what it reads - and read back in the plan's order, so
+        // the Output pane, the Error List and the log are what one tool after another gave. The first step to fail
+        // stops the rest. 1 when something ran, 0 when every step was up to date, -1 when one failed or was cancelled.
+        int RunBlockSteps(BlockPlan^ plan)
+        {
+            int n = plan->Steps->Count, jobs = Jobs(), at = 0;
+            bool anyRan = false;
+            while (at < n)
+            {
+                int end = at;
+                while (end < n && plan->Steps[end]->Wave == plan->Steps[at]->Wave) end++;
+                array<BlockWorker^>^ workers = gcnew array<BlockWorker^>(end - at);
+                for (int i = at; i < end; i++)
+                    workers[i - at] = plan->IsUpToDate(i) ? nullptr : gcnew BlockWorker(this, plan->Steps[i]);
+                int read = at, started = at;
+                bool failed = false;
+                for (;;)
+                {
+                    while (!failed && read < end && (workers[read - at] == nullptr || workers[read - at]->Done))
+                    {
+                        BlockWorker^ w = workers[read - at];
+                        if (w == nullptr) SayLog(plan->UpToDate(read));
+                        else
+                        {
+                            anyRan = true;
+                            BlockStep^ step = plan->Steps[read];
+                            String^ text = w->Text;
+                            ReadDiagnostics(step, text);
+                            if (w->Code == ToolRunner::ExitStartFailed) text += step->Tool + " could not be run: " + step->Program + "\r\n";
+                            plan->Ran(read, w->Code == 0);
+                            SayLog(plan->Finished(read, w->Code, text, w->Seconds));
+                            if (w->Code != 0)
+                            {
+                                failed = true;
+                                failedStep = step->Kind;
+                                for each (String^ o in step->Outputs) RemoveFile(o);      // half an object would look up to date
+                                StopWorkers();
+                            }
+                        }
+                        read++;
+                    }
+                    int running = 0;
+                    for each (BlockWorker^ w in workers) if (w != nullptr && w->Started && !w->Done) running++;
+                    if (failed || runner->Cancelled)
+                    {
+                        if (running == 0) return -1;
+                    }
+                    else
+                    {
+                        if (read == end) break;
+                        while (running < jobs && started < end)
+                        {
+                            BlockWorker^ next = workers[started++ - at];
+                            if (next == nullptr) continue;
+                            next->Started = true;
+                            System::Threading::Thread^ th = gcnew System::Threading::Thread(gcnew System::Threading::ThreadStart(next, &BlockWorker::Run));
+                            th->IsBackground = true;
+                            th->Name = "GRIDE build step";
+                            th->Start();
+                            running++;
+                        }
+                    }
+                    stepDone->WaitOne(100);
+                }
+                at = end;
+            }
+            return anyRan ? 1 : 0;
+        }
+
+        // ---- the dry run (Build > Dry Run; the design's 5.2) ---------------------------------------------------
+        // One project's build as a script, and nothing run: "DRY RUN ONLY", every command of a full build written
+        // whole, "DRY RUN ONLY - end". A project the block plans gets the block's text. Any other - a CCS project,
+        // a Visual Studio project, a file built without a project, a target whose toolchain page is changed - is
+        // planned by Black's own planner with `dry` set: it goes through the whole build, and where it would run a
+        // tool, clean a folder or write a file, it says so instead. Returns 1; -1 when the plan has an error.
+        int DryOne(GrideProject^ p, BuildRequest^ r)
+        {
+            currentWorkDir = p->ProjectDir;
+            dryEnvironment = gcnew List<String^>();
+            BuildRequest^ full = gcnew BuildRequest();
+            full->Projects = r->Projects; full->Config = r->Config; full->TargetKind = r->TargetKind;
+            full->WorkspaceDir = r->WorkspaceDir; full->DryRun = true;
+            full->Action = BuildAction::Build;
+            String^ why = WhyNotBlock(p, full);
+            if (why == nullptr)
+            {
+                BlockPlan^ plan = PlanByBlock(p, full, false);
+                if (plan != nullptr)
+                {
+                    try
+                    {
+                        for each (String^ line in plan->DryRun()->Split(gcnew array<String^>{ "\r\n" }, StringSplitOptions::RemoveEmptyEntries)) Say(line);
+                        return plan->Runnable ? 1 : -1;
+                    }
+                    finally { delete plan; }
+                }
+                why = Block::Problem;
+            }
+            // Black's own planner: every step, whatever is up to date - a Rebuild that cleans nothing
+            full->Action = BuildAction::Rebuild;
+            String^ kind = p->IsCcs ? "a CCS project" : p->IsVs ? "a Visual Studio project"
+                         : (String::IsNullOrEmpty(p->FilePath) || !File::Exists(p->FilePath)) ? "a file built without a project" : why;
+            Say("DRY RUN ONLY - nothing was compiled, assembled or linked: these are the commands a full build would run");
+            Say(String::Format("GRIDE build   {0}   {1}   {2}   {3:dd-MM-yyyy HH:mm:ss}   {4}", p->Name, r->Config, RideToolchain::Arch(r->TargetKind), DateTime::Now, OutlookWord()));
+            Say("planner       Black's own: " + kind + (p->IsImported ? " is read from its own files, which compile.dll does not plan yet" : String::Empty));
+            Say("project       " + (String::IsNullOrEmpty(p->FilePath) ? p->ProjectDir : p->FilePath));
+            Say("folder        " + p->ProjectDir + "   (every command runs here)");
+            int result;
+            try { result = BuildProject(p, full, false); }
+            catch (Exception^ ex) { Say("error         " + ex->Message); result = -1; }
+            if (result == -2) Say("nothing       this project is not built for " + TargetInfo::Name(r->TargetKind));
+            else if (result < 0) Say("not runnable  the errors above stand in the way of this build");
+            Say("DRY RUN ONLY - end");
+            return result < 0 && result != -2 ? -1 : 1;
+        }
+
+        // a command of a dry run, written whole: each variable it is given said once (again when its value changes),
+        // then the line
+        void DryCommand(String^ command, String^ workDir, ToolRunOptions^ options)
+        {
+            if (options != nullptr && !String::IsNullOrWhiteSpace(options->SetupScript))
+                Say("      through cmd.exe, after: call " + options->SetupScript->Trim());
+            List<String^>^ env = options == nullptr || options->Environment == nullptr ? gcnew List<String^>() : options->Environment;
+            for each (String^ v in env)
+            {
+                if (dryEnvironment->Contains(v)) continue;       // said before, with this value
+                dryEnvironment->Add(v);
+                Say("      set " + v);
+            }
+            Say("      " + command);
+        }
+
+        // a file a build would write for a tool (the C6747's linker command file): named, and its lines shown
+        void DryFile(String^ file, String^ text)
+        {
+            Say("writes        " + file);
+            for each (String^ line in text->Replace("\r", String::Empty)->TrimEnd(L'\n')->Split(L'\n')) Say("      | " + line);
+        }
+
+    public:
+        // where the block keeps the log of a project's builds (obj\<Config>\<Target>\<project>.build.log), for
+        // Build > Show Build Log; null where the block does not plan the project
+        String^ LogFileOf(GrideProject^ p, String^ config, Target target, String^ workspaceDir)
+        {
+            BuildRequest^ r = gcnew BuildRequest();
+            r->Config = config; r->TargetKind = target; r->Action = BuildAction::Build; r->WorkspaceDir = workspaceDir;
+            if (WhyNotBlock(p, r) != nullptr) return nullptr;
+            BlockPlan^ plan = PlanByBlock(p, r, false);
+            if (plan == nullptr) return nullptr;
+            try { return plan->LogFile; }
+            finally { delete plan; }
+        }
+
+    private:
         // returns 1 = built, 0 = up to date, -1 = failed, -2 = skipped
         int BuildProject(GrideProject^ p, BuildRequest^ r, bool native)
         {
@@ -1026,7 +1374,7 @@ namespace Gride { namespace Services {
             String^ actionName = "Build";
             if (r->Action == BuildAction::Clean) actionName = "Clean";
             else if (r->Action == BuildAction::Rebuild) actionName = "Rebuild All";
-            Say(String::Format("------ {0} started: Project {1}, Configuration {2} | {3} ------",
+            if (!dry) Say(String::Format("------ {0} started: Project {1}, Configuration {2} | {3} ------",
                                actionName, p->Name, r->Config, TargetInfo::Name(t)));
 
             if (!p->SupportsTarget(t))
@@ -1073,18 +1421,21 @@ namespace Gride { namespace Services {
             {
                 // OutDir "." or "..\" would otherwise empty the project (or a parent) folder
                 if (!CanClean(p, objDir, "object") || !CanClean(p, outDir, "output")) return -1;
-                CleanDir(objDir);
-                if (!PathUtil::SamePath(objDir, outDir)) CleanDir(outDir);
+                if (!dry)
+                {
+                    CleanDir(objDir);
+                    if (!PathUtil::SamePath(objDir, outDir)) CleanDir(outDir);
+                }
                 if (r->Action == BuildAction::Clean) return 1;
             }
 
             // RIDE refuses a build whose program could not be written where it would go
             for each (String^ dir in gcnew array<String^>{ outDir, objDir })
             {
-                String^ why = Unwritable(dir);
+                String^ why = dry ? nullptr : Unwritable(dir);       // the probe makes the folder: not in a dry run
                 if (why != nullptr) { Report(Severity::Error, nullptr, why); return -1; }
             }
-            PrepareLog(p, objDir);
+            if (!dry) PrepareLog(p, objDir);
 
             MacroExpander^ mx = BaseMacros(p, cfg, tc, r);
             List<String^>^ objects = gcnew List<String^>();
@@ -1393,7 +1744,7 @@ namespace Gride { namespace Services {
             Say("$ linking with " + ld->Name);
             Say(String::Format("[LINK] {0}", PathUtil::MakeRelative(p->ProjectDir, program)));
             if (RunTool(mx->Expand(ld->Cmd), p->ProjectDir, run, nullptr, ld->Name, tc->Name, false) != 0) return -1;
-            Say("[built " + program + "]");
+            Say(dry ? "would build   " + program : "[built " + program + "]");
             return 0;
         }
 
@@ -1461,14 +1812,14 @@ namespace Gride { namespace Services {
                     if (!String::IsNullOrEmpty(theirs))
                     {
                         String^ into = Path::Combine(objDir, "shmrt");
-                        PathUtil::EnsureDirectory(into);
+                        if (!dry) PathUtil::EnsureDirectory(into);
                         Step^ as = AssemblerFor(tc, cfg->TargetKind, debug, native, RideTool::Shalimar);
                         mx->Set(as->Macro, as->Path);
                         for each (String^ s in Directory::GetFiles(theirs, "*" + tc->AsmExt))
                         {
                             String^ copy = Path::Combine(into, Path::GetFileName(s));
                             String^ obj = Path::ChangeExtension(copy, tc->ObjExt);
-                            File::Copy(s, copy, true);
+                            if (dry) Say("copies        " + s + "  ->  " + copy); else File::Copy(s, copy, true);
                             mx->Set("AsmFile", copy); mx->Set("ObjFile", obj);
                             if (RunTool(mx->Expand(as->Cmd), p->ProjectDir, run, copy, as->Name, tc->Name, false) != 0)
                             {
@@ -1490,7 +1841,7 @@ namespace Gride { namespace Services {
                 if (text->Length > 0 && name->Length > 0)
                 {
                     cmdFile = Path::Combine(objDir, name);
-                    File::WriteAllText(cmdFile, text);
+                    if (dry) DryFile(cmdFile, text); else File::WriteAllText(cmdFile, text);
                 }
             }
             mx->Set("LinkerCmd", cmdFile);
@@ -1517,7 +1868,7 @@ namespace Gride { namespace Services {
                 Say(ld->Name + " did not link it - see its messages above");
                 return -1;
             }
-            Say("[linked " + program + "]");
+            Say(dry ? "would build   " + program : "[linked " + program + "]");
             return 0;
         }
 

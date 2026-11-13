@@ -1,0 +1,33 @@
+// compile.rc - the version resource of compile.dll, which Windows shows in the file's Properties > Details. The
+// numbers are gride_compile.h's, the same the DLL answers through version() and the outlooks check at start-up.
+#include <winres.h>
+#include "gride_compile.h"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    GRIDE_COMPILE_MAJOR, GRIDE_COMPILE_MINOR, 0, 0
+ PRODUCTVERSION GRIDE_COMPILE_MAJOR, GRIDE_COMPILE_MINOR, 0, 0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0x0L
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_DLL
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "G. R. Akhtar"
+            VALUE "FileDescription",  "compile - plans GRIDE's build commands"
+            VALUE "FileVersion",      GRIDE_COMPILE_NUMBER
+            VALUE "InternalName",     "compile"
+            VALUE "LegalCopyright",   "(c) 2026 G. R. Akhtar"
+            VALUE "OriginalFilename", "compile.dll"
+            VALUE "ProductName",      "GRIDE"
+            VALUE "ProductVersion",   GRIDE_COMPILE_NUMBER
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

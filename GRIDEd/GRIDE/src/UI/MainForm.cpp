@@ -9,6 +9,10 @@ namespace Gride { namespace UI {
     MainForm::MainForm(array<String^>^ args)
     {
         startArgs = args;
+        // The block, compile.dll, checked first - before the settings and the environment are loaded - and once:
+        // beside GRIDE.exe, and the release this GRIDE.exe was built with. Nothing of the DLL is used when it is
+        // not; builds are then planned by Black's own planner, and OnShown says why.
+        blockProblem = GrideBlock::Block::Problem;
         String^ warning;
         settings = SettingsManager::Load(warning);
         workspace = nullptr;
@@ -498,6 +502,14 @@ namespace Gride { namespace UI {
         {
             try { OpenPath(settings->LastWorkspace); }
             catch (Exception^ ex) { output->Append("Tools", "Could not reopen last workspace: " + ex->Message); }
+        }
+        if (blockProblem != nullptr)
+        {
+            output->Append("Build", "[" + blockProblem + " - builds are planned by Black's own planner, and there is no dry run of a GRIDE project]");
+            output->ShowSource("Build");
+            bottomArea->ShowPane(output);
+            SetStatus("compile.dll cannot be used - see the Output pane");
+            return;
         }
         SetStatus("Ready");
     }

@@ -112,6 +112,7 @@ namespace Gride { namespace UI {
     private:
         // ---------------------------------------------------------------- state
         array<String^>^ startArgs;
+        String^ blockProblem;            // why compile.dll cannot be used, found at start-up; nullptr when it can
         GrideSettings^ settings;
         Workspace^ workspace;
         Workspace^ lone;                // a source built with no workspace open: its own one-file program (BuildSpace)
@@ -395,6 +396,10 @@ namespace Gride { namespace UI {
         void BuildProject();
         void RebuildProject();
         void CleanProject();
+        void DryRun();
+        void DryRunWorkspace();
+        void StartDryRun(List<GrideProject^>^ projects);
+        void ShowBuildLog();
         void CompileFile();
         void AssembleOnly();
         void LinkOnly();

@@ -1,0 +1,325 @@
+outlook:        Grey (GRIDE 2.0)
+project:        compilerpp   (examples\projects\compilerpp\compilerpp.pro)
+configuration:  Release
+target:         x86_64-windows
+commands:       33   (compile 17, assemble 16, link 0, other 0)
+last link:      none was run
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 33 command line(s)
+
+[1] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\VM.cpp" -o "<proj>\build\Windows\Release\obj\VM.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[2] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Lexer.cpp" -o "<proj>\build\Windows\Release\obj\Lexer.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[3] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\CodeGen.cpp" -o "<proj>\build\Windows\Release\obj\CodeGen.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[4] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Bytecode.cpp" -o "<proj>\build\Windows\Release\obj\Bytecode.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[5] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Lower1.cpp" -o "<proj>\build\Windows\Release\obj\Lower1.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[6] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\IR.cpp" -o "<proj>\build\Windows\Release\obj\IR.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[7] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Parser1.cpp" -o "<proj>\build\Windows\Release\obj\Parser1.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[8] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Lower.cpp" -o "<proj>\build\Windows\Release\obj\Lower.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[9] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Parser.cpp" -o "<proj>\build\Windows\Release\obj\Parser.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[10] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Semantic.cpp" -o "<proj>\build\Windows\Release\obj\Semantic.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[11] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Layout.cpp" -o "<proj>\build\Windows\Release\obj\Layout.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[12] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Diagnostics.cpp" -o "<proj>\build\Windows\Release\obj\Diagnostics.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[13] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\main.cpp" -o "<proj>\build\Windows\Release\obj\main.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[14] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\AST1.cpp" -o "<proj>\build\Windows\Release\obj\AST1.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[15] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\SymbolTable.cpp" -o "<proj>\build\Windows\Release\obj\SymbolTable.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[16] cpp11   compile   exit 1
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\sample.cpp" -o "<proj>\build\Windows\Release\obj\sample.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[17] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\AST.cpp" -o "<proj>\build\Windows\Release\obj\AST.s" -arch x86_64-windows -O2 -DNDEBUG=1 -masm=masm -DNDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[18] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\AST1.s" -o "<proj>\build\Windows\Release\obj\AST1.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[19] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\AST.s" -o "<proj>\build\Windows\Release\obj\AST.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[20] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\SymbolTable.s" -o "<proj>\build\Windows\Release\obj\SymbolTable.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[21] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Diagnostics.s" -o "<proj>\build\Windows\Release\obj\Diagnostics.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[22] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Lexer.s" -o "<proj>\build\Windows\Release\obj\Lexer.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[23] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Bytecode.s" -o "<proj>\build\Windows\Release\obj\Bytecode.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[24] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Parser.s" -o "<proj>\build\Windows\Release\obj\Parser.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[25] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Parser1.s" -o "<proj>\build\Windows\Release\obj\Parser1.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[26] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\IR.s" -o "<proj>\build\Windows\Release\obj\IR.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[27] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Layout.s" -o "<proj>\build\Windows\Release\obj\Layout.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[28] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\VM.s" -o "<proj>\build\Windows\Release\obj\VM.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[29] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\CodeGen.s" -o "<proj>\build\Windows\Release\obj\CodeGen.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[30] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Lower1.s" -o "<proj>\build\Windows\Release\obj\Lower1.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[31] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\main.s" -o "<proj>\build\Windows\Release\obj\main.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[32] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Lower.s" -o "<proj>\build\Windows\Release\obj\Lower.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[33] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\build\Windows\Release\obj\Semantic.s" -o "<proj>\build\Windows\Release\obj\Semantic.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%

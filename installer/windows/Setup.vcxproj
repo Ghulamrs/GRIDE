@@ -45,7 +45,7 @@
     <SetupDist>$(GrideRoot)\installer\dist</SetupDist>
     <OutDir>$(SetupDist)\</OutDir>
     <IntDir>$(SetupDist)\obj\$(Configuration)\</IntDir>
-    <SetupVersion Condition="'$(SetupVersion)'==''">1.6.3</SetupVersion>
+    <SetupVersion Condition="'$(SetupVersion)'==''">1.8.0</SetupVersion>
     <SetupMsi>$(SetupDist)\GRIDE-Setup-$(SetupVersion).msi</SetupMsi>
     <!-- Visual Studio's own up-to-date check knows nothing of the three builds, so it would skip the package once
          one is made; MakeSetup's Inputs and Outputs decide instead -->

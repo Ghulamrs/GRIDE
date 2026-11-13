@@ -149,7 +149,31 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp" />
+    <!-- the bridge to the block, compile.dll, which Black and Grey share: the one file that includes its header -->
+    <ClCompile Include="..\common\compile\clr\Block.cpp" />
   </ItemGroup>
+  <!-- The block, compile.dll (common\compile): built with Grey, by the same compiler and against the same runtime,
+       and never mixed from two releases. Its import library is linked; the DLL is delay-loaded, so that Grey
+       starts without it and says what is missing instead of failing to start. gride-plan.exe, the block's
+       command-line front end, is built with it. Both are copied beside GRIDE.exe below. -->
+  <ItemGroup>
+    <ProjectReference Include="..\common\compile\compile.vcxproj">
+      <Project>{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE01}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+    </ProjectReference>
+    <ProjectReference Include="..\common\compile\plan\gride-plan.vcxproj">
+      <Project>{7A3F2C10-52B4-4E0E-9A61-0C0DE0C0DE02}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <DelayLoadDLLs>compile.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <AdditionalDependencies>delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="src\Common\Common.h" />
     <ClInclude Include="src\Common\Json.h" />
@@ -179,14 +203,16 @@
     <ClInclude Include="src\UI\MainForm.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="toolchain.json" />
+    <!-- the one toolchain.json of the three outlooks, common\toolchain.json (2026-11-12): this project keeps no copy -->
+    <None Include="..\common\toolchain.json" />
     <None Include="lib\ccs\options-ccs74-C6000_8.2.tsv" />
     <None Include="lib\ccs\options-ccs55-C6000_7.4.tsv" />
     <None Include="..\docs\GRIDE_Help.html" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyToolchainFile" AfterTargets="Build">
-    <Copy SourceFiles="$(ProjectDir)toolchain.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ProjectDir)..\common\toolchain.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(ProjectDir)..\common\compile\$(Platform)\$(Configuration)\compile.dll;$(ProjectDir)..\common\compile\$(Platform)\$(Configuration)\gride-plan.exe" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     <!-- TI's option definitions for reading CCS projects (toolchain.json's ccs section names them) -->
     <ItemGroup>
       <CcsDefinitionFiles Include="$(ProjectDir)lib\ccs\*.tsv" />

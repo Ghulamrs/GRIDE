@@ -452,6 +452,7 @@ namespace Gride { namespace UI {
         info->Fore = worn->Text;
         info->Accent = worn->Accent;
         info->AccentFore = worn->AccentText;
+        info->BlockExpected = GrideBlock::Block::Expected;      // the compile.dll this GRIDE.exe was built with
         GrideAbout::AboutBox::Open(this, info);
     }
 

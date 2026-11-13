@@ -56,7 +56,7 @@ they are answered, so the words are written once, in the tool.
 
 | component | number | where the number is written | the line |
 |---|---|---|---|
-| cpp11 | 1.66 | Compilers\C++Optimize\src\Version.h | `cpp11 1.66 - C++03 with C++11 extensions` |
+| cpp11 | 1.67 | Compilers\C++Optimize\src\Version.h | `cpp11 1.67 - C++03 with C++11 extensions` |
 | c90 | 1.3 | Compilers\Compiler-Ci\src\Driver.cpp, `cc1Version` | `c90 1.3 - ISO C 90 compiler` |
 | shalimar, shmrt | 1.3 | Compilers\Compiler-Si\runtime\ShalimarVersion.h | `shalimar 1.3 - the Shalimar language compiler`, `shmrt 1.3 - the Shalimar run-time library` (Runtime.cpp, `shm_runtime_version`) |
 | c2s | 1.2 | Compilers\Converter-C2S\src\main.cpp | `c2s 1.2 - C and Shalimar converter` |

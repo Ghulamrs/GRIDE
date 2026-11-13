@@ -2,8 +2,9 @@
 
 The IDE keeps no tool name, library name or argument convention in its code: everything comes
 from `toolchain.json`. Both IDEs read the same format, so one file serves both. The installer lays
-the shipped copy down beside `GRIDE.exe`; the source of truth in GRIDEd's tree is
-`GRIDEd\GRIDE\toolchain.json` (the project file copies it beside the exe on every build).
+the shipped copy down beside `GRIDE.exe`; the source of truth is `common\toolchain.json`, the one file of
+the three outlooks' repository (since 2026-11-12: Black's and Grey's project files copy it beside the exe on
+every build, and neither keeps a copy of its own).
 
 ## Files and precedence
 
@@ -24,7 +25,9 @@ writes only what differs from the shipped file; "Restore shipped defaults" remov
 The reader accepts `//` line comments. The shipped file holds settings only (since 2026-10-21): no header, and a
 `description` only where the Options pages show one - on a tool, an operation and a library, one line each. What
 every entry is, in words, is in the Help: `docs\Settings_Files.html`, keyed by each entry's path. Black and Grey
-ship the one file, identical byte for byte.
+ship the one file, `common\toolchain.json`. (Until 2026-11-12 each kept a copy, said here to be identical; they
+had drifted apart in four places - Grey's linked the Release runtime into a Debug build - which is why there is
+one file now.)
 
 ## Validation
 
@@ -50,6 +53,9 @@ GRIDE.exe (...), the installation's ..., PATH`).
 ```
 {
   "format": 1,                 // the format version
+  "languages": { ... },        // the languages, their source extensions and their compilers' roles (the block)
+  "headerExtensions": [ ... ], // files never compiled (the block)
+  "folders": { ... },          // where a build writes (the block)
   "installation": { ... },     // where the toolchain is installed
   "visualStudio": { ... },     // where Visual Studio's tools and the Windows SDK are, found without cmd.exe
   "ccs": { ... },              // reading CCS projects: TI's option definitions, which projects are built, TI's runtime names, TI's compiler directories
@@ -152,7 +158,7 @@ tools), in that order, from the project's store (`.pro`: `"options": { "debug": 
 | `assemblyExtension`, `objectExtension`, `programExtension` | string | the files of a build (`.s`, `.obj`, `.exe` / `.out`) |
 | `emulatedProgramExtension` | string | the emulator's program directory (`.vm`) |
 | `libraryDirFlag`, `libraryFlag` | string | how a library directory and a library are spelled to the linker (`/LIBPATH:`, `-L` / `-l`, `-i ` / `-l `) |
-| `roles` | object | role -> tool id for this target: `cCompiler`, `cppCompiler`, `shalimarCompiler`, `hostCompiler`, `assembler`, `linker`, `debugAssembler`, `debugLinker`, `nativeAssembler`, `nativeLinker` (the vendor's tools offered by the native-tools question when the project's own fail), `simulator`, `emulator`, `debugger` |
+| `roles` | object | role -> tool id for this target: `cCompiler`, `cppCompiler`, `shalimarCompiler`, `hostCompiler`, `assembler`, `linker`, `debugAssembler`, `debugLinker`, `nativeAssembler`, `nativeLinker` (the vendor's tools offered by the native-tools question when the project's own fail), `simulator`, `emulator`, `ownDebugger` (GRIDE's own debugger, taken before the `debugger`: gride-dbg on Windows), `debugger` |
 | `runtime` | string | the `libraries` entry linked as the C runtime (`rts6x`, `hostCrt`) |
 | `linkerCommandFile` | string | the `linkerCommandFiles` entry written when the project brings none |
 | `run` | string | how a program is started here: `program` (itself), `simulator` (the simulator's `simulate` operation), `none` (the target only reaches assembly on this machine) |
@@ -165,7 +171,7 @@ tools), in that order, from the project's store (`.pro`: `"options": { "debug": 
 |---|---|---|
 | `name` | string | what the IDE prints (`c90`, `cl`, `link.exe`) |
 | `description` | string | one line, shown in the Options pages |
-| `role` | string, required | `cCompiler`, `cppCompiler`, `shalimarCompiler`, `hostCompiler`, `hostCxx`, `assembler`, `linker`, `debugAssembler`, `debugLinker`, `nativeAssembler`, `nativeLinker`, `simulator`, `emulator`, `debugger`, `fallbackDebugger` (stands in for the `debugger` when that one is not installed: lldb on Windows), `converter` |
+| `role` | string, required | `cCompiler`, `cppCompiler`, `shalimarCompiler`, `hostCompiler`, `hostCxx`, `assembler`, `linker`, `debugAssembler`, `debugLinker`, `nativeAssembler`, `nativeLinker`, `simulator`, `emulator`, `ownDebugger`, `debugger`, `fallbackDebugger` (stands in for the `debugger` when that one is not installed: lldb on Windows), `converter` |
 | `languages` | list | what it compiles: `C`, `C++`, `Shalimar` |
 | `targets` | list | the arch words it serves (empty: all) |
 | `exe` | string, required | the program's file name (RIDE's actual name) |
@@ -219,6 +225,7 @@ and simulator read a tms6747 build's `.dwpsn` lines, so the session is for a Win
 and a tms6747 without `vm6747`.
 | `asmSyntaxFlags.codeview` | string | added to a Debug build whose target carries CodeView (`-masm=gnu`) |
 | `asmSyntaxFlags.assemblerNamed` | string | added to a host build when an assembler is named (`-masm=masm`) |
+| `asmSyntaxFlags.ownCodeView` | string | the compiler writes its own CodeView in the MASM spelling when given this (`-masm=masm` with `-g`): a Debug build then stays on the target's own assembler and linker, with `/DEBUG`, and needs neither `debugAssembler` nor `debugLinker`. c90, cpp11 and shalimar have it |
 | `operations` | object | operation id -> { `description` (one line, shown), `args` (required), `shown`, `output`, `arguments` } |
 
 The operations and what the IDE uses them for:
@@ -266,6 +273,7 @@ A path placeholder is written without quotes; the template quotes it where the t
 | `assemblyDirectories` | object | `Debug` / `Release` -> the runtime's assembly directory for the emulator (`lib\tms6747\shmrt-debug`) |
 | `assemblyDirectoryEnv` | object | `Debug` / `Release` -> the environment variable naming that directory (`SHMRT6747D`) |
 | `when` | string | when it is linked: `always`, `shalimar` (a Shalimar program), `printf`, `never` |
+| `crt` | string | which host C runtime the entry belongs to: `grt` (GRIDE's own) or `msvc` (Microsoft's). The Windows runtime setting chooses between the entries of one kind by it |
 
 ### linkerCommandFiles - keyed by id
 
@@ -273,6 +281,23 @@ A path placeholder is written without quotes; the template quotes it where the t
 |---|---|---|
 | `name` | string | the file name written into the build directory (`ti-link.cmd`) |
 | `lines` | list | the file's text, one line per entry |
+
+### Fields the block reads (since 2026-11-12)
+
+`compile.dll`, the block of `common\Common_Compilation_Design.md`, reads the whole file and adds these fields,
+which were names in the three outlooks' code until then. Black's and Grey's own readers do not know them and
+leave them alone; each outlook reads them from the day it takes the block.
+
+| field | on | kind | meaning |
+|---|---|---|---|
+| `languages` | the document | object | a language by its name: `role`, the role of its compiler on a target (`cCompiler` ...), and `extensions`, the files that are its sources (`.cpp`, `.cc`, `.cxx`, `.c++`); compared without regard to case. Replaces three lists in code. |
+| `headerExtensions` | the document | list | files that are never compiled |
+| `folders` | the document | object | `output` and `objects`: where a build writes, relative to the project, with `$(Config)`, `$(TargetFolder)` and `$(Arch)`. A configuration's `outDir` / `objDir` in the `.pro` overrides them. |
+| `folder` | a target | string | the target's name in those folders (`Win`, `C6747`) |
+| `refuseLibraryFlag` | a target | string | how a link is told not to take a library (`/NODEFAULTLIB:`) |
+| `linkFlags` | a linker | object | flags by configuration: `"Debug": "/DEBUG"` |
+| `responseFile` | a tool | string | how the tool takes a file of arguments (`@$(File)`); used when a command line would pass 30,000 characters |
+| `refuses` | a library | list | libraries a link with this one must not take: Microsoft's runtime names, with GRIDE's runtime |
 
 ## GRIDE 2.0
 

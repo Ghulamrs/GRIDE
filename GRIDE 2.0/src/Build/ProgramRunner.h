@@ -302,7 +302,7 @@ namespace Gride
             ToolDefinition^ vm = t->EmulatorId == nullptr ? nullptr : s->GetTool(t->EmulatorId);
             String^ simPath = sim == nullptr ? nullptr : sim->ResolvedPath();
             String^ vmPath = vm == nullptr ? nullptr : vm->ResolvedPath();
-            String^ asmDir = Path::Combine(p->OutputDirectory(), "obj");      // the assembly the build wrote, which the emulator runs
+            String^ asmDir = p->ObjectDirectory();      // the assembly the build wrote, which the emulator runs
             plan->EmulatorName = EmulatorNameOf(t->Entry);
             plan->SimulatorName = ToolNameOf(t->Entry, "simulator");
             plan->OutName = Path::GetFileName(program);

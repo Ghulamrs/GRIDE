@@ -45,6 +45,9 @@
     <ClCompile Include="src\UI\MainForm.Build.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\common\compile\clr\Block.cpp">
+      <Filter>Source\Services</Filter>
+    </ClCompile>
     <ClCompile Include="src\UI\MainForm.Commands.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -96,6 +99,9 @@
       <Filter>Source\Model</Filter>
     </ClInclude>
     <ClInclude Include="src\Services\BuildEngine.h">
+      <Filter>Source\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\common\compile\clr\Block.h">
       <Filter>Source\Services</Filter>
     </ClInclude>
     <ClInclude Include="src\Services\BuildMessage.h">
@@ -220,7 +226,7 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="toolchain.json" />
+    <None Include="..\..\common\toolchain.json" />
     <None Include="lib\ccs\options-ccs74-C6000_8.2.tsv" />
     <None Include="lib\ccs\options-ccs55-C6000_7.4.tsv" />
   </ItemGroup>

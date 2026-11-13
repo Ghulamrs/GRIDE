@@ -1,0 +1,30 @@
+outlook:        Black (GRIDEd)
+project:        ccs_SampleExt   (examples\projects\ccs\SampleExt)
+configuration:  Debug
+target:         tms6747
+commands:       3   (compile 1, assemble 1, link 1, other 0)
+last link:      FAILED (exit 1)
+driver:         Build > Rebuild Workspace; build ended
+cross-check:    Black's own build log names the same 3 command line(s)
+dialog:         'GRIDE': The project's own lnk6x did not build it. Use TI's lnk6x for this build instead?  [buttons: No, Yes; pressed: No]
+
+[1] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Math.cpp" -o "<proj>\.gride\obj\Debug\Math.s" -arch tms6747 -g -D_DEBUG=1 -I"<proj>" -Dc6747
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[2] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\.gride\obj\Debug\Math.s" -o "<proj>\.gride\obj\Debug\Math.obj"
+    env: (none of the recorded variables is set)
+
+[3] lnk6x   link   exit 1
+    cwd: <proj>
+    cmd: "<bin>\lnk6x.exe" -mv6740 --abi=eabi -i "<bin>\lib\tms6747" "<proj>\C6747.cmd" --heap_size=0x800 --stack_size=0x4000 --rom_model "<proj>\.gride\obj\Debug\Math.obj" -l "rts6xd.lib" -o "<proj>\.gride\out\Debug\SampleExt.out"
+    env: (none of the recorded variables is set)

@@ -1,0 +1,71 @@
+outlook:        Black (GRIDEd)
+project:        cpp-shapes   (examples\projects\cpp-shapes\cpp-shapes.pro)
+configuration:  Debug
+target:         x86_64-windows
+commands:       7   (compile 3, assemble 3, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Rebuild Workspace; build ended
+cross-check:    Black's own build log names the same 7 command line(s)
+
+[1] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\main.cpp" -o "<proj>\obj\Debug\Win\main.s" -arch x86_64-windows -g -D_DEBUG=1 -masm=masm -I"<proj>\inc" -DDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[2] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\circle.cpp" -o "<proj>\obj\Debug\Win\circle.s" -arch x86_64-windows -g -D_DEBUG=1 -masm=masm -I"<proj>\inc" -DDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[3] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\rect.cpp" -o "<proj>\obj\Debug\Win\rect.s" -arch x86_64-windows -g -D_DEBUG=1 -masm=masm -I"<proj>\inc" -DDEBUG
+    env: C90_AS=<bin>\masm.exe
+    env: C90_LD=<bin>\link.exe
+    env: CPP11_AS=<bin>\masm.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\link.exe
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+    env: SHALIMAR_AS=<bin>\masm.exe
+    env: SHALIMAR_LD=<bin>\link.exe
+
+[4] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\obj\Debug\Win\circle.s" -o "<proj>\obj\Debug\Win\circle.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[5] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\obj\Debug\Win\main.s" -o "<proj>\obj\Debug\Win\main.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[6] masm   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\masm.exe" -t x64 "<proj>\obj\Debug\Win\rect.s" -o "<proj>\obj\Debug\Win\rect.obj"
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%
+
+[7] link   link   exit 0
+    cwd: <proj>
+    cmd: "<bin>\link.exe" /nologo /subsystem:console /out:"<proj>\out\Debug\Win\cpp-shapes.exe" "<proj>\obj\Debug\Win\main.obj" "<proj>\obj\Debug\Win\circle.obj" "<proj>\obj\Debug\Win\rect.obj" "<bin>\lib\x86_64-windows\grtstartd.lib" "<bin>\lib\x86_64-windows\grtcompatd.lib" "<bin>\lib\x86_64-windows\grtcxxd.lib" "<bin>\lib\x86_64-windows\grtcd.lib" "<bin>\lib\x86_64-windows\grtwind.lib" "<bin>\lib\x86_64-windows\kernel32.lib" /NODEFAULTLIB:libcmt /NODEFAULTLIB:libcmtd /NODEFAULTLIB:msvcrt /NODEFAULTLIB:msvcrtd /NODEFAULTLIB:libucrt /NODEFAULTLIB:libucrtd /NODEFAULTLIB:ucrt /NODEFAULTLIB:ucrtd /NODEFAULTLIB:libvcruntime /NODEFAULTLIB:libvcruntimed /NODEFAULTLIB:vcruntime /NODEFAULTLIB:vcruntimed /NODEFAULTLIB:libcpmt /NODEFAULTLIB:libcpmtd /NODEFAULTLIB:msvcprt /NODEFAULTLIB:msvcprtd /NODEFAULTLIB:oldnames /NODEFAULTLIB:legacy_stdio_definitions /DEBUG
+    env: INCLUDE=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\include;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%
+    env: LIB=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%

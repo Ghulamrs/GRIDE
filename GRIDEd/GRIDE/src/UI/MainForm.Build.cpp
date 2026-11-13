@@ -28,6 +28,8 @@ namespace Gride { namespace UI {
         Workspace^ space = BuildSpace();
         if (space == nullptr || engine->IsBuilding) return false;
         if (settings->Env->SaveBeforeBuild) { docs->SaveAll(); SaveWorkspace(); }
+        // the block plans from the .pro on disk: what Project > Properties changed must be in the file by now
+        if (workspace != nullptr) workspace->SaveProjects();
 
         BuildRequest^ r = gcnew BuildRequest();
         r->Projects = projects;
@@ -71,6 +73,66 @@ namespace Gride { namespace UI {
         if (p == nullptr) return;
         one->Add(p);
         StartBuild(BuildAction::Clean, one, nullptr);
+    }
+
+    // Build > Dry Run: the build of the project (and of what it depends on, first) as a script in the Output pane -
+    // "DRY RUN ONLY", then every command a full build would run, compile, assemble and link, each written whole.
+    // Nothing is run and nothing is written; the Error List and the last build's log are left as they are.
+    void MainForm::DryRun()
+    {
+        GrideProject^ p = BuildContextProject();
+        Workspace^ space = BuildSpace();
+        if (p == nullptr || space == nullptr || engine->IsBuilding) return;
+        StartDryRun(space->BuildOrderFor(p));
+    }
+
+    // Build > Dry Run Workspace: the same for every project of the workspace - of a CCS workspace, of a Visual
+    // Studio solution - in the order a build of it takes them
+    void MainForm::DryRunWorkspace()
+    {
+        Workspace^ space = BuildSpace();
+        if (space == nullptr || engine->IsBuilding) return;
+        StartDryRun(space->BuildOrder());
+    }
+
+    // The dry run goes the way a build goes - the engine's thread, the Output pane - with the request marked: no
+    // tool is started, nothing is cleaned or written, the Error List is not touched and nothing follows it.
+    void MainForm::StartDryRun(List<GrideProject^>^ projects)
+    {
+        Workspace^ space = BuildSpace();
+        if (space == nullptr || projects == nullptr || projects->Count == 0) return;
+        if (workspace != nullptr) workspace->SaveProjects();      // the block reads the .pro: what Properties changed must be in it
+        BuildRequest^ r = gcnew BuildRequest();
+        r->Projects = projects;
+        r->Config = CurrentConfig();
+        r->TargetKind = CurrentTarget();
+        r->Action = BuildAction::Build;
+        r->WorkspaceDir = space->Directory;
+        r->DryRun = true;
+        afterBuild = AfterBuild::Nothing;
+        output->Clear("Build");
+        output->ShowSource("Build");
+        bottomArea->ShowPane(output);
+        SetStatus("Dry run...");
+        if (!engine->StartAsync(r)) SetStatus("A build is running");
+    }
+
+    // Build > Show Build Log: the log of the project's last build for the configuration and target chosen, as the
+    // block kept it - every step, its whole command line, all its tool wrote - opened as a document
+    void MainForm::ShowBuildLog()
+    {
+        GrideProject^ p = BuildContextProject();
+        Workspace^ space = BuildSpace();
+        if (p == nullptr || space == nullptr) return;
+        String^ file = engine->LogFileOf(p, CurrentConfig(), CurrentTarget(), space->Directory);
+        if (file == nullptr || !File::Exists(file))
+        {
+            MessageBox::Show(this, file == nullptr ? "The build log is kept for GRIDE projects (.pro) that compile.dll plans; this project has none."
+                                                   : "No build of " + p->Name + " for " + CurrentConfig() + " | " + TargetInfo::Name(CurrentTarget()) + " has left a log yet:\n" + file,
+                             "Build Log", MessageBoxButtons::OK, MessageBoxIcon::Information);
+            return;
+        }
+        OpenDocument(file, 0);
     }
 
     void MainForm::CompileFile()
@@ -186,6 +248,7 @@ namespace Gride { namespace UI {
 
     void MainForm::BuildFinishedUI(BuildSummary^ s)
     {
+        if (s->DryRun) { SetStatus("Dry run only - nothing was built"); afterBuild = AfterBuild::Nothing; return; }
         if (s->Cancelled) SetStatus("Build cancelled");
         else if (s->Ok) SetStatus(String::Format("Build succeeded  ({0} warning(s))", s->Warnings));
         else SetStatus(String::Format("Build failed  ({0} error(s), {1} warning(s))", s->Errors, s->Warnings));

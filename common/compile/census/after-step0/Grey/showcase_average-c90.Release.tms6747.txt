@@ -1,0 +1,86 @@
+outlook:        Grey (GRIDE 2.0)
+project:        showcase_average-c90   (examples\projects\showcase\average-c90\average-c90.pro)
+configuration:  Release
+target:         tms6747
+commands:       7   (compile 3, assemble 3, link 1, other 0)
+last link:      succeeded (exit 0)
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 7 command line(s)
+
+[1] c90   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\c90.exe" -S "<proj>\src\main.c" -o "<proj>\build\TMS6747\Release\obj\src_main.s" -arch tms6747 -O2 -DNDEBUG=1 -I"<bin>\include\c" -I"<bin>\include\win" -I"<bin>\lib" -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[2] c90   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\c90.exe" -S "<proj>\src\rng.c" -o "<proj>\build\TMS6747\Release\obj\src_rng.s" -arch tms6747 -O2 -DNDEBUG=1 -I"<bin>\include\c" -I"<bin>\include\win" -I"<bin>\lib" -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[3] c90   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\c90.exe" -S "<proj>\src\stats.c" -o "<proj>\build\TMS6747\Release\obj\src_stats.s" -arch tms6747 -O2 -DNDEBUG=1 -I"<bin>\include\c" -I"<bin>\include\win" -I"<bin>\lib" -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[4] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\src_main.s" -o "<proj>\build\TMS6747\Release\obj\src_main.obj"
+    env: (none of the recorded variables is set)
+
+[5] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\src_rng.s" -o "<proj>\build\TMS6747\Release\obj\src_rng.obj"
+    env: (none of the recorded variables is set)
+
+[6] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\src_stats.s" -o "<proj>\build\TMS6747\Release\obj\src_stats.obj"
+    env: (none of the recorded variables is set)
+
+[7] lnk6x   link   exit 0
+    cwd: <proj>
+    cmd: "<bin>\lnk6x.exe" -mv6740 --abi=eabi -i "<bin>\lib\tms6747" "<proj>\build\TMS6747\Release\obj\ti-link.cmd" "<proj>\build\TMS6747\Release\obj\src_main.obj" "<proj>\build\TMS6747\Release\obj\src_rng.obj" "<proj>\build\TMS6747\Release\obj\src_stats.obj" -l "<bin>\lib\tms6747\rts6x.lib" -o "<proj>\build\TMS6747\Release\average-c90.out"
+    env: (none of the recorded variables is set)
+
+file written for a tool: <proj>\build\TMS6747\Release\obj\ti-link.cmd
+    | /* one flat memory for the C6747 and every section in it - written by GRIDE, as White writes it */
+    | --rom_model
+    | --stack_size=0x100000
+    | --heap_size=0x1000000
+    | MEMORY
+    | {
+    |     RAM : origin = 0xC0000000, length = 0x04000000
+    | }
+    | SECTIONS
+    | {
+    |     .text        > RAM
+    |     .const       > RAM
+    |     .data        > RAM
+    |     .bss         > RAM
+    |     .far         > RAM
+    |     .fardata     > RAM
+    |     .neardata    > RAM
+    |     .rodata      > RAM
+    |     .cinit       > RAM
+    |     .init_array  > RAM
+    |     .switch      > RAM
+    |     .cio         > RAM
+    |     .stack       > RAM
+    |     .sysmem      > RAM
+    |     .vm6747.eh   > RAM
+    | }

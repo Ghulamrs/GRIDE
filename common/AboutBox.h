@@ -11,9 +11,10 @@
 //     masm 1.0 - x64 assembler, MASM syntax
 // No line of the first three groups is written here. Every program of the toolchain answers `--version` with such a
 // line first, and every runtime library holds one (RTS6x's __rts6x_version, grt's __grt_version, shmrt's
-// shm_runtime_version); the box asks and reads as it opens, so it says what this installation holds, and a
-// missing, old or foreign program shows as one. The editors' lines are Editors.h's, which each editor takes its
-// own number from.
+// shm_runtime_version); the box asks and reads each time it opens, so it says what this installation holds, and a
+// missing, old or foreign program shows as one. It does not wait for them (2026-11-13): it opens at once with
+// "cpp11 ..." for every line still to be asked, asks them all side by side, and puts each line in its place as it
+// comes. The editors' lines are Editors.h's, which each editor takes its own number from.
 //
 // An outlook fills an AboutInfo - which outlook it is, how it finds a program - and calls AboutBox::Open.
 // C++/CLI, header only: each outlook includes it by relative path. Every name is qualified, because the three
@@ -59,66 +60,52 @@ namespace GrideAbout {
             return true;
         }
 
-        // The programs, each run with --version: all started, then all read, so eleven take the time of one.
-        // files[i] is the program a build would run, or nullptr when the outlook did not find it.
-        static array<VersionAnswer^>^ AskPrograms(array<System::String^>^ names, array<System::String^>^ files)
+        // A program, run with --version. file is the program a build would run, or nullptr when the outlook did not
+        // find it. The box asks each program on a thread of its own, so the eleven together take the time of one.
+        static VersionAnswer^ AskProgram(System::String^ name, System::String^ file)
         {
-            int n = names->Length;
-            array<VersionAnswer^>^ said = gcnew array<VersionAnswer^>(n);
-            array<System::Diagnostics::Process^>^ run = gcnew array<System::Diagnostics::Process^>(n);
-            array<System::Threading::Tasks::Task<System::String^>^>^ outText = gcnew array<System::Threading::Tasks::Task<System::String^>^>(n);
-            array<System::Threading::Tasks::Task<System::String^>^>^ errText = gcnew array<System::Threading::Tasks::Task<System::String^>^>(n);
-            for (int i = 0; i < n; i++)
+            VersionAnswer^ a = gcnew VersionAnswer();
+            a->Name = name;
+            a->File = file;
+            if (System::String::IsNullOrEmpty(file) || !System::IO::File::Exists(file)) { a->Problem = "not found beside GRIDE"; return a; }
+            System::Diagnostics::Process^ run = nullptr;
+            System::Threading::Tasks::Task<System::String^>^ outText = nullptr;
+            try
             {
-                VersionAnswer^ a = gcnew VersionAnswer();
-                a->Name = names[i];
-                a->File = files[i];
-                said[i] = a;
-                if (System::String::IsNullOrEmpty(files[i]) || !System::IO::File::Exists(files[i])) { a->Problem = "not found beside GRIDE"; continue; }
-                try
-                {
-                    System::Diagnostics::ProcessStartInfo^ si = gcnew System::Diagnostics::ProcessStartInfo(files[i], "--version");
-                    si->UseShellExecute = false;
-                    si->CreateNoWindow = true;
-                    si->RedirectStandardInput = true;
-                    si->RedirectStandardOutput = true;
-                    si->RedirectStandardError = true;
-                    si->StandardOutputEncoding = System::Text::Encoding::UTF8;
-                    si->StandardErrorEncoding = System::Text::Encoding::UTF8;
-                    run[i] = System::Diagnostics::Process::Start(si);
-                    run[i]->StandardInput->Close();
-                    outText[i] = run[i]->StandardOutput->ReadToEndAsync();
-                    errText[i] = run[i]->StandardError->ReadToEndAsync();
-                }
-                catch (System::Exception^) { run[i] = nullptr; a->Problem = "found, cannot be run"; }
+                System::Diagnostics::ProcessStartInfo^ si = gcnew System::Diagnostics::ProcessStartInfo(file, "--version");
+                si->UseShellExecute = false;
+                si->CreateNoWindow = true;
+                si->RedirectStandardInput = true;
+                si->RedirectStandardOutput = true;
+                si->RedirectStandardError = true;
+                si->StandardOutputEncoding = System::Text::Encoding::UTF8;
+                si->StandardErrorEncoding = System::Text::Encoding::UTF8;
+                run = System::Diagnostics::Process::Start(si);
+                run->StandardInput->Close();
+                outText = run->StandardOutput->ReadToEndAsync();
+                run->StandardError->ReadToEndAsync();   // read, so that a program that writes much there is not stopped
             }
-            // one allowance for them all: a program that does not know --version may wait for something
-            System::DateTime until = System::DateTime::UtcNow.AddSeconds(5);
-            for (int i = 0; i < n; i++)
+            catch (System::Exception^) { delete run; a->Problem = "found, cannot be run"; return a; }
+            try
             {
-                if (run[i] == nullptr) continue;
-                VersionAnswer^ a = said[i];
-                try
+                // a program that does not know --version may wait for something: five seconds, then it is stopped
+                if (!run->WaitForExit(5000))
                 {
-                    int left = static_cast<int>((until - System::DateTime::UtcNow).TotalMilliseconds);
-                    if (!run[i]->WaitForExit(left > 50 ? left : 50))
-                    {
-                        try { run[i]->Kill(); } catch (System::Exception^) { }
-                        a->Problem = "gave no answer";
-                        continue;
-                    }
-                    System::String^ text = outText[i]->Wait(1000) ? outText[i]->Result : System::String::Empty;
-                    System::String^ first = nullptr;
-                    for each (System::String^ raw in text->Split(gcnew array<wchar_t>{ L'\r', L'\n' }, System::StringSplitOptions::RemoveEmptyEntries))
-                        if (raw->Trim()->Length > 0) { first = raw->Trim(); break; }
-                    if (Read(a->Name, first, a)) continue;
-                    // not the shape: an earlier release of the program, or somebody else's program of the same name
-                    a->Problem = "no version, not this release's";
+                    try { run->Kill(); } catch (System::Exception^) { }
+                    a->Problem = "gave no answer";
+                    return a;
                 }
-                catch (System::Exception^) { a->Problem = "found, cannot be asked"; }
-                finally { delete run[i]; }
+                System::String^ text = outText->Wait(1000) ? outText->Result : System::String::Empty;
+                System::String^ first = nullptr;
+                for each (System::String^ raw in text->Split(gcnew array<wchar_t>{ L'\r', L'\n' }, System::StringSplitOptions::RemoveEmptyEntries))
+                    if (raw->Trim()->Length > 0) { first = raw->Trim(); break; }
+                if (Read(a->Name, first, a)) return a;
+                // not the shape: an earlier release of the program, or somebody else's program of the same name
+                a->Problem = "no version, not this release's";
             }
-            return said;
+            catch (System::Exception^) { a->Problem = "found, cannot be asked"; }
+            finally { delete run; }
+            return a;
         }
 
         // A runtime library: the string `name x.y - what it is` among its bytes.
@@ -145,6 +132,65 @@ namespace GrideAbout {
             catch (System::Exception^) { a->Problem = "found, cannot be read"; }
             return a;
         }
+
+        // The block, compile.dll, read for its line as a library is. expected is the line the outlook was built for,
+        // or nullptr: the outlook loads no other compile.dll, so another number is a different release.
+        static VersionAnswer^ AskBlock(System::String^ file, System::String^ expected)
+        {
+            VersionAnswer^ a = AskLibrary("compile", file);
+            if (expected != nullptr && a->Version != nullptr &&
+                !System::String::Equals(a->Name + " " + a->Version + " - " + a->What, expected))
+            {
+                System::Text::RegularExpressions::Match^ m = System::Text::RegularExpressions::Regex::Match(expected, "^compile (\\S+) - ");
+                a->Problem = a->Version + " found, this release's is " + (m->Success ? m->Groups[1]->Value : expected);
+                a->Version = nullptr;
+            }
+            return a;
+        }
+    };
+
+    // ------------------------------------------------------------------ a line asked after the box is shown
+    // The box opens at once with "cpp11 ..." for each line still to be asked (the user's, 2026-11-13: no wait for the
+    // About box); each slot is then asked on a thread of its own, and its line takes the place of the dots as soon as
+    // it comes. Asking is the slow part - a program run, a library read - so nothing of it is done before the box shows.
+    ref class AboutSlot;
+    public delegate void SlotAnswered(AboutSlot^ slot);
+
+    public ref class AboutSlot
+    {
+    public:
+        enum class Kind { Program, Library, Block };
+        int Part, Index;                        // where its line stands: AboutText::Parts[Part]->Lines[Index]
+        System::String^ Name;                   // "cpp11", "RTS6x"
+        Kind Asks;
+        array<System::String^>^ Files;          // a program: the one it runs; a library: where it is read, in turn
+        System::String^ Expected;               // the block: the line the outlook was built for, or nullptr
+        System::String^ Answer;                 // the line, once asked
+
+        System::String^ Waiting() { return Name + " ..."; }
+
+        // asked on the slot's own thread; then Done is called on the box's
+        System::Windows::Forms::Control^ Box;
+        SlotAnswered^ Done;
+
+        void Run()
+        {
+            VersionAnswer^ a = nullptr;
+            try
+            {
+                if (Asks == Kind::Program) a = VersionProbe::AskProgram(Name, Files[0]);
+                else if (Asks == Kind::Block) a = VersionProbe::AskBlock(Files[0], Expected);
+                else
+                    // the next file is read only when the one before has no line: shmrt.lib, then shmrt6x.lib
+                    for (int i = 0; i < Files->Length && (a == nullptr || a->Version == nullptr); i++)
+                        a = VersionProbe::AskLibrary(Name, Files[i]);
+                Answer = a->Line();
+            }
+            catch (System::Exception^) { Answer = Name + " - cannot be asked"; }
+            // the box may have been closed while this was asked: then there is nothing to show it in
+            try { if (Box != nullptr && !Box->IsDisposed) Box->BeginInvoke(Done, gcnew array<System::Object^>{ this }); }
+            catch (System::InvalidOperationException^) { }   // ObjectDisposedException among them
+        }
     };
 
     // ------------------------------------------------------------------ what an outlook says of itself
@@ -162,6 +208,10 @@ namespace GrideAbout {
         // marks things with (the button that closes the box wears it). Each may be left empty: the system's
         // background, text by the background's brightness, a plain button.
         System::Drawing::Color Back, Fore, Accent, AccentFore;
+        // The block, compile.dll, as the outlook was built for it - "compile 1.0 - plans GRIDE's build commands" - or
+        // nullptr for an outlook that does not use it (White). A compile.dll beside the outlook that says anything
+        // else is shown as not this release's, with what it said.
+        System::String^ BlockExpected;
     };
 
     // one of the four groups: its heading and its lines, one of which may be this editor's own
@@ -182,6 +232,7 @@ namespace GrideAbout {
         System::String^ Outlook;     // "Black outlook", with ", Setup 1.6.3" where a Setup installed it
         System::String^ Owner;
         System::Collections::Generic::List<AboutPart^>^ Parts;   // Compilers; Other tools; Runtime, library, debug; Editors
+        System::Collections::Generic::List<AboutSlot^>^ Slots;   // the lines still to be asked, "name ..." until then
 
         // the folder this program runs from: the toolchain and lib\ are beside it
         static System::String^ Here() { return System::Windows::Forms::Application::StartupPath; }
@@ -201,6 +252,9 @@ namespace GrideAbout {
             catch (System::Exception^) { return nullptr; }
         }
 
+        // What the box says, as it opens: everything it knows without asking, and "name ..." for each line it is still
+        // to ask (Slots). Finding a program is quick - the outlook's settings, a file looked for - and is done here;
+        // running it is not, and is left to the slots.
         static AboutText^ Gather(AboutInfo^ info)
         {
             AboutText^ t = gcnew AboutText();
@@ -210,6 +264,7 @@ namespace GrideAbout {
             // the copyright sign by its number, 169: this file is read in whatever code page each outlook compiles in
             t->Owner = System::Char::ToString(static_cast<wchar_t>(169)) + "2026 G. R. Akhtar, Islamabad, Pakistan";
             t->Parts = gcnew System::Collections::Generic::List<AboutPart^>();
+            t->Slots = gcnew System::Collections::Generic::List<AboutSlot^>();
 
             // the eleven programs: four compilers, the two assemblers and two linkers, the three that debug
             array<System::String^>^ names = gcnew array<System::String^>{
@@ -227,34 +282,34 @@ namespace GrideAbout {
                 }
                 files[i] = found;
             }
-            array<VersionAnswer^>^ programs = VersionProbe::AskPrograms(names, files);
 
-            AboutPart^ compilers = gcnew AboutPart("Compilers");
-            for (int i = 0; i < 4; i++) compilers->Lines->Add(programs[i]->Line());
-            t->Parts->Add(compilers);
+            AboutPart^ compilers = t->Part("Compilers");
+            for (int i = 0; i < 4; i++) t->Ask(compilers, names[i], AboutSlot::Kind::Program, files[i]);
 
             // the other tools: what turns a compiler's assembly into a program, for Windows and for the C6747
-            AboutPart^ tools = gcnew AboutPart("Other tools");
-            for (int i = 4; i < 8; i++) tools->Lines->Add(programs[i]->Line());
-            t->Parts->Add(tools);
+            AboutPart^ tools = t->Part("Other tools");
+            for (int i = 4; i < 8; i++) t->Ask(tools, names[i], AboutSlot::Kind::Program, files[i]);
+            // the block, compile.dll, which plans an outlook's builds: listed by the outlooks that have taken it
+            // (Black and Grey since 2026-11-13), and by any other that has one beside it
+            System::String^ block = System::IO::Path::Combine(Here(), "compile.dll");
+            if (info->BlockExpected != nullptr || System::IO::File::Exists(block))
+                t->Ask(tools, "compile", AboutSlot::Kind::Block, block)->Expected = info->BlockExpected;
 
             // what a program runs on and is debugged with, a group of its own (the user's, 2026-11-12): the four
             // runtime libraries beside this program, each read for its own line, then the debugger for Windows and
             // the simulator and the emulator, which run and debug a C6747 program
-            AboutPart^ runtime = gcnew AboutPart("Runtime, library, debug");
+            AboutPart^ runtime = t->Part("Runtime, library, debug");
             System::String^ win = System::IO::Path::Combine(Here(), "lib\\x86_64-windows");
             System::String^ tms = System::IO::Path::Combine(Here(), "lib\\tms6747");
-            VersionAnswer^ shmrt = VersionProbe::AskLibrary("shmrt", System::IO::Path::Combine(win, "shmrt.lib"));
-            if (shmrt->Version == nullptr) shmrt = VersionProbe::AskLibrary("shmrt", System::IO::Path::Combine(tms, "shmrt6x.lib"));
-            runtime->Lines->Add(VersionProbe::AskLibrary("grt", System::IO::Path::Combine(win, "grtc.lib"))->Line());
-            runtime->Lines->Add(VersionProbe::AskLibrary("RTS6x", System::IO::Path::Combine(tms, "rts6x.lib"))->Line());
-            runtime->Lines->Add(VersionProbe::AskLibrary("printf6x", System::IO::Path::Combine(tms, "printf6x.lib"))->Line());
-            runtime->Lines->Add(shmrt->Line());
-            for (int i = 8; i < programs->Length; i++) runtime->Lines->Add(programs[i]->Line());
-            t->Parts->Add(runtime);
+            t->Ask(runtime, "grt", AboutSlot::Kind::Library, System::IO::Path::Combine(win, "grtc.lib"));
+            t->Ask(runtime, "RTS6x", AboutSlot::Kind::Library, System::IO::Path::Combine(tms, "rts6x.lib"));
+            t->Ask(runtime, "printf6x", AboutSlot::Kind::Library, System::IO::Path::Combine(tms, "printf6x.lib"));
+            t->Ask(runtime, "shmrt", AboutSlot::Kind::Library, System::IO::Path::Combine(win, "shmrt.lib"))->Files =
+                gcnew array<System::String^>{ System::IO::Path::Combine(win, "shmrt.lib"), System::IO::Path::Combine(tms, "shmrt6x.lib") };
+            for (int i = 8; i < names->Length; i++) t->Ask(runtime, names[i], AboutSlot::Kind::Program, files[i]);
 
             // the editors: the three outlooks of this release (Editors.h), the running one marked
-            AboutPart^ editors = gcnew AboutPart("Editors");
+            AboutPart^ editors = t->Part("Editors");
             array<System::String^>^ outlooks = gcnew array<System::String^>{ "Black", "Grey", "White" };
             array<System::String^>^ lines = gcnew array<System::String^>{
                 "Black " GRIDE_BLACK_VERSION " - " GRIDE_BLACK_WHAT,
@@ -265,9 +320,35 @@ namespace GrideAbout {
                 if (System::String::Compare(outlooks[i], info->Outlook, System::StringComparison::OrdinalIgnoreCase) == 0) editors->Own = i;
                 editors->Lines->Add(lines[i]);
             }
-            t->Parts->Add(editors);
             return t;
         }
+
+        // a slot's answer, put in its place: the Copy button copies what the box shows
+        void Answered(AboutSlot^ slot) { Parts[slot->Part]->Lines[slot->Index] = slot->Answer; }
+
+    private:
+        AboutPart^ Part(System::String^ title)
+        {
+            AboutPart^ p = gcnew AboutPart(title);
+            Parts->Add(p);
+            return p;
+        }
+
+        // a line of `part` still to be asked: "name ..." until it is
+        AboutSlot^ Ask(AboutPart^ part, System::String^ name, AboutSlot::Kind asks, System::String^ file)
+        {
+            AboutSlot^ s = gcnew AboutSlot();
+            s->Part = Parts->IndexOf(part);
+            s->Index = part->Lines->Count;
+            s->Name = name;
+            s->Asks = asks;
+            s->Files = gcnew array<System::String^>{ file };
+            part->Lines->Add(s->Waiting());
+            Slots->Add(s);
+            return s;
+        }
+
+    public:
 
         // the same as plain text, for the Copy button and for a report: the running editor's line begins with ">"
         System::String^ Plain()
@@ -299,7 +380,8 @@ namespace GrideAbout {
             ShowInTaskbar = false;
             Font = gcnew System::Drawing::Font("Segoe UI", 9.0f);
             AutoSize = true;
-            AutoSizeMode = System::Windows::Forms::AutoSizeMode::GrowAndShrink;
+            // the box only grows as its lines come in, never shrinks back to the dots
+            AutoSizeMode = System::Windows::Forms::AutoSizeMode::GrowOnly;
             // The outlook's own colours (below); every panel and line takes them from the box. An outlook that gives
             // no background gets the system's, and text is light on a dark background and dark on a light one.
             back = Mix(info->Back.IsEmpty ? System::Drawing::SystemColors::Control : info->Back, System::Drawing::Color::Black, 0);
@@ -344,9 +426,14 @@ namespace GrideAbout {
             // user's, 2026-11-12), and the editors still come last. Each group is a heading and its lines.
             System::Windows::Forms::TableLayoutPanel^ body = Grid(2);
             body->Padding = System::Windows::Forms::Padding(20, 4, 0, 10);
+            // A line still to be asked is as wide from the start as a usual answer, so that the box keeps its size as
+            // the answers come; and its dots are dimmed.
+            int usual = System::Windows::Forms::TextRenderer::MeasureText("vm6747 1.1 - TMS320C6000 emulator, runs assembly", Font).Width;
+            lines = gcnew array<array<System::Windows::Forms::Label^>^>(said->Parts->Count);
             int cell = 0;
             for each (AboutPart^ part in said->Parts)
             {
+                lines[cell] = gcnew array<System::Windows::Forms::Label^>(part->Lines->Count);
                 System::Windows::Forms::TableLayoutPanel^ group = Grid(1);
                 group->Margin = System::Windows::Forms::Padding(0, 0, 28, 0);
                 int at = 0;
@@ -361,11 +448,18 @@ namespace GrideAbout {
                     // the running editor's own line stands out among the three
                     if (i == part->Own) line->Font = gcnew System::Drawing::Font(Font, System::Drawing::FontStyle::Bold);
                     group->Controls->Add(line, 0, at++);
+                    lines[cell][i] = line;
                 }
                 body->Controls->Add(group, cell % 2, cell / 2);
                 cell++;
             }
             root->Controls->Add(body, 0, 1);
+            for each (AboutSlot^ s in said->Slots)
+            {
+                System::Windows::Forms::Label^ l = lines[s->Part][s->Index];
+                l->MinimumSize = System::Drawing::Size(usual, 0);
+                l->ForeColor = Mix(fore, back, 45);
+            }
 
             System::Windows::Forms::FlowLayoutPanel^ buttons = gcnew System::Windows::Forms::FlowLayoutPanel();
             buttons->FlowDirection = System::Windows::Forms::FlowDirection::RightToLeft;
@@ -396,8 +490,36 @@ namespace GrideAbout {
             finally { delete box; }
         }
 
+    protected:
+        // The box is on the screen: now each line still to be asked is asked, each on a thread of its own. A thread
+        // left asking when the box is closed finishes on its own (a program gets five seconds) and shows nothing.
+        virtual void OnShown(System::EventArgs^ e) override
+        {
+            System::Windows::Forms::Form::OnShown(e);
+            for each (AboutSlot^ s in said->Slots)
+            {
+                s->Box = this;
+                s->Done = gcnew SlotAnswered(this, &AboutBox::OnAnswered);
+                System::Threading::Thread^ asker = gcnew System::Threading::Thread(gcnew System::Threading::ThreadStart(s, &AboutSlot::Run));
+                asker->IsBackground = true;
+                asker->Name = "About: " + s->Name;
+                asker->Start();
+            }
+        }
+
     private:
         AboutText^ said;
+        array<array<System::Windows::Forms::Label^>^>^ lines;   // each group's line labels, as said->Parts holds them
+
+        // a slot's answer, on the box's own thread: its dots give way to its line
+        void OnAnswered(AboutSlot^ slot)
+        {
+            if (IsDisposed) return;
+            said->Answered(slot);
+            System::Windows::Forms::Label^ l = lines[slot->Part][slot->Index];
+            l->Text = slot->Answer;
+            l->ForeColor = fore;
+        }
 
         // **The colours are the outlook's own** (the user's, 2026-11-12: the background of About comes from the
         // outlook itself). The outlook gives its background, and may give its text and accent colours; what lies

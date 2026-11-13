@@ -44,7 +44,7 @@
 # folders whole (with what the IDE and the user's builds wrote in them), %APPDATA%\GRIDE, White's former
 # %USERPROFILE%\GRIDE 1.0 and GRIDE's own files in %TEMP% - so the next installation starts from nothing.
 param(
-    [string]$Version = "1.6.3",
+    [string]$Version = "1.8.0",
     [string]$OutDir = "",
     [string]$VsRoot = "D:\Microsoft Visual Studio 2026",
     [string]$CrtFolder = "",
@@ -131,6 +131,12 @@ foreach ($ide in $ides) {
     if (-not (Test-Path "$rel\GRIDE.exe")) { throw "$rel has no GRIDE.exe - build GRIDE3.sln in Release | x64 first" }
     foreach ($t in "c90", "cpp11", "shalimar", "c2s", "masm", "link", "asm6x", "lnk6x", "sim6747", "vm6747", "gride-dbg") {
         if (-not (Test-Path "$rel\$t.exe")) { throw "$rel has no $t.exe - GRIDE3.sln builds all eleven tools and gride-dbg" }
+    }
+    # Black (Setup 1.7.0) and Grey (1.8.0) build through the block: compile.dll and its front end are built with each and lie beside it
+    if ($ide.Feature -in "Black", "Grey") {
+        foreach ($b in "compile.dll", "gride-plan.exe") {
+            if (-not (Test-Path "$rel\$b")) { throw "$rel has no $b - GRIDE3.sln builds the block (common\compile) with Black" }
+        }
     }
     # the three link Windows programs with GRIDE's own runtime (toolchain\Windows\RT, the grt project): packed with
     # lib\x86_64-windows, the tree of docs\Runtime_Design.md 5.3

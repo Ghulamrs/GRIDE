@@ -1,0 +1,275 @@
+outlook:        Grey (GRIDE 2.0)
+project:        compilerpp   (examples\projects\compilerpp\compilerpp.pro)
+configuration:  Release
+target:         tms6747
+commands:       33   (compile 17, assemble 16, link 0, other 0)
+last link:      none was run
+driver:         Build > Rebuild Project; build ended
+cross-check:    Grey's Output pane names the same 33 command line(s)
+
+[1] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Layout.cpp" -o "<proj>\build\TMS6747\Release\obj\Layout.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[2] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\IR.cpp" -o "<proj>\build\TMS6747\Release\obj\IR.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[3] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\main.cpp" -o "<proj>\build\TMS6747\Release\obj\main.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[4] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Diagnostics.cpp" -o "<proj>\build\TMS6747\Release\obj\Diagnostics.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[5] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\SymbolTable.cpp" -o "<proj>\build\TMS6747\Release\obj\SymbolTable.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[6] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\AST1.cpp" -o "<proj>\build\TMS6747\Release\obj\AST1.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[7] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Semantic.cpp" -o "<proj>\build\TMS6747\Release\obj\Semantic.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[8] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\CodeGen.cpp" -o "<proj>\build\TMS6747\Release\obj\CodeGen.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[9] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Lower1.cpp" -o "<proj>\build\TMS6747\Release\obj\Lower1.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[10] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Lower.cpp" -o "<proj>\build\TMS6747\Release\obj\Lower.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[11] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\AST.cpp" -o "<proj>\build\TMS6747\Release\obj\AST.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[12] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\VM.cpp" -o "<proj>\build\TMS6747\Release\obj\VM.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[13] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Parser.cpp" -o "<proj>\build\TMS6747\Release\obj\Parser.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[14] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Lexer.cpp" -o "<proj>\build\TMS6747\Release\obj\Lexer.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[15] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Parser1.cpp" -o "<proj>\build\TMS6747\Release\obj\Parser1.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[16] cpp11   compile   exit 0
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\Bytecode.cpp" -o "<proj>\build\TMS6747\Release\obj\Bytecode.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[17] cpp11   compile   exit 1
+    cwd: <proj>
+    cmd: "<bin>\cpp11.exe" -S "<proj>\sample.cpp" -o "<proj>\build\TMS6747\Release\obj\sample.s" -arch tms6747 -O2 -DNDEBUG=1 -DNDEBUG
+    env: C90_AS=<bin>\asm6x.exe
+    env: C90_LD=<bin>\lnk6x.exe
+    env: CPP11_AS=<bin>\asm6x.exe
+    env: CPP11_DECLINES=
+    env: CPP11_LD=<bin>\lnk6x.exe
+    env: SHALIMAR_AS=<bin>\asm6x.exe
+    env: SHALIMAR_LD=<bin>\lnk6x.exe
+
+[18] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Diagnostics.s" -o "<proj>\build\TMS6747\Release\obj\Diagnostics.obj"
+    env: (none of the recorded variables is set)
+
+[19] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\SymbolTable.s" -o "<proj>\build\TMS6747\Release\obj\SymbolTable.obj"
+    env: (none of the recorded variables is set)
+
+[20] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Parser.s" -o "<proj>\build\TMS6747\Release\obj\Parser.obj"
+    env: (none of the recorded variables is set)
+
+[21] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\AST1.s" -o "<proj>\build\TMS6747\Release\obj\AST1.obj"
+    env: (none of the recorded variables is set)
+
+[22] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Lexer.s" -o "<proj>\build\TMS6747\Release\obj\Lexer.obj"
+    env: (none of the recorded variables is set)
+
+[23] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\AST.s" -o "<proj>\build\TMS6747\Release\obj\AST.obj"
+    env: (none of the recorded variables is set)
+
+[24] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Bytecode.s" -o "<proj>\build\TMS6747\Release\obj\Bytecode.obj"
+    env: (none of the recorded variables is set)
+
+[25] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\IR.s" -o "<proj>\build\TMS6747\Release\obj\IR.obj"
+    env: (none of the recorded variables is set)
+
+[26] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Layout.s" -o "<proj>\build\TMS6747\Release\obj\Layout.obj"
+    env: (none of the recorded variables is set)
+
+[27] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Parser1.s" -o "<proj>\build\TMS6747\Release\obj\Parser1.obj"
+    env: (none of the recorded variables is set)
+
+[28] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\CodeGen.s" -o "<proj>\build\TMS6747\Release\obj\CodeGen.obj"
+    env: (none of the recorded variables is set)
+
+[29] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Lower1.s" -o "<proj>\build\TMS6747\Release\obj\Lower1.obj"
+    env: (none of the recorded variables is set)
+
+[30] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\main.s" -o "<proj>\build\TMS6747\Release\obj\main.obj"
+    env: (none of the recorded variables is set)
+
+[31] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\VM.s" -o "<proj>\build\TMS6747\Release\obj\VM.obj"
+    env: (none of the recorded variables is set)
+
+[32] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Lower.s" -o "<proj>\build\TMS6747\Release\obj\Lower.obj"
+    env: (none of the recorded variables is set)
+
+[33] asm6x   assemble   exit 0
+    cwd: <proj>
+    cmd: "<bin>\asm6x.exe" "<proj>\build\TMS6747\Release\obj\Semantic.s" -o "<proj>\build\TMS6747\Release\obj\Semantic.obj"
+    env: (none of the recorded variables is set)
